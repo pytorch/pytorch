@@ -3,7 +3,7 @@
 
 ``gemm_epilogue_analysis`` identifies grouped layouts, local reductions, and
 grouped main-output lanes in the FX graph. This module binds those results to
-QuACK-owned stores and ``materialize_flex_gemm_epimod`` then changes only the
+QuACK-owned stores and ``materialize_flex_gemm_epilogue`` then changes only the
 emission boundary, preserving the analysis as the semantic source of truth.
 """
 
@@ -22,8 +22,8 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     use_cutedsl_fast_math,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
@@ -37,7 +37,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_UNPLANNED_ERROR,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
-    GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
     squeeze_source_node,
     view_or_reshape_args,
@@ -48,14 +47,14 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedReduction,
 )
 from torch._inductor.kernel.gemm_epilogue_analysis import (
+    build_output_contraction_plan,
     GemmLocalReduceAnalysis,
     GemmOutputLocalReducePlan,
     GemmOutputPlan,
-    grouped_main_output_match,
-    match_gemm_local_reduce_output_storage,
+    match_flex_gemm_local_reduce_output_storage,
 )
 from torch._inductor.kernel.gemm_epilogue_codegen import (
-    gemm_epilogue_arg,
+    _cute_arg,
     gemm_epilogue_source_expr,
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
@@ -197,7 +196,7 @@ def reject_unplanned_reductions(
             raise NotImplementedError(LOCAL_REDUCE_UNPLANNED_ERROR)
 
 
-def validate_output_storage_transforms(
+def validate_output_layout_transforms(
     graph: GemmEpilogueGraph,
     outputs: GemmOutputPlan,
 ) -> None:
@@ -207,7 +206,7 @@ def validate_output_storage_transforms(
         store.node if store is not None and store.output_storage is not None else None
     )
     if any(
-        match_gemm_local_reduce_output_storage(node) is not None
+        match_flex_gemm_local_reduce_output_storage(node) is not None
         and node is not selected_node
         for node in graph.dependencies
     ):
@@ -226,10 +225,10 @@ class FlexGemmEpilogueAnalysis:
     gemm: torch.fx.Node
     outputs: GemmOutputPlan
     local_reduce: GemmLocalReduceAnalysis
-    grouped_select_indices: dict[torch.fx.Node, int] = dataclasses.field(
+    output_contraction_select_indices: dict[torch.fx.Node, int] = dataclasses.field(
         default_factory=dict
     )
-    grouped_main_layouts: dict[torch.fx.Node, GroupedTensorSSALayout] = (
+    output_contraction_layouts: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = (
         dataclasses.field(default_factory=dict)
     )
 
@@ -240,14 +239,14 @@ class FlexGemmEpilogueAnalysis:
         """Analyze reductions and an optional grouped main-output transform."""
         local_reduce = GemmLocalReduceAnalysis.from_graph_module(graph_module, gemm)
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
-        validate_output_storage_transforms(local_reduce.graph, outputs)
+        validate_output_layout_transforms(local_reduce.graph, outputs)
         reject_unplanned_reductions(local_reduce, outputs)
-        grouped_main = grouped_main_output_match(
+        contraction_plan = build_output_contraction_plan(
             outputs.output_storage or outputs.output,
             gemm,
             local_reduce,
         )
-        if grouped_main is None:
+        if contraction_plan is None:
             gemm_meta = gemm.meta.get("val")
             output_meta = outputs.output.meta.get("val")
             if (
@@ -259,19 +258,19 @@ class FlexGemmEpilogueAnalysis:
             local_reduce.commit_output_guards(outputs)
             return cls(gemm, outputs, local_reduce)
         if outputs.aux_outputs:
-            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
-        if grouped_main.transform.chunked and outputs.local_reduce is not None:
+            raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
+        if contraction_plan.transform.chunked and outputs.local_reduce is not None:
             raise NotImplementedError(
                 "chunked grouped main outputs do not compose with grouped reductions"
             )
-        grouped_main.commit_guards()
+        contraction_plan.commit_guards()
         local_reduce.commit_output_guards(outputs)
         return cls(
             gemm,
-            dataclasses.replace(outputs, main_transform=grouped_main.transform),
+            dataclasses.replace(outputs, output_contraction=contraction_plan.transform),
             local_reduce,
-            grouped_main.select_indices,
-            grouped_main.layouts,
+            contraction_plan.select_indices,
+            contraction_plan.layouts,
         )
 
     @property
@@ -282,9 +281,9 @@ class FlexGemmEpilogueAnalysis:
         )
         if self.outputs.local_reduce is not None:
             geometries.add(self.outputs.local_reduce.match.geometry)
-        if self.outputs.main_transform is not None:
+        if self.outputs.output_contraction is not None:
             geometries.add(
-                FlexGemmLocalReduceGeometry(self.outputs.main_transform.group, 1)
+                FlexGemmLocalReduceGeometry(self.outputs.output_contraction.group, 1)
             )
         return tuple(geometries)
 
@@ -384,10 +383,10 @@ def gemm_node(
 
 def flex_gemm_epilogue_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
     """Adapt one FlexGEMM FX value to the shared CuTeDSL expression frontend."""
-    return gemm_epilogue_arg(value, env, "FlexGEMM")
+    return _cute_arg(value, env, "FlexGEMM")
 
 
-class FlexGemmTensorSSAOpOverrides(GemmEpilogueCuteDSLOpOverrides):
+class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
     """Add PyTorch NaN propagation to the shared TensorSSA operation lowering."""
 
     @staticmethod
@@ -409,28 +408,28 @@ class FlexGemmTensorSSAOpOverrides(GemmEpilogueCuteDSLOpOverrides):
 
     @staticmethod
     def minimum(a: Any, b: Any) -> Any:
-        return FlexGemmTensorSSAOpOverrides.nan_propagating_minmax(a, b, "min")
+        return FlexGemmCuteDSLOpOverrides.nan_propagating_minmax(a, b, "min")
 
     @staticmethod
     def maximum(a: Any, b: Any) -> Any:
-        return FlexGemmTensorSSAOpOverrides.nan_propagating_minmax(a, b, "max")
+        return FlexGemmCuteDSLOpOverrides.nan_propagating_minmax(a, b, "max")
 
     @staticmethod
     def clamp(x: Any, min: Any = None, max: Any = None) -> Any:
         result = x
         if min is not None:
-            result = FlexGemmTensorSSAOpOverrides.maximum(result, min)
+            result = FlexGemmCuteDSLOpOverrides.maximum(result, min)
         if max is not None:
-            result = FlexGemmTensorSSAOpOverrides.minimum(result, max)
+            result = FlexGemmCuteDSLOpOverrides.minimum(result, max)
         return result
 
     @staticmethod
     def clamp_min(x: Any, min: Any) -> Any:
-        return FlexGemmTensorSSAOpOverrides.maximum(x, min)
+        return FlexGemmCuteDSLOpOverrides.maximum(x, min)
 
     @staticmethod
     def clamp_max(x: Any, max: Any) -> Any:
-        return FlexGemmTensorSSAOpOverrides.minimum(x, max)
+        return FlexGemmCuteDSLOpOverrides.minimum(x, max)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -617,7 +616,7 @@ def epimod_local_reduce_spec(
     return spec
 
 
-class FlexGemmEpiModEmitter:
+class FlexGemmEpilogueEmitter:
     """Emit QuACK EpiMod source from shared FlexGEMM analysis."""
 
     def __init__(
@@ -637,8 +636,10 @@ class FlexGemmEpiModEmitter:
         self.analysis = analysis
         self.outputs = analysis.outputs
         self.local_reduce = self.outputs.local_reduce
-        self.grouped_select_indices = analysis.grouped_select_indices
-        self.grouped_main_layouts = analysis.grouped_main_layouts
+        self.output_contraction_select_indices = (
+            analysis.output_contraction_select_indices
+        )
+        self.output_contraction_layouts = analysis.output_contraction_layouts
         local_reduce_store = (
             None if self.local_reduce is None else self.local_reduce.store
         )
@@ -827,7 +828,7 @@ class FlexGemmEpiModEmitter:
         )
         with (
             V.set_kernel_handler(kernel),
-            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
+            V.set_ops_handler(FlexGemmCuteDSLOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -862,7 +863,7 @@ class FlexGemmEpiModEmitter:
         env = dict(self.base_env)
         with (
             V.set_kernel_handler(kernel),
-            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
+            V.set_ops_handler(FlexGemmCuteDSLOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -884,8 +885,8 @@ class FlexGemmEpiModEmitter:
         self.local_reduce_prepass_body = tuple(kernel.body.lines)
         self.local_reduce_prepass_result = flex_gemm_epilogue_arg(source, env)
 
-    def lower_grouped_main_layout(
-        self, node: torch.fx.Node, layout: GroupedTensorSSALayout
+    def lower_output_contraction_layout(
+        self, node: torch.fx.Node, layout: FlexGemmLocalReduceGeometry
     ) -> None:
         """Reshape one physical TensorSSA fragment into adjacent-N lane groups."""
         if node.target is torch.ops.aten.split.Tensor:
@@ -897,12 +898,12 @@ class FlexGemmEpiModEmitter:
             source_node = view_args[0]
         source = flex_gemm_epilogue_arg(source_node, self.env)
         fragment_group = (
-            f"cutlass.const_expr(min({layout.group_size}, "
+            f"cutlass.const_expr(min({layout.group}, "
             f"cute.size({source}.shape, mode=[0])))"
         )
         repeats = (
             f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
-            f"// min({layout.group_size}, cute.size({source}.shape, mode=[0])))"
+            f"// min({layout.group}, cute.size({source}.shape, mode=[0])))"
         )
         grouped = self.kernel.cse.generate(
             self.kernel.body,
@@ -918,12 +919,12 @@ class FlexGemmEpiModEmitter:
                     dtype=torch.float32,
                     shape=(1,),
                 )
-                for index in range(layout.group_size)
+                for index in range(layout.group)
             )
         else:
             self.env[node] = grouped
 
-    def lower_grouped_main_select(self, node: torch.fx.Node, index: int) -> None:
+    def lower_output_contraction_select(self, node: torch.fx.Node, index: int) -> None:
         """Select one analysis-validated lane from a grouped TensorSSA value."""
         source = flex_gemm_epilogue_arg(node.args[0], self.env)
         expression = (
@@ -949,7 +950,7 @@ class FlexGemmEpiModEmitter:
         )
         with (
             V.set_kernel_handler(self.kernel),
-            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
+            V.set_ops_handler(FlexGemmCuteDSLOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -972,14 +973,14 @@ class FlexGemmEpiModEmitter:
                     raise NotImplementedError(
                         f"unsupported FlexGEMM EpiMod node: {node.format_node()}"
                     )
-                if node in self.grouped_main_layouts:
-                    self.lower_grouped_main_layout(
-                        node, self.grouped_main_layouts[node]
+                if node in self.output_contraction_layouts:
+                    self.lower_output_contraction_layout(
+                        node, self.output_contraction_layouts[node]
                     )
                     continue
-                if node in self.grouped_select_indices:
-                    self.lower_grouped_main_select(
-                        node, self.grouped_select_indices[node]
+                if node in self.output_contraction_select_indices:
+                    self.lower_output_contraction_select(
+                        node, self.output_contraction_select_indices[node]
                     )
                     continue
                 if node in self.output_storage_nodes:
@@ -1043,7 +1044,7 @@ class FlexGemmEpiModEmitter:
             flex_gemm_epilogue_arg(output, self.env)
             for output in self.outputs.aux_outputs
         )
-        main_name = "main" if self.outputs.main_transform is not None else "D"
+        main_name = "main" if self.outputs.output_contraction is not None else "D"
         result_items = [
             (main_name, main_result),
             *zip(aux_names, aux_results, strict=True),
@@ -1101,7 +1102,7 @@ class FlexGemmEpiModEmitter:
             f"{finalize_payload}{prepass_payload}{self.epilogue_arg_kinds!r}"
         )
         key = hashlib.sha256(key_payload.encode()).hexdigest()[:16]
-        name = f"flex_gemm_epimod_{key}"
+        name = f"flex_gemm_epilogue_{key}"
         finalize_name = None
         finalize_source = ""
         if self.local_reduce_finalize_result is not None:
@@ -1186,7 +1187,7 @@ class FlexGemmEpiModEmitter:
         return self.render()
 
 
-def materialize_flex_gemm_epimod(
+def materialize_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
     analysis: FlexGemmEpilogueAnalysis,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...],
@@ -1198,7 +1199,7 @@ def materialize_flex_gemm_epimod(
     mainloop_scale_count: int = 0,
 ) -> FlexGemmEpiModSource:
     """Materialize an analyzed FlexGEMM body as QuACK EpiMod source."""
-    return FlexGemmEpiModEmitter(
+    return FlexGemmEpilogueEmitter(
         graph_module,
         analysis,
         epilogue_arg_placeholders,
