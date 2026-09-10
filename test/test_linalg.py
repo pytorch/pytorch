@@ -127,6 +127,7 @@ def get_tunableop_untuned_filename():
 
 class TestLinalgDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
@@ -4975,6 +4976,7 @@ class TestLinalgDevice(TestCase):
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5331")
     @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_1d_Nd(self, device, dtype):
         for backend in ["cublas", "cublaslt"]:
@@ -4990,6 +4992,7 @@ class TestLinalgDevice(TestCase):
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5331")
     @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_2d_Nd(self, device, dtype):
         for backend in ["cublas", "cublaslt"]:
@@ -5005,6 +5008,7 @@ class TestLinalgDevice(TestCase):
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5331")
     @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_3d_Nd(self, device, dtype):
         for backend in ["cublas", "cublaslt"]:
@@ -5292,6 +5296,7 @@ class TestLinalgDevice(TestCase):
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5331")
     def test_corner_cases_of_cublasltmatmul(self, device, dtype):
         # common case
         M = torch.randn(128, device=device).to(dtype)
