@@ -4970,7 +4970,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
     """Inline CUDA-graph annotations, driven through stub activities so the branches
     are covered without a capture or a live profiler."""
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def _export(self, activities, **kwargs):
         from torch.profiler._chrome_trace_export import export_chrome_trace
@@ -5168,7 +5168,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestMetadataJsonFormat(TestCase):
+class TestMetadataJsonFormatCUDA(TestCase):
     """Guard the format of ITraceActivity.metadataJson() for kernel events.
 
     The Python-side chrome trace exporter splices metadataJson() verbatim
