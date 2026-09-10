@@ -9288,27 +9288,21 @@ class Scheduler:
 
         if any(node.is_cpu() or node.is_foreach() for node in (node1, node2)):
             return False
-        if node1.is_reduction() and not node2.is_reduction():
-            reduction_node, pw_node = node1, node2
-        elif node2.is_reduction() and not node1.is_reduction():
-            reduction_node, pw_node = node2, node1
-        else:
+        if (
+            not node1.is_reduction()
+            or not isinstance(node2, SchedulerNode)
+            or node2.is_reduction()
+        ):
             return False
-
-        snodes = pw_node.get_nodes()
-        # Reordering children independently can invalidate fused dependencies.
-        if len(snodes) != 1 or not isinstance(snodes[0], SchedulerNode):
-            return False
-        sn = snodes[0]
-        target_sizes = reduction_node.group[1]
+        target_sizes = node1.group[1]
         if not V.graph.sizevars.statically_known_equals(
-            sympy_product(sn._sizes[0]), sympy_product(target_sizes)
-        ) or SIMDKernel.is_compatible(target_sizes, sn.get_ranges()):
+            sympy_product(node2._sizes[0]), sympy_product(target_sizes)
+        ) or SIMDKernel.is_compatible(target_sizes, node2.get_ranges()):
             return False
 
-        order = self._broadcast_dims_last_order(sn, reduction_node.get_buffer_names())
+        order = self._broadcast_dims_last_order(node2, node1.get_buffer_names())
         if order is None or not SIMDKernel.is_compatible(
-            target_sizes, (ir.same_reorder(order)(sn._sizes[0]), sn._sizes[1])
+            target_sizes, (ir.same_reorder(order)(node2._sizes[0]), node2._sizes[1])
         ):
             return False
 
@@ -9318,20 +9312,10 @@ class Scheduler:
         if all(m is not None for m in memory):
             unfused_memory = typing.cast("tuple[MemoryCoalescing, ...]", memory)
 
-        snapshot = _LoopStateSnapshot.create((pw_node,))
-        sn.apply_new_loop_order(order)
-        if isinstance(pw_node, FusedSchedulerNode):
-            pw_node.group = sn.group
-            refresh_group_node_dependencies(pw_node)
-
-        common_names = (
-            node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
-        )
-        deps1 = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
-        deps2 = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
-        if not any(
-            self.deps_match_normalized(deps1[name], deps2[name])
-            for name in common_names
+        snapshot = _LoopStateSnapshot.create((node2,))
+        node2.apply_new_loop_order(order)
+        if not self.can_fuse_vertical(
+            node1, node2
         ) or self._reindexing_regresses_memory_coalescing(node1, node2, unfused_memory):
             snapshot.restore()
             return False
