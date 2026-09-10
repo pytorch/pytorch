@@ -861,9 +861,8 @@ class TestInstrumentationCoverage(TestCase):
         self.assertEqual(len(jit_v), 1)
 
     def test_no_raw_cute_compile_calls(self):
-        # Caching is compulsory: every cute.compile() must sit inside a decorated function or be the
-        # one shared helper, or it is uncached and invisible to instrumentation. This walks EVERY file
-        # under ops/, which is coverage the runtime test cannot give.
+        # Every cute.compile() must be decorated or use the shared helper to be cached and
+        # instrumented. Unlike the runtime test, this scans every file under ops/.
         bad = []
         seen = 0
         for path in self._ops_files():
@@ -882,8 +881,7 @@ class TestInstrumentationCoverage(TestCase):
         )
 
     def test_scan_flags_raw_cute_compile(self):
-        # Meta-test: prove the requirement fires, that both decorator forms satisfy it, and that the
-        # allowance is keyed on the file AND the function name.
+        # Verify both decorators satisfy the guard and helper allowances key on file and function.
         raw = "def f():\n    return cute.compile(k)\n"
         raw_v, raw_n = _scan_for_raw_cute_compile(raw, "<raw>")
         self.assertEqual(raw_n, 1, "scan didn't see the cute.compile call")
