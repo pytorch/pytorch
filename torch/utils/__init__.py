@@ -32,6 +32,18 @@ def set_module(obj, mod):
 cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
 
 
+def _has_blocking_weakrefs(t):
+    # WeakValueDictionary (FakeTensorMode / MetaConverter tensor_memo) attaches
+    # KeyedRef weakrefs that track Python object identity. swap_tensors keeps
+    # that identity, so those refs stay valid. Other weakrefs still block.
+    keyed_ref = getattr(weakref, "KeyedRef", None)
+    for ref in weakref.getweakrefs(t):
+        if keyed_ref is not None and isinstance(ref, keyed_ref):
+            continue
+        return True
+    return False
+
+
 def swap_tensors(t1, t2):
     """
     This function swaps the content of the two Tensor objects.
@@ -40,10 +52,9 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
-    # Ensure there are no weakrefs
-    if weakref.getweakrefs(t1):
+    if _has_blocking_weakrefs(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
-    if weakref.getweakrefs(t2):
+    if _has_blocking_weakrefs(t2):
         raise RuntimeError("Cannot swap t2 because it has weakref associated with it")
     t1_slots = set(copyreg._slotnames(t1.__class__))  # type: ignore[attr-defined]
     t2_slots = set(copyreg._slotnames(t2.__class__))  # type: ignore[attr-defined]

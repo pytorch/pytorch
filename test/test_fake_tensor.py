@@ -3314,12 +3314,53 @@ class FakeTensorOperatorInvariants(TestCase):
 
         self.assertEqual(mode.count, 0)
 
-    # PropagateRealTensors installs weakrefs
+    def _assert_only_keyedref_weakrefs(self, tensors):
+        keyed_ref = getattr(weakref, "KeyedRef", None)
+        if keyed_ref is None:
+            return
+        for t in tensors:
+            refs = weakref.getweakrefs(t)
+            self.assertTrue(refs)
+            self.assertTrue(all(isinstance(r, keyed_ref) for r in refs))
+
+    @unittest.skipIf(
+        getattr(weakref, "KeyedRef", None) is None,
+        "weakref.KeyedRef is a CPython-only private attribute",
+    )
+    def test_swap_tensors_allows_mode_memo_keyedref(self):
+        # FakeTensorMode memos FakeTensors in a WeakValueDictionary, which
+        # attaches KeyedRef weakrefs. Those must not block swap_tensors, or
+        # Module.to() fails with "_apply(): Couldn't swap Linear.weight".
+        keyed_ref = weakref.KeyedRef
+        with FakeTensorMode():
+            t1 = torch.nn.Parameter(torch.randn(2, 2))
+            t2 = torch.nn.Parameter(torch.randn(3, 3))
+            refs1 = weakref.getweakrefs(t1)
+            refs2 = weakref.getweakrefs(t2)
+            self.assertTrue(refs1)
+            self.assertTrue(refs2)
+            self.assertTrue(all(isinstance(r, keyed_ref) for r in refs1))
+            self.assertTrue(all(isinstance(r, keyed_ref) for r in refs2))
+            wr = weakref.ref(t1)
+            with self.assertRaisesRegex(RuntimeError, "has weakref"):
+                torch.utils.swap_tensors(t1, t2)
+            del wr
+            id1, id2 = id(t1), id(t2)
+            shape1, shape2 = tuple(t1.shape), tuple(t2.shape)
+            torch.utils.swap_tensors(t1, t2)
+            self.assertEqual(id(t1), id1)
+            self.assertEqual(id(t2), id2)
+            self.assertEqual(tuple(t1.shape), shape2)
+            self.assertEqual(tuple(t2.shape), shape1)
+
+    # The PropagateRealTensors clone of this test used to xfail because that
+    # mode also memos tensors (KeyedRef). Those refs are the same kind this
+    # swap_tensors change allows, so the clone is expected to pass. The
+    # KeyedRef asserts below run in both the base test and that clone.
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/165387",
     )
-    @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):
         def _check_device(sd, device_type):
@@ -3328,9 +3369,11 @@ class FakeTensorOperatorInvariants(TestCase):
 
         with FakeTensorMode():
             m = torch.nn.Linear(2, 2)
+            self._assert_only_keyedref_weakrefs(m.parameters())
             _check_device(m.state_dict(), "cpu")
             m.to("cuda")
             _check_device(m.state_dict(), "cuda")
+            self._assert_only_keyedref_weakrefs(m.parameters())
 
 
 make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
