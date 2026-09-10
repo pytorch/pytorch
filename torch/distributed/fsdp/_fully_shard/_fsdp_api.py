@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 
 
 _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
@@ -12,7 +13,7 @@ _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
 
 @dataclass(frozen=True)
 class MixedPrecisionPolicy:
-    """
+    r"""
     This configures FSDP's mixed precision. Unlike autocast, this applies mixed
     precision at the module level, not op level, which means low-precision
     activations are saved for backward and high-to-low-precision casts are
@@ -46,12 +47,67 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
             For grouped ``fully_shard([a, b, ...])``, the cast is applied per
             module, before each module's forward.
+        param_dtype_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
+            Optional per-parameter override for ``param_dtype``. The callable
+            receives the original parameter when FSDP is applied. Returning a
+            dtype overrides ``param_dtype`` for that parameter; returning
+            ``None`` uses the default ``param_dtype``. Forward input casting
+            continues to use ``param_dtype``. (Default: ``None``)
+        reduce_dtype_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
+            Optional per-parameter override for ``reduce_dtype``. The callable
+            receives the original parameter when FSDP is applied. Returning a
+            dtype overrides ``reduce_dtype`` for that parameter; returning
+            ``None`` uses the default ``reduce_dtype``. Parameters with
+            different effective reduction dtypes use separate collectives.
+            (Default: ``None``)
+
+    .. warning::
+        ``param_dtype_fn`` and ``reduce_dtype_fn`` must return consistent
+        results across ranks.
     """
 
     param_dtype: torch.dtype | None = None
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
+    param_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = None
+    reduce_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = None
+
+    def _without_dtype_fns(self) -> "MixedPrecisionPolicy":
+        if self.param_dtype_fn is None and self.reduce_dtype_fn is None:
+            return self
+        return replace(self, param_dtype_fn=None, reduce_dtype_fn=None)
+
+    def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
+        if self.param_dtype_fn is None and self.reduce_dtype_fn is None:
+            return self
+        param_dtype = self.param_dtype
+        if self.param_dtype_fn is not None:
+            param_dtype_override = self.param_dtype_fn(param)
+            if param_dtype_override is not None:
+                if not isinstance(param_dtype_override, torch.dtype):
+                    raise ValueError(
+                        "param_dtype_fn must return a torch.dtype or None but got "
+                        f"{type(param_dtype_override)}"
+                    )
+                param_dtype = param_dtype_override
+        reduce_dtype = self.reduce_dtype
+        if self.reduce_dtype_fn is not None:
+            reduce_dtype_override = self.reduce_dtype_fn(param)
+            if reduce_dtype_override is not None:
+                if not isinstance(reduce_dtype_override, torch.dtype):
+                    raise ValueError(
+                        "reduce_dtype_fn must return a torch.dtype or None but got "
+                        f"{type(reduce_dtype_override)}"
+                    )
+                reduce_dtype = reduce_dtype_override
+        return replace(
+            self,
+            param_dtype=param_dtype,
+            reduce_dtype=reduce_dtype,
+            param_dtype_fn=None,
+            reduce_dtype_fn=None,
+        )
 
 
 class Comm(ABC):
