@@ -18740,6 +18740,86 @@ class TestInputGradBuffers(TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(x.grad, torch.full_like(x, 10))
 
+    @onlyCUDA
+    def test_lookup_does_not_deadlock_with_python_dispatch(self, device):
+        script = """
+import threading
+import time
+
+import torch
+from torch.autograd import Function
+from torch.utils._pytree import tree_map
+
+dispatch_entered = threading.Event()
+
+class DispatchTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            elem.shape,
+            strides=elem.stride(),
+            storage_offset=elem.storage_offset(),
+            dtype=elem.dtype,
+            layout=elem.layout,
+            device=elem.device,
+            requires_grad=False,
+        )
+
+    def __init__(self, elem):
+        self.elem = elem
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        dispatch_entered.set()
+        time.sleep(0.1)
+        kwargs = {} if kwargs is None else kwargs
+        unwrap = lambda value: value.elem if isinstance(value, cls) else value
+        return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
+
+class Getter(Function):
+    @staticmethod
+    def forward(ctx, value):
+        return value.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if not dispatch_entered.wait(timeout=5):
+            raise RuntimeError("timed out waiting for Python dispatch")
+        ctx.input_grad_buffers
+        return grad_output
+
+class Fanout(Function):
+    @staticmethod
+    def forward(ctx, getter_output, duplicated_a, duplicated_b):
+        return duplicated_a.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return (
+            grad_output.cpu(),
+            grad_output.clone(),
+            DispatchTensor(grad_output.clone()),
+        )
+
+seed = torch.ones((), requires_grad=True)
+getter_output = Getter.apply(seed)
+source = torch.ones((), device="cuda", requires_grad=True)
+duplicated = source.clone()
+Fanout.apply(getter_output, duplicated, duplicated).backward()
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("input_grad_buffers lookup deadlocked")
+        except subprocess.CalledProcessError as error:
+            self.fail(error.output.decode("utf-8"))
+
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence

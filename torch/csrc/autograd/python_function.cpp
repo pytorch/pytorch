@@ -1392,8 +1392,18 @@ PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
 PyObject* THPFunction_input_grad_buffers(PyObject* self, void* unused) {
   HANDLE_TH_ERRORS
   auto* py_fn = reinterpret_cast<THPFunction*>(self);
-  check_legacy_fn_attr_access(py_fn->cdata, "input_grad_buffers");
-  auto buffers = get_current_input_grad_buffers(py_fn->cdata.get());
+  auto node = py_fn->cdata;
+  check_legacy_fn_attr_access(node, "input_grad_buffers");
+  TORCH_CHECK(
+      node->post_hooks().empty(),
+      "input_grad_buffers does not support hooks registered on the producing "
+      "autograd node");
+
+  variable_list buffers;
+  {
+    pybind11::gil_scoped_release no_gil;
+    buffers = get_current_input_grad_buffers(node.get());
+  }
 
   THPObjectPtr result(
       PyTuple_New(static_cast<Py_ssize_t>(py_fn->is_variable_input.size())));

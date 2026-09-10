@@ -434,11 +434,6 @@ variable_list get_current_input_grad_buffers(Node* node) {
       !AnomalyMode::is_enabled(),
       "input_grad_buffers does not support anomaly detection");
   TORCH_CHECK(
-      node->post_hooks().empty(),
-      "input_grad_buffers does not support hooks registered on the producing "
-      "autograd node");
-
-  TORCH_CHECK(
       !at::globalContext().overrideStaleCaptureStream(),
       "input_grad_buffers does not support "
       "set_override_stale_capture_stream(True)");
