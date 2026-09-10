@@ -2859,6 +2859,13 @@ def skipIfNoXNNPACK(fn):
 def skipIfNoLapack(fn):
     return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
+def skipIfNoNativeAot(fn):
+    """Skip unless this build embedded native-AOT kernels (i.e. stage 2 ran)."""
+    return lazy_skip_if(
+        lambda: not torch._native._native_aot_embedded(),
+        "AOT kernels not embedded in this build",
+    )(fn)
+
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
 

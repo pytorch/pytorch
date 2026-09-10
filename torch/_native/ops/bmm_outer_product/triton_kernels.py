@@ -7,9 +7,9 @@ from torch._native.instrumentation import instrument_triton_kernel
 
 from ...triton import ConstTensorWrapper
 
-# Kernel body is shared with the AOT export path: aot_kernel.py carries
-# the @triton.jit function (torch-free, loadable by triton.tools.compile);
-# here we only add the runtime instrumentation wrapper.
+# Kernel body is shared with the AOT export path: aot_kernel.py carries the
+# @triton.jit function (torch-free, so the exporter can load it by path with no
+# torch import); here we only add the runtime instrumentation wrapper.
 from .aot_kernel import _bmm_outer_product_aot_kernel
 
 

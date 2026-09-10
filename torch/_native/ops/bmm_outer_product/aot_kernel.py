@@ -1,7 +1,9 @@
 """Triton bmm outer-product kernel (K == 1) for AOT export: out[b] = a[b] @ b[b].
 
-Separate from triton_kernels.py because the exporter executes this FILE to find the
-JITFunction, so it holds the bare @triton.jit body the JIT wrapper imports."""
+Separate from triton_kernels.py because the exporter loads this FILE by path to find
+the JITFunction, so it holds the bare @triton.jit body the JIT wrapper imports. Loaded
+by path it is not registered in sys.modules and has no package, so everything here
+must be importable with no relative imports."""
 
 import os
 
@@ -63,8 +65,10 @@ def _bmm_outer_product_aot_kernel(
     )
 
 
-_TL_DTYPES = {"float32": "fp32", "float16": "fp16", "bfloat16": "bf16"}
-_DTYPE_SHORT = {"float32": "f32", "float16": "f16", "bfloat16": "bf16"}
+# fp16 is absent on purpose: the declaration's _DTYPES leaves it to the JIT override,
+# so a key here would be a point no grid can reach.
+_TL_DTYPES = {"float32": "fp32", "bfloat16": "bf16"}
+_DTYPE_SHORT = {"float32": "f32", "bfloat16": "bf16"}
 
 
 def build(spec: dict) -> dict:
@@ -75,7 +79,9 @@ def build(spec: dict) -> dict:
     bm, bn = int(spec["BLOCK_M"]), int(spec["BLOCK_N"])
     prefix = f"bmm_outer_{_DTYPE_SHORT[dtype]}_bm{bm}_bn{bn}"
     # Parity with the JIT specializer's baked strides and 16B hints: without them the
-    # SASS is generically addressed, measured ~7x slower.
+    # SASS is generically addressed, measured ~7x slower. The ":16" suffix is the
+    # toolchain's spelling for a tt.divisibility attr, which the prelude's 16B
+    # alignment tests are what make true.
     ptr = f"*{tl_ty}:16"
     signature = ", ".join(
         [ptr, ptr, ptr, "i32", "i32", "i32"]

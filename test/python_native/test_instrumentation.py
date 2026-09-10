@@ -667,13 +667,62 @@ def _is_instrumented(decos, jit_deco, instrument_deco, combined_deco):
     )
 
 
-def _scan_for_missing_instrumentation(source, label):
+def _jit_site_names(source, label):
+    """Names of the functions in one source carrying a DSL jit decorator."""
+    names = []
+    for node in ast.walk(ast.parse(source, filename=label)):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        decos = _decorator_names(node)
+        for _, jit_deco, _, combined_deco in _DSL_INSTRUMENTATION_RULES:
+            jit_decos = (jit_deco,) if isinstance(jit_deco, str) else jit_deco
+            if any(deco in decos for deco in jit_decos) or combined_deco in decos:
+                names.append(node.name)
+                break
+    return names
+
+
+def _wraps_kernel(source, label, kernel, module_stem):
+    """True if this source imports ``kernel`` from ``module_stem`` and instruments it.
+
+    The call form -- ``instrument_triton_kernel(op)(kernel)`` -- is how a module
+    instruments a kernel defined elsewhere, and it is invisible to the decorator
+    scan, so it needs its own recognizer. The import is part of the test because
+    names are not unique across a directory: norm wraps a *vendored*
+    ``_compile_rmsnorm_fwd``, which must not credit the same name in a sibling.
+    """
+    entry_points = {
+        name
+        for _, _, instrument_deco, combined_deco in _DSL_INSTRUMENTATION_RULES
+        for name in (instrument_deco, combined_deco)
+    }
+    tree = ast.parse(source, filename=label)
+    imported = any(
+        isinstance(node, ast.ImportFrom)
+        and (node.module or "").split(".")[-1] == module_stem
+        and any(alias.name == kernel for alias in node.names)
+        for node in ast.walk(tree)
+    )
+    if not imported:
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+        if names & entry_points and kernel in names:
+            return True
+    return False
+
+
+def _scan_for_missing_instrumentation(source, label, instrumented_elsewhere=()):
     """Return (violations, n_compile_sites) for one Python source string.
 
     A compile site is any function carrying a DSL rule's ``jit_decorator`` or
     its ``combined_decorator``. A violation is such a site that isn't fully
-    instrumented (see :func:`_is_instrumented`). ``n_compile_sites`` lets
-    callers assert the scan saw something rather than passing vacuously.
+    instrumented (see :func:`_is_instrumented`) and is not named in
+    ``instrumented_elsewhere``, the sites another module wraps in call form.
+    ``n_compile_sites`` lets callers assert the scan saw something rather than
+    passing vacuously.
     """
     violations = []
     n_compile_sites = 0
@@ -686,6 +735,8 @@ def _scan_for_missing_instrumentation(source, label):
             jit_decos = (jit_deco,) if isinstance(jit_deco, str) else jit_deco
             if any(deco in decos for deco in jit_decos) or combined_deco in decos:
                 n_compile_sites += 1
+                if node.name in instrumented_elsewhere:
+                    break
                 if not _is_instrumented(
                     decos, jit_deco, instrument_deco, combined_deco
                 ):
@@ -774,14 +825,32 @@ class TestInstrumentationCoverage(TestCase):
         ops_dir = os.path.join(os.path.dirname(torch._native.__file__), "ops")
         for root, _, files in os.walk(ops_dir):
             for name in files:
-                # aot_kernel.py modules are exempt: their kernels are
-                # compiled at EXPORT time by tools/native_aot (no runtime
-                # compile to instrument). triton.tools.compile also needs
-                # to find a plain JITFunction by name, which a wrapper
-                # would hide. aot.py declaration modules are stdlib-only
-                # metadata (torchgen loads them pre-build).
-                if name.endswith(".py") and name not in ("aot_kernel.py", "aot.py"):
+                if name.endswith(".py"):
                     yield os.path.join(root, name)
+
+    def _instrumented_by_sibling(self, path, source):
+        """Jit sites in ``source`` that a module beside it wraps in call form.
+
+        A kernel a native-AOT declaration exports has to stay a bare object the
+        exporter can find by name, so the wrapper goes on in the sibling that launches
+        it -- which instruments the JIT route just as a decorator would, and is what
+        makes such a kernel acceptable rather than the name of the file it sits in.
+        """
+        directory = os.path.dirname(path)
+        stem = os.path.splitext(os.path.basename(path))[0]
+        siblings = [
+            os.path.join(directory, n)
+            for n in os.listdir(directory)
+            if n.endswith(".py") and os.path.join(directory, n) != path
+        ]
+        wrapped = set()
+        for kernel in _jit_site_names(source, os.path.relpath(path)):
+            for sib in siblings:
+                with open(sib) as f:
+                    if _wraps_kernel(f.read(), os.path.relpath(sib), kernel, stem):
+                        wrapped.add(kernel)
+                        break
+        return wrapped
 
     def test_required_decorators_exist(self):
         # Ties each rule to the real API: a typo'd or removed instrumentation
@@ -801,9 +870,12 @@ class TestInstrumentationCoverage(TestCase):
         checked = 0
         for path in self._ops_files():
             with open(path) as f:
-                violations, n = _scan_for_missing_instrumentation(
-                    f.read(), os.path.relpath(path)
-                )
+                source = f.read()
+            violations, n = _scan_for_missing_instrumentation(
+                source,
+                os.path.relpath(path),
+                self._instrumented_by_sibling(path, source),
+            )
             missing += violations
             checked += n
 
@@ -813,6 +885,26 @@ class TestInstrumentationCoverage(TestCase):
             [],
             "DSL compile sites missing instrumentation:\n" + "\n".join(missing),
         )
+
+    def test_scan_requires_a_wrapper_for_an_undecorated_kernel(self):
+        # Meta-test for the only accepted alternative to the decorator: the sibling's
+        # call form. A bare kernel is flagged, and stops being flagged exactly when
+        # some other module passes it to an instrumentation entry point.
+        bare = "@triton.jit\ndef k(): ...\n"
+        v, n = _scan_for_missing_instrumentation(bare, "<bare>")
+        self.assertEqual((n, len(v)), (1, 1), "bare kernel was NOT flagged")
+
+        wrapper = (
+            "from .aot_kernel import k\nk2 = instrument_triton_kernel('aten::x')(k)\n"
+        )
+        self.assertTrue(_wraps_kernel(wrapper, "<wrapper>", "k", "aot_kernel"))
+        # Same name, different module: must not credit this file's site.
+        self.assertFalse(_wraps_kernel(wrapper, "<wrapper>", "k", "other_kernel"))
+        plain = "from .aot_kernel import k\nk2 = passthrough(k)\n"
+        self.assertFalse(_wraps_kernel(plain, "<plain>", "k", "aot_kernel"))
+
+        v, n = _scan_for_missing_instrumentation(bare, "<wrapped>", {"k"})
+        self.assertEqual((n, v), (1, []), "wrapped kernel was wrongly flagged")
 
     def test_scan_flags_uninstrumented_kernel_per_dsl(self):
         # Meta-test: prove the guard fires. For each DSL: a bare jit decorator
