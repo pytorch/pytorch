@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import dataclasses
 import functools
 import gc
 import importlib
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -16,16 +18,24 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    _current_cpu_codegen_target,
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+    SystemInfo,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
+from torch._inductor import cpu_vec_isa
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    subtest,
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.testing._internal.inductor_utils import (
@@ -111,6 +121,204 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    def test_mixed_device_capture_records_cpu_codegen_target(self):
+        # A mixed cpu+accelerator capture still holds native CPU code, so the
+        # codegen target must be recorded and compared even though the
+        # collapsed device_type reads as the accelerator. The graph is
+        # fabricated (never run), so no accelerator is needed.
+        if _current_cpu_codegen_target() is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn)
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        node.meta["val"] = torch.empty(2)
+        graph.call_function(
+            torch.ops.aten.ones.default, ((2,),), {"device": torch.device("cuda")}
+        )
+        package.update_device_type(graph)
+        self.assertEqual(package._device_types, {"cpu", "cuda"})
+
+        entry = package.cache_entry()
+        self.assertEqual(entry.device_type, "cuda")
+        self.assertEqual(entry.device_types, frozenset(("cpu", "cuda")))
+        self.assertIsNotNone(entry.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", 128, ("INVALID",), None, "INVALID")
+        entry.system_info = dataclasses.replace(
+            entry.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            entry.check_versions()
+
+    # Named codegen targets: (machine, isa, bit width, build macros, simdlen, march).
+    _CODEGEN_TARGETS = {
+        "avx2": ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None),
+        "avx512": ("x86_64", "avx512", 512, ("CPU_CAPABILITY_AVX512",), None, None),
+        "neon": (
+            "aarch64",
+            "asimd",
+            128,
+            ("CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"),
+            None,
+            None,
+        ),
+        "sve128": ("aarch64", "asimd", 128, ("CPU_CAPABILITY_SVE128",), None, None),
+        "avx2_simdlen": ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), 256, None),
+    }
+
+    @parametrize(
+        "cached, host, error",
+        [
+            subtest(("avx2", "avx2", None), name="same_isa"),
+            subtest(
+                ("avx2", "avx512", "generated for vector ISA 'avx2'.*for 'avx512'"),
+                name="wider_host",
+            ),
+            subtest(
+                ("avx512", "avx2", "generated for vector ISA 'avx512'.*for 'avx2'"),
+                name="narrower_host",
+            ),
+            subtest(
+                ("neon", "avx2", "machine 'aarch64', this host is 'x86_64'"),
+                name="other_machine",
+            ),
+            # NEON and SVE128 share both the name "asimd" and a 128-bit width, so
+            # only the build macro tells them apart.
+            subtest(
+                ("neon", "sve128", "vector ISA 'asimd'"), name="same_name_other_macro"
+            ),
+            # simdlen and march are recorded for diagnostics but do not gate:
+            # pick_vec_isa() folds cpp.simdlen (and ATEN_CPU_CAPABILITY) into the
+            # ISA it resolves, and march never reaches it -- it only changes how
+            # the same tiled source is compiled -- so a host that lands on the
+            # same (ISA, width, macro) can rebuild the kernels whatever knob got
+            # it there. An artifact built under cpp.simdlen=256 loads on a host
+            # whose default already picks the same 256-bit ISA; gating on the raw
+            # knob would reject it and make the cpp.simdlen escape hatch trade an
+            # ISA error for a simdlen error.
+            subtest(("avx2_simdlen", "avx2", None), name="simdlen_does_not_gate"),
+            subtest(
+                ("avx2", None, "reports no CPU codegen target"), name="no_host_target"
+            ),
+        ],
+    )
+    def test_cpu_codegen_target_requires_the_host_to_pick_the_same_isa(
+        self, cached, host, error
+    ):
+        # The kernel source is tiled for the ISA picked at codegen and compiled
+        # with the ISA picked on the loading host, so the two must be equal. A
+        # wider host is not a superset: its masked loads zero-fill the lanes the
+        # narrower tiling never touches, and unmasked reductions read them.
+        base = SystemInfo.current(cpu_codegen=False)
+        cached_info = dataclasses.replace(
+            base, cpu_codegen_target=self._CODEGEN_TARGETS[cached]
+        )
+        host_target = None if host is None else self._CODEGEN_TARGETS[host]
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            return_value=host_target,
+        ):
+            if error is None:
+                cached_info.check_compatibility(SystemInfo.current())
+            else:
+                with self.assertRaisesRegex(RuntimeError, error):
+                    cached_info.check_compatibility(SystemInfo.current())
+
+    def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
+        # pick_vec_isa never raises for a missing compiler; it returns
+        # invalid_vec_isa, which must read as "no target", not as a target
+        # named INVALID_VEC_ISA that only an equally broken host would match.
+        # Patch pick_vec_isa directly, not valid_vec_isa_list: in fbcode on x86
+        # pick_vec_isa returns VecAVX2 before ever consulting the list, so
+        # emptying the list would leave this assertion inert there.
+        with patch.object(
+            cpu_vec_isa, "pick_vec_isa", return_value=cpu_vec_isa.invalid_vec_isa
+        ):
+            self.assertIsNone(_current_cpu_codegen_target())
+
+    def test_sve_widths_do_not_collide_in_the_codegen_fingerprint(self):
+        # VecSVE(128) and VecSVE(256) both stringify to "asimd", so the ISA name
+        # alone cannot tell a 128-bit tiling from a 256-bit one. The fingerprint
+        # records bit_width() so the two do not compare equal and a kernel tiled
+        # for one width is refused on a host that picks the other.
+        narrow = cpu_vec_isa.VecSVE(_bit_width=128)
+        wide = cpu_vec_isa.VecSVE(_bit_width=256)
+        self.assertEqual(str(narrow), str(wide))
+        with patch.object(cpu_vec_isa, "pick_vec_isa", return_value=narrow):
+            narrow_target = _current_cpu_codegen_target()
+        with patch.object(cpu_vec_isa, "pick_vec_isa", return_value=wide):
+            wide_target = _current_cpu_codegen_target()
+        self.assertEqual(narrow_target[1], wide_target[1])
+        self.assertNotEqual(narrow_target[2], wide_target[2])
+        self.assertNotEqual(narrow_target, wide_target)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    @parametrize("fullgraph", (False, True))
+    def test_eager_backend_entry_is_exempt_from_the_codegen_target(self, fullgraph):
+        # fullgraph=False takes _optimize, fullgraph=True optimize_assert; both
+        # thread native_backend and must agree.
+        def fn(x):
+            return x + 1
+
+        def custom_backend(gm, example_inputs):
+            return gm
+
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            side_effect=AssertionError("toolchain probe ran for an eager backend"),
+        ) as probe:
+            torch.compile(fn, backend="eager", fullgraph=fullgraph)(torch.randn(3))
+            (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        # side_effect fails at the call site, but Dynamo swallows exceptions on
+        # the compile path, so assert not-called outside the patch too.
+        probe.assert_not_called()
+        self.assertFalse(entry.requires_native_backend_compatibility)
+        self.assertIsNone(entry.system_info.cpu_codegen_target)
+
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        # A user's own callable may emit anything, so it counts as native and
+        # the probe runs; patch it so the assertion needs no host toolchain.
+        sentinel = ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None)
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            return_value=sentinel,
+        ):
+            torch.compile(fn, backend=custom_backend, fullgraph=fullgraph)(
+                torch.randn(3)
+            )
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertTrue(entry.requires_native_backend_compatibility)
+        self.assertEqual(entry.system_info.cpu_codegen_target, sentinel)
+
+    def test_loaded_eager_package_stays_exempt_on_resave(self):
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn, requires_native_backend_compatibility=False)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(3))
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            side_effect=AssertionError("toolchain probe ran for an eager backend"),
+        ) as probe:
+            entry = package.cache_entry()
+            self.assertFalse(entry.requires_native_backend_compatibility)
+            self.assertIsNone(entry.system_info.cpu_codegen_target)
+            # Reload under an eager session (native_backend=False, as eval_frame
+            # passes it): an eager artifact reloaded to be served again stays
+            # exempt, so the resave never runs the toolchain probe.
+            reloaded = CompilePackage(
+                fn, entry, requires_native_backend_compatibility=False
+            )
+            resaved = reloaded.cache_entry()
+        probe.assert_not_called()
+        self.assertFalse(resaved.requires_native_backend_compatibility)
+        self.assertIsNone(resaved.system_info.cpu_codegen_target)
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
