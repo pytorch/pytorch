@@ -305,7 +305,10 @@ class ListTests(TupleTests):
         self.assertEqual(p, ["a", "d"])
         self.assertRaises(IndexError, p.pop, -3)
         self.assertRaises(TypeError, p.pop, 1.0)
-        self.assertRaises(OverflowError, p.pop, 2**80)
+        with self.assertRaisesRegex(
+            OverflowError, "Python int too large to convert to C ssize_t"
+        ):
+            p.pop(2**80)
 
         # The conversion precedes the empty-list check.
         self.assertRaises(TypeError, self.thetype().pop, 1.0)
@@ -678,6 +681,16 @@ class SymIntIndexTests(torch._dynamo.test_case.TestCase):
                 return str(e)
 
         self._check(fn, [3])
+
+    def test_deque_sym_maxlen(self):
+        # maxlen is converted by the same PyLong_AsSsize_t, so a shape-derived
+        # maxlen specializes too, and the deque keeps the converted ssize_t.
+        def fn(x):
+            q = collections.deque([1, 2, 3], maxlen=x.shape[0] - 1)
+            return x + len(q)
+
+        cnts = self._check(fn, [3, 4])
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_pop_unbacked_index_raises(self):
         # An unbacked index has no guard that could make the choice sound, so
