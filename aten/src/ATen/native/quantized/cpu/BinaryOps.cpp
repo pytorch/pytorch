@@ -429,8 +429,10 @@ Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   acl_add->configure();
 
-  acl_add->qa_tensor.allocator()->import_memory(qa_contig.data_ptr());
-  acl_add->qb_tensor.allocator()->import_memory(qb_contig.data_ptr());
+  acl_add->qa_tensor.allocator()->import_memory(
+      const_cast<void*>(qa_contig.const_data_ptr()));
+  acl_add->qb_tensor.allocator()->import_memory(
+      const_cast<void*>(qb_contig.const_data_ptr()));
   acl_add->qdst_tensor.allocator()->import_memory(dst.mutable_data_ptr());
 
   acl_add->q_add.run();
