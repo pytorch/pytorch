@@ -548,6 +548,108 @@ INSTANTIATE_APPLY_TRSM(L, false, float)
 INSTANTIATE_APPLY_TRSM(U, true, float2)
 INSTANTIATE_APPLY_TRSM(L, false, float2)
 
+// op(A)(i, j): row-major (n x n) A, optionally transposed and/or conjugated.
+template <typename T>
+inline T tri_opA(
+    device const T* Ab,
+    uint i,
+    uint j,
+    uint n,
+    bool transpose,
+    bool conj) {
+  T v = transpose ? Ab[j * n + i] : Ab[i * n + j];
+  return conj ? c10::metal::conj(v) : v;
+}
+
+// General batched triangular solve via forward/back substitution. Each thread
+// owns one independent RHS vector (a column for the left case, a row for the
+// right case) and solves it serially, so there are no cross-thread hazards.
+// Correctness-first: this is O(n^2) per RHS with no blocking. Complex support
+// comes from the c10::metal mul/div/conj helpers, which are no-ops for real T.
+template <typename T>
+kernel void triangular_solve(
+    device const T* A [[buffer(0)]],
+    device const T* B [[buffer(1)]],
+    device T* X [[buffer(2)]],
+    constant TriangularSolveParams& p [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  const uint n = p.n;
+  const uint k = p.k;
+  if (tid >= p.nbatch * k) {
+    return;
+  }
+  const uint batch = tid / k;
+  const uint vec = tid % k;
+  device const T* Ab = A + batch * n * n;
+  const bool tr = p.transpose;
+  const bool cj = p.conj;
+  // A is upper before op; a transpose flips the effective triangle.
+  const bool eff_upper = (p.upper != 0) != (p.transpose != 0);
+
+  if (p.left) {
+    // op(A) x = b, x/b are columns of an (n x k) matrix; solve over rows.
+    device const T* b = B + batch * n * k + vec;
+    device T* x = X + batch * n * k + vec;
+    if (eff_upper) {
+      for (int i = int(n) - 1; i >= 0; --i) {
+        T sum = b[uint(i) * k];
+        for (uint j = uint(i) + 1; j < n; ++j) {
+          sum = sum -
+              c10::metal::mul(tri_opA(Ab, uint(i), j, n, tr, cj), x[j * k]);
+        }
+        x[uint(i) * k] = p.unit
+            ? sum
+            : c10::metal::div(sum, tri_opA(Ab, uint(i), uint(i), n, tr, cj));
+      }
+    } else {
+      for (uint i = 0; i < n; ++i) {
+        T sum = b[i * k];
+        for (uint j = 0; j < i; ++j) {
+          sum = sum - c10::metal::mul(tri_opA(Ab, i, j, n, tr, cj), x[j * k]);
+        }
+        x[i * k] =
+            p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, i, i, n, tr, cj));
+      }
+    }
+  } else {
+    // x op(A) = b, x/b are rows of a (k x n) matrix; solve over columns.
+    device const T* b = B + batch * k * n + vec * n;
+    device T* x = X + batch * k * n + vec * n;
+    if (eff_upper) {
+      for (uint j = 0; j < n; ++j) {
+        T sum = b[j];
+        for (uint i = 0; i < j; ++i) {
+          sum = sum - c10::metal::mul(x[i], tri_opA(Ab, i, j, n, tr, cj));
+        }
+        x[j] =
+            p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, j, j, n, tr, cj));
+      }
+    } else {
+      for (int j = int(n) - 1; j >= 0; --j) {
+        T sum = b[uint(j)];
+        for (uint i = uint(j) + 1; i < n; ++i) {
+          sum = sum - c10::metal::mul(x[i], tri_opA(Ab, i, uint(j), n, tr, cj));
+        }
+        x[uint(j)] = p.unit
+            ? sum
+            : c10::metal::div(sum, tri_opA(Ab, uint(j), uint(j), n, tr, cj));
+      }
+    }
+  }
+}
+
+#define INSTANTIATE_TRIANGULAR_SOLVE(DTYPE)                      \
+  template [[host_name("triangular_solve_" #DTYPE)]] kernel void \
+  triangular_solve<DTYPE>(                                       \
+      device const DTYPE* A [[buffer(0)]],                       \
+      device const DTYPE* B [[buffer(1)]],                       \
+      device DTYPE* X [[buffer(2)]],                             \
+      constant TriangularSolveParams& p [[buffer(3)]],           \
+      uint tid [[thread_position_in_grid]]);
+
+INSTANTIATE_TRIANGULAR_SOLVE(float);
+INSTANTIATE_TRIANGULAR_SOLVE(float2);
+
 template <bool upper>
 inline void syrk_simdgroup_tile(
     device float* A,
@@ -1598,21 +1700,13 @@ INSTANTIATE_FACTOR_PANEL_LU(float2, 4, 8)
 // factorPanelLU no longer fits. luStreamUpdate applies column j's rank-1 update
 // over all rows and writes each threadgroup's local argmax partial to scratch;
 // luStreamPivot then reduces those partials to the global pivot for column j.
-// Streaming scratch layout per batch (in floats): kLUStreamNT argmax value
-// partials, kLUStreamNT index partials, then the 32-element U row in the
-// kernel's element type (32 floats for float, 64 floats for float2).
-template <typename T>
-inline uint luStreamScratchStride() {
-  return 2 * kLUStreamNT + 32 * (sizeof(T) / sizeof(float));
-}
-
 template <typename T>
 [[max_total_threads_per_threadgroup(kLUStreamNT)]]
 kernel void luStreamUpdate(
     device T* A [[buffer(0)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]], // d0, j, RPT, searchOnly
-    device float* scratch [[buffer(6)]],
+    device LUStreamScratch<T>* scratch [[buffer(6)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint warp_id [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
@@ -1626,8 +1720,7 @@ kernel void luStreamUpdate(
   const uint nb = min(32u, minMN - d0);
   const uint H = M - d0;
   device T* Ab = A + ulong(tgid.y) * M * N;
-  device float* scr = scratch + ulong(tgid.y) * luStreamScratchStride<T>();
-  device T* uRow = (device T*)(scr + 2 * kLUStreamNT);
+  device auto& scr = scratch[tgid.y];
 
   const uint rowStart = searchOnly ? j : j + 1;
   const uint sc = searchOnly ? j : j + 1; // column searched for next pivot
@@ -1637,10 +1730,10 @@ kernel void luStreamUpdate(
   T rp = T(0.0f);
   bool doUpdate = false;
   if (!searchOnly) {
-    const T upiv = uRow[j];
+    const T upiv = scr.uRow[j];
     doUpdate = luPivotMag(upiv) != 0.0f;
     rp = doUpdate ? luRecip(upiv) : T(0.0f);
-    uc = (lane < nb) ? uRow[lane] : T(0.0f);
+    uc = (lane < nb) ? scr.uRow[lane] : T(0.0f);
   }
 
   float bv = -1.0f;
@@ -1691,21 +1784,21 @@ kernel void luStreamUpdate(
     const float m2 = simd_max(v2);
     const uint p2 = simd_min((v2 == m2) ? i2 : 0xffffffffu);
     if (lane == 0) {
-      scr[tgid.x] = m2;
-      ((device uint*)(scr + kLUStreamNT))[tgid.x] = p2;
+      scr.vpart[tgid.x] = m2;
+      scr.ipart[tgid.x] = p2;
     }
   }
 }
 
-#define INSTANTIATE_LU_STREAM_UPDATE(T)                \
-  template [[host_name("luStreamUpdate_" #T)]]         \
-  kernel void luStreamUpdate<T>(                       \
-      device T * A [[buffer(0)]],                      \
-      constant uint2 & dims [[buffer(3)]],             \
-      constant uint4 & params [[buffer(4)]],           \
-      device float* scratch [[buffer(6)]],             \
-      uint3 tgid [[threadgroup_position_in_grid]],     \
-      uint warp_id [[simdgroup_index_in_threadgroup]], \
+#define INSTANTIATE_LU_STREAM_UPDATE(T)                  \
+  template [[host_name("luStreamUpdate_" #T)]]           \
+  kernel void luStreamUpdate<T>(                         \
+      device T * A [[buffer(0)]],                        \
+      constant uint2 & dims [[buffer(3)]],               \
+      constant uint4 & params [[buffer(4)]],             \
+      device LUStreamScratch<T> * scratch [[buffer(6)]], \
+      uint3 tgid [[threadgroup_position_in_grid]],       \
+      uint warp_id [[simdgroup_index_in_threadgroup]],   \
       uint lane [[thread_index_in_simdgroup]]);
 
 INSTANTIATE_LU_STREAM_UPDATE(float)
@@ -1722,7 +1815,7 @@ kernel void luStreamPivot(
     device int* info [[buffer(2)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]], // d0, j, npart
-    device float* scratch [[buffer(6)]],
+    device LUStreamScratch<T>* scratch [[buffer(6)]],
     uint3 tid3 [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint warp_id [[simdgroup_index_in_threadgroup]],
@@ -1737,9 +1830,7 @@ kernel void luStreamPivot(
   const uint tid = tid3.x; // threadgroup of kLUStreamNT threads
   device T* Ab = A + ulong(tgid.x) * M * N;
   device int* pv = pivots + ulong(tgid.x) * minMN;
-  device float* scr = scratch + ulong(tgid.x) * luStreamScratchStride<T>();
-  device const uint* sidx = (device const uint*)(scr + kLUStreamNT);
-  device T* uRow = (device T*)(scr + 2 * kLUStreamNT);
+  device auto& scr = scratch[tgid.x];
 
   if (d0 == 0 && j == 0 && tid == 0) {
     info[tgid.x] = 0;
@@ -1752,8 +1843,8 @@ kernel void luStreamPivot(
   float bv = -1.0f;
   uint bi = 0xffffffffu;
   for (uint i = tid; i < npart; i += kLUStreamNT) {
-    const float v = scr[i];
-    const uint ix = sidx[i];
+    const float v = scr.vpart[i];
+    const uint ix = scr.ipart[i];
     if (v > bv || (v == bv && ix < bi)) {
       bv = v;
       bi = ix;
@@ -1793,23 +1884,23 @@ kernel void luStreamPivot(
         *rp2 = vj;
         vj = vp;
       }
-      uRow[lane] = vj;
+      scr.uRow[lane] = vj;
     }
   }
 }
 
-#define INSTANTIATE_LU_STREAM_PIVOT(T)                 \
-  template [[host_name("luStreamPivot_" #T)]]          \
-  kernel void luStreamPivot<T>(                        \
-      device T * A [[buffer(0)]],                      \
-      device int* pivots [[buffer(1)]],                \
-      device int* info [[buffer(2)]],                  \
-      constant uint2& dims [[buffer(3)]],              \
-      constant uint4& params [[buffer(4)]],            \
-      device float* scratch [[buffer(6)]],             \
-      uint3 tid3 [[thread_position_in_threadgroup]],   \
-      uint3 tgid [[threadgroup_position_in_grid]],     \
-      uint warp_id [[simdgroup_index_in_threadgroup]], \
+#define INSTANTIATE_LU_STREAM_PIVOT(T)                  \
+  template [[host_name("luStreamPivot_" #T)]]           \
+  kernel void luStreamPivot<T>(                         \
+      device T * A [[buffer(0)]],                       \
+      device int* pivots [[buffer(1)]],                 \
+      device int* info [[buffer(2)]],                   \
+      constant uint2& dims [[buffer(3)]],               \
+      constant uint4& params [[buffer(4)]],             \
+      device LUStreamScratch<T>* scratch [[buffer(6)]], \
+      uint3 tid3 [[thread_position_in_threadgroup]],    \
+      uint3 tgid [[threadgroup_position_in_grid]],      \
+      uint warp_id [[simdgroup_index_in_threadgroup]],  \
       uint lane [[thread_index_in_simdgroup]]);
 
 INSTANTIATE_LU_STREAM_PIVOT(float)
@@ -2428,9 +2519,9 @@ INSTANTIATE_GEMM_LU(32, 64, 2)
 
 #endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
 
-template <bool upper, bool unit, short TS>
+template <typename T, bool upper, bool unit, short TS>
 kernel void trsmDiagSolveLU(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]],
     uint3 tid3 [[thread_position_in_threadgroup]],
@@ -2444,14 +2535,20 @@ kernel void trsmDiagSolveLU(
   const uint nr = params.w;
   const uint tid = tid3.x;
   const uint G = tpg.x;
-  device float* Ab = A + ulong(tgid.x) * M * N;
+  device T* Ab = A + ulong(tgid.x) * M * N;
 
-  threadgroup float T[TS][TS + 1];
+  threadgroup T Td[TS][TS + 1];
   for (uint i = tid; i < TS * TS; i += G) {
     const uint r = i / TS;
     const uint c = i % TS;
-    T[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c]
-                                 : (r == c ? 1.0f : 0.0f);
+    if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+      // pad with zeros; the divide below is guarded on c < nr so the zero
+      // diagonal in the padding never produces a 0/0 NaN (no complex one)
+      Td[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c] : T(0.0f);
+    } else {
+      Td[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c]
+                                    : (r == c ? T(1.0f) : T(0.0f));
+    }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -2459,20 +2556,50 @@ kernel void trsmDiagSolveLU(
   if (col >= ce) {
     return;
   }
-  float x[TS];
+  T x[TS];
 #pragma unroll
   for (short r = 0; r < TS; r++) {
-    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : 0.0f;
+    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : T(0.0f);
   }
-  if (!upper) {
+  if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+    // no dcol register staging for complex: it would double the per-thread
+    // register bytes; read Td directly instead (cf. trsmPanelLU)
+    if (!upper) {
+#pragma unroll
+      for (short c = 0; c < TS; c++) {
+        const T xc =
+            (unit || uint(c) >= nr) ? x[c] : c10::metal::div(x[c], Td[c][c]);
+        x[c] = xc;
+#pragma unroll
+        for (short i = 0; i < TS; i++) {
+          if (i > c) {
+            x[i] -= c10::metal::mul(xc, Td[i][c]);
+          }
+        }
+      }
+    } else {
+#pragma unroll
+      for (short c = TS - 1; c >= 0; c--) {
+        const T xc =
+            (unit || uint(c) >= nr) ? x[c] : c10::metal::div(x[c], Td[c][c]);
+        x[c] = xc;
+#pragma unroll
+        for (short i = 0; i < TS; i++) {
+          if (i < c) {
+            x[i] -= c10::metal::mul(xc, Td[i][c]);
+          }
+        }
+      }
+    }
+  } else if (!upper) {
 #pragma unroll
     for (short c = 0; c < TS; c++) {
-      float dcol[TS];
+      T dcol[TS];
 #pragma unroll
       for (short i = 0; i < TS; i++) {
-        dcol[i] = T[i][c];
+        dcol[i] = Td[i][c];
       }
-      const float xc = unit ? x[c] : x[c] / T[c][c];
+      const T xc = unit ? x[c] : x[c] / Td[c][c];
       x[c] = xc;
 #pragma unroll
       for (short i = 0; i < TS; i++) {
@@ -2484,12 +2611,12 @@ kernel void trsmDiagSolveLU(
   } else {
 #pragma unroll
     for (short c = TS - 1; c >= 0; c--) {
-      float dcol[TS];
+      T dcol[TS];
 #pragma unroll
       for (short i = 0; i < TS; i++) {
-        dcol[i] = T[i][c];
+        dcol[i] = Td[i][c];
       }
-      const float xc = unit ? x[c] : x[c] / T[c][c];
+      const T xc = unit ? x[c] : x[c] / Td[c][c];
       x[c] = xc;
 #pragma unroll
       for (short i = 0; i < TS; i++) {
@@ -2507,23 +2634,28 @@ kernel void trsmDiagSolveLU(
   }
 }
 
-#define INSTANTIATE_TRSM_DIAG_SOLVE(UP, UN, SUFF)    \
-  template [[host_name("trsmDiagSolveLU_" #SUFF)]]   \
-  kernel void trsmDiagSolveLU<UP, UN, 32>(           \
-      device float* A [[buffer(0)]],                 \
-      constant uint2& dims [[buffer(3)]],            \
-      constant uint4& params [[buffer(4)]],          \
-      uint3 tid3 [[thread_position_in_threadgroup]], \
-      uint3 tgid [[threadgroup_position_in_grid]],   \
+#define INSTANTIATE_TRSM_DIAG_SOLVE(T, UP, UN, SUFF)      \
+  template [[host_name("trsmDiagSolveLU_" #T "_" #SUFF)]] \
+  kernel void trsmDiagSolveLU<T, UP, UN, 32>(             \
+      device T * A [[buffer(0)]],                         \
+      constant uint2 & dims [[buffer(3)]],                \
+      constant uint4 & params [[buffer(4)]],              \
+      uint3 tid3 [[thread_position_in_threadgroup]],      \
+      uint3 tgid [[threadgroup_position_in_grid]],        \
       uint3 tpg [[threads_per_threadgroup]]);
 
-INSTANTIATE_TRSM_DIAG_SOLVE(false, true, lower_unit)
-INSTANTIATE_TRSM_DIAG_SOLVE(true, false, upper_nonunit)
-INSTANTIATE_TRSM_DIAG_SOLVE(false, false, lower_nonunit)
-INSTANTIATE_TRSM_DIAG_SOLVE(true, true, upper_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float, false, true, lower_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float, true, false, upper_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float, false, false, lower_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float, true, true, upper_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float2, false, true, lower_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float2, true, false, upper_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float2, false, false, lower_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float2, true, true, upper_unit)
 
+template <typename T>
 kernel void luApplyPivotsRHS(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     device const int* pivots [[buffer(1)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]],
@@ -2538,7 +2670,7 @@ kernel void luApplyPivotsRHS(
   const uint inverse = params.w;
   const uint tid = tid3.x;
   const uint G = tpg.x;
-  device float* Ab = A + ulong(tgid.x) * M * N;
+  device T* Ab = A + ulong(tgid.x) * M * N;
   device const int* pv = pivots + ulong(tgid.x) * npiv;
 
   for (uint s = 0; s < npiv; s++) {
@@ -2547,7 +2679,7 @@ kernel void luApplyPivotsRHS(
     if (p != i) {
       for (uint col = tid; col < k; col += G) {
         const uint cc = coff + col;
-        const float t = Ab[ulong(i) * N + cc];
+        const T t = Ab[ulong(i) * N + cc];
         Ab[ulong(i) * N + cc] = Ab[ulong(p) * N + cc];
         Ab[ulong(p) * N + cc] = t;
       }
@@ -2555,6 +2687,20 @@ kernel void luApplyPivotsRHS(
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
+
+#define INSTANTIATE_LU_APPLY_PIVOTS_RHS(T)           \
+  template [[host_name("luApplyPivotsRHS_" #T)]]     \
+  kernel void luApplyPivotsRHS<T>(                   \
+      device T * A [[buffer(0)]],                    \
+      device const int* pivots [[buffer(1)]],        \
+      constant uint2& dims [[buffer(3)]],            \
+      constant uint4& params [[buffer(4)]],          \
+      uint3 tid3 [[thread_position_in_threadgroup]], \
+      uint3 tgid [[threadgroup_position_in_grid]],   \
+      uint3 tpg [[threads_per_threadgroup]]);
+
+INSTANTIATE_LU_APPLY_PIVOTS_RHS(float)
+INSTANTIATE_LU_APPLY_PIVOTS_RHS(float2)
 
 kernel void applyPivots(
     device float* P [[buffer(0)]],
@@ -3280,10 +3426,13 @@ kernel void svd_jacobi(
           }
         }
       }
-      threadgroup_barrier(
-          params.stage_v
-              ? mem_flags::mem_threadgroup
-              : (mem_flags::mem_threadgroup | mem_flags::mem_device));
+      // Barrier scope must be a compile-time constant (runtime mem_flags
+      // crashes the AGX compiler)
+      if (params.stage_v) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      } else {
+        threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+      }
     }
 
     threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
@@ -3365,6 +3514,73 @@ kernel void svd_jacobi(
     }
   }
   threadgroup_barrier(mem_flags::mem_device);
+
+  // The Jacobi update forms the range factor's columns as (A V)_j / sigma_j,
+  // which collapses to 0 when sigma_j <= eps, leaving U (or V, when transposed)
+  // non-orthonormal for rank-deficient inputs. Replace those null columns with
+  // an orthonormal basis of the complement of the emitted columns (two-pass
+  // Gram-Schmidt of canonical vectors), matching LAPACK gesdd. Columns are
+  // sorted by descending sigma, so the null ones are a contiguous tail. One
+  // simd-group runs it (each lane owns a strided slice of the working column,
+  // so the projections are simd_sum reductions needing no barriers); the rare
+  // degenerate path. Reuses Atg as scratch.
+  if (params.compute_uv && simd_group == 0) {
+    device T* out = (params.transposed == 0u) ? U_b : V_b;
+    const uint32_t ld = (params.transposed == 0u) ? params.u_ld : params.v_ld;
+    // U_b is column-major (elem i of col c at out[c*ld + i]); the transposed
+    // run emits V_b row-major (out[i*ld + c]), so index columns accordingly.
+    const uint32_t col_off = (params.transposed == 0u) ? ld : 1u;
+    const uint32_t elem_step = (params.transposed == 0u) ? 1u : ld;
+    // Relative rank cutoff: sigma_j at or below the Jacobi noise floor
+    // (~m*eps*sigma_max) is numerically zero, so its column is arbitrary and
+    // gets completed. An absolute eps would keep noise-amplified columns.
+    const float thresh = eps * sig[ord[0]] * static_cast<float>(m);
+    uint32_t rank = 0;
+    while (rank < n && sig[ord[rank]] > thresh) {
+      ++rank;
+    }
+    // Accept a candidate as a null-space column when its squared residual after
+    // orthogonalization clears this: loose (well above the fp32 roundoff
+    // floor), but enough that the canonicals span the complement. Cf.
+    // Rutishauser/DGKS Gram-Schmidt reorthogonalization.
+    constexpr float kIndepThreshSq = 1e-2f;
+    threadgroup T* col = Atg;
+    uint32_t cand = 0;
+    for (uint32_t j = rank; j < n; ++j) {
+      while (cand < m) {
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          col[i] = (i == cand) ? svd_one(T(0)) : T(0);
+        }
+        ++cand;
+        for (uint32_t pass = 0; pass < 2; ++pass) {
+          for (uint32_t l = 0; l < j; ++l) {
+            device T* cl = out + l * col_off;
+            T partial = T(0);
+            for (uint32_t i = simd_lane; i < m; i += kSimd) {
+              partial += svd_conjmul(cl[i * elem_step], col[i]);
+            }
+            T dot = svd_simd_sum(partial);
+            for (uint32_t i = simd_lane; i < m; i += kSimd) {
+              col[i] -= svd_mul(dot, cl[i * elem_step]);
+            }
+          }
+        }
+        float partial_n = 0;
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          partial_n += svd_abs2(col[i]);
+        }
+        const float nrm_sq = c10::metal::simd_sum(partial_n);
+        if (nrm_sq > kIndepThreshSq) {
+          const float inv = 1.0f / precise::sqrt(nrm_sq);
+          device T* cj = out + j * col_off;
+          for (uint32_t i = simd_lane; i < m; i += kSimd) {
+            cj[i * elem_step] = col[i] * inv;
+          }
+          break;
+        }
+      }
+    }
+  }
 
   if (tid == 0) {
     // NaN/Inf never triggers a rotation, so flag info to raise like the CPU
