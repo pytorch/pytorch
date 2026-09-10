@@ -6,7 +6,7 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MTIA
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -46,13 +46,13 @@ def _rocm_major_minor():
 
 ROCM_VERSION = LazyVal(_rocm_major_minor)
 
-# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+# Cuspy needs both the cupti-python bindings and the build-generated
 # _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
     _check_module_exists("cupti")
-    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and _check_module_exists("torch.profiler._cuspy._cupti_stubs")
     and not TEST_WITH_ROCM
 )
 
@@ -60,7 +60,7 @@ def _cupti_version():
     if not TEST_CUPTI:
         return 0
     try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
+        from torch.profiler._cuspy.cupti_python import pylibcupti
         return pylibcupti().get_version()
     except Exception:
         return 0
@@ -92,6 +92,15 @@ SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
+BF16X9_API_SUPPORTED = LazyVal(
+    lambda: TEST_CUDA
+    and not TEST_WITH_ROCM
+    and _get_torch_cuda_version() >= (12, 9)
+)
+BF16X9_SUPPORTED = LazyVal(
+    lambda: BF16X9_API_SUPPORTED
+    and torch.cuda.get_device_capability() in ((10, 0), (10, 3))
+)
 
 IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
@@ -187,6 +196,8 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     if TEST_XPU:
         return True
+    if TEST_MTIA:
+        return True
     return False
 
 def evaluate_platform_supports_ck_sdpa():
@@ -209,6 +220,8 @@ def evaluate_platform_supports_efficient_attention():
     if TEST_CUDA:
         return True
     if TEST_XPU:
+        return True
+    if TEST_MTIA:
         return True
     return False
 
