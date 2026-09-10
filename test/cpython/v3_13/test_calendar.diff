@@ -1,0 +1,118 @@
+diff --git a/test/cpython/v3_13/test_calendar.py b/test/cpython/v3_13/test_calendar.py
+index df102fe1986e6199eb1ea817469cfb93ccda0435..a5cc419170a7556be791eff8bb0fca7124fc676b 100644
+--- a/test/cpython/v3_13/test_calendar.py
++++ b/test/cpython/v3_13/test_calendar.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_calendar.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import calendar
+ import unittest
+ 
+@@ -367,7 +385,7 @@ result_2004_dates = \
+        '12/27/04 12/28/04 12/29/04 12/30/04 12/31/04 01/01/05 01/02/05']]]
+ 
+ 
+-class OutputTestCase(unittest.TestCase):
++class OutputTestCase(CPythonTestCase):
+     def normalize_calendar(self, s):
+         # Filters out locale dependent strings
+         def neitherspacenordigit(c):
+@@ -496,7 +514,7 @@ class OutputTestCase(unittest.TestCase):
+             calendar.format(["1", "2", "3"], colwidth=3, spacing=1)
+             self.assertEqual(out.getvalue().strip(), "1   2   3")
+ 
+-class CalendarTestCase(unittest.TestCase):
++class CalendarTestCase(CPythonTestCase):
+ 
+     def test_deprecation_warning(self):
+         with self.assertWarnsRegex(
+@@ -741,7 +759,7 @@ class CalendarTestCase(unittest.TestCase):
+             self.assertEqual(week, expected)
+ 
+ 
+-class MonthCalendarTestCase(unittest.TestCase):
++class MonthCalendarTestCase(CPythonTestCase):
+     def setUp(self):
+         self.oldfirstweekday = calendar.firstweekday()
+         calendar.setfirstweekday(self.firstweekday)
+@@ -871,7 +889,7 @@ class SundayTestCase(MonthCalendarTestCase):
+         # A 31-day december starting on friday (2+7+7+7+7+1 days)
+         self.check_weeks(1995, 12, (2, 7, 7, 7, 7, 1))
+ 
+-class TimegmTestCase(unittest.TestCase):
++class TimegmTestCase(CPythonTestCase):
+     TIMESTAMPS = [0, 10, 100, 1000, 10000, 100000, 1000000,
+                   1234567890, 1262304000, 1275785153,]
+     def test_timegm(self):
+@@ -879,7 +897,7 @@ class TimegmTestCase(unittest.TestCase):
+             tuple = time.gmtime(secs)
+             self.assertEqual(secs, calendar.timegm(tuple))
+ 
+-class MonthRangeTestCase(unittest.TestCase):
++class MonthRangeTestCase(CPythonTestCase):
+     def test_january(self):
+         # Tests valid lower boundary case.
+         self.assertEqual(calendar.monthrange(2004,1), (3,31))
+@@ -910,7 +928,7 @@ class MonthRangeTestCase(unittest.TestCase):
+         with self.assertRaisesRegex(calendar.IllegalMonthError, '65'):
+             calendar.monthrange(2004, 65)
+ 
+-class LeapdaysTestCase(unittest.TestCase):
++class LeapdaysTestCase(CPythonTestCase):
+     def test_no_range(self):
+         # test when no range i.e. two identical years as args
+         self.assertEqual(calendar.leapdays(2010,2010), 0)
+@@ -934,8 +952,9 @@ class LeapdaysTestCase(unittest.TestCase):
+ def conv(s):
+     return s.replace('\n', os.linesep).encode()
+ 
+-class CommandLineTestCase(unittest.TestCase):
++class CommandLineTestCase(CPythonTestCase):
+     def setUp(self):
++        super().setUp()
+         self.runners = [self.run_cli_ok, self.run_cmd_ok]
+ 
+     @contextlib.contextmanager
+@@ -1121,7 +1140,7 @@ class CommandLineTestCase(unittest.TestCase):
+                           b'href="custom.css" />', output)
+ 
+ 
+-class MiscTestCase(unittest.TestCase):
++class MiscTestCase(CPythonTestCase):
+     def test__all__(self):
+         not_exported = {
+             'mdays', 'January', 'February', 'EPOCH',
+@@ -1130,9 +1149,10 @@ class MiscTestCase(unittest.TestCase):
+         support.check__all__(self, calendar, not_exported=not_exported)
+ 
+ 
+-class TestSubClassingCase(unittest.TestCase):
++class TestSubClassingCase(CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+ 
+         class CustomHTMLCal(calendar.HTMLCalendar):
+             cssclasses = [style + " text-nowrap" for style in
+@@ -1180,4 +1200,4 @@ class TestSubClassingCase(unittest.TestCase):
+             3, self.cal.cssclass_year_head, 2017), self.cal.formatyear(2017))
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
