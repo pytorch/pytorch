@@ -8,6 +8,7 @@ import unittest
 
 import torch
 import torch.nn as nn
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
 from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._trace_validator import (
@@ -38,12 +39,17 @@ _DEVICE_TYPE_TO_ACTIVITY = {
     "xpu": ProfilerActivity.XPU,
     "hpu": ProfilerActivity.HPU,
     "mtia": ProfilerActivity.MTIA,
-    "privateuse1": ProfilerActivity.PrivateUse1,
 }
 
 
 def _activity_for_device_type(device_type):
     """Map a device type string to its ProfilerActivity enum."""
+    # privateuse1 cannot be a table entry: the device_type a test sees is the
+    # registered backend name ("openreg", ...), because PrivateUse1TestBase.setUpClass
+    # overwrites device_type with _get_privateuse1_backend_name(). Resolved per call,
+    # not at import, since a backend may register after this module loads.
+    if device_type == _get_privateuse1_backend_name():
+        return ProfilerActivity.PrivateUse1
     if device_type not in _DEVICE_TYPE_TO_ACTIVITY:
         raise ValueError(
             f"No ProfilerActivity mapping for device type {device_type!r}. "
