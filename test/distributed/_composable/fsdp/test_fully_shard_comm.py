@@ -47,6 +47,7 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -71,6 +72,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -2045,6 +2047,37 @@ class TestFullyShardForceSumReduction(FSDPTest):
         # Now we should also have SUM
         self.assertRegex(logs, reduce_scatter_sum_re)
         self.assertRegex(logs, all_reduce_sum_re)
+
+
+class TestMixedDtypeChunkCat(TestCase):
+    @parametrize(
+        "input_shapes,dim,input_dtypes",
+        [
+            (((17,), (10,)), 0, (torch.bfloat16, torch.float32)),
+            (((17,), (10,)), 0, (torch.float16, torch.float32)),
+            (
+                ((2, 17, 3), (2, 10, 3), (2, 25, 3)),
+                1,
+                (torch.bfloat16, torch.float16, torch.float32),
+            ),
+        ],
+    )
+    def test_mixed_dtype_chunk_cat(self, device, input_shapes, dim, input_dtypes):
+        num_chunks = 4
+        inputs = [
+            torch.randn(shape, device=device, dtype=dtype)
+            for shape, dtype in zip(input_shapes, input_dtypes)
+        ]
+        fp32_inputs = [tensor.float() for tensor in inputs]
+        expected = torch._chunk_cat(fp32_inputs, dim=dim, num_chunks=num_chunks)
+        actual = torch.empty_like(expected)
+        torch._chunk_cat(inputs, dim=dim, num_chunks=num_chunks, out=actual)
+        self.assertEqual(actual, expected)
+
+
+instantiate_device_type_tests(
+    TestMixedDtypeChunkCat, globals(), only_for=("cpu", "cuda")
+)
 
 
 @instantiate_parametrized_tests

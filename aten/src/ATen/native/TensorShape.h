@@ -111,7 +111,8 @@ inline void leading_dimension_matches(TensorList tensors, int64_t dim) {
 inline int64_t preprocess_chunk_cat_inputs(
     TensorList tensors,
     int64_t dim,
-    int64_t num_chunks) {
+    int64_t num_chunks,
+    bool require_same_dtype = true) {
   TORCH_CHECK(num_chunks >= 1, "_chunk_cat expects positive num_chunks");
   TORCH_CHECK(
       !tensors.empty(), "_chunk_cat expects a non-empty input tensor list");
@@ -119,9 +120,11 @@ inline int64_t preprocess_chunk_cat_inputs(
   auto expected_device = tensors[0].device();
   for (const auto i : c10::irange(tensors.size())) {
     TORCH_CHECK(tensors[i].numel() > 0, "_chunk_cat expects non-empty tensor");
-    TORCH_CHECK(
-        tensors[i].dtype() == expected_dtype,
-        "_chunk_cat expects all input tensors with the same dtype");
+    if (require_same_dtype) {
+      TORCH_CHECK(
+          tensors[i].dtype() == expected_dtype,
+          "_chunk_cat expects all input tensors with the same dtype");
+    }
     TORCH_CHECK(
         tensors[i].device() == expected_device,
         "_chunk_cat expects all inputs tensors on the same device");
