@@ -200,10 +200,10 @@ def _make_disk_config_key(
     kernel_name: str,
     variant_name: str,
     accumulator_type: object,
-    scale_type_a: object | None = None,
-    scale_type_b: object | None = None,
-    swizzle_type_a: object | None = None,
-    swizzle_type_b: object | None = None,
+    scale_type_a: object = None,
+    scale_type_b: object = None,
+    swizzle_type_a: object = None,
+    swizzle_type_b: object = None,
     epilogue_source: str = "",
 ) -> tuple[str, ...]:
     return (

@@ -117,7 +117,7 @@ def benchmark_all_kernels(
             shared: int | None,
             prefix: str = "",
         ) -> str:
-            if not any(x is None for x in [n_regs, n_spills, shared]):
+            if n_regs is not None and n_spills is not None and shared is not None:
                 kernel_detail_str = (
                     f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
                 )
