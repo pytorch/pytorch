@@ -5884,6 +5884,7 @@ class Scheduler:
                 )
 
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
+            hint_override_fused_timings: dict[int, dict[ir.ChoiceCaller, float]] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
                     future_choices: list[
@@ -5913,6 +5914,14 @@ class Scheduler:
                                 )
                         except CantSplit:
                             continue
+                        except Exception as e:
+                            if fusion_log.isEnabledFor(logging.DEBUG):
+                                fusion_log.debug(
+                                    "Exception in compiling %s: %s",
+                                    "prologue" if not epilogue_fusion else "epilogue",
+                                    e,
+                                )
+                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -5937,7 +5946,6 @@ class Scheduler:
                             if ms_fused < min_ms_fused:
                                 min_ms_fused = ms_fused
                                 ms_fused_choice = choice
-                    multi_node._choice_timings[hint_override] = new_timings
                     if ms_fused_choice is not None:
                         if not isinstance(ms_fused_choice, TritonTemplateCallerBase):
                             raise AssertionError(
@@ -5947,6 +5955,7 @@ class Scheduler:
                         hint_override_best_fusion_choice[hint_override] = (
                             ms_fused_choice
                         )
+                        hint_override_fused_timings[hint_override] = new_timings
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
@@ -6098,11 +6107,25 @@ class Scheduler:
                     elif is_nvgemm:
                         # pyrefly: ignore [missing-attribute]
                         with multi_node.swap_as_nvgemm_caller(choice):
+                            # pyrefly: ignore [missing-attribute]
+                            choice_backend = backend.choose_node_backend(node1)
+                            if not choice_backend.can_fuse_vertical(node1, node2):
+                                template_choices -= 1
+                                continue
                             future_choices.append(
                                 (choice, *self.compile_kernel(node_list_fused))
                             )
                 except CantSplit:
                     template_choices -= 1
+                    continue
+                except Exception as e:
+                    template_choices -= 1
+                    if fusion_log.isEnabledFor(logging.DEBUG):
+                        fusion_log.debug(
+                            "Exception in compiling %s: %s",
+                            "prologue" if not epilogue_fusion else "epilogue",
+                            e,
+                        )
                     continue
 
             if len(future_choices) == 0:
@@ -6228,7 +6251,14 @@ class Scheduler:
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_nvgemm_caller(ms_fused_choice)
                     elif config.multi_kernel_hints:
+                        if any(
+                            hint not in hint_override_best_fusion_choice
+                            for hint in config.multi_kernel_hints
+                        ):
+                            return False
                         hint_override_best_fusion_choice[None] = ms_fused_choice
+                        # pyrefly: ignore [missing-attribute]
+                        multi_node._choice_timings.update(hint_override_fused_timings)
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_callers(
                             hint_override_best_fusion_choice

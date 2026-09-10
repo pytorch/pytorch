@@ -532,6 +532,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         pid_cache: dict[str, str] | None = None,
         override_persistent_reduction: bool | None = None,
         override_cooperative_reduction: bool | None = None,
+        metadata_features: SIMDKernelFeatures | None = None,
         tiling_scores: dict[str, sympy.Expr] | None = None,
         mix_order_reduction: bool = False,
     ) -> None:
@@ -539,7 +540,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             pid_cache = {}
         super().__init__()
         self.features = features
-        self.mutations = features.get_mutations()
+        metadata_features = metadata_features or features
+        self.mutations = metadata_features.get_mutations()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.numels = {
@@ -594,7 +596,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_xblock: int | None = None
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
-        self._index_dtype = self.features.select_index_dtype()
+        self._index_dtype = metadata_features.select_index_dtype()
 
     def codegen_template_body(
         self,
@@ -1977,7 +1979,7 @@ class _NativeFullXReductionLayout(_GroupedReductionLayout):
     output_r_tree: DerivedIterationRangesRoot
 
     @classmethod
-    def from_kernel(
+    def from_native_matmul_kernel(
         cls,
         kernel: SIMDKernel[Any],
         local_reduction_size: sympy.Integer,
@@ -2183,6 +2185,16 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         """Reshape the parent-full tile and reduce over the local reduction."""
         k = self._kernel
         value = self._layout.ensure_parent_tile_resolution(k, value)
+        default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
+        if not isinstance(default, (int, float)):
+            raise AssertionError(f"expected scalar reduction identity, got {default}")
+        value = k.cse.generate(
+            k.compute,
+            f"tl.where({self._layout.group_tree.mask_name()}, {value}, "
+            f"{constant_repr(default)})",
+            dtype=value.dtype,
+            shape=value.shape,
+        )
         # The grouped-reduction reshape uses the grouped-axis named constants
         # from the reduced-output family, so emit the derived headers before
         # we materialize the reshape line.
@@ -2871,6 +2883,11 @@ class SIMDScheduling(BaseScheduling):
             outer_numel,
             outer_rnumel,
         )
+        emitted_schedule = [
+            *combined_schedule,
+            *outer_local_reduction_pointwise,
+            *grouped_schedule,
+        ]
         coalesce_analysis = (
             outer_node.get_coalesce_analysis()
             if torch._inductor.config.triton.coalesce_tiling_analysis
@@ -2878,6 +2895,12 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel_features = SIMDKernelFeatures(
             combined_schedule,
+            outer_numel,
+            outer_rnumel,
+            coalesce_analysis,
+        )
+        metadata_features = SIMDKernelFeatures(
+            emitted_schedule,
             outer_numel,
             outer_rnumel,
             coalesce_analysis,
@@ -2900,6 +2923,7 @@ class SIMDScheduling(BaseScheduling):
         metrics.codegen_nested_reduction += 1
         kernel_kwargs: dict[str, Any] = {
             "features": kernel_features,
+            "metadata_features": metadata_features,
             "override_cooperative_reduction": False,
             "tiling_scores": tiling_score,
         }
@@ -2911,7 +2935,6 @@ class SIMDScheduling(BaseScheduling):
                 kernel_kwargs,
             )[0],
         )
-
         if local_reduction_in_r:
             kernel.min_rblock = local_reduction_size_hint
         else:
@@ -2933,7 +2956,7 @@ class SIMDScheduling(BaseScheduling):
                 nested_context.enter_context(kernel.disable_reduction())
 
             layout: _NestedReductionLayout = (
-                _NativeFullXReductionLayout.from_kernel(
+                _NativeFullXReductionLayout.from_native_matmul_kernel(
                     kernel,
                     local_reduction_size,
                 )
@@ -2990,11 +3013,7 @@ class SIMDScheduling(BaseScheduling):
             kernel,
             combined_schedule,
             node,
-            [
-                *combined_schedule,
-                *outer_local_reduction_pointwise,
-                *grouped_schedule,
-            ],
+            emitted_schedule,
         )
 
     def _finalize_nested_reduction_kernel(
@@ -3516,6 +3535,15 @@ class SIMDScheduling(BaseScheduling):
         """
         Helper method to codegen a single template kernel variant
         """
+        fused_schedule = [*prologue_nodes, *epilogue_nodes]
+        if fused_schedule:
+            fused_features = SIMDKernelFeatures(
+                fused_schedule,
+                sympy_product(kernel.output_node.get_size()),
+            )
+            if fused_features.select_index_dtype() == torch.int64:
+                kernel._index_dtype_override = "tl.int64"
+
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []

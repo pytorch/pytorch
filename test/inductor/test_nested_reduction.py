@@ -3,6 +3,7 @@
 """End-to-end nested-reduction behavior and kernel-form tests."""
 
 import re
+from unittest import mock
 
 import torch
 import torch._inductor.config as inductor_config
@@ -167,6 +168,84 @@ class _NestedReductionBase:
         with inductor_config.patch("triton.native_matmul", True):
             self.check_numeric(f, args, tol=5e-1)
         self.check_fusion()
+
+    @parametrize("reduction_type", ("amax", "amin"))
+    def test_native_matmul_output_reduction_padded_lanes(self, reduction_type):
+        def f(x, weight):
+            output = x @ weight
+            if reduction_type == "amax":
+                return output.amax(dim=-1)
+            return output.amin(dim=-1)
+
+        sign = -1 if reduction_type == "amax" else 1
+        args = (
+            torch.ones(16, 16, device=GPU_TYPE, dtype=torch.float16),
+            torch.full((16, 8), sign, device=GPU_TYPE, dtype=torch.float16),
+        )
+        with inductor_config.patch("triton.native_matmul", True):
+            actual, code = run_and_get_code(torch.compile(f), *args)
+        self.assertEqual(actual, f(*args))
+        self.check_fusion()
+        FileCheck().check("tl.where(xmask").run(code[0])
+
+    def test_native_matmul_output_reduction_atomic_add(self):
+        def f(x, weight, index, out):
+            return out.index_add_(0, index, (x @ weight).sum(dim=-1))
+
+        torch.manual_seed(6928)
+        args = (
+            torch.randn(16, 16, device=GPU_TYPE, dtype=torch.float16),
+            torch.randn(16, 8, device=GPU_TYPE, dtype=torch.float16),
+            torch.zeros(16, device=GPU_TYPE, dtype=torch.int64),
+        )
+        out = torch.zeros(1, device=GPU_TYPE, dtype=torch.float16)
+        expected = f(*args, out.clone())
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                {
+                    "triton.native_matmul": True,
+                    "epilogue_fusion_with_atomic_add": True,
+                }
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), *args, out.clone())
+        self.assertEqual(actual, expected, atol=5e-2, rtol=5e-2)
+        self.check_fusion()
+        FileCheck().check("tl.atomic_add").run(code[0])
+        FileCheck().check_not("'mutated_arg_names': []").run(code[0])
+
+    def test_native_matmul_output_reduction_epilogue_index_dtype(self):
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        def f(x, weight, scale):
+            return ((x @ weight) * scale).sum(dim=-1)
+
+        original_can_use_32bit = SIMDScheduling.can_use_32bit_indexing
+
+        def can_use_32bit_indexing(numel, buffers):
+            buffers = tuple(buffers)
+            if any(buf.get_dtype() == torch.uint8 for buf in buffers):
+                return False
+            return original_can_use_32bit(numel, buffers)
+
+        args = (
+            torch.randn(16, 16, device=GPU_TYPE, dtype=torch.float16),
+            torch.randn(16, 8, device=GPU_TYPE, dtype=torch.float16),
+            torch.ones(8, device=GPU_TYPE, dtype=torch.uint8),
+        )
+        with (
+            mock.patch.object(
+                SIMDScheduling,
+                "can_use_32bit_indexing",
+                can_use_32bit_indexing,
+            ),
+            inductor_config.patch("triton.native_matmul", True),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), *args)
+        self.assertEqual(actual, f(*args), atol=5e-2, rtol=5e-2)
+        self.check_fusion()
+        FileCheck().check(".to(tl.int64)").run(code[0])
 
     def test_native_matmul_column_reduction_not_fused(self):
         def f(x, weight):

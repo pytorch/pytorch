@@ -1188,7 +1188,7 @@ class TritonTemplateKernel(TritonKernel):
         return self._register_hook("<ARGDEFS>", hook, allow_overwriting=True)
 
     def gen_defines(self):
-        return self.defines
+        return f"{self.defines}INDEX_DTYPE : tl.constexpr = {self.index_dtype}\n"
 
     def def_kernel(self, *argnames):
         """
@@ -1263,7 +1263,7 @@ class TritonTemplateKernel(TritonKernel):
                 f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
             )
             with code.indent():
-                code.splice(self.defines)
+                code.splice(self.gen_defines())
                 code.splice(renames.getvalue())
                 self.codegen_prologue(code)
             return code.getvalue()
@@ -2337,7 +2337,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             kernel_name="",
             input_nodes=(),
             output_node=_RealOutputNode(),
-            defines={},
+            defines="",
             num_stages=0,
             num_warps=1,
             grid_fn=None,
@@ -3075,8 +3075,6 @@ class TritonTemplate(KernelTemplate):
         else:
             index_dtype = "tl.int64"
 
-        # Add index dtype to defines so it's available in the template
-        defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
         defines = defines.getvalue()
         template_local_reduction_tile = (
             self.template_local_reduction.tile(kwargs)

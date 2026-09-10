@@ -5644,6 +5644,84 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             self.assertEqual(choice.template_local_reduction_tile, (128, 128))
         FileCheck().check("block_local_").run(code[0])
 
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_template_local_reduction_multi_kernel_hints_fallback(self):
+        def f(a, b):
+            return (a @ b).view(2, 128, 2, 128).amax((1, 3))
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with (
+            self.get_common_patches(
+                False,
+                True,
+                aten_time=10.0,
+                triton_time=1.0,
+            ),
+            config.patch(multi_kernel_hints=[64]),
+            mock.patch(
+                "torch._inductor.codegen.cuda_combined_scheduling."
+                "CUDACombinedScheduling.can_fuse_reduction_epilogue_choice",
+                return_value=False,
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check_not("extern_kernels.mm").check_not("block_local_").run(
+            code[0]
+        )
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_template_local_reduction_epilogue_index_dtype(self):
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        def f(a, b, scale):
+            return ((a @ b) * scale).view(2, 128, 2, 128).sum((1, 3))
+
+        original_can_use_32bit = SIMDScheduling.can_use_32bit_indexing
+
+        def can_use_32bit_indexing(numel, buffers):
+            buffers = tuple(buffers)
+            if any(buf.get_dtype() == torch.uint8 for buf in buffers):
+                return False
+            return original_can_use_32bit(numel, buffers)
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        scale = torch.ones(256, 256, device=GPU_TYPE, dtype=torch.uint8)
+        with (
+            self.get_common_patches(
+                False,
+                True,
+                aten_time=10.0,
+                triton_time=1.0,
+            ),
+            mock.patch.object(
+                SIMDScheduling,
+                "can_use_32bit_indexing",
+                can_use_32bit_indexing,
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b, scale)
+
+        self.assertEqual(actual, f(a, b, scale))
+        FileCheck().check("INDEX_DTYPE : tl.constexpr = tl.int64").check(
+            "block_local_"
+        ).run(code[0])
+
     @contextlib.contextmanager
     def get_common_patches(
         self,
@@ -6205,6 +6283,9 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
         "test_template_local_reduction_multi_kernel_hints": (
+            "Covers the synchronous hint prepass"
+        ),
+        "test_template_local_reduction_multi_kernel_hints_fallback": (
             "Covers the synchronous hint prepass"
         ),
     }
