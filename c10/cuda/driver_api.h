@@ -128,10 +128,7 @@
   _(cuMemGetAllocationPropertiesFromHandle, 12000) \
   _(cuMemsetD32Async, 12000)                       \
   _(cuStreamWriteValue32, 12000)                   \
-  _(cuGetErrorString, 12000)                       \
-  _(cuModuleLoadData, 12000)                       \
-  _(cuModuleGetFunction, 12000)                    \
-  _(cuLaunchKernel, 12000)
+  _(cuGetErrorString, 12000)
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
 #define C10_LIBCUDA_DRIVER_API_12_3(_) \

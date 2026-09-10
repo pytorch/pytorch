@@ -496,8 +496,15 @@ class TritonToolchain(Toolchain):
     # Triton compiles the cubin, so its version decides what an artifact is.
     REQUIRED_RUNTIMES = ("triton",)
     RUNTIME_DISTS = ("triton",)
-    # driver_api.h: c10's dlopen wrapper, so torch never link-depends on libcuda.
-    launcher_includes = ("#include <cuda.h>", "#include <c10/cuda/driver_api.h>")
+    # ATen's NVRTC table: dlopen'd, so torch never link-depends on libcuda. The same
+    # wrapper every other cubin launcher in the tree uses (jiterator, nativert's Triton
+    # kernel manager, inductor's static launcher).
+    launcher_includes = (
+        "#include <cuda.h>",
+        "#include <ATen/Context.h>",
+        "#include <ATen/cuda/Exceptions.h>",
+        "#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>",
+    )
 
     REQUIRED_BUILD_KEYS = ("kernel_path", "kernel_name", "signature", "launch", "args")
 
@@ -521,13 +528,11 @@ c10::once_flag {prefix}_once[{prefix}_max_devices];
 CUfunction {prefix}_get(int device) {{
   TORCH_CHECK(device >= 0 && device < {prefix}_max_devices, "device index ", device);
   c10::call_once({prefix}_once[device], [&] {{
-    // Via c10's DriverAPI: a CUDA build must run on a machine with no libcuda.
-    const auto* drv = c10::cuda::DriverAPI::get();
+    // Via ATen's NVRTC table: a CUDA build must run on a machine with no libcuda.
+    const auto& nvrtc = at::globalContext().getNVRTC();
     CUmodule mod = nullptr;
-    CUresult rc = drv->cuModuleLoadData_(&mod, {prefix}_cubin);
-    TORCH_CHECK(rc == CUDA_SUCCESS, "{prefix}: cuModuleLoadData failed with CUresult ", static_cast<int>(rc));
-    rc = drv->cuModuleGetFunction_(&{prefix}_fn[device], mod, "{symbol}");
-    TORCH_CHECK(rc == CUDA_SUCCESS, "{prefix}: cuModuleGetFunction failed with CUresult ", static_cast<int>(rc));
+    AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&mod, {prefix}_cubin));
+    AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleGetFunction(&{prefix}_fn[device], mod, "{symbol}"));
   }});
   return {prefix}_fn[device];
 }}
@@ -545,12 +550,11 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
   if (gx * gy * gz == 0) return;
   int device = -1;
   TORCH_CHECK(cudaGetDevice(&device) == cudaSuccess, "{prefix}: cudaGetDevice failed");
-  CUresult rc = c10::cuda::DriverAPI::get()->cuLaunchKernel_(
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
                                {prefix}_get(device), gx, gy, gz,
                                {block_x}, 1, 1, {shared},
                                c10::cuda::CUDAStream(stream).stream(),
-                               kernel_args, nullptr);
-  TORCH_CHECK(rc == CUDA_SUCCESS, "{prefix} launch failed with CUresult ", static_cast<int>(rc));
+                               kernel_args, nullptr));
 }}
 """
 
