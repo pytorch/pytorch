@@ -6846,12 +6846,13 @@ def multi_head_attention_forward(
         target_type=query.dtype,
     )
 
-    if is_causal and attn_mask is None:
-        raise RuntimeError(
-            "Need attn_mask if specifying the is_causal hint. "
-            "You may use the Transformer module method "
-            "`generate_square_subsequent_mask` to create this mask."
-        )
+    # SDPA can take the is_causal hint directly. The need_weights and
+    # key_padding_mask paths merge into an explicit attn_mask; defer
+    # creating it until after static_k / add_zero_attn so src_len is final.
+    # Save the flag now: is_causal is later set to False when a kpm is present.
+    need_implicit_causal_mask = (
+        is_causal and attn_mask is None and (need_weights or key_padding_mask is not None)
+    )
 
     if is_causal and key_padding_mask is None and not need_weights:
         # when we have a kpm or need weights, we need attn_mask
@@ -7036,6 +7037,21 @@ def multi_head_attention_forward(
     # update source sequence length after adjustments
     src_len = k.size(1)
 
+    if need_implicit_causal_mask:
+        attn_mask = torch.triu(
+            query.new_ones((tgt_len, src_len), dtype=torch.bool),
+            diagonal=1,
+        )
+        attn_mask = _canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
+        attn_mask = attn_mask.unsqueeze(0)  # match the existing 2D -> (1, L, S) path
+
     # merge key padding and attention masks
     if key_padding_mask is not None:
         if not torch.jit.is_scripting() and not torch.jit.is_tracing():
@@ -7062,9 +7078,6 @@ def multi_head_attention_forward(
     if need_weights:
         _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
-
-        if is_causal and attn_mask is None:
-            raise AssertionError("FIXME: is_causal not implemented for need_weights")
 
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(
