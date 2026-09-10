@@ -2382,7 +2382,7 @@ void qtopk_kernel(Tensor& values,
 
 template <typename T, bool ReluFused>
 inline void do_bn_compute(
-    typename T::underlying* X_ptr,
+    const typename T::underlying* X_ptr,
     typename T::underlying* Y_ptr,
     Vectorized<float> & fake_scale,
     Vectorized<float> & in_zp_vec,
@@ -2428,9 +2428,9 @@ void q_batch_norm_kernel(
     const float* beta = b.const_data_ptr<float>();
     auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
     auto maximum = std::numeric_limits<scalar_t::underlying>::max();
-    scalar_t::underlying* X =
-        reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
-    scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
+    const scalar_t::underlying* X =
+        reinterpret_cast<const scalar_t::underlying*>(input.const_data_ptr());
+    scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.mutable_data_ptr());
 
     constexpr int kVLen = Vectorized<float>::size();
     const int64_t outer_size = N * HxW;
@@ -2443,7 +2443,7 @@ void q_batch_norm_kernel(
     const auto lanes = static_cast<int64_t>(Vec::float_num_vecs() * kVLen);
     at::parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
-        auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
+        const auto* X_ptr = reinterpret_cast<const typename scalar_t::underlying*>(X + i * C);
         auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
         int64_t ch = 0;
 
