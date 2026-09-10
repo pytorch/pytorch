@@ -597,7 +597,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             return inner
 
         fn = outer()
-        cell = fn.__closure__[0]
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
