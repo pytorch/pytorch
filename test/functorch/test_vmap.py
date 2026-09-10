@@ -57,7 +57,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     OpDTypes,
     ops,
     skipOps,
@@ -4267,7 +4266,9 @@ def discover_variants(opinfo):
 # TODO: enable this when we get a bit closer to getting torch.vmap x torch.compile working.
 # @markDynamoStrictTest
 @unMarkDynamoStrictTest
-class TestVmapOperatorsOpInfo(TestCase):
+class TestVmapOperatorsOpInfoDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def vmap_outplace_test(
         self,
         func,
@@ -4504,22 +4505,22 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("cdouble"),
         xfail("cfloat"),
         xfail(
-            "jiterator_binary", device_type="cuda"
+            "jiterator_binary", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         xfail(
-            "jiterator_binary_return_by_ref", device_type="cuda"
+            "jiterator_binary_return_by_ref", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         xfail(
-            "jiterator_4inputs_with_extra_args", device_type="cuda"
+            "jiterator_4inputs_with_extra_args", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         xfail(
             "equal", ""
         ),  # TypeError: object of type 'bool' has no len(); likely testrunner problem
         xfail(
-            "jiterator_unary", device_type="cuda"
+            "jiterator_unary", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         xfail(
-            "jiterator_2inputs_2outputs", device_type="cuda"
+            "jiterator_2inputs_2outputs", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         # ---------------------------------------------------------------------
         # TypeError: expected Tensor as element 0 in argument 0, but got NotImplementedType
@@ -4552,14 +4553,14 @@ class TestVmapOperatorsOpInfo(TestCase):
             tol1(
                 "linalg.det",
                 {torch.float32: tol(atol=1e-04, rtol=1e-04)},
-                device_type="cuda",
+                device_type=("cuda", "xpu"),
             ),
             # The following is often flaky, but just on windows.
             # We should investigate if it's actually a problem or not.
             tol1(
                 "nn.functional.conv_transpose3d",
                 {torch.float32: tol(atol=1e-04, rtol=1e-02)},
-                device_type="cuda",
+                device_type=("cuda", "xpu"),
             ),
         ),
     )
@@ -4724,9 +4725,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("linalg.ldl_solve", "", device_type="cpu"),
                 xfail("chalf", ""),
                 xfail("clamp_max", ""),
-                xfail("jiterator_binary_return_by_ref", device_type="cuda"),
-                xfail("jiterator_unary", device_type="cuda"),
-                xfail("jiterator_2inputs_2outputs", device_type="cuda"),
+                xfail("jiterator_binary_return_by_ref", device_type=("cuda", "xpu")),
+                xfail("jiterator_unary", device_type=("cuda", "xpu")),
+                xfail("jiterator_2inputs_2outputs", device_type=("cuda", "xpu")),
                 xfail("special.airy_ai"),
                 xfail("clamp_min", ""),
                 xfail("sparse.sampled_addmm"),
@@ -4747,8 +4748,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("special.laguerre_polynomial_l"),
                 xfail("special.legendre_polynomial_p"),
                 xfail("special.hermite_polynomial_h"),
-                xfail("jiterator_binary", device_type="cuda"),
-                xfail("jiterator_4inputs_with_extra_args", device_type="cuda"),
+                xfail("jiterator_binary", device_type=("cuda", "xpu")),
+                xfail("jiterator_4inputs_with_extra_args", device_type=("cuda", "xpu")),
                 xfail("_segment_reduce", "lengths"),
                 xfail("lu_solve", ""),
                 xfail("special.hermite_polynomial_he"),
@@ -5140,7 +5141,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(
             0
         ) == (8, 6)
-        atol, rtol = (1e-3, 1e-3) if is_cuda_sm86 else (1e-4, 1e-4)
+        atol, rtol = (
+            (1e-3, 1e-3) if is_cuda_sm86 or device.startswith("xpu") else (1e-4, 1e-4)
+        )
 
         def test():
             for loop_out, batched_out in generator:
@@ -5316,7 +5319,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
 
-    @onlyCUDA
+    @onlyAccelerator
     @parametrize("inplace", [True, False])
     def test_0d_tensor_index_put(self, device, inplace):
         def f(t, idx, v):
@@ -5324,7 +5327,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             return fn(t, idx, v)
 
         N = 2
-        t = torch.zeros((N, 5), device="cuda")
+        t = torch.zeros((N, 5), device=device)
         idx = torch.tensor([1, 3])
         v = torch.tensor(1, dtype=t.dtype, device="cpu")
 
@@ -6806,7 +6809,12 @@ instantiate_device_type_tests(
     only_for=only_for + ("xpu",),
     allow_xpu=True,
 )
-instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
+instantiate_device_type_tests(
+    TestVmapOperatorsOpInfoDevice,
+    globals(),
+    only_for=only_for + ("xpu",),
+    allow_xpu=True,
+)
 
 instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
