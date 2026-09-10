@@ -1,8 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Host-only tests for the static-fragment datapath's THREAD MAP. TileMap is plain arithmetic
-# and it is where a fold order describes itself, so the properties an order depends on are
-# checkable here rather than only through a compiled kernel.
+# Host-only tests for TileMap, the arithmetic description of a fold order's thread map.
 
 import math
 
@@ -17,14 +15,12 @@ class TestTileDatapath(TestCase):
         return tile.TileMap(**kw)
 
     def test_rejects_a_partial_warp(self):
-        # tpr must be 1 or a whole number of warps: the lane merge shuffles across a full warp, so
-        # a partial one silently folds the wrong lanes.
+        # Lane shuffles require tpr=1 or whole warps.
         with self.assertRaises(ValueError):
             self._tm(N=512, itemsize=4, tpr=48, loads=1)
 
     def test_exact_is_derived_and_overridable(self):
-        # `exact` means the tile covers the row with nothing over, which is what lets the load emit no
-        # predication. A BATCHED tile covers only its batch, so that caller keeps its bound checks.
+        # Exact tiles need no load predication; batched tiles retain bounds.
         covering = self._tm(N=256, itemsize=4, tpr=32, loads=2)  # 4 * 2 * 32 == 256
         self.assertTrue(covering.exact)
         ragged = self._tm(N=252, itemsize=4, tpr=32, loads=2)
@@ -35,17 +31,15 @@ class TestTileDatapath(TestCase):
         )
 
     def test_vec_override_is_what_an_order_needs(self):
-        # By default vec is gcd-derived from N, which would change an order's add DAG with N. An order
-        # defines its own from the itemsize and pads the tail, so the override must be honoured.
+        # Orders override N-derived vec to fix their DAG and pad the tail.
         derived = self._tm(N=252, itemsize=4, tpr=32, loads=2)
         self.assertEqual(derived.vec, math.gcd(252, 4))
         fixed = self._tm(N=252, itemsize=4, tpr=32, loads=2, vec=4, exact=False)
         self.assertEqual(fixed.vec, 4)
 
     def test_strides_are_the_only_difference_between_the_two_orders(self):
-        # The two orders read the SAME elements into the SAME registers and differ only in which chunk
-        # goes to which warp. Both must keep stride 1 innermost -- that is what coalesces the load --
-        # and both must be a permutation of the same column set.
+        # Orders differ only in chunk-to-warp assignment. Both coalesce innermost stride 1
+        # and permute the same columns into the same registers.
         kw = dict(N=1024, itemsize=4, tpr=128, loads=2)
         row_major = self._tm(**kw)
         warp_major = self._tm(**kw, warp_major=True)
@@ -64,9 +58,8 @@ class TestTileDatapath(TestCase):
             self.assertEqual(max(cols), kw["N"] - tm.vec)
 
     def test_align_bytes_tracks_the_load_width(self):
-        # The declared alignment is what makes the DSL emit the wide instruction, and declaring more
-        # than the layout proves faults at launch. With a DERIVED vec it always divides N; an ORDER's
-        # explicit vec may not, and there the declaration has to fall back with the load.
+        # Alignment enables wide loads but faults if overstated. Derived vec divides N;
+        # an order's explicit vec may not, so both load and declaration must narrow.
         wide = self._tm(N=1024, itemsize=4, tpr=32, loads=1)
         self.assertTrue(wide.wide_ok)
         self.assertEqual(wide.align_bytes(4), wide.vec * 4)

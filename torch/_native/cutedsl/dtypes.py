@@ -1,10 +1,6 @@
-# The torch <-> cute dtype correspondence, for every CuteDSL native op. Its own module because
-# a trait names its accumulator in cute types, a driver allocates matching torch scratch, and an
-# override reads what it was handed -- three different packages.
-#
-# NOT the vendored quack `torch2cute_dtype_map`, which maps torch.bool to Uint8 rather than
-# Boolean and carries no float64. Imports cutlass at module scope, so bind it lazily (see
-# test_no_dsl_imports_after_import_torch).
+# Shared torch <-> cute dtype mapping for traits, scratch allocation, and overrides. This is
+# distinct from quack's map, which maps bool to Uint8 and omits float64. Import lazily because
+# this module imports cutlass.
 
 import cutlass
 from cutlass import Float32, Float64, Int32
@@ -21,6 +17,5 @@ torch2cute = {
     torch.int32: Int32,
 }
 
-# The inverse, for sizing a SCRATCH buffer from an accumulator type (a trait's field dtypes are
-# cute types, and a partials buffer has to be allocated in torch).
+# Inverse mapping for allocating torch scratch from a trait's cute accumulator dtype.
 cute2torch = {v: k for k, v in torch2cute.items()}
