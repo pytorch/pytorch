@@ -20,7 +20,7 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -35,13 +35,10 @@ _REGISTER_KS = (16, 32)
 _SUPPORTED_KS = _REGISTER_KS + _RADIX_KS
 
 
-def _radix_min_n_for_k(k: int) -> int:
-    """Mirror of the radix kernel's per-K N gate; used to size test
-    shapes so the override actually fires rather than falling through
-    to aten."""
-    from torch._native.ops.topk.cutedsl_impl import _RADIX_MIN_N_MULTIPLIER
+def _radix_min_n_for_k(k: int, dtype: str = "float32") -> int:
+    from torch._native.ops.topk.aot import _radix_min_n
 
-    return _RADIX_MIN_N_MULTIPLIER[k] * k
+    return _radix_min_n(dtype, k, torch.cuda.get_device_capability()[0])
 
 
 def _test_n(k: int) -> int:
@@ -56,6 +53,7 @@ def _test_n(k: int) -> int:
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "SM90+ required")
 @skipIfNoCuteDSL
 class TestCuTeDSLTopK(TestCase):
     def _assert_topk_matches_aten(self, x: torch.Tensor, k: int) -> None:
@@ -73,6 +71,105 @@ class TestCuTeDSLTopK(TestCase):
         if k >= 2:
             diffs = got_v[..., :-1] - got_v[..., 1:]
             self.assertTrue((diffs >= 0).all(), "output is not descending")
+
+    @parametrize("deterministic", (False, True))
+    def test_radix_dynamic_n(self, deterministic: bool) -> None:
+        from torch._native.ops.topk.aot import _specialization
+        from torch._native.ops.topk.cutedsl_kernels import (
+            _compile_topk_radix,
+            topk_radix,
+        )
+
+        torch.manual_seed(11)
+        k = 64
+        pn = torch.backends.python_native
+        compiled_by_work = {}
+        for _tail_iters, ns in (
+            (0, (1024, 2048, 4096)),
+            (1, (128, 132, 1028, 4100, 5124)),
+            (2, (512, 516)),
+            (3, (768, 1540)),
+            (4, (1020, 2044)),
+        ):
+            for n in ns:
+                cache_tail, fixed_vec_iters = _specialization(n, k, deterministic)
+                compiled = _compile_topk_radix(
+                    k,
+                    deterministic,
+                    cache_tail,
+                    fixed_vec_iters,
+                )
+                work_key = (cache_tail, fixed_vec_iters)
+                previous = compiled_by_work.setdefault(work_key, compiled)
+                self.assertIs(compiled, previous)
+
+                x = torch.randn(4, n, device="cuda", dtype=torch.float32)
+                with pn.cutedsl.disabled():
+                    ref_v, ref_i = torch.topk(x, k, dim=-1)
+                got_v, got_i = topk_radix(x, k, deterministic=deterministic)
+
+                self.assertIs(
+                    _compile_topk_radix(
+                        k,
+                        deterministic,
+                        cache_tail,
+                        fixed_vec_iters,
+                    ),
+                    compiled,
+                )
+                self.assertEqual(got_v, ref_v)
+                self.assertEqual(torch.gather(x, -1, got_i), got_v)
+                if deterministic:
+                    self.assertEqual(got_i, ref_i)
+
+    def test_register_dynamic_n_ladder(self) -> None:
+        from torch._native.ops.topk.cutedsl_kernels import (
+            _compile_topk_register_i64,
+            topk_register,
+        )
+
+        torch.manual_seed(14)
+        k = 16
+        ns = (64, 128, 256, 512, 1024)
+        compiled = _compile_topk_register_i64(ns, k)
+        for n in ns:
+            x = torch.randn(4, n, device="cuda")
+            with torch.backends.python_native.cutedsl.disabled():
+                ref_v, _ = torch.topk(x, k, dim=-1)
+            got_v, got_i = topk_register(x, k)
+            self.assertIs(_compile_topk_register_i64(ns, k), compiled)
+            self.assertEqual(got_v, ref_v)
+            self.assertEqual(torch.gather(x, -1, got_i), got_v)
+
+    def test_radix_fixed_work_regimes(self) -> None:
+        from torch._native.ops.topk.cutedsl_kernels import topk_radix
+
+        torch.manual_seed(12)
+        pn = torch.backends.python_native
+        for k, n in ((512, 5120), (1024, 35840)):
+            x = torch.randn(4, n, device="cuda", dtype=torch.float32)
+            with pn.cutedsl.disabled():
+                ref_v, ref_i = torch.topk(x, k, dim=-1)
+            got_v, got_i = topk_radix(x, k, deterministic=True)
+            self.assertEqual(got_v, ref_v)
+            self.assertEqual(got_i, ref_i)
+
+    @parametrize("deterministic", (False, True))
+    def test_radix_bfloat16(self, deterministic: bool) -> None:
+        from torch._native.ops.topk.cutedsl_kernels import topk_radix
+
+        torch.manual_seed(13)
+        k = 64
+        n = _radix_min_n_for_k(k, "bfloat16")
+        x = torch.randn(256, n, device="cuda", dtype=torch.bfloat16)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref_v, ref_i = torch.topk(x, k, dim=-1)
+        got_v, got_i = topk_radix(x, k, deterministic=deterministic)
+        self.assertEqual(got_v, ref_v)
+        self.assertEqual(torch.gather(x, -1, got_i), got_v)
+        self.assertEqual(got_i.dtype, torch.int64)
+        if deterministic:
+            self.assertEqual(got_i, ref_i)
 
     @parametrize("k", _SUPPORTED_KS)
     def test_correctness_random_gaussian(self, k: int) -> None:
