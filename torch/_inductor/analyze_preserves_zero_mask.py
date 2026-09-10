@@ -39,6 +39,16 @@ class PreservesZeros(SymPyOps, DefaultHandler):
             sympy.Float(0) if dtype.is_floating_point else sympy.Integer(0), dtype
         )
 
+    @staticmethod
+    def to_dtype(
+        value: TypedExpr,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype | None = None,
+        use_compute_types: bool = False,
+    ) -> TypedExpr:
+        # Casts preserve zero, while unknown values remain unknown to this analysis.
+        return TypedExpr(value.expr, dtype)
+
     def store(
         self, name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
     ) -> None:

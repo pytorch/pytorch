@@ -108,6 +108,9 @@ class SymPyOps:
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = False,
     ) -> TypedExpr:
+        # Retagging a symbolic expression would erase a value-changing cast.
+        if not value.is_constant() and value.dtype != dtype:
+            return NotImplemented
         return TypedExpr(value.expr, dtype)
 
     @staticmethod

@@ -45,8 +45,9 @@ from torch.utils._sympy.reference import (
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch._inductor.analyze_preserves_zero_mask import PreservesZeros
 from torch._inductor.bounds import ValueRangeAnalysis
-from torch._inductor.index_propagation import TypedExpr
+from torch._inductor.index_propagation import SymPyOps, TypedExpr
 
 
 UNARY_OPS = [
@@ -1269,6 +1270,27 @@ class TestTypedExpr(TestCase):
         I = Identity(1)
         typed_I = TypedExpr(I, torch.int32)
         self.assertEqual(typed_I.expr, 1)
+
+    def test_symbolic_to_dtype_requires_fallback(self):
+        value = TypedExpr(sympy.Symbol("x", integer=True), torch.int64)
+        self.assertIs(SymPyOps.to_dtype(value, torch.bool), NotImplemented)
+        self.assertEqual(SymPyOps.to_dtype(value, torch.int64), value)
+        self.assertEqual(
+            SymPyOps.to_dtype(TypedExpr(3, torch.int64), torch.bool),
+            TypedExpr(True, torch.bool),
+        )
+
+    def test_preserves_zeros_to_dtype(self):
+        analysis = PreservesZeros()
+        value = analysis.to_dtype(TypedExpr(0, torch.int64), torch.bool)
+        analysis.store("output", sympy.S.Zero, value)
+        self.assertTrue(analysis.store_preserves_zeros)
+
+        analysis = PreservesZeros()
+        symbol = sympy.Symbol("x", integer=True)
+        value = analysis.to_dtype(TypedExpr(symbol, torch.int64), torch.bool)
+        analysis.store("output", sympy.S.Zero, value)
+        self.assertFalse(analysis.store_preserves_zeros)
 
 
 class TestCCodePrinting(TestCase):
