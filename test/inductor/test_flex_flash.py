@@ -35,6 +35,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     xfailIfSM120OrLater,
     xfailIfSM12X,
+    xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -3340,6 +3341,7 @@ class TestHierarchicalIndex(InductorTestCase):
         )
 
     @xfailIfSM120OrLater
+    @xfailIfSM90
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
