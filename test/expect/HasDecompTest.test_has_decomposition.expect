@@ -77,6 +77,7 @@ aten::_ctc_loss_backward.Tensor
 aten::_ctc_loss_backward.out
 aten::_cudnn_attention_backward
 aten::_cudnn_attention_forward
+aten::_cudnn_attention_forward_no_dropout_inplace
 aten::_cudnn_ctc_loss
 aten::_cudnn_ctc_loss.Tensor
 aten::_cudnn_ctc_loss.out
