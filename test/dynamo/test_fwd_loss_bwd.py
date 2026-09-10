@@ -1531,6 +1531,76 @@ class GraphModule(torch.nn.Module):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
 
+    def test_factory_requires_grad_kwarg_intermediate_single_graph(self):
+        def fn(x):
+            strain = torch.zeros(3, 3, dtype=x.dtype, requires_grad=True)
+            pos = x @ (torch.eye(3, dtype=x.dtype) + strain)
+            return torch.autograd.grad(pos.pow(2).sum(), strain)[0].detach()
+
+        x = torch.randn(4, 3)
+        eager = fn(x)
+        backend = AotEagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(compiled, eager)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            empty_line_normalizer(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False))
+            ),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 3]"):
+        l_x_ = L_x_
+        strain: "f32[3, 3]" = torch.zeros(3, 3, dtype = torch.float32)
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
+        requires_grad_ = strain.requires_grad_();  requires_grad_ = None
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
+        eye: "f32[3, 3]" = torch.eye(3, dtype = torch.float32)
+        add: "f32[3, 3]" = eye + strain;  eye = None
+        pos: "f32[4, 3]" = l_x_ @ add;  l_x_ = add = None
+        pow_1: "f32[4, 3]" = pos.pow(2);  pos = None
+        sum_1: "f32[]" = pow_1.sum();  pow_1 = None
+        grad = torch.autograd.grad(sum_1, strain);  sum_1 = strain = None
+        getitem: "f32[3, 3]" = grad[0];  grad = None
+        detach: "f32[3, 3]" = getitem.detach();  getitem = None
+        return (detach,)
+""",
+        )
+
+    def test_factory_requires_grad_kwarg_leaked_output_graph_breaks(self):
+        def fn(x):
+            x = x.sin()
+            w = torch.ones(4, requires_grad=True)
+            return x * w
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "returning intermediate with requires_grad_\\(\\)",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        out = torch.compile(fn, backend=cnt)(x)
+        self.assertTrue(out.requires_grad)
+        self.assertEqual(out, fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("dtype", (torch.int64, torch.bool))
+    def test_factory_requires_grad_kwarg_non_differentiable_dtype_graph_breaks(
+        self, dtype
+    ):
+        def fn(x):
+            return torch.ones(4, dtype=dtype, requires_grad=True) + x
+
+        x = torch.ones(4, dtype=dtype)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "tensor creation function with requires_grad=True",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
 
 if __name__ == "__main__":
     run_tests()
