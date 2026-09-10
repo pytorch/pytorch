@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
+    TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -89,18 +90,19 @@ def get_profiler_activities(device_type):
 
 
 def setUpModule():
-    if (
-        kineto_available()
-        and torch.cuda.is_available()
-        and ProfilerActivity.CUDA in supported_activities()
-    ):
-        # Kineto's process-global profiler cannot currently upgrade from a
-        # CPU-only first initialization to CUDA-capable profiling. Prime it with
-        # CUDA so CPU-only tests do not poison later CUDA profiler tests.
-        x = torch.ones(1, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]):
-            x + x
-            torch.cuda.synchronize()
+    if not kineto_available() or not torch.accelerator.is_available():
+        return
+    device_type = torch.accelerator.current_accelerator().type
+    activities = get_profiler_activities(device_type)
+    if len(activities) < 2:
+        return
+    # Kineto's process-global profiler cannot currently upgrade from a CPU-only
+    # first initialization to accelerator-capable profiling. Prime it with the
+    # accelerator so CPU-only tests do not poison later device profiler tests.
+    x = torch.ones(1, device=device_type)
+    with profile(activities=activities):
+        x + x
+        torch.accelerator.synchronize()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -2157,6 +2159,12 @@ class TestProfiler(TestCase):
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
+    # The child deadlocks once the parent has initialized Kineto's XPU profiler,
+    # which setUpModule does on any XPU build.
+    @unittest.skipIf(
+        TEST_XPU,
+        "os.fork() deadlocks after Kineto XPU init! Refer https://github.com/intel/torch-xpu-ops/issues/5287",
+    )
     def test_forked_process(self):
         def validate_forked_json(profiler):
             nonlocal cpu_op_found, parent_tid, child_pid
