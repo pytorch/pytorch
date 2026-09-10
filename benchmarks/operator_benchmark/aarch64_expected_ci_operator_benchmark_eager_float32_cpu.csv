@@ -637,7 +637,7 @@ PyTorch,round,round_M512_N512_cpu,short,False,48.096134,0.0,22.626479
 PyTorch,round_,round__M512_N512_cpu,short,False,46.510204,0.0,22.599332
 PyTorch,rsqrt,rsqrt_M512_N512_cpu,short,False,65.080319,0.0,18.732055
 PyTorch,rsqrt_,rsqrt__M512_N512_cpu,short,False,61.56294,0.0,18.980871
-PyTorch,sigmoid,sigmoid_M512_N512_cpu,short,False,152.874356,0.0,13.718141
+PyTorch,sigmoid,sigmoid_M512_N512_cpu,short,False,100.805806,0.0,13.718141
 PyTorch,sigmoid_,sigmoid__M512_N512_cpu,short,False,101.325204,0.0,13.669907
 PyTorch,sign,sign_M512_N512_cpu,short,False,52.15014,0.0,21.173998
 PyTorch,sgn,sgn_M512_N512_cpu,short,False,51.816253,0.0,21.264937
