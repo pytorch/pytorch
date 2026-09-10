@@ -134,7 +134,7 @@ def _grouped_layout_matches_source_shape(
 def grouped_tensor_layout(
     shape: Any, source_shape: Any | None = None
 ) -> GemmReductionGeometry | None:
-    """Recognize exact grouped M/N reshapes for the local-reduction contract."""
+    """Recognize grouped M/N geometry, specializing backed group dimensions."""
     shape = normalize_shape(shape)
     if not isinstance(shape, tuple):
         return None
