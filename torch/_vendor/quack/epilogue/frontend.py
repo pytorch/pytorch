@@ -311,51 +311,87 @@ def _fragment_apply(op, gemm, pstate):
 
 
 class _FragmentEpiModMixin(_EpiModMixinBase):
-    """Device adapter for whole-fragment TensorSSA EpiMod callbacks."""
+    """Device adapter for whole-fragment TensorSSA EpiMod callbacks.
+
+    The main fn and the accumulator prepass fn both receive the whole subtile
+    fragment as a TensorSSA (operands broadcast to the same shape) and return
+    TensorSSAs. Sinks may declare ``sink_operands``: names of operands whose
+    per-tile values are handed to ``fn_sink_flush`` by keyword.
+    """
+
+    def _fragment_operand(self, op, kind, fragment, tRS_rD, tRS_rC):
+        """Present one epilogue operand to a TensorSSA callback (or apply callable)."""
+        if const_expr(kind == "scalar"):
+            dtype = op.dtype
+            register_dtype = Float32 if dtype is None or is_floating_dtype(dtype) else dtype
+            filled = cute.make_rmem_tensor(tRS_rD.shape, register_dtype)
+            filled.fill(fragment)
+            return filled.load()
+        if const_expr(kind == "value"):
+            fragment = op.fn_prepare(self, fragment, False)
+            assert fragment is not None
+            return fragment.load()
+        if const_expr(kind == "apply"):
+            return _fragment_apply(op, self, op.fn_prepare(self, fragment, False))
+        assert kind in ("c", "row", "col", "tile"), (
+            "TensorSSA callbacks support c/row/col/tile/scalar/value/apply operands"
+        )
+        if const_expr(kind == "c"):
+            fragment = tRS_rC
+        assert fragment is not None
+        if const_expr(
+            kind == "c" or (kind == "tile" and is_floating_dtype(fragment.element_type))
+        ):
+            fragment = fragment.to(self.acc_dtype)
+        value = fragment.load()
+        if const_expr(kind in ("row", "col")):
+            value = value.reshape(tRS_rD.shape)
+        if const_expr(kind != "c"):
+            dtype = op.dtype
+            if const_expr(dtype is Boolean):
+                value = value != cute.full_like(value, 0)
+            elif const_expr(dtype is not None and not is_floating_dtype(dtype)):
+                value = value.to(dtype)
+        return value
+
+    @cute.jit
+    def _fragment_sink_flush(self, op, state, epi_loop_tensors, value):
+        """Flush one sink's returned plane(s) with the operands it declared."""
+        fragments = []
+        for plane in self._value_planes(op.name, op.sink_arity, value):
+            fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
+            fragment.store(plane)
+            fragments.append(fragment)
+        operands = {
+            name: epi_loop_tensors[name] for name in getattr(op, "sink_operands", ())
+        }
+        op.fn_sink_flush(self, state, *fragments, **operands)
+
+    @cute.jit
+    def epi_prepass_subtile(self, params, epi_tensors, tRS_rD, epi_coord, epi_idx):
+        pfn = self._epi_mod_prepass_fn
+        ops_by_name = {op.name: op for op in self._epi_ops}
+        values = {}
+        for name, kind in self._epi_mod_prepass_operands:
+            op = ops_by_name[name]
+            state = op.begin_loop(self, epi_tensors[name], epi_coord)
+            values[name] = self._fragment_operand(op, kind, state, tRS_rD, None)
+        result = pfn(tRS_rD.load(), **values)
+        for name in self._epi_mod_prepass_outs:
+            op = ops_by_name[name]
+            state = op.begin_loop(self, epi_tensors[name], epi_coord)
+            self._fragment_sink_flush(op, state, epi_tensors, result[name])
 
     @cute.jit
     def epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC=None):
         fn = self._epi_mod_fn
         ops_by_name = {op.name: op for op in self._epi_ops}
-        values = {}
-        for name, kind in self._epi_mod_operands:
-            if const_expr(kind == "scalar"):
-                dtype = ops_by_name[name].dtype
-                register_dtype = Float32 if dtype is None or is_floating_dtype(dtype) else dtype
-                fragment = cute.make_rmem_tensor(tRS_rD.shape, register_dtype)
-                fragment.fill(epi_loop_tensors[name])
-                values[name] = fragment.load()
-                continue
-            if const_expr(kind == "value"):
-                fragment = ops_by_name[name].fn_prepare(self, epi_loop_tensors[name], False)
-                assert fragment is not None
-                values[name] = fragment.load()
-                continue
-            if const_expr(kind == "apply"):
-                op = ops_by_name[name]
-                pstate = op.fn_prepare(self, epi_loop_tensors[name], False)
-                values[name] = _fragment_apply(op, self, pstate)
-                continue
-            assert kind in ("c", "row", "col", "tile"), (
-                "TensorSSA callbacks support c/row/col/tile/scalar/value/apply operands"
+        values = {
+            name: self._fragment_operand(
+                ops_by_name.get(name), kind, epi_loop_tensors.get(name), tRS_rD, tRS_rC
             )
-            fragment = tRS_rC if const_expr(kind == "c") else epi_loop_tensors[name]
-            assert fragment is not None
-            if const_expr(
-                kind == "c" or (kind == "tile" and is_floating_dtype(fragment.element_type))
-            ):
-                fragment = fragment.to(self.acc_dtype)
-            value = fragment.load()
-            if const_expr(kind in ("row", "col")):
-                value = value.reshape(tRS_rD.shape)
-            if const_expr(kind != "c"):
-                dtype = ops_by_name[name].dtype
-                if const_expr(dtype is Boolean):
-                    value = value != cute.full_like(value, 0)
-                elif const_expr(dtype is not None and not is_floating_dtype(dtype)):
-                    value = value.to(dtype)
-            values[name] = value
-
+            for name, kind in self._epi_mod_operands
+        }
         result = fn(tRS_rD.load(), **values)
         if const_expr("D" in result):
             tRS_rD.store(result["D"].to(self.acc_dtype))
@@ -365,15 +401,10 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
             output = cute.make_rmem_tensor(value.shape, value.element_type)
             output.store(value)
             outputs.append(output)
-        sink_tmps = []
         for name in self._epi_mod_sinks:
-            planes = []
-            for value in self._value_planes(name, ops_by_name[name].sink_arity, result[name]):
-                plane = cute.make_rmem_tensor(value.shape, value.element_type)
-                plane.store(value)
-                planes.append(plane)
-            sink_tmps.append(tuple(planes))
-        self._flush_sinks(ops_by_name, epi_loop_tensors, tuple(sink_tmps))
+            self._fragment_sink_flush(
+                ops_by_name[name], epi_loop_tensors[name], epi_loop_tensors, result[name]
+            )
         return tuple(outputs)
 
 

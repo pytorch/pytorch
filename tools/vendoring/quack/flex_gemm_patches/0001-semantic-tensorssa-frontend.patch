@@ -55,7 +55,7 @@ index 7106526..6ce345f 100644
 +    if cache_root is not None:
 +        cache_dir = Path(cache_root)
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 1b56f44..1058c83 100644
+index 1b56f44..d82e05a 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -163 +163,2 @@ from typing import NamedTuple, Optional
@@ -68,7 +68,7 @@ index 1b56f44..1058c83 100644
 +    is_floating_dtype,
 @@ -191,0 +195 @@ from quack.gemm_config import (
 +    GemmConfig,
-@@ -292,0 +297,80 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
+@@ -292,0 +297,111 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
 +def _fragment_apply(op, gemm, pstate):
 +    """Adapt an apply-port op's per-element ``fn_apply`` to a TensorSSA callable."""
 +
@@ -85,46 +85,85 @@ index 1b56f44..1058c83 100644
 +
 +
 +class _FragmentEpiModMixin(_EpiModMixinBase):
-+    """Device adapter for whole-fragment TensorSSA EpiMod callbacks."""
++    """Device adapter for whole-fragment TensorSSA EpiMod callbacks.
++
++    The main fn and the accumulator prepass fn both receive the whole subtile
++    fragment as a TensorSSA (operands broadcast to the same shape) and return
++    TensorSSAs. Sinks may declare ``sink_operands``: names of operands whose
++    per-tile values are handed to ``fn_sink_flush`` by keyword.
++    """
++
++    def _fragment_operand(self, op, kind, fragment, tRS_rD, tRS_rC):
++        """Present one epilogue operand to a TensorSSA callback (or apply callable)."""
++        if const_expr(kind == "scalar"):
++            dtype = op.dtype
++            register_dtype = Float32 if dtype is None or is_floating_dtype(dtype) else dtype
++            filled = cute.make_rmem_tensor(tRS_rD.shape, register_dtype)
++            filled.fill(fragment)
++            return filled.load()
++        if const_expr(kind == "apply"):
++            return _fragment_apply(op, self, op.fn_prepare(self, fragment, False))
++        assert kind in ("c", "row", "col", "tile"), (
++            "TensorSSA callbacks support c/row/col/tile/scalar/apply operands"
++        )
++        if const_expr(kind == "c"):
++            fragment = tRS_rC
++        assert fragment is not None
++        if const_expr(
++            kind == "c" or (kind == "tile" and is_floating_dtype(fragment.element_type))
++        ):
++            fragment = fragment.to(self.acc_dtype)
++        value = fragment.load()
++        if const_expr(kind in ("row", "col")):
++            value = value.reshape(tRS_rD.shape)
++        if const_expr(kind != "c"):
++            dtype = op.dtype
++            if const_expr(dtype is Boolean):
++                value = value != cute.full_like(value, 0)
++            elif const_expr(dtype is not None and not is_floating_dtype(dtype)):
++                value = value.to(dtype)
++        return value
++
++    @cute.jit
++    def _fragment_sink_flush(self, op, state, epi_loop_tensors, value):
++        """Flush one sink's returned plane(s) with the operands it declared."""
++        # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
++        planes = value if isinstance(value, tuple) else (value,)
++        fragments = []
++        for plane in planes:
++            fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
++            fragment.store(plane)
++            fragments.append(fragment)
++        operands = {
++            name: epi_loop_tensors[name] for name in getattr(op, "sink_operands", ())
++        }
++        op.fn_sink_flush(self, state, *fragments, **operands)
++
++    @cute.jit
++    def epi_prepass_subtile(self, params, epi_tensors, tRS_rD, epi_coord, epi_idx):
++        pfn = self._epi_mod_prepass_fn
++        ops_by_name = {op.name: op for op in self._epi_ops}
++        values = {}
++        for name, kind in self._epi_mod_prepass_operands:
++            op = ops_by_name[name]
++            state = op.begin_loop(self, epi_tensors[name], epi_coord)
++            values[name] = self._fragment_operand(op, kind, state, tRS_rD, None)
++        result = pfn(tRS_rD.load(), **values)
++        for name in self._epi_mod_prepass_outs:
++            op = ops_by_name[name]
++            state = op.begin_loop(self, epi_tensors[name], epi_coord)
++            self._fragment_sink_flush(op, state, epi_tensors, result[name])
 +
 +    @cute.jit
 +    def epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC=None):
 +        fn = self._epi_mod_fn
 +        ops_by_name = {op.name: op for op in self._epi_ops}
-+        values = {}
-+        for name, kind in self._epi_mod_operands:
-+            if const_expr(kind == "scalar"):
-+                dtype = ops_by_name[name].dtype
-+                register_dtype = Float32 if dtype is None or is_floating_dtype(dtype) else dtype
-+                fragment = cute.make_rmem_tensor(tRS_rD.shape, register_dtype)
-+                fragment.fill(epi_loop_tensors[name])
-+                values[name] = fragment.load()
-+                continue
-+            if const_expr(kind == "apply"):
-+                op = ops_by_name[name]
-+                pstate = op.fn_prepare(self, epi_loop_tensors[name], False)
-+                values[name] = _fragment_apply(op, self, pstate)
-+                continue
-+            assert kind in ("c", "row", "col", "tile"), (
-+                "TensorSSA callbacks support c/row/col/tile/scalar/apply operands"
++        values = {
++            name: self._fragment_operand(
++                ops_by_name.get(name), kind, epi_loop_tensors.get(name), tRS_rD, tRS_rC
 +            )
-+            fragment = tRS_rC if const_expr(kind == "c") else epi_loop_tensors[name]
-+            assert fragment is not None
-+            if const_expr(
-+                kind == "c" or (kind == "tile" and is_floating_dtype(fragment.element_type))
-+            ):
-+                fragment = fragment.to(self.acc_dtype)
-+            value = fragment.load()
-+            if const_expr(kind in ("row", "col")):
-+                value = value.reshape(tRS_rD.shape)
-+            if const_expr(kind != "c"):
-+                dtype = ops_by_name[name].dtype
-+                if const_expr(dtype is Boolean):
-+                    value = value != cute.full_like(value, 0)
-+                elif const_expr(dtype is not None and not is_floating_dtype(dtype)):
-+                    value = value.to(dtype)
-+            values[name] = value
-+
++            for name, kind in self._epi_mod_operands
++        }
 +        result = fn(tRS_rD.load(), **values)
 +        if const_expr("D" in result):
 +            tRS_rD.store(result["D"].to(self.acc_dtype))
@@ -134,36 +173,28 @@ index 1b56f44..1058c83 100644
 +            output = cute.make_rmem_tensor(value.shape, value.element_type)
 +            output.store(value)
 +            outputs.append(output)
-+        sink_tmps = []
 +        for name in self._epi_mod_sinks:
-+            value = result[name]
-+            # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
-+            planes = value if isinstance(value, tuple) else (value,)
-+            fragments = []
-+            for plane in planes:
-+                fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
-+                fragment.store(plane)
-+                fragments.append(fragment)
-+            sink_tmps.append(fragments[0] if len(fragments) == 1 else tuple(fragments))
-+        self._flush_sinks(ops_by_name, epi_loop_tensors, tuple(sink_tmps))
++            self._fragment_sink_flush(
++                ops_by_name[name], epi_loop_tensors[name], epi_loop_tensors, result[name]
++            )
 +        return tuple(outputs)
 +
 +
-@@ -308,0 +393 @@ class EpiMod:
+@@ -308,0 +424 @@ class EpiMod:
 +        fragmentwise=False,
-@@ -348,0 +434,5 @@ class EpiMod:
+@@ -348,0 +465,5 @@ class EpiMod:
 +        self.fragmentwise = fragmentwise
 +        if fragmentwise and (self.mode != "element" or prepass is not None):
 +            raise ValueError(
 +                "TensorSSA callbacks support element mode without an accumulator prepass"
 +            )
-@@ -406 +496,4 @@ class EpiMod:
+@@ -406 +527,4 @@ class EpiMod:
 -            ("vectorize", self.vectorize),
 +            # Preserve the default disk-cache identity while distinguishing
 +            # explicit vectorizer choices and whole-fragment callbacks.
 +            *(() if self.vectorize is None else (("vectorize", self.vectorize),)),
 +            *(() if not self.fragmentwise else (("fragmentwise", True),)),
-@@ -414,0 +508,9 @@ class EpiMod:
+@@ -414,0 +539,9 @@ class EpiMod:
 +    def supports_swap_ab(self) -> bool:
 +        """Whether every orientation-sensitive op supports swap-at-trace."""
 +        return (
@@ -173,37 +204,37 @@ index 1b56f44..1058c83 100644
 +            and all(op.supports_swap_ab for op in self.sinks.values())
 +        )
 +
-@@ -422,0 +525 @@ class EpiMod:
+@@ -422,0 +556 @@ class EpiMod:
 +        state["_call_cache"] = {}
-@@ -527 +630,4 @@ class EpiMod:
+@@ -527 +661,4 @@ class EpiMod:
 -            (_EpiModMixinBase, _SM_BASE[sm]),
 +            (
 +                _FragmentEpiModMixin if self.fragmentwise else _EpiModMixinBase,
 +                _SM_BASE[sm],
 +            ),
-@@ -540,0 +647 @@ class EpiMod:
+@@ -540,0 +678 @@ class EpiMod:
 +                "_epi_mod_fragmentwise": self.fragmentwise,
-@@ -660,2 +766,0 @@ class EpiMod:
+@@ -660,2 +797,0 @@ class EpiMod:
 -            import torch
 -
-@@ -687 +792,3 @@ class EpiMod:
+@@ -687 +823,3 @@ class EpiMod:
 -            # Swap-at-trace contract: dense, element-mode, sink-less, B (k, n).
 +            # Swap-at-trace requires dense element mode, B (k, n), and
 +            # orientation-aware EpiOps (supports_swap_ab) that own their
 +            # transposed physical geometry.
-@@ -692,2 +799,2 @@ class EpiMod:
+@@ -692,2 +830,2 @@ class EpiMod:
 -            if self.mode != "element" or self.sinks:
 -                raise ValueError("swap_ab supports element-mode sink-less epilogues only")
 +            if not self.supports_swap_ab():
 +                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
-@@ -817,2 +923,0 @@ class EpiMod:
+@@ -817,2 +954,0 @@ class EpiMod:
 -            import torch
 -
-@@ -879,2 +984 @@ class EpiMod:
+@@ -879,2 +1015 @@ class EpiMod:
 -            import torch
 -
 +            output_op = self.output_ops.get(out_name)
-@@ -882 +986,7 @@ class EpiMod:
+@@ -882 +1017,7 @@ class EpiMod:
 -            out_n = n_gemm // 2 if paired_acc else n_gemm
 +            out_n = (
 +                output_op.output_n(n_gemm)
@@ -212,9 +243,9 @@ index 1b56f44..1058c83 100644
 +                if paired_acc
 +                else n_gemm
 +            )
-@@ -1183 +1292,0 @@ class EpiMod:
+@@ -1183 +1323,0 @@ class EpiMod:
 -        n_store = n // 2 if self.mode == "acc_pair" else n
-@@ -1185,0 +1295,8 @@ class EpiMod:
+@@ -1185,0 +1326,8 @@ class EpiMod:
 +                output_op = self.output_ops.get(name)
 +                n_store = (
 +                    output_op.output_n(n)
@@ -223,28 +254,28 @@ index 1b56f44..1058c83 100644
 +                    if self.mode == "acc_pair"
 +                    else n
 +                )
-@@ -1299 +1416 @@ class EpiMod:
+@@ -1299 +1447 @@ class EpiMod:
 -        config=None,  # explicit GemmConfig pins; None + tuned=True autotunes
 +        config=None,  # exact GemmConfig pin; None selects the mod's default
-@@ -1317,0 +1435 @@ class EpiMod:
+@@ -1317,0 +1466 @@ class EpiMod:
 +        compile_dispatch: bool = True,
-@@ -1338 +1456,2 @@ class EpiMod:
+@@ -1338 +1487,2 @@ class EpiMod:
 -        inside the op body."""
 +        inside the op body. Generated runtime callers set ``compile_dispatch=False``
 +        because they are already below torch.compile."""
-@@ -1340,0 +1460,3 @@ class EpiMod:
+@@ -1340,0 +1491,3 @@ class EpiMod:
 +        if config is not None and type(config) is not GemmConfig:
 +            raise TypeError("config must be an exact GemmConfig or None")
 +
-@@ -1345 +1467 @@ class EpiMod:
+@@ -1345 +1498 @@ class EpiMod:
 -                if torch.compiler.is_compiling():
 +                if compile_dispatch and torch.compiler.is_compiling():
-@@ -1384 +1506 @@ class EpiMod:
+@@ -1384 +1537 @@ class EpiMod:
 -        if torch.compiler.is_compiling():
 +        if compile_dispatch and torch.compiler.is_compiling():
-@@ -1411,0 +1534 @@ class EpiMod:
+@@ -1411,0 +1565 @@ class EpiMod:
 +                concat_layout=concat_layout,
-@@ -1439,4 +1562,4 @@ class EpiMod:
+@@ -1439,4 +1593,4 @@ class EpiMod:
 -                # Pinned configs key by identity: they are module-level
 -                # constants in practice; a recreated equal config just
 -                # re-records (correct, one extra cold pass).
@@ -253,7 +284,7 @@ index 1b56f44..1058c83 100644
 +                # may rebuild an equal config per call (identity keys can
 +                # alias a freed config's address and replay its plan).
 +                config,
-@@ -1531 +1654,6 @@ class EpiMod:
+@@ -1531 +1685,6 @@ class EpiMod:
 -                        self, lead[-1], n, l=l, device=A.device, num_seqs=num_seqs
 +                        self,
 +                        lead[-1],
@@ -261,7 +292,7 @@ index 1b56f44..1058c83 100644
 +                        l=l,
 +                        device=A.device,
 +                        num_seqs=num_seqs,
-@@ -1586,0 +1715,32 @@ class EpiMod:
+@@ -1586,0 +1746,32 @@ class EpiMod:
 +            elif any(
 +                hasattr(op, "supports_config")
 +                for op in (
@@ -294,7 +325,7 @@ index 1b56f44..1058c83 100644
 +                cfg = _legal_mod_configs(
 +                    self, A.device, selection_args, preferred_config=preferred_config
 +                )[0]
-@@ -1794,0 +1955,16 @@ def gemm_epilogue(
+@@ -1794,0 +1986,16 @@ def gemm_epilogue(
 +def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +    """Decorate a whole-fragment TensorSSA callback using the EpiMod host stack."""
 +
