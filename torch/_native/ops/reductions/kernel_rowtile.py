@@ -1,6 +1,5 @@
-# ROW reductions: the launch policy for tile.TileReduce on the row axis. The body is in
-# tile.py; this module owns the measured launch shapes, the narrow-row gates and the plan
-# cache. The chunk loop is ROLLED, so one compiled kernel covers every N in a vec class.
+# Row-reduction launch policy and plan cache for tile.TileReduce. A runtime chunk
+# loop lets each compiled kernel cover one vector class.
 import math
 from typing import NamedTuple
 
@@ -20,35 +19,26 @@ _stream = _L.stream
 _CACHE = {}
 
 
-# --- Row-reduce occupancy heuristic, as DATA (see row_config) --- threads-per-row ladder,
-# first matching row wins. Small N takes one warp per row so many rows pack per block with no
-# cross-warp reduce. The N-limits are B200 anchors that row_config scales by hw.
+# First matching B200 threads-per-row anchor wins; small rows pack without cross-warp merge.
 _TPR_LADDER = ((64, 8), (128, 16), (3072, 32), (6144, 64), (16384, 128))
 _TPR_MAX = 256
-# Every legal tpr, widest last. Powers of two: tpr sets the cross-thread reduce width and,
-# when it doubles as the block size, the warp count -- both need one.
+# Legal power-of-two reduction/block widths, widest last.
 _TPR_RUNGS = tuple(t for _, t in _TPR_LADDER) + (_TPR_MAX,)
-# threads-per-block (nt) gate: small rows use a smaller block, wider rows the larger.
+# Small rows use fewer threads/block.
 _NT_SMALL, _NT_LARGE, _NT_GATE_N = 128, 256, 16 * 1024
-# Wide-row rung: past 16 KB a row needs the full 256 threads, which the dtype-blind element
-# ladder under-threads (1.1-1.4x). In BYTES, so it is dtype-correct with no per-dtype table.
+# Rows >=16 KB need 256 threads; the element ladder underthreads them by 1.1-1.4x.
 _WIDE_ROW_BYTES = 16 * 1024
 
 
 class _RowConfig(NamedTuple):
-    # Row-reduce knob set: knobs left None are filled from row_config, and explicit values
-    # override per field. This is the row kernel's OWN config -- the other axes differ in shape.
+    # Row-kernel defaults; explicit arguments override them.
     tpr: int  # threads per row
     nt: int  # threads per block
 
 
 def row_config(N: int, dtype_width: int) -> "_RowConfig":
-    # Occupancy config from (N, dtype). The ladder's N-limits are proxies for how wide a row gets
-    # before it needs more threads. No nfields term: the fp32 and bf16 optima move in OPPOSITE
-    # directions, so no scalar rule serves both.
-    #
-    # Wide-row rung first, and byte-based: a >=16KB row saturates 256 threads whatever the dtype.
-    # This overrides the element ladder, which under-threads mid-N wide rows by ~1.3x.
+    # Occupancy by N and dtype; no nfields rule fits opposing fp32/bf16 optima.
+    # Check the byte rung first because the element ladder underthreads it by ~1.3x.
     if N * (dtype_width // 8) >= _WIDE_ROW_BYTES:
         return _RowConfig(tpr=_TPR_MAX, nt=_NT_LARGE)
     tpr = next((t for limit, t in _TPR_LADDER if N <= limit), _TPR_MAX)
@@ -57,11 +47,9 @@ def row_config(N: int, dtype_width: int) -> "_RowConfig":
 
 
 def single_row_config(N: int, dtype_width: int):
-    # Occupancy override for a ONE-ROW launch, or None to leave the ladder's pick standing. The
-    # ladder's small tpr exists so rows pack per block; with one row the GPU runs a fraction of
-    # one CTA, so give that row the widest rung it can feed. From _TPR_RUNGS rather than a
-    # computed width, since tpr is both tree width and block size -- a computed one returned a
-    # wrong variance. Measured 0.53-0.93x -> 1.47-1.62x of ATen on var_mean.
+    # A lone row cannot exploit packing, so use its widest feedable legal rung. Computed
+    # widths changed tree shape and returned wrong variance. Measured var_mean improves
+    # from 0.53-0.93x to 1.47-1.62x of ATen.
     cfg = row_config(N, dtype_width)
     vec = math.gcd(N, 128 // dtype_width)
     feedable = min(_TPR_MAX, N // max(1, vec))  # vector loads this row can issue
@@ -72,9 +60,7 @@ def single_row_config(N: int, dtype_width: int):
 
 
 def _declared_align(x, natural: int) -> int:
-    """The alignment the wrap may DECLARE for `x`: what N allows, narrowed to what its base
-    pointer meets. Both are powers of two, so halving terminates at the element width.
-    """
+    """Return the greatest N-allowed alignment met by `x`'s base pointer."""
     # const_data_ptr, so reading the address does not materialize a COW tensor.
     with torch._C.DisableTorchFunctionSubclass():
         ptr = x.const_data_ptr()
@@ -95,18 +81,13 @@ def reduce_row_tile(
     final=True,
     unroll=None,
 ):
-    """Tile-based row reduction: reduce the contiguous last dim of a 2D `x` -> (M,).
-
-    Returns a tuple of `nouts` outputs. tpr=1 is the NARROW-row shape, TMA-staged where that
-    wins. `order` selects the fold order; see itree_plan for the reproducible one.
-    """
+    """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`."""
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     M, N = x.shape
     cfg = row_config(N, x.element_size() * 8)
-    # Unroll depth of the rolled wave loop. A SCALAR row (an odd or prime N) has no wide load to
-    # hide latency behind and wants more loads in flight; a vectorized row pays for the depth.
-    # Measured across unroll 4/8/16/32, 4 is at or within noise of the best at every shape.
+    # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
+    # the measured optimum across 4/8/16/32.
     if unroll is None:
         unroll = 16 if tile.vec_size(N, x.element_size()) == 1 else 4
     tpr = max(WARP, cfg.tpr) if tpr is None else tpr
@@ -125,24 +106,17 @@ def reduce_row_tile(
         unroll=unroll,
     )
 
-    # final -> nouts projected results; stage 1 -> one RAW partial buffer per trait field
+    # Final projects nouts; stage 1 stores one raw buffer per field.
     ndst = nouts if final else trait.nfields
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
     nchunks = Int32(N // op.vec)
     nwaves = Int32(math.ceil((N // op.vec) / tpr))
-    # Declared alignment is what lets the load emit the wide instruction, and tile owns the
-    # derivation so it cannot be forgotten here (it was, and cost 3x). The rolled paths take N at
-    # RUNTIME, wrapping with both extents dynamic so one kernel serves a vec class; the TMA box
-    # shape is compile-time, so that variant bakes N.
-    # What N allows, narrowed to what the base pointer meets: a wider claim than the pointer
-    # honours is rejected at launch, and N alone cannot see a storage offset.
+    # Declare alignment to retain wide loads (worth 3x), but narrow it for storage offsets.
+    # Dynamic extents let each kernel serve a vector class.
     align = _declared_align(x, tile.align_bytes(N, x.element_size()))
 
     def _fake():
-        # Compile-time descriptors: 2D row-major with both extents dynamic, the inner one divisible by
-        # vec so one kernel serves the vec class. `align` is what keeps the load wide, narrowed to what
-        # the base pointer meets. The col axis's args are None, not dummies -- an unused Int32 param
-        # costs real time.
+        # Dynamic row-major descriptors preserve vec/alignment; None omits costly column args.
         return (
             [
                 _L.fake_compact(
@@ -158,13 +132,11 @@ def reduce_row_tile(
             _stream(),
         )
 
-    # align is part of the KEY now that it depends on the pointer: two calls of the same shape
-    # can differ in it, and the declared value is baked into the kernel.
+    # Pointer-dependent alignment is compiled, so include it in the key.
     dts = tuple(out_dtypes[:ndst])
     key = ("rowtile", trait_key, x.dtype, dts, align) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
-    # The real operands: read_only on the INPUT, or a COW input materializes on export. The other
-    # axes' args are None rather than dummies -- an unused Int32 param costs real time.
+    # read_only avoids COW materialization; None omits unused column arguments.
     fn([_L.read_only(x)], list(outs), nchunks, nwaves, Int32(N), None, None, _stream())
     return tuple(outs)
