@@ -200,8 +200,8 @@ def _eager_forward(*args):
     user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
     if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):
         _fail(
-            "precompile: runtime inputs have a different structure than the traced "
-            "example inputs (invariant 3); they must match in nesting and count."
+            "precompile: runtime inputs have a different structure than the inputs "
+            "traced at capture (invariant 3); they must match in nesting and count."
         )
     # Reject a SHAPE / DTYPE / DEVICE mismatch (invariants 3 and 6) up front. Mirrors the
     # inductor driver checks (keep the two drivers in sync). The eager backend has no
@@ -291,8 +291,8 @@ def _inductor_forward(*args):
     user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
     if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):
         _fail(
-            "precompile: runtime inputs have a different structure than the traced "
-            "example inputs (invariant 3); they must match in nesting and count."
+            "precompile: runtime inputs have a different structure than the inputs "
+            "traced at capture (invariant 3); they must match in nesting and count."
         )
     # Reject a SHAPE / DTYPE / DEVICE / BOUNDS mismatch (invariants 3 and 6) up front.
     # Mirrors the eager driver checks (keep the two drivers in sync). Stride/memory-format
@@ -465,20 +465,80 @@ def _build_multigraph_forward():
             f"under the serving Python."
         )
 
+    # A dynamo artifact carries Dynamo internals in its opaque blobs, so it is
+    # locked to the build that made it. Say so, rather than letting the mismatch
+    # surface as whatever import or attribute error happens to come first.
+    produced_by = globals().get("TORCH_VERSION")
+    if produced_by is not None and produced_by != torch.__version__:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced by torch {produced_by} and "
+            f"this is torch {torch.__version__}: its opaque blobs carry Dynamo "
+            f"internals, which are build-locked. Regenerate the artifact under "
+            f"the serving torch."
+        )
+
+    # The graphs below were captured with these functions inlined into them, so
+    # their current source has to be the source that was traced. The installed
+    # mode gets this check from CompilePackage; here it is the artifact's own.
+    from torch._dynamo.package import _hash_sourcelines
+
+    _unverifiable = []
+    for _module, _first, _last, _checksum in globals().get("INLINED_SOURCES", ()):
+        try:
+            _hash = _hash_sourcelines(importlib.import_module(_module), _first, _last)
+        except (ImportError, OSError, TypeError):
+            # The module is absent, or importable but source-less (.pyc-only):
+            # drift is UNVERIFIABLE here, not detected. The traced code is baked
+            # into the compiled graphs, and a module the bytecode actually needs
+            # is caught by the import_sources loop below with a clean error -- an
+            # unverifiable entry must not reject an artifact that would serve
+            # identically -- but a since-edited .pyc-only module would go
+            # unnoticed, so warn.
+            _unverifiable.append(_module)
+            continue
+        if _hash != _checksum:
+            raise _PrecompileError(
+                f"precompile: source code changes detected for {_module} "
+                f"(line {_first} - line {_last}); the captured graphs inlined "
+                f"the old source, so recapture the artifact."
+            )
+    if _unverifiable:
+        import warnings as _warnings
+
+        _warnings.warn(
+            f"precompile: could not verify inlined source is unchanged for "
+            f"{sorted(set(_unverifiable))} (module absent or source-less here). "
+            f"The captured graphs inline the source as it was at capture, so a "
+            f"since-edited module would serve stale code undetected."
+        )
+
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS)) if _BACKENDS else {}
 
     # One namespace for the whole artifact. Every name the transformed bytecode
     # can reach lives here: the compiled subgraphs, Dynamo's synthetic import
     # aliases, the plain globals it read, and the resume dispatchers bound
-    # below. It is this module's own dict, never the user's.
-    ns = globals()
+    # below. It is the artifact's, never the user's module dict.
+    #
+    # A COPY of this module's globals rather than the dict itself. The rendered
+    # inductor source was exec'd into this module and brought its own names with
+    # it -- `device` among them -- and binding the frames to the live dict would
+    # let those shadow a user global of the same name, which their guards were
+    # written against, so every variant would miss. The kernels keep resolving
+    # through the real module dict via their own __globals__, so seeding a copy
+    # separates the two without moving anything out from under them.
+    ns = dict(globals())
     # Seed from the module each frame was compiled in: its bytecode reads that
     # module's globals by name, and its guards were written against them. This
     # is a READ -- the artifact binds its own names here, never in the user's
     # module, so loading mutates nothing and there is nothing to unload. The
     # values are therefore as of load time; a global rebound afterwards is not
     # seen, which for a frozen artifact is the intended reading.
+    #
+    # The user's value wins over the artifact's own, but the FIRST frame's
+    # module wins among several, which is the flattening this one namespace has
+    # always done.
+    _seeded = set()
     for _frame in frames:
         _module = _sys.modules.get(_frame["python_module"])
         if _module is None:
@@ -488,7 +548,9 @@ def _build_multigraph_forward():
                 _module = None
         if _module is not None:
             for _k, _v in vars(_module).items():
-                ns.setdefault(_k, _v)
+                if _k not in _seeded:
+                    _seeded.add(_k)
+                    ns[_k] = _v
     # The artifact's own names win over anything seeded above.
     for _backend_id, _artifact in backends.items():
         ns[_backend_id] = torch._dynamo.disable(_artifact.after_deserialization())
@@ -527,13 +589,11 @@ def _build_multigraph_forward():
         target = SerializedCode.to_code_object(frame["code"])
         arg_names = target.co_varnames[: target.co_argcount]
         is_entry = frame["is_entry"]
-        # A code object carries neither defaults nor closure values, so the
-        # entry gets them back from the artifact. Without the defaults an
-        # omitted parameter is missing from f_locals and every guard misses;
-        # without the closure a closure entry cannot be built at all.
+        # A code object carries no defaults, so the entry gets them back from
+        # the artifact; without them an omitted parameter is missing from
+        # f_locals and every guard misses. Capture refuses a closure entry.
         entry_defaults = entry_binding.get("defaults") if is_entry else None
         entry_kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
-        entry_cells = entry_binding.get("closure") if is_entry else None
         variants = []
         for guarded in frame["variants"]:
             guards_state = load_guards_state(guarded["guards_state"])
@@ -563,7 +623,10 @@ def _build_multigraph_forward():
             # otherwise, and every variant misses on a call that omitted it.
             if entry_defaults:
                 # __defaults__ aligns with the LAST len(defaults) parameters,
-                # not with the first parameter this call omitted.
+                # not with whatever this call left off, so anchor it at the tail
+                # of arg_names. Anchoring at len(args) instead shifts every
+                # default one slot left for each argument passed positionally
+                # past the first defaulted one.
                 for name, value in zip(
                     arg_names[-len(entry_defaults) :], entry_defaults
                 ):
@@ -581,16 +644,6 @@ def _build_multigraph_forward():
                 f"example covering it and recapture. Captured "
                 f"{len(variants)} variant(s)."
             )
-
-        if is_entry and target.co_freevars:
-            # The entry's cells come from the artifact, not from a caller: only
-            # a continuation is handed a closure per call.
-            bound = _bind(tuple(types.CellType(v) for v in (entry_cells or ())))
-
-            def entry_dispatch(*args, **kwargs):
-                return _dispatch_with(bound, args, kwargs)
-
-            return entry_dispatch, target
 
         if target.co_freevars:
             # Dynamo binds a continuation that closes over locals as a FACTORY
@@ -648,8 +701,34 @@ def _build_installed_forward():
     import sys
     import types
 
+    import torch
     from torch._dynamo.package import SerializedCode
-    from torch._precompile import _InstalledArtifact, PrecompileError
+    from torch._precompile import (
+        _InstalledArtifact,
+        PrecompileError as _PrecompileError,
+    )
+
+    # The same locks the standalone driver checks, for the same reasons: the
+    # package below unmarshals bytecode and unpickles Dynamo internals, so a
+    # foreign Python or torch build has to fail here, with the documented
+    # PrecompileError, rather than wherever the blob happens to break first.
+    produced_on = globals().get("_DYNAMO_PYTHON_VERSION")
+    if produced_on is not None and tuple(produced_on) != sys.version_info[:2]:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced on Python "
+            f"{produced_on[0]}.{produced_on[1]} and cannot load on "
+            f"{sys.version_info[0]}.{sys.version_info[1]}: it inlines marshalled "
+            f"bytecode, which is Python-version-locked. Regenerate the artifact "
+            f"under the serving Python."
+        )
+    produced_by = globals().get("TORCH_VERSION")
+    if produced_by is not None and produced_by != torch.__version__:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced by torch {produced_by} and "
+            f"this is torch {torch.__version__}: its opaque blobs carry Dynamo "
+            f"internals, which are build-locked. Regenerate the artifact under "
+            f"the serving torch."
+        )
 
     cache_entry = pickle.loads(base64.b64decode(_PACKAGE))
 
@@ -659,7 +738,7 @@ def _build_installed_forward():
         try:
             importlib.import_module(_code_entry.python_module)
         except ImportError as e:
-            raise PrecompileError(
+            raise _PrecompileError(
                 f"precompile: this artifact holds a frame captured from module "
                 f"{_code_entry.python_module!r}, which is not importable here "
                 f"({e}). Load it where that module is, or pass fn= to load()."
@@ -689,16 +768,20 @@ def _build_installed_forward():
             f.__kwdefaults__ = dict(kwdefaults)
         return f
 
-    def _serve(fn):
+    def _serve(fn, prepared=None):
         from torch._dynamo.precompile_context import PrecompileContext
         from torch._dynamo.precompile_package import serve_cache_entry
 
-        # The backends have to be in the context before install deserializes
-        # them, the same thing DynamoStore.load_cache_entry does for the path
-        # form of this artifact.
+        # Recorded so a later save of this entry finds its backends, the same
+        # thing DynamoStore.load_cache_entry does for the path form of this
+        # artifact; install itself reads cache_entry.backends directly. Keys are
+        # per-capture uuids, so a key already present belongs to another handle
+        # on this same artifact and holds identical content: it stays theirs, and
+        # only absent keys are recorded.
         for _backend in cache_entry.backends.values():
-            PrecompileContext.record_artifact(_backend)
-        return serve_cache_entry(fn, cache_entry, backend=BACKEND)
+            if PrecompileContext.serialize_artifact_by_key(_backend.key) is None:
+                PrecompileContext.record_artifact(_backend)
+        return serve_cache_entry(fn, cache_entry, backend=BACKEND, prepared=prepared)
 
     def _check_entry(fn):
         from torch._dynamo.precompile_package import (
@@ -712,4 +795,5 @@ def _build_installed_forward():
         _serve,
         _entry_function,
         check_fn=_check_entry,
+        backend_keys=tuple(cache_entry.backends),
     )
