@@ -77,7 +77,7 @@ class TestMultiForward(FSDPTestContinuous):
         self.assertEqual(ddp_state, fsdp_state)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = ("cpu", "hpu", "xpu")
 instantiate_device_type_tests(
     TestMultiForward, globals(), only_for=devices, allow_xpu=True
 )
