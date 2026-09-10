@@ -5379,28 +5379,10 @@ class SourcelessBuilder:
                     pass  # failthrough to unimplemented branch
             else:
                 # Instance method - look up the VT for __self__ via side
-                # effects. Fall back to building __self__ fresh only for the
-                # narrow case this supports safely: a closure cell holding a
-                # bound _DecoratorContextManager.clone method Dynamo never
-                # observed directly (e.g. the @torch.no_grad()-style
-                # decorator's ctx_factory -- see gh-194763). The fresh VT is
-                # a plain UserDefinedObjectVariable, not a
-                # GenericContextWrappingVariable -- it has no source and so
-                # no way to track/replay mutations, so only a clone/class
-                # pair that can be reconstructed without a source may use
-                # it. Gating on the shared reconstruction predicate and
-                # excluding inference_mode.clone (which needs a source for
-                # self.mode) makes that true: supported pairs are resolved
-                # exclusively as a .value-read by
-                # user_defined.maybe_reconstruct_decorator_ctx_manager_clone,
-                # which never inlines anything on this VT. Without the
-                # shared pair check, an arbitrary bound method or an
-                # unlisted subclass inheriting the base clone could get this
-                # same untracked VT and fall through to normal inlining in
-                # UserMethodVariable.call_function -- silently wrong results
-                # or an internal crash, the same bug class this branch exists
-                # to prevent. Unsupported decorator context-manager pairs
-                # take the dedicated `unimplemented` path below.
+                # effects. Build a sourceless receiver only for allowlisted
+                # clone/class pairs whose clone reconstruction does not read
+                # or mutate it. inference_mode.clone is excluded because it
+                # requires a source for self.mode.
                 obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
                 if obj_vt is None and isinstance(
                     value.__self__, torch.utils._contextlib._DecoratorContextManager
@@ -5413,16 +5395,6 @@ class SourcelessBuilder:
                     ):
                         obj_vt = UserDefinedObjectVariable(value.__self__)
                     else:
-                        # This function/class pair cannot be reconstructed.
-                        # Building the untracked VT above is only safe because
-                        # it's never inlined; inlining an unsupported method
-                        # on it would reopen the bug this branch exists to
-                        # prevent (see comment above).
-                        # Raise here with a precise, supportable-limitation
-                        # message rather than silently falling through to
-                        # SourcelessBuilder.create's generic catch-all, which
-                        # carries a "this is a Dynamo bug" hint that's wrong
-                        # for this well-understood case.
                         unimplemented(
                             gb_type="Sourceless _DecoratorContextManager method reconstruction unsupported",
                             context=f"{type(value.__self__)}.{value.__func__.__name__}",
@@ -5501,14 +5473,10 @@ class SourcelessBuilder:
             return SliceVariable(items, tx)  # pyrefly: ignore[bad-argument-type]
         elif isinstance(value, torch.nn.parallel.distributed.DistributedDataParallel):
             return UnspecializedNNModuleVariable(value)
-        # This raise-only branch is the structural counterpart to the
-        # _DecoratorContextManager bound-method rejection above: a generic
-        # context-manager object reached without a source cannot safely replay
-        # mutations. Do not restore the removed unsafe wrapping path. See
-        # gh-194763.
+        # A sourceless context manager cannot safely replay mutations.
         elif is_generic_ctx_manager_cls(type(value)):
             unimplemented(
-                gb_type="Sourceless context manager entered without mutation support",
+                gb_type="Sourceless context manager without mutation support",
                 context=f"{value_type.__module__}.{value_type.__qualname__}",
                 explanation=(
                     f"{value_type} was reached without a source (e.g. via a "

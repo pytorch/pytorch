@@ -5513,7 +5513,7 @@
   ],
   "GB2710": [
     {
-      "Gb_type": "Sourceless context manager entered without mutation support",
+      "Gb_type": "Sourceless context manager without mutation support",
       "Context": "{value_type.__module__}.{value_type.__qualname__}",
       "Explanation": "{value_type} was reached without a source (e.g. via a closure cell) and Dynamo cannot safely enter it or call its methods without a way to replay any resulting mutation on the real object.",
       "Hints": [
