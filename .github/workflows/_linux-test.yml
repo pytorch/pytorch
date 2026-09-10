@@ -49,6 +49,11 @@ on:
         type: boolean
         default: false
         description: Explicitly disable target determination.
+      soft-fail-tests:
+        required: false
+        type: boolean
+        default: false
+        description: Allow the test step to fail without failing the job.
       use-gha:
         required: false
         type: string
@@ -271,6 +276,7 @@ jobs:
 
       - name: Test
         id: test
+        continue-on-error: ${{ inputs.soft-fail-tests }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -354,6 +360,11 @@ jobs:
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
           ${TEST_COMMAND}
+
+      - name: Report soft-failed tests
+        if: always() && inputs.soft-fail-tests && steps.test.outcome == 'failure'
+        shell: bash
+        run: echo "::warning title=Soft-failed tests::The test step failed; inspect the test artifacts for details."
 
       - name: Configure AWS credentials
         id: aws-creds-benchmark
