@@ -30,6 +30,13 @@ void silu_kernel(TensorIteratorBase& iter) {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
           using opmath_t = at::opmath_type<scalar_t>;
           const opmath_t x_acc = static_cast<opmath_t>(x);
+          if constexpr (!c10::is_complex<scalar_t>::value) {
+            // silu(x) -> 0 as x -> -inf (avoid -inf/inf = NaN); see
+            // pytorch/pytorch#160876.
+            if (x_acc == -std::numeric_limits<opmath_t>::infinity()) {
+              return scalar_t(0);
+            }
+          }
           return x_acc / (opmath_t(1) + ::exp(-x_acc));
         });
       });
