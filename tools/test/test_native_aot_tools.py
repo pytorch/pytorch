@@ -2098,7 +2098,7 @@ class TestCubinLauncher(unittest.TestCase):
         self.assertIn("const unsigned char fakemm_f32_cubin[]", src)
         self.assertIn("c10::call_once(fakemm_f32_once[device]", src)
         self.assertIn(
-            'drv->cuModuleGetFunction_(&fakemm_f32_fn[device], mod, "_fakemm_kernel")',
+            'nvrtc.cuModuleGetFunction(&fakemm_f32_fn[device], mod, "_fakemm_kernel")',
             src,
         )
 
@@ -2106,14 +2106,16 @@ class TestCubinLauncher(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             src = self._gen(d)
         self.assertNotIn("exit(", src)
-        self.assertIn("TORCH_CHECK(rc == CUDA_SUCCESS", src)
+        self.assertIn("AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(", src)
 
-    def test_every_driver_call_goes_through_c10s_dlopen_wrapper(self):
+    def test_every_driver_call_goes_through_atens_dlopen_wrapper(self):
         with tempfile.TemporaryDirectory() as d:
             src = self._gen(d)
-        for raw in ("cuModuleLoadData(", "cuModuleGetFunction(", "cuLaunchKernel("):
-            self.assertNotIn(raw, src.replace(f"_{raw}", ""))
-        self.assertIn("c10::cuda::DriverAPI::get()", src)
+        # A raw call links torch_cuda against libcuda, which breaks driver-less
+        # machines; a wrapped one is always a member of the NVRTC table.
+        for name in ("cuModuleLoadData", "cuModuleGetFunction", "cuLaunchKernel"):
+            self.assertIsNone(re.search(rf"(?<![\w.]){name}\(", src), name)
+        self.assertIn("at::globalContext().getNVRTC()", src)
 
     def test_the_grid_block_and_shared_bytes_come_from_the_sidecar(self):
         with tempfile.TemporaryDirectory() as d:
