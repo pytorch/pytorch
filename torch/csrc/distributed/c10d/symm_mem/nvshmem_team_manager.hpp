@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -92,8 +93,10 @@ class TeamManager {
     return std::make_pair(std::cref(team_pool), team_pool_dev);
   }
 
-  // Destroy all teams associated with a process group. This must be called
-  // collectively by the members of the group after all work has completed.
+  // Retire a group's team pool for exclusive reuse by a future process group
+  // with the same membership. Team destruction is collective, while process
+  // group destruction does not provide the ordering guarantees needed to call
+  // it safely here.
   void release_group(const std::string& group_name) {
     auto team_it = group_name_to_team_pool_.find(group_name);
     if (team_it == group_name_to_team_pool_.end()) {
@@ -103,18 +106,18 @@ class TeamManager {
     c10::cuda::CUDAGuard guard(device_);
     C10_CUDA_CHECK(cudaDeviceSynchronize());
 
-    for (auto team : team_it->second) {
-      if (team != NVSHMEM_TEAM_INVALID) {
-        nvshmem_team_destroy(team);
-      }
-    }
-    group_name_to_team_pool_.erase(team_it);
-
     auto dev_it = team_pool_devptrs_.find(group_name);
     if (dev_it != team_pool_devptrs_.end()) {
       c10::cuda::CUDACachingAllocator::raw_delete(dev_it->second);
       team_pool_devptrs_.erase(dev_it);
     }
+
+    auto ranks_it = group_name_to_global_ranks_.find(group_name);
+    TORCH_INTERNAL_ASSERT(ranks_it != group_name_to_global_ranks_.end());
+    reusable_team_pools_.emplace_back(
+        std::move(ranks_it->second), std::move(team_it->second));
+    group_name_to_global_ranks_.erase(ranks_it);
+    group_name_to_team_pool_.erase(team_it);
   }
 
   ~TeamManager() noexcept {
@@ -151,9 +154,25 @@ class TeamManager {
     // Guarding the NVSHMEM API calls below just to be safe
     c10::cuda::CUDAGuard guard(device_);
 
-    // Insert a new team pool if not exists
+    // Insert a new team pool if not exists. Prefer a retired pool with the
+    // same membership, transferring ownership so distinct live process groups
+    // never alias a team.
     auto [it, inserted] = group_name_to_team_pool_.emplace(
         group_name, TeamPool(MAX_N_TEAMS, NVSHMEM_TEAM_INVALID));
+    if (inserted) {
+      auto reusable_it = std::find_if(
+          reusable_team_pools_.begin(),
+          reusable_team_pools_.end(),
+          [&](const auto& entry) { return entry.first == global_ranks; });
+      if (reusable_it != reusable_team_pools_.end()) {
+        it->second = std::move(reusable_it->second);
+        reusable_team_pools_.erase(reusable_it);
+      }
+      group_name_to_global_ranks_.emplace(group_name, global_ranks);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          group_name_to_global_ranks_.at(group_name) == global_ranks);
+    }
     auto& team_pool = it->second;
     bool pool_updated = inserted;
 
@@ -195,6 +214,11 @@ class TeamManager {
   const c10::Device device_;
   // A map from group name to team pool for that group.
   std::unordered_map<std::string, TeamPool> group_name_to_team_pool_;
+  // Membership of each live group, used to match retired pools.
+  std::unordered_map<std::string, std::vector<int>>
+      group_name_to_global_ranks_;
+  // Retired pools available for exclusive reuse by matching future groups.
+  std::vector<std::pair<std::vector<int>, TeamPool>> reusable_team_pools_;
   // A map from group name to team pool array in device memory.
   std::unordered_map<std::string, nvshmem_team_t*> team_pool_devptrs_;
 };
