@@ -112,8 +112,9 @@ class SerializedCode:
 
 
 def _instance_dict(obj: Any) -> dict[str, Any] | None:
-    """obj.__dict__ read through the plain slot, so a user __getattr__ on a
-    __slots__ receiver never runs; None when there is no instance dict."""
+    """obj.__dict__ via object.__getattribute__: a user __getattr__ or
+    __getattribute__ never runs (a type-level __dict__ property still does, and
+    only its AttributeError is absorbed); None when there is no instance dict."""
     try:
         d = object.__getattribute__(obj, "__dict__")
     except AttributeError:
