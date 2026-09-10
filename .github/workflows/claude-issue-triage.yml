@@ -10,6 +10,11 @@ on:
         description: "Issue number to triage (for manual runs)"
         type: string
         required: false
+      attempt:
+        description: "Retry counter set by the automatic re-dispatch; leave at 1"
+        type: string
+        required: false
+        default: "1"
 
 jobs:
   capture-issue:
@@ -31,13 +36,21 @@ jobs:
             echo "::error::Invalid issue number format: '$ISSUE_NUM'. Must be a positive integer."
             exit 1
           fi
-          echo "Capturing issue #${ISSUE_NUM} for triage"
+          ATTEMPT="${{ inputs.attempt || '1' }}"
+          if ! [[ "$ATTEMPT" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid attempt: '$ATTEMPT'"
+            exit 1
+          fi
+          echo "Capturing issue #${ISSUE_NUM} for triage (attempt ${ATTEMPT})"
           echo "$ISSUE_NUM" > issue_number.txt
+          echo "$ATTEMPT" > attempt.txt
 
       - name: Upload issue number artifact
         uses: actions/upload-artifact@v4
         with:
           name: issue-triage-data
-          path: issue_number.txt
+          path: |
+            issue_number.txt
+            attempt.txt
           retention-days: 1
           if-no-files-found: error
