@@ -2369,9 +2369,8 @@ class _CudaDeviceProperties:
     memory_bus_width: _int
     shared_memory_per_block: _int
     shared_memory_per_multiprocessor: _int
-    # Registered under `#ifndef USE_ROCM` in torch/csrc/cuda/Module.cpp, so absent at
-    # runtime on a HIP build. Declared unconditionally anyway: the stub cannot be
-    # platform-conditional, and gcnArchName above is the mirror case (HIP-only).
+    # Registered only without ROCm, but stubs cannot be platform-conditional; gcnArchName
+    # above is the reciprocal HIP-only case.
     shared_memory_per_block_optin: _int
     regs_per_multiprocessor: _int
 
