@@ -10,15 +10,15 @@ from torch._higher_order_ops import foreach_map
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_FBCODE,
     parametrize,
     skipIfRocm,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 from torch.utils._pytree import tree_flatten
 
 
@@ -26,11 +26,10 @@ aten = torch.ops.aten
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_gpu
+        from .test_torchinductor import check_model
     except ImportError:
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
             check_model,
-            check_model_gpu,
         )
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
@@ -188,34 +187,33 @@ foreach_map_un_ops = parametrize(
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
 
-def gen_args(op):
+def gen_args(op, device):
     if op in un_ops_under_test:
         return (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
     elif op in bin_ops_under_test:
         return (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
     else:
         return (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
 
 
-@instantiate_parametrized_tests
-class ForeachTests(TestCase):
-    check_model_gpu = check_model_gpu
-    check_model_cpu = check_model
+class ForeachTestsAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    check_model = torch._inductor.config.patch("triton.cudagraphs", False)(check_model)
     check_kernel_count = True
 
     def setUp(self):
@@ -226,7 +224,7 @@ class ForeachTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
-    def _test_single_list(self, op):
+    def _test_single_list(self, op, device):
         if op in un_ops_under_test:
 
             def fn(a0, a1):
@@ -242,64 +240,56 @@ class ForeachTests(TestCase):
             def fn(a0, a1, b0, b1, c0, c1):
                 return op([a0, a1], [b0, b1], [c0, c1])
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
-            gen_args(op),
+            gen_args(op, device),
         )
 
-    def _test_single_scalar(self, op):
+    def _test_single_scalar(self, op, device):
         def fn(a0, a1):
             return op([a0, a1], 3.3)
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
             ),
         )
 
-    def _test_single_scalar_tensor(self, op):
+    def _test_single_scalar_tensor(self, op, device):
         def fn(a0, a1):
-            return op([a0, a1], torch.tensor(3.3, device=GPU_TYPE))
+            return op([a0, a1], torch.tensor(3.3, device=device))
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
             ),
         )
 
-    # called in test_gpu_cpp_wrapper.py
-    @requires_gpu
-    def test_foreach_cpp_wrapper_cuda(self):
-        self._test_single_list(op=torch._foreach_add)
-
-    # called in test_gpu_cpp_wrapper.py
-    test_foreach_cpp_wrapper_xpu = test_foreach_cpp_wrapper_cuda
-
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
-    def test_single_list(self, op):
-        self._test_single_list(op)
+    def test_single_list(self, device, op):
+        self._test_single_list(op, device)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
-    def test_single_scalar(self, op):
-        self._test_single_scalar(op)
+    def test_single_scalar(self, device, op):
+        self._test_single_scalar(op, device)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_tensor_bin_ops
-    def test_single_scalar_tensor(self, op):
-        self._test_single_scalar_tensor(op)
+    def test_single_scalar_tensor(self, device, op):
+        self._test_single_scalar_tensor(op, device)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
-    def test_scheduler_fusion_list(self, op):
+    def test_scheduler_fusion_list(self, device, op):
         if op in un_ops_under_test:
 
             def fn(a0, a1):
@@ -318,66 +308,66 @@ class ForeachTests(TestCase):
                 c = op([a0, a1], [b0, b1], [c0, c1])
                 return c, torch._foreach_add([a0, a1], c)
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
-            gen_args(op),
+            gen_args(op, device),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
-    def test_scheduler_fusion_scalar(self, op):
+    def test_scheduler_fusion_scalar(self, device, op):
         def fn(a0, a1):
             c = op([a0, a1], 3.4)
             return c, torch._foreach_add([a0, a1], c)
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
-    def test_broadcasting(self, op):
+    def test_broadcasting(self, device, op):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
         fn_opt = torch.compile(fn)
 
         inputs = (
-            torch.rand(10, 1, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(1, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 1, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(1, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
-    def test_singleton_lists(self, op):
+    def test_singleton_lists(self, device, op):
         if op in un_ops_under_test:
 
             def fn(a0):
                 return op([a0])
 
-            args = (torch.rand(10, 10, device=GPU_TYPE),)
+            args = (torch.rand(10, 10, device=device),)
         elif op in bin_ops_under_test:
 
             def fn(a0, b0):
                 return op([a0], [b0])
 
             args = (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(10, 10, device=device),
             )
 
         else:
@@ -386,21 +376,21 @@ class ForeachTests(TestCase):
                 return op([a0], [b0], [c0])
 
             args = (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(10, 10, device=device),
+                torch.rand(10, 10, device=device),
             )
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             args,
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
-    def test_type_promotion(self, op):
+    def test_type_promotion(self, device, op):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
@@ -409,19 +399,19 @@ class ForeachTests(TestCase):
         max32 = torch.iinfo(torch.int32).max
         max64 = torch.iinfo(torch.int64).max
         inputs = (
-            torch.randint(max32, (10, 10), device=GPU_TYPE, dtype=torch.int32),
-            torch.randint(max32, (20, 20), device=GPU_TYPE, dtype=torch.int32),
-            torch.randint(max32, (10, 10), device=GPU_TYPE, dtype=torch.int32),
-            torch.randint(max64, (20, 20), device=GPU_TYPE, dtype=torch.int64),
+            torch.randint(max32, (10, 10), device=device, dtype=torch.int32),
+            torch.randint(max32, (20, 20), device=device, dtype=torch.int32),
+            torch.randint(max32, (10, 10), device=device, dtype=torch.int32),
+            torch.randint(max64, (20, 20), device=device, dtype=torch.int64),
         )
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
-    def test_kernel_split_arg_limit_list(self, op):
+    def test_kernel_split_arg_limit_list(self, device, op):
         # NB: foeach_copy won't pass this test because it will dce one set of buffers
 
         def fn(a, b):
@@ -432,8 +422,8 @@ class ForeachTests(TestCase):
         max_args = 370
         max_list_len = (max_args // 3) + 1
         inputs = (
-            [torch.rand(10, 10, device=GPU_TYPE) for _ in range(max_list_len)],
-            [torch.rand(10, 10, device=GPU_TYPE) for _ in range(max_list_len)],
+            [torch.rand(10, 10, device=device) for _ in range(max_list_len)],
+            [torch.rand(10, 10, device=device) for _ in range(max_list_len)],
         )
 
         actual = fn_opt(*inputs)
@@ -441,12 +431,12 @@ class ForeachTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     @unittest.skip(
         "Triton recursion depth exceeded: https://github.com/triton-lang/triton/issues/1763"
     )
-    def test_kernel_split_arg_limit_scalar(self, op):
+    def test_kernel_split_arg_limit_scalar(self, device, op):
         def fn(a):
             return op(a, 3.3)
 
@@ -454,27 +444,27 @@ class ForeachTests(TestCase):
 
         max_args = 370
         max_list_len = (max_args // 2) + 1
-        inputs = ([torch.rand(10, 10, device=GPU_TYPE) for _ in range(max_list_len)],)
+        inputs = ([torch.rand(10, 10, device=device) for _ in range(max_list_len)],)
 
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
-    def test_fusion_duplicate_buffer_list(self, op):
+    def test_fusion_duplicate_buffer_list(self, device, op):
         def fn(a0, a1, b0, b1):
             c = op([a0, a1], [b0, b1])
             return op([a0, b0], [c[0], c[0]])
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
             ),
             reference_in_float=False,
             check_lowp=False,
@@ -485,9 +475,9 @@ class ForeachTests(TestCase):
             kernel_count = 2
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, kernel_count)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
-    def test_non_foreach_consumer_list(self, op):
+    def test_non_foreach_consumer_list(self, device, op):
         if op in un_ops_under_test:
 
             def fn(a0, a1):
@@ -506,33 +496,33 @@ class ForeachTests(TestCase):
                 c = op([a0, a1], [b0, b1], [c0, c1])
                 return torch.mul(c[0], a0)
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
-            gen_args(op),
+            gen_args(op, device),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
-    def test_non_foreach_consumer_scalar(self, op):
+    def test_non_foreach_consumer_scalar(self, device, op):
         def fn(a0, a1):
             c = op([a0, a1], 4.7)
             return torch.mul(c[0], a0)
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
-    def test_non_foreach_producer_list(self, op):
+    def test_non_foreach_producer_list(self, device, op):
         if op in un_ops_under_test:
 
             def fn(a0, a1):
@@ -554,35 +544,35 @@ class ForeachTests(TestCase):
                 c1 = torch.add(a1, b1)
                 return op([a0, a1], [b0, b1], [c0, c1])
 
-        self.check_model_gpu(
-            fn, gen_args(op), reference_in_float=False, check_lowp=False
+        self.check_model(
+            fn, gen_args(op, device), reference_in_float=False, check_lowp=False
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
-    def test_non_foreach_producer_scalar(self, op):
+    def test_non_foreach_producer_scalar(self, device, op):
         def fn(a0, a1, b0, b1):
             c0 = torch.mul(a0, b0)
             c1 = torch.mul(a1, b1)
             return op([c0, c1], 5.6)
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
-    def test_non_foreach_consumer_producer_list(self, op):
+    def test_non_foreach_consumer_producer_list(self, device, op):
         if op in un_ops_under_test:
 
             def fn(a0, a1):
@@ -613,18 +603,18 @@ class ForeachTests(TestCase):
                 e1 = torch.mul(d[1], a1)
                 return [e0, e1]
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
-            gen_args(op),
+            gen_args(op, device),
             reference_in_float=False,
             check_lowp=False,
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
-    def test_non_foreach_consumer_producer_scalar(self, op):
+    def test_non_foreach_consumer_producer_scalar(self, device, op):
         def fn(a0, a1, b0, b1):
             c0 = torch.add(a0, b0)
             c1 = torch.add(a1, b1)
@@ -633,13 +623,13 @@ class ForeachTests(TestCase):
             e1 = torch.mul(d[1], a1)
             return [e0, e1]
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
             ),
             reference_in_float=False,
             check_lowp=False,
@@ -647,107 +637,67 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", False)
-    def test_dynamic_shapes_fallback(self, op):
+    def test_dynamic_shapes_fallback(self, device, op):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
         inputs = (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
 
-        self.check_model_gpu(fn, inputs)
+        self.check_model(fn, inputs)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
-    def test_enable_dynamic_shapes_python_wrapper(self, op=torch._foreach_add):
+    def test_enable_dynamic_shapes_python_wrapper(self, device, op=torch._foreach_add):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
         inputs = (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
 
-        self.check_model_gpu(fn, inputs)
+        self.check_model(fn, inputs)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
-    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
-    @torch._dynamo.config.patch("assume_static_by_default", False)
-    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
-    @torch._inductor.config.patch("cpp_wrapper", True)
-    def test_enable_dynamic_shapes_cpp_wrapper_cuda(self, op=torch._foreach_add):
-        def fn(a0, a1, b0, b1):
-            return op([a0, a1], [b0, b1])
-
-        inputs = (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-        )
-
-        self.check_model_gpu(fn, inputs)
-
-    # called in test_gpu_cpp_wrapper.py
-    test_enable_dynamic_shapes_cpp_wrapper_xpu = (
-        test_enable_dynamic_shapes_cpp_wrapper_cuda
-    )
-
-    @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
-    @bin_ops
-    def test_cpu_cpp_fallback(self, op):
-        def fn(a0, a1, b0, b1):
-            return op([a0, a1], [b0, b1])
-
-        inputs = (
-            torch.rand(10, 10, device="cpu"),
-            torch.rand(20, 20, device="cpu"),
-            torch.rand(10, 10, device="cpu"),
-            torch.rand(20, 20, device="cpu"),
-        )
-
-        self.check_model_cpu(fn, inputs)
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
-
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @decomp_ops
-    def test_decomp(self, op):
+    def test_decomp(self, device, op):
         def fn(a0, a1, b0, b1, c0, c1):
             return op([a0, a1], [b0, b1], [c0, c1], value=0.5)
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(20, 20, device=GPU_TYPE),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
+                torch.rand(10, 10, device=device),
+                torch.rand(20, 20, device=device),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
-    def test_fuse_concat(self):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_fuse_concat(self, device):
         def fn(x1, x2, x3, w1, w2, w3):
             x = torch.stack([x1, x2, x3])
             w = torch.stack([w1, w2, w3])
@@ -756,182 +706,182 @@ class ForeachTests(TestCase):
 
             return y
 
-        x1 = torch.randn(5, 4).to(GPU_TYPE)
+        x1 = torch.randn(5, 4).to(device)
         x2 = x1 + 1
         x3 = x1 + 2
-        w1 = torch.randn(4, 3).to(GPU_TYPE)
+        w1 = torch.randn(4, 3).to(device)
         w2 = w1 + 1
         w3 = w1 + 2
 
         args = (x1, x2, x3, w1, w2, w3)
 
-        self.check_model_gpu(fn, args)
+        self.check_model(fn, args)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_gpu
-    def test_zero_elems(self):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_zero_elems(self, device):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(0, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
-                torch.rand(0, device=GPU_TYPE),
-                torch.rand(10, 10, device=GPU_TYPE),
+                torch.rand(0, device=device),
+                torch.rand(10, 10, device=device),
+                torch.rand(0, device=device),
+                torch.rand(10, 10, device=device),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
-    def test_2d_blocking(self, op):
+    def test_2d_blocking(self, device, op):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 40, device=GPU_TYPE),
-                torch.rand(10, 30, device=GPU_TYPE),
-                torch.rand(40, 10, device=GPU_TYPE).t(),
-                torch.rand(30, 10, device=GPU_TYPE).t(),
+                torch.rand(10, 40, device=device),
+                torch.rand(10, 30, device=device),
+                torch.rand(40, 10, device=device).t(),
+                torch.rand(30, 10, device=device).t(),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
-    def test_2d_blocking_partitioning(self, op):
+    def test_2d_blocking_partitioning(self, device, op):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(30, 20, device=GPU_TYPE),
-                torch.rand(40, 30, device=GPU_TYPE),
-                torch.rand(30, 20, device=GPU_TYPE),
-                torch.rand(30, 40, device=GPU_TYPE).t(),
+                torch.rand(30, 20, device=device),
+                torch.rand(40, 30, device=device),
+                torch.rand(30, 20, device=device),
+                torch.rand(30, 40, device=device).t(),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
-    def test_2d_blocking_partitioning_elems(self, op):
+    def test_2d_blocking_partitioning_elems(self, device, op):
         """2D blocking should be grouped by number of yelems"""
 
         def fn(a0, a1, a2, b0, b1, b2):
             return op([a0, a1, a2], [b0, b1, b2])
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 20, device=GPU_TYPE),
-                torch.rand(30, 20, device=GPU_TYPE),
-                torch.rand(10, 30, device=GPU_TYPE),
-                torch.rand(20, 10, device=GPU_TYPE).t(),
-                torch.rand(20, 30, device=GPU_TYPE).t(),
-                torch.rand(30, 10, device=GPU_TYPE).t(),
+                torch.rand(10, 20, device=device),
+                torch.rand(30, 20, device=device),
+                torch.rand(10, 30, device=device),
+                torch.rand(20, 10, device=device).t(),
+                torch.rand(20, 30, device=device).t(),
+                torch.rand(30, 10, device=device).t(),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
-    def test_2d_blocking_partitioning_mixed_sizes(self, op):
+    def test_2d_blocking_partitioning_mixed_sizes(self, device, op):
         """2D blocking with mixed sizes should group together"""
 
         def fn(a0, a1, a2, b0, b1, b2):
             return op([a0, a1, a2], [b0, b1, b2])
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(10, 20, device=GPU_TYPE),
-                torch.rand(30, 20, device=GPU_TYPE),
-                torch.rand(10, 30, device=GPU_TYPE),
-                torch.rand(20, 10, device=GPU_TYPE).t(),
-                torch.rand(20, 30, device=GPU_TYPE).t(),
-                torch.rand(30, 10, device=GPU_TYPE).t(),
+                torch.rand(10, 20, device=device),
+                torch.rand(30, 20, device=device),
+                torch.rand(10, 30, device=device),
+                torch.rand(20, 10, device=device).t(),
+                torch.rand(20, 30, device=device).t(),
+                torch.rand(30, 10, device=device).t(),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inplace_bin_ops
-    def test_reinplacing(self, op):
+    def test_reinplacing(self, device, op):
         def fn(a0, a1, b0, b1):
             op([a0, a1], [b0, b1])
             return [a0, a1]
 
         inputs = (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
 
-        self.check_model_gpu(fn, inputs, check_lowp=False)
+        self.check_model(fn, inputs, check_lowp=False)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inplace_bin_ops
-    def test_reinplacing_mut_before(self, op):
+    def test_reinplacing_mut_before(self, device, op):
         def fn(a0, a1, b0, b1):
-            a0.add_(torch.ones(10, 10, device=GPU_TYPE))
+            a0.add_(torch.ones(10, 10, device=device))
             op([a0, a1], [b0, b1])
             return [a0, a1]
 
         inputs = (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
 
-        self.check_model_gpu(fn, inputs, check_lowp=False)
+        self.check_model(fn, inputs, check_lowp=False)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inplace_bin_ops
-    def test_reinplacing_mut_after(self, op):
+    def test_reinplacing_mut_after(self, device, op):
         def fn(a0, a1, b0, b1):
             op([a0, a1], [b0, b1])
-            a0.add_(torch.ones(10, 10, device=GPU_TYPE))
+            a0.add_(torch.ones(10, 10, device=device))
             return [a0, a1]
 
         inputs = (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
 
-        self.check_model_gpu(fn, inputs, check_lowp=False)
+        self.check_model(fn, inputs, check_lowp=False)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
-    def test_multi_device(self):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_multi_device(self, device):
         def test_foreach_add(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
 
         inps = [
-            torch.ones(10, 10, device=GPU_TYPE),
+            torch.ones(10, 10, device=device),
             torch.ones(20, 20, device="cpu"),
-            torch.zeros(10, 10, device=GPU_TYPE),
+            torch.zeros(10, 10, device=device),
             torch.zeros(20, 20, device="cpu"),
         ]
 
@@ -941,13 +891,13 @@ class ForeachTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_gpu
-    def test_aliasing(self):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_aliasing(self, device):
         def test_foreach_add(a0, a1, a2, b0, b1, b2):
             return torch._foreach_add_([a0, a1, a2], [b0, b1, b2])
 
-        input = torch.ones(10, 10, device=GPU_TYPE)
-        input2 = torch.ones(10, 10, device=GPU_TYPE)
+        input = torch.ones(10, 10, device=device)
+        input2 = torch.ones(10, 10, device=device)
         inps = [
             input,
             input.view(10, 10),
@@ -963,32 +913,32 @@ class ForeachTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 1)
-    def test_2d_block_no_mixed_sizes_no_mask(self):
+    def test_2d_block_no_mixed_sizes_no_mask(self, device):
         """2D blocking with no mixed sizes constant mask"""
 
         def fn(a0, a1, a2, b0, b1, b2):
             return torch._foreach_add([a0, a1, a2], [b0, b1, b2])
 
-        self.check_model_gpu(
+        self.check_model(
             fn,
             (
-                torch.rand(1024, 2048, device=GPU_TYPE),
-                torch.rand(2048, 2048, device=GPU_TYPE),
-                torch.rand(1024, 2048, device=GPU_TYPE),
-                torch.rand(2048, 1024, device=GPU_TYPE).t(),
-                torch.rand(2048, 2048, device=GPU_TYPE).t(),
-                torch.rand(2048, 1024, device=GPU_TYPE).t(),
+                torch.rand(1024, 2048, device=device),
+                torch.rand(2048, 2048, device=device),
+                torch.rand(1024, 2048, device=device),
+                torch.rand(2048, 1024, device=device).t(),
+                torch.rand(2048, 2048, device=device).t(),
+                torch.rand(2048, 1024, device=device).t(),
             ),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
     @config.patch({"combo_kernel_per_subkernel_blocks": True})
-    def test_2d_block_mixed_sizes_with_mask(self):
+    def test_2d_block_mixed_sizes_with_mask(self, device):
         """2D blocking with mixed sizes should have mask"""
         from torch._inductor.utils import run_and_get_code
 
@@ -996,12 +946,12 @@ class ForeachTests(TestCase):
             return torch._foreach_add([a0, a1, a2], [b0, b1, b2])
 
         inputs = (
-            torch.rand(1024, 2048, device=GPU_TYPE),
-            torch.rand(2048, 2048, device=GPU_TYPE),
-            torch.rand(1024, 2048, device=GPU_TYPE),
-            torch.rand(2048, 1024, device=GPU_TYPE).t(),
-            torch.rand(2048, 2048, device=GPU_TYPE).t(),
-            torch.rand(2048, 1024, device=GPU_TYPE).t(),
+            torch.rand(1024, 2048, device=device),
+            torch.rand(2048, 2048, device=device),
+            torch.rand(1024, 2048, device=device),
+            torch.rand(2048, 1024, device=device).t(),
+            torch.rand(2048, 2048, device=device).t(),
+            torch.rand(2048, 1024, device=device).t(),
         )
         fn_c = torch.compile(fn)
         compiled_out, code = run_and_get_code(fn_c, *inputs)
@@ -1011,9 +961,9 @@ class ForeachTests(TestCase):
         self.assertNotIn("SequentialFlattenComboKernelGrid", code)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @foreach_map_bin_ops
-    def test_foreach_map_backward_binary(self, op):
+    def test_foreach_map_backward_binary(self, device, op):
         from torch._dynamo.polyfills import foreach_map_fn
 
         def fn(xs, ys):
@@ -1026,14 +976,14 @@ class ForeachTests(TestCase):
 
         ref_inps = (
             [
-                torch.rand(10, 20, device=GPU_TYPE, requires_grad=True),
-                torch.rand(10, 30, device=GPU_TYPE, requires_grad=True),
-                torch.rand(30, 30, device=GPU_TYPE, requires_grad=True),
+                torch.rand(10, 20, device=device, requires_grad=True),
+                torch.rand(10, 30, device=device, requires_grad=True),
+                torch.rand(30, 30, device=device, requires_grad=True),
             ],
             [
-                torch.rand(10, 20, device=GPU_TYPE, requires_grad=True),
-                torch.rand(10, 30, device=GPU_TYPE, requires_grad=True),
-                torch.rand(30, 30, device=GPU_TYPE, requires_grad=True),
+                torch.rand(10, 20, device=device, requires_grad=True),
+                torch.rand(10, 30, device=device, requires_grad=True),
+                torch.rand(30, 30, device=device, requires_grad=True),
             ],
         )
         inps = (
@@ -1052,22 +1002,22 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_gpu
-    def test_foreach_map_input_mutation(self):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_foreach_map_input_mutation(self, device):
         def fn(xs, ys):
             outs = foreach_map_add_inplace(xs, ys)
             return outs[0].sum() + outs[1].sum() + outs[2].sum()
 
         ref_inps = (
             [
-                torch.rand(10, 20, device=GPU_TYPE, requires_grad=True),
-                torch.rand(10, 30, device=GPU_TYPE, requires_grad=True),
-                torch.rand(30, 30, device=GPU_TYPE, requires_grad=True),
+                torch.rand(10, 20, device=device, requires_grad=True),
+                torch.rand(10, 30, device=device, requires_grad=True),
+                torch.rand(30, 30, device=device, requires_grad=True),
             ],
             [
-                torch.rand(10, 20, device=GPU_TYPE, requires_grad=True),
-                torch.rand(10, 30, device=GPU_TYPE, requires_grad=True),
-                torch.rand(30, 30, device=GPU_TYPE, requires_grad=True),
+                torch.rand(10, 20, device=device, requires_grad=True),
+                torch.rand(10, 30, device=device, requires_grad=True),
+                torch.rand(30, 30, device=device, requires_grad=True),
             ],
         )
         # Set requires_grad to be False to avoid mutating a leaf variable
@@ -1088,7 +1038,7 @@ class ForeachTests(TestCase):
             ):
                 _ = run_fw_bw_and_get_code(lambda: torch.compile(fn)(*inps))
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
     @parametrize(
@@ -1113,7 +1063,7 @@ class ForeachTests(TestCase):
             0.30000000000000004,  # 0.1 + 0.2 in fp64 (famous precision issue)
         ],
     )
-    def test_addcmul_scalar_value_vs_tensor_value(self, value):
+    def test_addcmul_scalar_value_vs_tensor_value(self, device, value):
         """Test that torch._foreach_addcmul with unbacked float scalar from .item()
         matches tensor scalar value in compiled mode.
 
@@ -1132,28 +1082,22 @@ class ForeachTests(TestCase):
         inputs = (
             torch.tensor(
                 [[1.0000001192092896, 0.333333333333333333], [1e-7, 3.4028235e30]],
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.float32,
             ),
             torch.tensor(
                 [[1.0000000000000002, 0.1], [1e-38, 2.718281828459045]],
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.float32,
             ),
+            torch.tensor([[0.5, 0.5], [0.5, 0.5]], device=device, dtype=torch.float32),
+            torch.tensor([[1.0, 1.0], [1.0, 1.0]], device=device, dtype=torch.float32),
+            torch.tensor([[2.0, 2.0], [2.0, 2.0]], device=device, dtype=torch.float32),
             torch.tensor(
-                [[0.5, 0.5], [0.5, 0.5]], device=GPU_TYPE, dtype=torch.float32
-            ),
-            torch.tensor(
-                [[1.0, 1.0], [1.0, 1.0]], device=GPU_TYPE, dtype=torch.float32
-            ),
-            torch.tensor(
-                [[2.0, 2.0], [2.0, 2.0]], device=GPU_TYPE, dtype=torch.float32
-            ),
-            torch.tensor(
-                [[0.25, 0.25], [0.25, 0.25]], device=GPU_TYPE, dtype=torch.float32
+                [[0.25, 0.25], [0.25, 0.25]], device=device, dtype=torch.float32
             ),
         )
-        scalar_tensor = torch.tensor(value, device=GPU_TYPE, dtype=torch.float64)
+        scalar_tensor = torch.tensor(value, device=device, dtype=torch.float64)
 
         # Compiled mode comparison - assert bitwise equality
         # The .item() path should preserve fp64 precision just like tensor scalar path
@@ -1166,7 +1110,7 @@ class ForeachTests(TestCase):
         for a, b in zip(compiled_item_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize(
         "op",
@@ -1200,7 +1144,7 @@ class ForeachTests(TestCase):
             0.30000000000000004,  # 0.1 + 0.2 in fp64 (famous precision issue)
         ],
     )
-    def test_foreach_scalar_vs_scalar_tensor(self, op, value):
+    def test_foreach_scalar_vs_scalar_tensor(self, device, op, value):
         """Test that foreach binary ops with python scalar second argument
         match tensor scalar second argument in both eager and compiled modes."""
 
@@ -1214,16 +1158,16 @@ class ForeachTests(TestCase):
         inputs = (
             torch.tensor(
                 [[1.0000001192092896, 0.333333333333333333], [1e-7, 3.4028235e30]],
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.float32,
             ),
             torch.tensor(
                 [[1.0000000000000002, 0.1], [1e-38, 2.718281828459045]],
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.float32,
             ),
         )
-        scalar_tensor = torch.tensor(value, device=GPU_TYPE, dtype=torch.float64)
+        scalar_tensor = torch.tensor(value, device=device, dtype=torch.float64)
 
         # Eager mode comparison - assert bitwise equality
         eager_python_scalar = fn_python_scalar(*inputs)
@@ -1247,8 +1191,8 @@ class ForeachTests(TestCase):
         for a, b in zip(eager_tensor_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @skipIfRocm
-    @requires_gpu
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("emulate_precision_casts", True)
     @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
@@ -1266,7 +1210,7 @@ class ForeachTests(TestCase):
             0.1,  # Cannot be exactly represented in binary
         ],
     )
-    def test_adam_ema_update_scalar_precision(self, beta2):
+    def test_adam_ema_update_scalar_precision(self, device, beta2):
         """Test that Adam-style EMA update compiled matches eager bitwise.
 
         Tests the pattern:
@@ -1285,22 +1229,22 @@ class ForeachTests(TestCase):
         inputs = (
             torch.tensor(
                 [[1.0000001192092896, 0.333333333333333333], [1e-7, 1e-30]],
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.float32,
             ),
             torch.tensor(
                 [[1.0000000000000002, 0.1], [1e-38, 2.718281828459045]],
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.float32,
             ),
             torch.tensor(
                 [[0.01, 0.02], [0.001, 0.0001]],
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.float32,
             ),
             torch.tensor(
                 [[0.1, 0.2], [0.01, 0.001]],
-                device=GPU_TYPE,
+                device=device,
                 dtype=torch.float32,
             ),
         )
@@ -1315,9 +1259,9 @@ class ForeachTests(TestCase):
         for a, b in zip(eager_result, compiled_result):
             self.assertEqual(a, b, atol=0, rtol=0)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @foreach_map_un_ops
-    def test_foreach_map_backward_unary(self, op):
+    def test_foreach_map_backward_unary(self, device, op):
         from torch._dynamo.polyfills import foreach_map_fn
 
         def fn(xs):
@@ -1329,9 +1273,9 @@ class ForeachTests(TestCase):
             return outs[0].sum() + outs[1].sum() + outs[2].sum()
 
         ref_inp = [
-            torch.rand(10, 20, device=GPU_TYPE, requires_grad=True),
-            torch.rand(10, 30, device=GPU_TYPE, requires_grad=True),
-            torch.rand(30, 30, device=GPU_TYPE, requires_grad=True),
+            torch.rand(10, 20, device=device, requires_grad=True),
+            torch.rand(10, 30, device=device, requires_grad=True),
+            torch.rand(30, 30, device=device, requires_grad=True),
         ]
 
         inp = [x.clone().detach().requires_grad_(True) for x in ref_inp]
@@ -1347,21 +1291,98 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_cuda_and_triton
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_foreach_sub(self, device):
+        def fn(a, b):
+            return torch._foreach_sub(a, b, alpha=2.0)
+
+        torch.manual_seed(42)
+        a = [torch.randn(4, device=device) for _ in range(3)]
+        b = [torch.randn(4, device=device) for _ in range(3)]
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, fullgraph=True)(a, b)
+
+        self.assertEqual(eager, compiled)
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_foreach_reorder_loops_with_nested_foreach_snodes(self, device):
+        def fn(x0, x1, y0, y1):
+            xs, ys = [x0, x1], [y0, y1]
+            torch._foreach_add_(xs, ys)
+            zs = torch._foreach_mul(xs, 2)
+            return [z.sum() for z in zs]
+
+        args = (
+            torch.randint(0, 10, (128, 128), device=device),
+            torch.randint(0, 10, (128,), device=device),
+            torch.randint(0, 10, (128, 128), device=device),
+            torch.randint(0, 10, (128,), device=device),
+        )
+        args_clone = tuple(a.clone() for a in args)
+
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args_clone)
+        self.assertEqual(actual, expected)
+
+
+class ForeachTestsCpu(TestCase):
+    hw_classification = HardwareClassification.CPU
+    check_model_cpu = check_model
+    check_kernel_count = True
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._inductor.metrics.reset()
+
+    @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
+    @bin_ops
+    def test_cpu_cpp_fallback(self, device, op):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        inputs = (
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+        )
+
+        self.check_model_cpu(fn, inputs)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+
+class ForeachTestsCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._inductor.metrics.reset()
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @config.patch({"emulate_precision_casts": True})
-    def test_foreach_addcmul_fma_bitwise_equal(self):
+    def test_foreach_addcmul_fma_bitwise_equal(self, device):
         """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
         self_tensors = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
         ]
         tensor1_list = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
         ]
         tensor2_list = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
         ]
 
         # ROCm may have small numerical differences
@@ -1393,23 +1414,23 @@ class ForeachTests(TestCase):
         for eager, compiled in zip(eager_result2, compiled_result2):
             self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
-    @requires_cuda_and_triton
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @config.patch({"emulate_precision_casts": True})
-    def test_foreach_addcmul_uses_fma_instruction(self):
+    def test_foreach_addcmul_uses_fma_instruction(self, device):
         """Test that _foreach_addcmul generates code using FMA instruction."""
         from torch._inductor.utils import run_and_get_code
 
         self_tensors = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
         ]
         tensor1_list = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
         ]
         tensor2_list = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
         ]
 
         @torch.compile
@@ -1420,43 +1441,82 @@ class ForeachTests(TestCase):
         code = " ".join(code)
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
-    @requires_gpu
-    def test_foreach_sub(self):
-        def fn(a, b):
-            return torch._foreach_sub(a, b, alpha=2.0)
 
-        torch.manual_seed(42)
-        a = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
-        b = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+class ForeachCppWrapperTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    check_model = torch._inductor.config.patch("triton.cudagraphs", False)(check_model)
+    check_kernel_count = True
 
-        eager = fn(a, b)
-        compiled = torch.compile(fn, fullgraph=True)(a, b)
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
 
-        self.assertEqual(eager, compiled)
+    def tearDown(self):
+        super().tearDown()
+        torch._inductor.metrics.reset()
 
-    @requires_gpu
-    def test_foreach_reorder_loops_with_nested_foreach_snodes(self):
-        def fn(x0, x1, y0, y1):
-            xs, ys = [x0, x1], [y0, y1]
-            torch._foreach_add_(xs, ys)
-            zs = torch._foreach_mul(xs, 2)
-            return [z.sum() for z in zs]
+    # called in test_gpu_cpp_wrapper.py
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_foreach_cpp_wrapper(self, device):
+        self._test_single_list_gpu(op=torch._foreach_add, device=device)
 
-        args = (
-            torch.randint(0, 10, (128, 128), device=GPU_TYPE),
-            torch.randint(0, 10, (128,), device=GPU_TYPE),
-            torch.randint(0, 10, (128, 128), device=GPU_TYPE),
-            torch.randint(0, 10, (128,), device=GPU_TYPE),
+    def _test_single_list_gpu(self, op, device):
+        if op in un_ops_under_test:
+
+            def fn(a0, a1):
+                return op([a0, a1])
+
+        elif op in bin_ops_under_test:
+
+            def fn(a0, a1, b0, b1):
+                return op([a0, a1], [b0, b1])
+
+        else:
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                return op([a0, a1], [b0, b1], [c0, c1])
+
+        self.check_model(
+            fn,
+            gen_args(op, device),
         )
-        args_clone = tuple(a.clone() for a in args)
 
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args_clone)
-        self.assertEqual(actual, expected)
+    # called in test_gpu_cpp_wrapper.py
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_enable_dynamic_shapes_cpp_wrapper(self, device, op=torch._foreach_add):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        inputs = (
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+        )
+
+        self.check_model(fn, inputs)
+
+
+instantiate_device_type_tests(
+    ForeachTestsAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
+
+instantiate_device_type_tests(ForeachTestsCpu, globals(), only_for="cpu")
+
+instantiate_device_type_tests(ForeachTestsCuda, globals(), only_for="cuda")
+
+instantiate_device_type_tests(
+    ForeachCppWrapperTests, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
+    from torch.utils._triton import has_triton
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or has_triton():
         run_tests(needs="filelock")
