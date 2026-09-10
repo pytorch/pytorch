@@ -261,7 +261,7 @@ class GemmReductionCompileConfig:
         )
 
 
-def gemm_epilogue_cutedsl_op_name(target: Any) -> str | None:
+def _cute_op_name(target: Any) -> str | None:
     """Return the CuTeDSL operations-handler name for one FX target."""
     if isinstance(target, torch._ops.OpOverload):
         name = target.overloadpacket.__name__
@@ -274,7 +274,7 @@ def gemm_epilogue_cutedsl_op_name(target: Any) -> str | None:
     return "truediv" if name == "div" else name
 
 
-def gemm_epilogue_arg(value: Any, env: dict[torch.fx.Node, Any], context: str) -> Any:
+def _cute_arg(value: Any, env: dict[torch.fx.Node, Any], context: str) -> Any:
     """Translate FX references and constants into generated expressions."""
     if isinstance(value, torch.fx.Node):
         if value in env:
@@ -295,7 +295,7 @@ def gemm_epilogue_arg(value: Any, env: dict[torch.fx.Node, Any], context: str) -
     if isinstance(value, (str, torch.dtype)) or value is None:
         return value
     if isinstance(value, (tuple, list)):
-        return type(value)(gemm_epilogue_arg(item, env, context) for item in value)
+        return type(value)(_cute_arg(item, env, context) for item in value)
     raise NotImplementedError(f"unsupported {context} epilogue constant: {value!r}")
 
 
@@ -317,7 +317,7 @@ def lower_full_scalar(node: torch.fx.Node) -> Any | None:
     return value if isinstance(value, (bool, int, float)) else None
 
 
-def lower_gemm_epilogue_fx_call(
+def _cute_call(
     node: torch.fx.Node,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
@@ -326,7 +326,7 @@ def lower_gemm_epilogue_fx_call(
 ) -> Any:
     """Lower one FX call through the active CuTeDSL operations handler."""
     target = node.target
-    op_name = gemm_epilogue_cutedsl_op_name(target)
+    op_name = _cute_op_name(target)
     if op_name is None:
         raise NotImplementedError(f"unsupported {context} epilogue op: {target}")
     if op_name == "inline_asm_elementwise":
@@ -366,22 +366,19 @@ def lower_gemm_epilogue_fx_node(
     context: str,
 ) -> Any:
     """Lower one ordinary FX expression through the shared CuTeDSL frontend."""
-    if gemm_epilogue_cutedsl_op_name(node.target) in ("view", "reshape", "squeeze"):
-        return gemm_epilogue_arg(node.args[0], env, context)
+    if _cute_op_name(node.target) in ("view", "reshape", "squeeze"):
+        return _cute_arg(node.args[0], env, context)
     if node.target is operator.getitem:
-        source = gemm_epilogue_arg(node.args[0], env, context)
+        source = _cute_arg(node.args[0], env, context)
         index = node.args[1]
         if isinstance(source, (tuple, list)) and isinstance(index, int):
             return source[index]
     if (value := lower_full_scalar(node)) is not None:
-        return gemm_epilogue_arg(value, env, context)
-    args = tuple(gemm_epilogue_arg(arg, env, context) for arg in node.args)
-    kwargs = {
-        key: gemm_epilogue_arg(value, env, context)
-        for key, value in node.kwargs.items()
-    }
+        return _cute_arg(value, env, context)
+    args = tuple(_cute_arg(arg, env, context) for arg in node.args)
+    kwargs = {key: _cute_arg(value, env, context) for key, value in node.kwargs.items()}
     with V.set_current_node(node):
-        expression = lower_gemm_epilogue_fx_call(node, args, kwargs, context=context)
+        expression = _cute_call(node, args, kwargs, context=context)
     if isinstance(expression, OpsValue):
         expression = expression.value
     if isinstance(expression, (tuple, list, CuteDSLCSEVariable)):
