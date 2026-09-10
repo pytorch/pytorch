@@ -36,9 +36,6 @@ struct TORCH_CUDA_CPP_API MemPool {
   static MempoolId_t graph_pool_handle(bool is_user_created = true);
 
  private:
-  static std::atomic<CaptureId_t> uid_;
-  static std::atomic<CaptureId_t> uuid_;
-  bool is_user_created_;
   MempoolId_t id_;
   c10::DeviceIndex device_;
 };

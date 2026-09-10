@@ -32,13 +32,10 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipCUDANonDefaultStreamIf,
     TEST_CUDA,
+    TEST_CUDAMALLOCASYNC,
     TestCase,
 )
 
-
-TEST_CUDAMALLOCASYNC = TEST_CUDA and (
-    torch.cuda.get_allocator_backend() == "cudaMallocAsync"
-)
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
