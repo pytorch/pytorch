@@ -1,7 +1,5 @@
 # Owner(s): ["module: dsl-native-ops"]
-# Structural conformance for reduction traits, whose partial implementations can silently
-# misfold. Protocol laws need two real fold shapes; this file also probes the local var/std
-# divisor clamp with one thread.
+# Structural checks for reduction traits and the local var/std divisor clamp.
 import inspect
 import sys
 import unittest
