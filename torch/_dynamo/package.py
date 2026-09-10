@@ -22,10 +22,13 @@ import logging
 import os
 import pickle
 import platform
+import re
 import shutil
 import sys
 import types
-from collections.abc import Callable, Generator, Iterator
+import uuid
+import weakref
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
@@ -36,9 +39,11 @@ from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
+    _reserve_unique_id_through,
     COMPILED_FN_PREFIX,
     get_code_keys,
     is_compiled_fn_name,
+    RESUME_FN_PREFIX,
 )
 from .utils import CleanupHook, counters, dynamo_timed, increment_frame
 
@@ -498,6 +503,71 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+
+
+def _resume_global_renames(
+    entries: Iterable[_DynamoCodeCacheEntry], package_token: str
+) -> dict[str, str]:
+    """
+    Pick a global name for every resume function that the installing package
+    owns exclusively, so two artifacts that share a capture-time name do not
+    collide in one module dict.
+
+    ``__resume_at_<offset>_<n>`` comes from a counter that restarts in every
+    capture process, so two artifacts captured separately both claim, say,
+    ``__resume_at_16_3``. A serving process installs both into the same module
+    dict: the second one wins, and because precompile lookup is region-EXACT
+    the first package's frame then resolves the name to a twin holding another
+    region's entries and is served nothing at all.
+
+    The package token is what actually separates them: it is unique to the
+    loaded package (minted once in __init__, never per install, so a reinstall
+    rebinding the same name keeps an in-flight entry from a previous install
+    resolvable). The ``__resume_at_<offset>_<n>`` base name still says which
+    code the binding belongs to, so no extra per-code digest is carried.
+    """
+    renames: dict[str, str] = {}
+    for entry in entries:
+        if not entry.install_to_global:
+            continue
+        for name in entry.function_names:
+            # Two entries in one package sharing a capture-time name would
+            # collapse onto one token-suffixed global (second wins). The token
+            # separates packages, not entries within a package, so surface the
+            # collision here rather than silently rebinding. RuntimeError (not
+            # AssertionError) so a corrupt on-disk artifact is caught by the
+            # failed-install fallback in eval_frame instead of crashing
+            # torch.compile at decoration time.
+            if name in renames:
+                raise RuntimeError(
+                    f"duplicate resume-function name {name!r} within one package"
+                )
+            renames[name] = f"{name}_{package_token}"
+    return renames
+
+
+def _rename_globals(code: types.CodeType, renames: dict[str, str]) -> types.CodeType:
+    """
+    Rewrite ``co_names`` so LOAD_GLOBAL follows the renamed bindings. Indices
+    into ``co_names`` are preserved, so the bytecode itself is untouched.
+
+    ``co_names`` is one table shared with LOAD_ATTR/STORE_ATTR/IMPORT_NAME/
+    LOAD_NAME, and every matching slot is rewritten, not just LOAD_GLOBAL's.
+    That is safe only because the rename keys are ``__resume_at_*`` names minted
+    by ``unique_id``, which no attribute or import name plausibly collides with.
+    """
+    if not renames:
+        return code
+    consts = tuple(
+        _rename_globals(c, renames) if isinstance(c, types.CodeType) else c
+        for c in code.co_consts
+    )
+    names = tuple(renames.get(name, name) for name in code.co_names)
+    if names == code.co_names and all(
+        new is old for new, old in zip(consts, code.co_consts)
+    ):
+        return code
+    return code.replace(co_names=names, co_consts=consts)
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -1050,6 +1120,28 @@ def _compile_frame_context(
     return _ctx()
 
 
+def _uninstall_abandoned_package(
+    installed_globals: dict[types.ModuleType, dict[str, object]],
+    precompile_codes: dict[int, types.CodeType],
+    region_id: int,
+    owner: object,
+) -> None:
+    # weakref.finalize callback for a CompilePackage that died while still
+    # installed. A global is only popped while it still holds OUR value: a
+    # later load of the same artifact reuses the artifact's names, and its
+    # overwrite must survive us. Entry teardown fires from GC, which can run
+    # mid-guard-evaluation, so _reset_precompile_entries_for_owner never
+    # blocks (it parks the reset when the cache lock is unavailable).
+    from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
+
+    for code in precompile_codes.values():
+        _reset_precompile_entries_for_owner(code, region_id, owner)
+    for module, values_by_name in installed_globals.items():
+        for name, value in values_by_name.items():
+            if module.__dict__.get(name) is value:
+                del module.__dict__[name]
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -1060,7 +1152,10 @@ class CompilePackage:
         b. when `dynamo` argument is not None, it will load a pre-compiled dynamo state.
     2. `package.save()` which dumps the dynamo and backend states to a DynamoCacheEntry object.
     3. `package.install(backends) which will handle all the side-effectful global scope
-        updates with compiled functions and resume functions.
+        updates with compiled functions and resume functions. The install is tied
+        to the package's lifetime by a finalizer, so a caller that installs must
+        retain the package; dropping it undoes these updates (the frame skip a
+        zero-guarded entry writes is restored from #195915 on).
     """
 
     def __init__(
@@ -1075,7 +1170,24 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        # name -> installed value, so teardown can tell its own binding from
+        # one a later package overwrote (two loads of one artifact reuse the
+        # artifact's global names).
+        self._installed_globals: dict[types.ModuleType, dict[str, object]] = {}
+        # Code objects holding this package's region state, so uninstall() can
+        # clear all of them -- and only them. Clearing the code object wholesale
+        # would take every OTHER region's entries with it, and since lookup() is
+        # region-exact those owners can no longer be served by what is left.
+        self._installed_precompile_codes: dict[int, types.CodeType] = {}
+        self._installed_precompile_region_id = -1
+        # Identity token stamped onto every precompile entry this package
+        # installs, so uninstall() can remove its own and leave a neighbour
+        # package's entries on a shared code object alone.
+        self._install_owner = object()
+        # Uninstalls an installed package that dies without uninstall(),
+        # so repeated loads of one artifact cannot grow the frame cache and
+        # module globals without bound. Registered by install().
+        self._uninstall_finalizer: weakref.finalize[..., CompilePackage] | None = None
         # Empty means no graph named a device; cache_entry records that as cpu.
         self._device_types: set[str] = set()
         # An eager backend bakes no vector width, so it neither pays the C++
@@ -1088,14 +1200,32 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
+        # Suffix minted once here (never refreshed) and appended to every
+        # resume function's global name, so two packages holding byte-identical
+        # resume code -- two loads of one artifact, or two artifacts of one
+        # script captured in separate processes -- do not take each other's
+        # name. Distinct from _install_owner, which is re-minted per install.
+        # See _resume_global_renames.
+        self._resume_name_token = uuid.uuid4().hex
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
-            self.uninstall()
             self.validate()
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    def owns_install_on(self, code: types.CodeType, isolate_recompiles_id: int) -> bool:
+        """True when install() put this package's entries on code in that region."""
+        return (
+            self._installed_precompile_region_id == isolate_recompiles_id
+            and id(code) in self._installed_precompile_codes
+        )
+
+    def has_guarded_codes_for(self, code: types.CodeType) -> bool:
+        """True once a compile of this frame was recorded into the package."""
+        entry = self._codes.get(code)
+        return entry is not None and bool(entry.guarded_codes)
 
     def initialize(
         self,
@@ -1173,7 +1303,7 @@ class CompilePackage:
                     f"code_source mismatch: {code.code_source} != {code_source}"
                 )
 
-        if function_name is not None:
+        if function_name is not None and function_name not in code.function_names:
             code.function_names.append(function_name)
 
     @property
@@ -1321,22 +1451,37 @@ class CompilePackage:
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        self._installed_globals.setdefault(module, {})[name] = value
 
     def uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import _reset_precompile_entries
-
+        # A package must be initialized before it can be uninstalled; uninstall
+        # no longer reads _innermost_fn, this only rejects an uninitialized one.
         if self._innermost_fn is None:
-            raise AssertionError("_innermost_fn is not set in uninstall")
-        for module, names in self._installed_globals.items():
-            for name in names:
-                module.__dict__.pop(name, None)
-
+            raise AssertionError("cannot uninstall an uninitialized package")
+        if self._uninstall_finalizer is not None:
+            self._uninstall_finalizer.detach()
+            self._uninstall_finalizer = None
+        # Same teardown the finalizer runs for an abandoned package: pop only
+        # globals still holding OUR value (a user or a later load of the same
+        # artifact may have rebound the name) and reset only our own entries.
+        _uninstall_abandoned_package(
+            self._installed_globals,
+            self._installed_precompile_codes,
+            self._installed_precompile_region_id,
+            self._install_owner,
+        )
+        # Rebind, do not mutate: a pending finalizer still references the old
+        # containers, so a reinstall must not be undone by it later.
         self._installed_globals = {}
+        self._installed_precompile_codes = {}
+        self._installed_precompile_region_id = -1
 
-        _reset_precompile_entries(self._innermost_fn.__code__)
-
-    def install(self, backends: dict[_BackendId, Any]) -> None:
+    def install(
+        self,
+        backends: dict[_BackendId, Any],
+        *,
+        isolate_recompiles_id: int = -1,
+    ) -> None:
         """
         Sync the package states to the compiled function. This includes the following actions:
           1. Clean up the previously installed states.
@@ -1349,6 +1494,42 @@ class CompilePackage:
         from .output_graph import get_builtins_dict
 
         self.uninstall()
+        # A fresh owner identity per install: the uninstall above may have
+        # PARKED its eviction (lock contended, or run from inside a lookup),
+        # and a parked eviction keyed on the old owner must not take the
+        # entries this install is about to add.
+        self._install_owner = object()
+        self._installed_precompile_region_id = isolate_recompiles_id
+        # Resume functions are bound under a name unique to their code and to
+        # this package, not under the name the capture process happened to
+        # mint. Every reference to them lives in some frame's dynamo bytecode,
+        # remapped below.
+        renames = _resume_global_renames(self._codes.values(), self._resume_name_token)
+        # A loaded artifact's __resume_at_<offset>_<n> names came from another
+        # process's counter; reserve their n so a compile in this process (a
+        # branch the artifact never took) cannot mint the same name for a
+        # different code object, which _resume_global_renames would reject at
+        # the next install -- and re-recording would persist.
+        for entry in self._codes.values():
+            for name in entry.function_names:
+                match = re.fullmatch(rf"{RESUME_FN_PREFIX}_\d+_(\d+)", name)
+                if match:
+                    _reserve_unique_id_through(int(match.group(1)))
+        # Registered before anything is installed, so a failed install is still
+        # torn down when the package dies. The callback must not capture self
+        # (it would never fire); it works off the containers the loop below
+        # fills in place, which uninstall() rebinds rather than mutates, so an
+        # explicit uninstall + reinstall cannot be undone by a stale finalizer.
+        self._uninstall_finalizer = weakref.finalize(
+            self,
+            _uninstall_abandoned_package,
+            self._installed_globals,
+            self._installed_precompile_codes,
+            self._installed_precompile_region_id,
+            self._install_owner,
+        )
+        # Not at interpreter exit: module dicts and the frame cache are torn down.
+        self._uninstall_finalizer.atexit = False
         for code, entry in self._codes.items():
             context = (
                 _compile_frame_context(code)
@@ -1364,6 +1545,7 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
+                        function_name = renames.get(function_name, function_name)
                         if code.co_freevars:
                             # Resume functions with freevars need a factory
                             # that takes a closure tuple, matching
@@ -1396,6 +1578,23 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
+                # Dedup on identity via id(): code objects compare structurally,
+                # so two distinct frames with identical bytecode would collapse
+                # under ``in``, and a linear identity scan makes install() O(n^2)
+                # in the entry count. input_codes above keys on id() for the same
+                # reason. Deliberately NOT clearing the region here: a frame
+                # reached through code_source is shared -- a library block two
+                # loaded models both call -- and several packages may hold
+                # entries for it in one region, which lookup handles by
+                # evaluating each entry's guards. Clearing the region would evict
+                # a live neighbour, and since lookup is region-exact the
+                # neighbour cannot be served by what is left. This package's own
+                # stale entries are already gone: install() runs uninstall()
+                # first, which removes exactly the ones it owns. A zero-guarded
+                # entry installs no precompile entry (it skips the frame below),
+                # so it is not recorded as owned.
+                if entry.guarded_codes:
+                    self._installed_precompile_codes[id(target_code)] = target_code
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -1453,7 +1652,12 @@ class CompilePackage:
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
-                        SerializedCode.to_code_object(guarded_code.dynamo_code),
+                        _rename_globals(
+                            SerializedCode.to_code_object(guarded_code.dynamo_code),
+                            renames,
+                        ),
+                        self._installed_precompile_region_id,
+                        self._install_owner,
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:
@@ -1753,16 +1957,30 @@ class DiskDynamoCache(DiskDynamoStore):
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
-    def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
+    def load_and_install_package(
+        self, fn: Callable[..., Any], *, isolate_recompiles_id: int = -1
+    ) -> CompilePackage | None:
         """
-        Load directly into a package and install backends
+        Load directly into a package and install backends.
+
+        The returned package OWNS the install: install effects are tied to its
+        lifetime via a weakref finalizer, so the caller must retain it. Dropping
+        the result uninstalls immediately on refcounted CPython, before the
+        install can even be observed.
+
+        ``isolate_recompiles_id`` must be the region the caller will look up in:
+        precompile entries match their own region only, so installing into the
+        default bucket for an isolated caller loads the artifact and then serves
+        nothing from it.
         """
         results = self.load(fn)
         if results is None:
             return None
         else:
             package = CompilePackage(fn, results.dynamo)
-            package.install(results.backends)
+            package.install(
+                results.backends, isolate_recompiles_id=isolate_recompiles_id
+            )
             return package
 
     def path_prefix(self) -> str:

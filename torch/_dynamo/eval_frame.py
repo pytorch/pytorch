@@ -57,6 +57,7 @@ from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
+    _has_precompile_entries,
     get_eval_frame_isolate_recompiles_id,
     reset_code as _reset_code,
     set_code_exec_strategy,
@@ -774,6 +775,28 @@ def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     return unaltered_fn
 
 
+# Every callable _TorchDynamoContext.__call__ routes through wrap_inline (a
+# skipfile function or built-in nn.Module forward, a top-level in-graph or
+# polyfilled function, and any module at all under config.wrap_top_frame)
+# compiles through this one shared `inner` code object, so entries on it never
+# say which package owns a frame and the refusal is skipped for all of them.
+_WRAP_INLINE_INNER_CODE = external_utils.wrap_inline(lambda: None).__code__
+
+
+def _refusal_frame_code(fn: Any) -> types.CodeType | None:
+    # No getattr probe: a user nn.Module.__getattr__ can recurse on it.
+    if (
+        inspect.ismethod(fn)
+        and isinstance(fn.__self__, torch.nn.Module)
+        and fn.__func__ is torch.nn.Module.__call__
+    ):
+        fn = innermost_fn(fn.__self__.forward)
+    if not isinstance(fn, (types.FunctionType, types.MethodType)):
+        return None
+    code = fn.__code__
+    return None if code is _WRAP_INLINE_INNER_CODE else code
+
+
 def innermost_backend(fn: Callable[..., Any]) -> Callable[..., Any]:
     """
     Unwrap backend wrapper chain via _torchdynamo_orig_backend to find the
@@ -924,6 +947,10 @@ class _TorchDynamoContext:
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         self._package = package
+        # The transparent cache hands _optimize an uninitialized package (fn=None)
+        # that this context loads and installs itself, so what it finds on the
+        # frame is its own; a user-built CompilePackage(fn) arrives initialized.
+        self._user_package = package is not None and package.is_initialized()
         self._hooks = hooks
         self._isolate_recompiles_id = (
             next(_next_isolate_recompiles_id) if isolate_recompiles else -1
@@ -1019,16 +1046,70 @@ class _TorchDynamoContext:
                         self._package.initialize(
                             fn_key, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(result.backends)
+                        # Install into the SAME region this context looks up in.
+                        # Precompile entries match their own region only, so a
+                        # default-bucket install here would never be found by an
+                        # isolate_recompiles=True context -- the cache would load
+                        # and then silently serve nothing.
+                        self._package.install(
+                            result.backends,
+                            isolate_recompiles_id=self._isolate_recompiles_id,
+                        )
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
+                        # install() binds an entry's globals and precompile
+                        # entries before it discovers a missing backend on a
+                        # later entry, so a partial install stays live in this
+                        # context's region (the finalizer never fires while this
+                        # context retains the package). Undo it before re-init.
+                        self._package.uninstall()
+                        # initialize() above already set _initialized before
+                        # install() raised, so clear it or the fresh re-init
+                        # below trips its already-initialized assertion.
+                        self._package._initialized = False
                         self._package.initialize(
                             fn_key, None, ignore_inlined_sources=False
                         )
 
         fn = innermost_fn(fn)
+
+        # Lookup is region-exact but not owner-exact: while another package's
+        # entries serve this frame in this context's region, Dynamo never
+        # reaches this context's callback, so a capturing package that has
+        # recorded nothing for the frame keeps recording nothing, and a later
+        # save writes a zero-guarded artifact whose install skip_code()s the
+        # frame. Refuse when a user-supplied package with no guarded code for the
+        # frame does not own the entries serving it -- at decoration and again on
+        # each call, since the neighbour can arrive in either order. A package
+        # that already recorded the frame is served legitimately (the manual
+        # DynamoCache flow: an old wrapper served by a freshly loaded package),
+        # and the transparent cache's package is exempt: a hit installs its own
+        # entries and a miss records and writes nothing. refusal_code is bound
+        # below, once fn is final.
+        user_package = self._package if self._user_package else None
+        refusal_code: types.CodeType | None = None
+        recorded = False
+
+        def refuse_if_another_package_serves() -> None:
+            nonlocal recorded
+            code = refusal_code
+            if recorded or user_package is None or code is None:
+                return
+            if user_package.has_guarded_codes_for(code):
+                # This package serves the frame from here on: latch, so the
+                # steady state is one bool read per call.
+                recorded = True
+                return
+            if not user_package.owns_install_on(
+                code, self._isolate_recompiles_id
+            ) and _has_precompile_entries(code, self._isolate_recompiles_id):
+                raise RuntimeError(
+                    f"another CompilePackage is installed on {code.co_name} in "
+                    "this compile region; uninstall it first or compile with "
+                    "isolate_recompiles=True"
+                )
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
@@ -1164,6 +1245,12 @@ class _TorchDynamoContext:
         is_jit_tracing = torch._C._is_tracing
         is_fx_symbolic_tracing = torch.fx._symbolic_trace.is_fx_symbolic_tracing
 
+        # Resolved once fn is final (wrap_inline may have rebound it above), on
+        # the frame Dynamo intercepts: a module's forward rather than the
+        # skipfile _wrapped_call_impl that OptimizedModule hands this context.
+        refusal_code = _refusal_frame_code(fn)
+        refuse_if_another_package_serves()
+
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             # NB: function calls here could change global state (e.g. random state)
@@ -1240,6 +1327,7 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
 
+                refuse_if_another_package_serves()
                 cleanups = [enter() for enter in self.enter_exit_hooks]
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
