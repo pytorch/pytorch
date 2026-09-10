@@ -30,7 +30,7 @@ int32_t dynamo_get_c_recursion_limit();
 } // extern "C"
 
 // Bytecode debugger callback functions
-void set_bytecode_debugger_callback(py::object callback);
+void set_bytecode_debugger_callback(const py::object& callback);
 py::object get_bytecode_debugger_callback();
 
 // Breakpoint code object tracking

@@ -5476,7 +5476,7 @@ class CheckFunctionManager:
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
 
-            extra_state.invalidate(cache_entry, deleted_guard_manager)
+            extra_state.invalidate(deleted_guard_manager, self.guard_manager)
             self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:
@@ -5634,10 +5634,14 @@ def format_user_stack_trace(
     return "\n".join(lines)
 
 
-def describe_backend(backend: Callable[..., object] | None) -> str:
+def describe_backend(backend: object | None) -> str:
     """Return a human-readable string describing a backend callable for debugging."""
     if backend is None:
         return "None"
+    if not callable(backend):
+        # A precompile backend is cached by its _torchdynamo_cache_key
+        # (get_backend, cache_entry.cpp), not by the callable.
+        return f"_torchdynamo_cache_key {backend!r} (id={id(backend):#x})"
 
     # _TorchCompileWrapper is the internal wrapper created by torch.compile().
     # It has structured fields that are more informative than generic introspection.
@@ -5733,8 +5737,9 @@ def get_guard_fail_reason_helper(
         # None of the guard entries failed - a backend match issue
         cached_desc = describe_backend(cache_entry_backend)
         new_desc = describe_backend(backend)
+        kind = "callables" if callable(cache_entry_backend or backend) else "cache keys"
         reason = (
-            f"BACKEND_MATCH failure: torch.compile detected different backend callables."
+            f"BACKEND_MATCH failure: torch.compile detected different backend {kind}."
             f" Cached backend: {cached_desc}."
             f" New backend: {new_desc}."
             " If this is unexpected, wrap your backend in functools.partial (or reuse the"

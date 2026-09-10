@@ -58,7 +58,7 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
-    reset_code,
+    reset_code as _reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
@@ -309,10 +309,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             if not convert_frame.has_tensor_in_frame(frame):
                 return ConvertFrameReturn()
 
-            from torch._C._dynamo.eval_frame import (
-                _debug_get_cache_entry_list,
-                _debug_get_precompile_entries,
-            )
+            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
             from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
 
             message = (
@@ -321,7 +318,12 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                 + f"function name: '{frame.f_code.co_name}', "
                 + f"line number: {frame.f_lineno}"
             )
-            cache_entries = _debug_get_cache_entry_list(frame.f_code)
+            # The buckets the lookup consulted: the region's own, then the
+            # default bucket an isolated region falls back to.
+            region_id = get_eval_frame_isolate_recompiles_id()
+            cache_entries = _get_cache_entries_for_region(frame.f_code, region_id)
+            if region_id >= 0:
+                cache_entries += _get_cache_entries_for_region(frame.f_code, -1)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
                     cache_entries,
@@ -335,7 +337,11 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                         f"triggered by the following guard failure(s):\n{failures}"
                     )
                     message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
-            precompile_entries = _debug_get_precompile_entries(frame.f_code)
+            precompile_entries = [
+                e
+                for e in _debug_get_precompile_entries(frame.f_code)
+                if e.isolate_recompiles_id == region_id
+            ]
             if len(precompile_entries) > 0:
                 message += "\nFailed on the following precompiled guards: "
                 for entry in precompile_entries:
@@ -688,6 +694,21 @@ class OptimizedModule(torch.nn.Module):
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
         ]
+
+
+def reset_code(code: types.CodeType) -> None:
+    """
+    Drop all cached compiled products for ``code``, forcing a recompile.
+
+    Wraps the raw C binding under ``compile_lock``: an in-flight compile holds
+    a snapshot of this code's cache entries (recompile-reason logging,
+    cache-size accounting) and the reset frees those nodes in place, so a
+    concurrent COMPILE must be excluded per the contract in ``extra_state.h``.
+    """
+    from .convert_frame import compile_lock
+
+    with compile_lock:
+        _reset_code(code)
 
 
 def remove_from_cache(f: Any) -> None:
