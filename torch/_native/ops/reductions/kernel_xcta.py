@@ -91,9 +91,11 @@ class FusedTwoStage:
         stream: cuda.CUstream,
     ):
         s1 = self.s1
-        # Stage 1 emits raw accumulators. Runtime rolled-loop counts share a kernel
-        # across N; wide sub-rows coalesce directly, so omit TMA and unused axis arguments.
-        s1.kernel([mX], parts, s1_nchunks, s1_nwaves, project_n, None, None).launch(
+        # Stage 1 emits raw accumulators. Runtime loop counts share a kernel across N;
+        # wide sub-rows coalesce directly, so omit TMA and unused axis arguments.
+        s1.kernel(
+            [mX], parts, None, s1_nchunks, s1_nwaves, project_n, None, None
+        ).launch(
             grid=[cute.ceil_div(mX.shape[0], const_expr(s1.rows_per_block)), 1, 1],
             block=[const_expr(s1.nt), 1, 1],
             stream=stream,

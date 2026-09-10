@@ -454,6 +454,9 @@ def _try_fast_row(
         return None
     from . import kernel_rowtile as rt
 
+    # Packed rows floor at one warp (25% utilized at N=32); tpr=1 needs no merge.
+    if rt.narrow_row(N, x.element_size(), x.shape[0]):
+        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts, tpr=1)
     if _oneshot_ok(x):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
     from . import kernel_xcta as xc
