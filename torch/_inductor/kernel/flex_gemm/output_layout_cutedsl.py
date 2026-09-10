@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-"""CuTeDSL views for PyTorch-owned FlexGEMM output layouts."""
+"""CuTeDSL implementations of PyTorch-owned FlexGEMM output layouts."""
 
 import cutlass
 import cutlass.cute as cute
@@ -14,7 +14,7 @@ def blocked_128x4_fake_shape(batch, _rows, _cols):
 def blocked_128x4_output_tensor(
     tensor: cute.Tensor, transposed: cutlass.Constexpr[bool]
 ) -> cute.Tensor:
-    """Expose a blocked carrier as a logical matrix in candidate orientation."""
+    """Expose blocked storage in its ordinary logical orientation."""
     layout = cute.make_layout(
         (
             tensor.shape[0],
