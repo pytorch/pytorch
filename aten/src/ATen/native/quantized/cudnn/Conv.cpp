@@ -115,11 +115,11 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     at::SmallVector<void *, 7> data_ptrs;
     at::SmallVector<int64_t, 7> uids;
     data_ptrs = {input.mutable_data_ptr<int8_t>(), maybe_padded_weight_.mutable_data_ptr<int8_t>(),
-                 requantize_multiplier_tensor.data_ptr(), quantized_output.mutable_data_ptr<int8_t>()};
+                 const_cast<void*>(requantize_multiplier_tensor.const_data_ptr()), quantized_output.mutable_data_ptr<int8_t>()};
     uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
-      data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
-                                         broadcasted_bias.value().data_ptr()});
+      data_ptrs.insert(data_ptrs.end(), {const_cast<void*>(broadcasted_bias.value().const_data_ptr()), const_cast<void*>(bias_multiplier_tensor.value().const_data_ptr()),
+                                         const_cast<void*>(broadcasted_bias.value().const_data_ptr())});
       uids.insert(uids.end(), {'b', 'c', 'd'});
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
