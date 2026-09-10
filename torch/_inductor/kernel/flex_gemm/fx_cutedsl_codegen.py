@@ -3,7 +3,7 @@
 
 ``gemm_epilogue_analysis`` identifies grouped layouts, local reductions, and
 grouped main-output lanes in the FX graph. This module binds those results to
-QuACK-owned stores and ``materialize_flex_gemm_epimod`` then changes only the
+QuACK-owned stores and ``materialize_flex_gemm_epilogue`` then changes only the
 emission boundary, preserving the analysis as the semantic source of truth.
 """
 
@@ -22,9 +22,9 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     use_cutedsl_fast_math,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR,
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
     INDEXED_OUTPUT_STORE_ARG_NAME,
@@ -53,17 +53,17 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedReduction,
 )
 from torch._inductor.kernel.gemm_epilogue_analysis import (
+    build_output_contraction_plan,
     GemmIndexedOutputStore,
     GemmLocalReduceAnalysis,
     GemmLocalReduceMatch,
     GemmOutputLocalReducePlan,
     GemmOutputPlan,
-    grouped_main_output_match,
-    match_gemm_local_reduce_output_storage,
+    match_flex_gemm_local_reduce_output_storage,
 )
 from torch._inductor.kernel.gemm_epilogue_codegen import (
+    _cute_arg,
     canonical_tensorssa_reduction_type,
-    gemm_epilogue_arg,
     gemm_epilogue_source_expr,
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
@@ -350,7 +350,7 @@ def reject_unplanned_reductions(
             raise NotImplementedError(LOCAL_REDUCE_UNPLANNED_ERROR)
 
 
-def validate_output_storage_transforms(
+def validate_output_layout_transforms(
     graph: GemmEpilogueGraph,
     outputs: GemmOutputPlan,
 ) -> None:
@@ -360,7 +360,7 @@ def validate_output_storage_transforms(
         store.node if store is not None and store.output_storage is not None else None
     )
     if any(
-        match_gemm_local_reduce_output_storage(node) is not None
+        match_flex_gemm_local_reduce_output_storage(node) is not None
         and node is not selected_node
         for node in graph.dependencies
     ):
@@ -379,10 +379,10 @@ class FlexGemmEpilogueAnalysis:
     gemm: torch.fx.Node
     outputs: GemmOutputPlan
     local_reduce: GemmLocalReduceAnalysis
-    grouped_select_indices: dict[torch.fx.Node, int] = dataclasses.field(
+    output_contraction_select_indices: dict[torch.fx.Node, int] = dataclasses.field(
         default_factory=dict
     )
-    grouped_main_layouts: dict[torch.fx.Node, GroupedTensorSSALayout] = (
+    output_contraction_layouts: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = (
         dataclasses.field(default_factory=dict)
     )
 
@@ -393,18 +393,18 @@ class FlexGemmEpilogueAnalysis:
         """Analyze reductions and an optional grouped main-output transform."""
         local_reduce = GemmLocalReduceAnalysis.from_graph_module(graph_module, gemm)
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
-        validate_output_storage_transforms(local_reduce.graph, outputs)
+        validate_output_layout_transforms(local_reduce.graph, outputs)
         reject_unplanned_reductions(local_reduce, outputs)
         if outputs.indexed_output is not None and outputs.output_storage_nodes:
             raise NotImplementedError(
                 "FlexGEMM indexed outputs do not compose with terminal dtype views"
             )
-        grouped_main = grouped_main_output_match(
+        contraction_plan = build_output_contraction_plan(
             outputs.output_storage or outputs.output,
             gemm,
             local_reduce,
         )
-        if grouped_main is None:
+        if contraction_plan is None:
             gemm_meta = gemm.meta.get("val")
             output_meta = outputs.output.meta.get("val")
             if (
@@ -420,27 +420,27 @@ class FlexGemmEpilogueAnalysis:
             and (
                 outputs.aux_outputs != (gemm,)
                 or outputs.local_reduce is not None
-                or grouped_main.transform.group != 2
-                or grouped_main.transform.chunked
+                or contraction_plan.transform.group != 2
+                or contraction_plan.transform.chunked
             )
         ):
-            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+            raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
         if (
-            grouped_main.transform.chunked
+            contraction_plan.transform.chunked
             and outputs.local_reduce is not None
             and outputs.local_reduce.match.physical_span == 1
         ):
             raise NotImplementedError(
                 "chunked grouped main outputs do not compose with grouped reductions"
             )
-        grouped_main.commit_guards()
+        contraction_plan.commit_guards()
         local_reduce.commit_output_guards(outputs)
         return cls(
             gemm,
-            dataclasses.replace(outputs, main_transform=grouped_main.transform),
+            dataclasses.replace(outputs, output_contraction=contraction_plan.transform),
             local_reduce,
-            grouped_main.select_indices,
-            grouped_main.layouts,
+            contraction_plan.select_indices,
+            contraction_plan.layouts,
         )
 
     @property
@@ -451,9 +451,9 @@ class FlexGemmEpilogueAnalysis:
         )
         if self.outputs.local_reduce is not None:
             geometries.add(self.outputs.local_reduce.match.geometry)
-        if self.outputs.main_transform is not None:
+        if self.outputs.output_contraction is not None:
             geometries.add(
-                FlexGemmLocalReduceGeometry(self.outputs.main_transform.group, 1)
+                FlexGemmLocalReduceGeometry(self.outputs.output_contraction.group, 1)
             )
         return tuple(geometries)
 
@@ -492,10 +492,10 @@ def gemm_node(
 
 def flex_gemm_epilogue_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
     """Adapt one FlexGEMM FX value to the shared CuTeDSL expression frontend."""
-    return gemm_epilogue_arg(value, env, "FlexGEMM")
+    return _cute_arg(value, env, "FlexGEMM")
 
 
-class FlexGemmTensorSSAOpOverrides(GemmEpilogueCuteDSLOpOverrides):
+class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
     """Add PyTorch NaN propagation to the shared TensorSSA operation lowering."""
 
     @staticmethod
@@ -517,28 +517,28 @@ class FlexGemmTensorSSAOpOverrides(GemmEpilogueCuteDSLOpOverrides):
 
     @staticmethod
     def minimum(a: Any, b: Any) -> Any:
-        return FlexGemmTensorSSAOpOverrides.nan_propagating_minmax(a, b, "min")
+        return FlexGemmCuteDSLOpOverrides.nan_propagating_minmax(a, b, "min")
 
     @staticmethod
     def maximum(a: Any, b: Any) -> Any:
-        return FlexGemmTensorSSAOpOverrides.nan_propagating_minmax(a, b, "max")
+        return FlexGemmCuteDSLOpOverrides.nan_propagating_minmax(a, b, "max")
 
     @staticmethod
     def clamp(x: Any, min: Any = None, max: Any = None) -> Any:
         result = x
         if min is not None:
-            result = FlexGemmTensorSSAOpOverrides.maximum(result, min)
+            result = FlexGemmCuteDSLOpOverrides.maximum(result, min)
         if max is not None:
-            result = FlexGemmTensorSSAOpOverrides.minimum(result, max)
+            result = FlexGemmCuteDSLOpOverrides.minimum(result, max)
         return result
 
     @staticmethod
     def clamp_min(x: Any, min: Any) -> Any:
-        return FlexGemmTensorSSAOpOverrides.maximum(x, min)
+        return FlexGemmCuteDSLOpOverrides.maximum(x, min)
 
     @staticmethod
     def clamp_max(x: Any, max: Any) -> Any:
-        return FlexGemmTensorSSAOpOverrides.minimum(x, max)
+        return FlexGemmCuteDSLOpOverrides.minimum(x, max)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -871,7 +871,7 @@ def epimod_local_reduce_spec(
     return spec
 
 
-class FlexGemmEpiModEmitter:
+class FlexGemmEpilogueEmitter:
     """Emit QuACK EpiMod source from shared FlexGEMM analysis."""
 
     def __init__(
@@ -892,7 +892,9 @@ class FlexGemmEpiModEmitter:
         self.analysis = analysis
         self.outputs = analysis.outputs
         self.local_reduce = self.outputs.local_reduce
-        self.grouped_select_indices = analysis.grouped_select_indices
+        self.output_contraction_select_indices = (
+            analysis.output_contraction_select_indices
+        )
         self.terminal_rewrites = self.outputs.terminal_rewrites
         self.local_reduce_spec: FlexGemmEpiModLocalReduceSpec | None = None
         self.local_reduce_prepass: FlexGemmEpiModReductionSpec | None = None
@@ -973,13 +975,13 @@ class FlexGemmEpiModEmitter:
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
-        grouped_tensors = analysis.grouped_main_layouts | (
+        grouped_tensors = analysis.output_contraction_layouts | (
             analysis.local_reduce.grouped_tensors
             if self.local_reduce_fragment_reduced
             else {}
         )
         self.grouped_layouts = {
-            node: layout
+            node: GroupedTensorSSALayout(layout.group, layout.axis)
             for node, layout in grouped_tensors.items()
             if view_or_reshape_args(node) is not None
             or node.target is torch.ops.aten.split.Tensor
@@ -1115,7 +1117,7 @@ class FlexGemmEpiModEmitter:
         )
         with (
             V.set_kernel_handler(kernel),
-            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
+            V.set_ops_handler(FlexGemmCuteDSLOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -1150,7 +1152,7 @@ class FlexGemmEpiModEmitter:
         env = dict(self.base_env)
         with (
             V.set_kernel_handler(kernel),
-            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
+            V.set_ops_handler(FlexGemmCuteDSLOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -1198,12 +1200,12 @@ class FlexGemmEpiModEmitter:
                     dtype=torch.float32,
                     shape=(1,),
                 )
-                for index in range(layout.group_size)
+                for index in range(layout.group)
             )
         else:
             self.env[node] = grouped
 
-    def lower_grouped_main_select(self, node: torch.fx.Node, index: int) -> None:
+    def lower_output_contraction_select(self, node: torch.fx.Node, index: int) -> None:
         """Select one analysis-validated lane from a grouped TensorSSA value."""
         source = flex_gemm_epilogue_arg(node.args[0], self.env)
         expression = (
@@ -1277,7 +1279,7 @@ class FlexGemmEpiModEmitter:
             )
         match = self.local_reduce.match
         geometry = match.geometry
-        layout = GroupedTensorSSALayout(geometry.axis, geometry.group)
+        layout = GroupedTensorSSALayout(geometry.group, geometry.axis)
         if isinstance(sink.reduction, NormalizedPrepareSoftmax):
             return self.lower_online_softmax_fragment_partial(source, layout)
         kind = sink.reduction.reduction_type
@@ -1291,7 +1293,7 @@ class FlexGemmEpiModEmitter:
             # QuACK collects this sink at physical fragment width; broadcast the
             # logical group value across both paired lanes.
             physical = GroupedTensorSSALayout(
-                geometry.axis, match.physical_geometry.group
+                match.physical_geometry.group, geometry.axis
             )
             self.local_reduce_sink_value = self.generate_like(
                 f"{reduced}.reshape({physical.keepdim_shape('acc')})"
@@ -1312,7 +1314,7 @@ class FlexGemmEpiModEmitter:
         )
         with (
             V.set_kernel_handler(self.kernel),
-            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
+            V.set_ops_handler(FlexGemmCuteDSLOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -1339,9 +1341,9 @@ class FlexGemmEpiModEmitter:
                 if node in self.grouped_layouts:
                     self.lower_grouped_layout(node, self.grouped_layouts[node])
                     continue
-                if node in self.grouped_select_indices:
-                    self.lower_grouped_main_select(
-                        node, self.grouped_select_indices[node]
+                if node in self.output_contraction_select_indices:
+                    self.lower_output_contraction_select(
+                        node, self.output_contraction_select_indices[node]
                     )
                     continue
                 if node in self.terminal_rewrites:
@@ -1400,7 +1402,7 @@ class FlexGemmEpiModEmitter:
             flex_gemm_epilogue_arg(output, self.env)
             for output in self.outputs.aux_outputs
         )
-        main_name = "main" if self.outputs.main_transform is not None else "D"
+        main_name = "main" if self.outputs.output_contraction is not None else "D"
         result_items = [
             (main_name, main_result),
             *zip(aux_names, aux_results, strict=True),
@@ -1474,7 +1476,7 @@ class FlexGemmEpiModEmitter:
             f"{self.epilogue_arg_kinds!r}"
         )
         key = hashlib.sha256(key_payload.encode()).hexdigest()[:16]
-        name = f"flex_gemm_epimod_{key}"
+        name = f"flex_gemm_epilogue_{key}"
         combine_name = None
         combine_source = ""
         if combine_lines:
@@ -1567,7 +1569,7 @@ class FlexGemmEpiModEmitter:
         return self.render()
 
 
-def materialize_flex_gemm_epimod(
+def materialize_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
     analysis: FlexGemmEpilogueAnalysis,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...],
@@ -1580,7 +1582,7 @@ def materialize_flex_gemm_epimod(
     mainloop_scale_count: int = 0,
 ) -> FlexGemmEpiModSource:
     """Materialize an analyzed FlexGEMM body as QuACK EpiMod source."""
-    return FlexGemmEpiModEmitter(
+    return FlexGemmEpilogueEmitter(
         graph_module,
         analysis,
         epilogue_arg_placeholders,
