@@ -312,19 +312,23 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             "cutlass.min(cutlass.max(x, lower), upper)",
         )
 
-    def test_scalar_callback_division_respects_fast_math(self):
+    def test_tensorssa_math_respects_fast_math(self):
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            use_cutedsl_fast_math,
+        )
         from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmScalarCallbackOpOverrides,
+            FlexGemmTensorSSAOpOverrides,
         )
 
-        self.assertEqual(
-            FlexGemmScalarCallbackOpOverrides(False).truediv("a", "b"),
-            "epi_math.divide(a, b, fast=False)",
-        )
-        self.assertEqual(
-            FlexGemmScalarCallbackOpOverrides(True).truediv("a", "b"),
-            "epi_math.divide(a, b, fast=True)",
-        )
+        with use_cutedsl_fast_math(False):
+            self.assertEqual(
+                FlexGemmTensorSSAOpOverrides.sqrt("a"), "cute.math.sqrt(a)"
+            )
+        with use_cutedsl_fast_math(True):
+            self.assertEqual(
+                FlexGemmTensorSSAOpOverrides.sqrt("a"),
+                "cute.math.sqrt(a, fastmath=True)",
+            )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -1687,7 +1691,7 @@ class FlexGemmTestCase(TestCase):
     def assertNvfp4ScaleCode(self, code, max_value=6.0):
         """Check direct E4M3 scale rounding in generated code."""
         precise_division = (
-            f"epi_math.divide(value, {max_value!r}, fast=False)",
+            f"(value / cute.full_like(value, {max_value!r}))",
             f"/ cute.full_like(local_reduce0, {max_value!r})",
         )
         self.assertTrue(any(expression in code for expression in precise_division))
@@ -2352,6 +2356,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.ops.aten._grouped_mm.default, (x, w_t, offs), lambda acc: acc
             )
 
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_grouped_mm_quack_pinned_config_rejects_varlen_gaps(self):
         import torch.nn.functional as F
 
@@ -2510,7 +2515,37 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_generated_captured_arg_rejects_reduction_finalizer_read(self):
+    def test_generated_captured_scalar_scales_reduction_finalizer(self):
+        m, n, group = 64, 64, 16
+
+        def epilogue_fn(acc, scale):
+            return acc, acc.float().view(m, -1, group).sum(-1) * scale
+
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, scale),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 32, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(32, n, device="cuda", dtype=torch.bfloat16)
+        scale = torch.full((1, 1), 2.5, device="cuda")
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
+        )
+        self.assertLocalReduceAuxMatches(
+            actual, aux, a, b, lambda acc: epilogue_fn(acc, scale.double())
+        )
+        FileCheck().check("_local_reduce_finalize(value, operand0)").check(
+            "finalize_operands=('operand0',)"
+        ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_generated_captured_vector_rejects_reduction_finalizer_read(self):
         m = 64
 
         def fn(a, b, scale):
@@ -2523,11 +2558,56 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(m, 32, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16)
-        scale = torch.full((1, 1), 2.0, device="cuda")
+        scale = torch.full((m, 1), 2.0, device="cuda")
         with self.assertRaisesRegex(
             Exception, "cannot be read while finalizing a compressed grouped reduction"
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_grouped_finalizer_preserves_integer_inline_asm_results(self):
+        from torch._higher_order_ops.inline_asm_elementwise import (
+            inline_asm_elementwise,
+        )
+
+        m, n, k, group = 64, 128, 32, 16
+
+        def epilogue_fn(acc):
+            total = acc.float().view(m, -1, group).sum(-1)
+            bits = inline_asm_elementwise(
+                total,
+                asm_str="mov.b32 $0, 16777217;",
+                constraints="=r,f",
+                dtype=torch.int32,
+            )
+            shifted = inline_asm_elementwise(
+                bits,
+                asm_str="sub.s32 $0, $1, 16777216;",
+                constraints="=r,r",
+                dtype=torch.int32,
+            )
+            return acc, shifted.float()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        torch.testing.assert_close(actual, a @ b)
+        self.assertEqual(aux, torch.ones(m, n // group, device="cuda"))
+        FileCheck().check("_local_reduce_finalize(value)").check(
+            "result_type=cutlass.Int32"
+        ).check("result_type=cutlass.Int32").run(code)
 
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_generated_captured_arg_rejects_addmm_scope(self):
@@ -3759,9 +3839,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             rtol=2e-3,
         )
         self.assertAssociativeReduceCode(code, group)
-        FileCheck().check("epi_math.exp(lhs[0] - maximum, fast=False)").check(
-            "epi_math.log(state[1], fast=False)"
-        ).run(code)
+        FileCheck().check(
+            "cute.where(operator.eq(lhs[0], maximum), one, cute.math.exp2((lhs[0] - maximum) * "
+        ).check("_local_reduce_finalize(state):").check("cute.math.log(state[1])").run(
+            code
+        )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -5993,7 +6075,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
-        FileCheck().check("epi_math.sqrt").check("finalize=").run(code)
+        FileCheck().check("cute.math.sqrt").check("finalize=").run(code)
         self.assertLocalReduceAuxCode(code, group, axis=0)
 
     @skipIfNoCuteDSL
@@ -6440,12 +6522,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     (x - x.amax(-1, keepdim=True)).exp().sum(-1, keepdim=True).log()
                     + x.amax(-1, keepdim=True)
                 ).view(x.shape[0], -1),
-                "epi_math.log",
+                "cute.math.log",
             ),
             (
                 "logsumexp_method",
                 lambda x: x.logsumexp(-1),
-                "epi_math.log",
+                "cute.math.log",
             ),
         ),
         name_fn=lambda case: case[0],
