@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
-"""Lower FlexGEMM HOP bodies through ordinary Inductor or QuACK EpiMod.
+"""Lower FlexGEMM HOP bodies and connect epilogue analysis to backend templates.
 
-``flex_gemm_lowering`` dispatches non-QUACK requests through ordinary subgraph
-lowering and routes QUACK requests through shared analysis and one EpiMod choice.
+``flex_gemm_lowering`` is the main entry point. Non-QUACK
+requests execute the captured body through ordinary Inductor lowering. Although this
+is stale and will fix up later on. See ``lower_quack_flex_gemm`` for the flow.
 """
 
 from __future__ import annotations
@@ -301,7 +302,7 @@ def validate_flex_gemm_aux_outputs(
 def allocate_flex_gemm_aux_outs(
     aux_metas: tuple[Any, ...], mat1: TensorBox
 ) -> tuple[TensorBox, ...]:
-    """Allocate same-shape aux output buffers beside the main GEMM output."""
+    """Allocate auxiliary buffers with their requested dense strides."""
     return tuple(
         empty_strided(
             ir.convert_shape_to_inductor(aux_meta.shape),
@@ -381,7 +382,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
           find GEMM operands and captured epilogue args
                          |
                          v
-             FlexGemmEpilogueAnalysis.from_graph_module()
+             analyze_flex_gemm_epilogue()
                          |
                          +--> output plan + buffer ABI
                          |        `--> derive layout + allocate aux
@@ -390,10 +391,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                          |        `--> flex_gemm_candidate_configs()
                          |
                          `--> materialize_flex_gemm_epilogue()
-                                  `--> QuACK EpiMod source + EpiOp specs
+                                  `--> CuTeDSL epilogue + callbacks
                          |
                          v
-             combine into template choices -> autotune_select_algorithm
+             combine into template choices -> autotune
                          |
                          v
               restore captured output order

@@ -106,7 +106,7 @@ class FlexGemmEpilogueConfig:
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
-    """Render one generated FlexGEMM EpiMod wrapper."""
+    """Render generated FlexGEMM epilogue modules with a compile-only hook."""
 
     @override
     def render(self, template, **kwargs):
