@@ -46,7 +46,8 @@ _ATTR_PREFIX = "CUPTI_ACTIVITY_ATTR_"
 # Ctype (decode interpretation); the byte width comes from CUPTI's captured layout, not here.
 _CHAR_PTR_DECL_RE = re.compile(r"(?:const\s+)?char\s*\*")
 # Trailing count sentinel each field enum ends with (``*_FIELD_MAX``); not a real field.
-_SENTINEL_SUFFIXES = ("MAX", "FORCE_INT")
+# CUPTI 13.4 added ``CUPTI_ACTIVITY_ATTR_COUNT`` as the attribute enum's sentinel.
+_SENTINEL_SUFFIXES = ("MAX", "FORCE_INT", "COUNT")
 # CUPTI_API_VERSION lives in the sibling cupti_version.h; stamped into the generated
 # module (with the header's sha256) so its provenance -- which CUPTI ABI it came from
 # -- is self-evident.

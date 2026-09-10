@@ -307,9 +307,14 @@ class CuspyObserver:
     @staticmethod
     def _with_graph_fields(activities: Any) -> dict[int, set[int]]:
         """Augment a field map so the graph resolver can name nodes: add each GPU-op kind's
-        GRAPH_NODE_ID. Collection-free (it's a normal record field, no extra kinds, stays on
-        the vectorized path). Expects a ``{kind: fields}`` map."""
-        from torch.profiler._cuspy.records import GRAPH_NODE_FIELD
+        GRAPH_NODE_ID, plus its SOURCE_GRAPH_NODE_ID where the CUPTI ABI has one (the key an
+        annotation kept on its capture graph is under). Collection-free (normal record
+        fields, no extra kinds, stays on the vectorized path). Expects a ``{kind: fields}``
+        map."""
+        from torch.profiler._cuspy.records import (
+            GRAPH_NODE_FIELD,
+            SOURCE_GRAPH_NODE_FIELD,
+        )
 
         aug: dict[int, set[int]] = {}
         for kind, sel in dict(activities).items():
@@ -317,6 +322,8 @@ class CuspyObserver:
             fields = {int(f) for f in sel}
             if k in GRAPH_NODE_FIELD:
                 fields.add(GRAPH_NODE_FIELD[k])
+            if k in SOURCE_GRAPH_NODE_FIELD:
+                fields.add(SOURCE_GRAPH_NODE_FIELD[k])
             aug[k] = fields
         return aug
 
