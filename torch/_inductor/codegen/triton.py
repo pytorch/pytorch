@@ -27,6 +27,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -159,6 +160,12 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
+
+_R_NUMEL_REUSE_SYMBOL_TYPES = (
+    SymT.SIZE,
+    SymT.UNBACKED_INT,
+    SymT.PRECOMPUTED_SIZE,
+)
 
 
 def get_triton_reduction_function(reduction_type):
@@ -3314,6 +3321,92 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     )
     transpose_discontiguous_tensor_descriptors_override: bool | None = None
 
+    def finalize_indexing(self, indices: Sequence[sympy.Expr]) -> None:
+        super().finalize_indexing(indices)
+        self._finalize_r_numel_reuse(indices)
+
+    def _finalize_r_numel_reuse(self, indices: Sequence[sympy.Expr]) -> None:
+        """Select profitable indexing expressions to rewrite with ``rN_numel``.
+        The goal is to reuse an existing ``rN_numel`` kernel argument when
+        doing so eliminates an ordinary scalar size argument from the kernel.
+
+        1. Collect size symbols from all ordinary indexing and range-tree
+           expressions.
+        2. Simulate every exact reduction-extent replacement with the
+           corresponding existing ``rN_numel`` argument. Simulating them
+           together detects
+           arguments that become unused only after multiple replacements.
+        3. Record the size symbols absent from the fully rewritten expressions.
+        4. During source emission, keep only replacements involving one of
+           these eliminated symbols, avoiding neutral indexing rewrites.
+        """
+        self._r_numel_reuse_eliminated_symbols.clear()
+        self._r_numel_reuse_replacements.clear()
+        # Staged reductions emit some symbolic indexing expressions after
+        # this prepass, so we cannot prove that a size argument is unused.
+        if self.features.indexing_node_schedule is not self.features.node_schedule:
+            return
+
+        for prefix, numel in self.numels.items():
+            if not prefix_is_reduction(prefix):
+                continue
+            if has_free_symbols(numel):
+                r_numel_symbol = sympy.Symbol(
+                    f"{prefix}numel", integer=True, nonnegative=True
+                )
+                self._r_numel_reuse_replacements[r_numel_symbol] = numel
+
+        # Only these symbols become ordinary ks* size arguments, which are the
+        # kernel arguments this profitability check is intended to eliminate.
+        def size_symbols(exprs: Iterable[sympy.Expr]) -> OrderedSet[sympy.Symbol]:
+            return OrderedSet(
+                symbol
+                for expr in exprs
+                for symbol in expr.free_symbols
+                if symbol_is_type(symbol, _R_NUMEL_REUSE_SYMBOL_TYPES)
+            )
+
+        all_indexing_exprs = [
+            *indices,
+            *(entry.expr for entry in self.range_tree_nodes.values()),
+        ]
+        original_symbols = size_symbols(all_indexing_exprs)
+        rewritten_symbols = size_symbols(
+            self._replace_reduction_numel_in_index(index, simulate=True)
+            for index in all_indexing_exprs
+        )
+        self._r_numel_reuse_eliminated_symbols.update(
+            original_symbols - rewritten_symbols
+        )
+
+    def _replace_reduction_numel_in_index(
+        self, index: sympy.Expr, *, simulate: bool = False
+    ) -> sympy.Expr:
+        # Real emission has nothing profitable to rewrite.
+        if not simulate and not self._r_numel_reuse_eliminated_symbols:
+            return index
+
+        # The kernel has no dynamic reduction extent available for reuse.
+        if not self._r_numel_reuse_replacements:
+            return index
+
+        replacements = {}
+        for (
+            r_numel_symbol,
+            equivalent_extent_expr,
+        ) in self._r_numel_reuse_replacements.items():
+            # Keep only replacements that eliminate a scalar kernel argument.
+            if simulate or equivalent_extent_expr.free_symbols.intersection(
+                self._r_numel_reuse_eliminated_symbols
+            ):
+                replacements.setdefault(equivalent_extent_expr, r_numel_symbol)
+        return index.xreplace(replacements)
+
+    def index_to_str(self, index: sympy.Expr) -> str:
+        if isinstance(index, sympy.Expr):
+            index = self._replace_reduction_numel_in_index(index)
+        return super().index_to_str(index)
+
     def __init__(
         self,
         tiling: dict[str, sympy.Expr],
@@ -3327,6 +3420,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
+        self._r_numel_reuse_eliminated_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+        self._r_numel_reuse_replacements: dict[sympy.Symbol, sympy.Expr] = {}
         self.is_combo_kernel: bool = is_combo_kernel
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
@@ -4551,7 +4646,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         index_str = indexing.index_str
         mask_str = indexing.mask_str if indexing.has_mask() else None
-        size_str = texpr(self.rename_indexing(size)) if upper else None
+        size_str = self.index_to_str(size) if upper else None
 
         # expr is already wrapped
         line = self.indirect_assert(
@@ -7766,7 +7861,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if tree.is_reduction and self.persistent_reduction:
                 if self.cooperative_reduction:
-                    numel = self.kexpr(self.rename_indexing(tree.numel))
+                    numel = self.index_to_str(tree.numel)
                     val = f"triton_helpers.constexpr_next_power_of_2(({numel} + RSPLIT - 1) // RSPLIT)"
                 else:
                     val = self._get_persistent_reduction_block(tree.numel)
@@ -7855,7 +7950,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return TritonCSEVariable(*args, **kwargs)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
-        line = f"{entry.name} = {self.kexpr(self.rename_indexing(entry.expr))}"
+        line = f"{entry.name} = {self.index_to_str(entry.expr)}"
 
         # mix order reduction introduces an extra loop across the x
         # dimension
