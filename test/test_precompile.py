@@ -572,6 +572,10 @@ class _PrecompileTrainMod(torch.nn.Module):
         return torch.relu(self.b(torch.relu(self.a(x))))
 
 
+def _precompile_backward_step(model, x):
+    model(x).sum().backward()
+
+
 # Training captures: model, entry, input width; the second row breaks the graph.
 _PRECOMPILE_TRAINING_CASES = {
     "plain": (_PrecompileTrainMod, _precompile_call_model, 8),
@@ -1014,6 +1018,52 @@ _DRIFT_MODULE = None
 
 def _precompile_drift_entry(x):
     return _DRIFT_MODULE.scaled(x).sum()
+
+
+class _PrecompileDeadResultModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l = torch.nn.Linear(4, 4)
+
+
+def _precompile_dead_result(model, x):
+    # The result is unused, so the graph's output prunes to nothing -- the
+    # shape upstream short-circuits past the backend.
+    model.l(x)
+    return None
+
+
+def _precompile_grad_step(model, x):
+    loss = model(x).sum()
+    loss.backward()
+    return loss
+
+
+@torch._dynamo.allow_in_graph
+def _precompile_unkeyable(t):
+    """Not on AOTAutogradCache's allowlist, so it refuses to key the graph --
+    standing in for the get_external_object_by_index a sharded model emits."""
+    return t
+
+
+def _precompile_calls_unkeyable(model, x):
+    # On BOTH sides of the break, so the capture produces two graphs the cache
+    # will not key -- which is what makes their fallback keys collide.
+    y = _precompile_unkeyable(x)
+    torch._dynamo.graph_break()
+    return model(_precompile_unkeyable(y)).sum()
+
+
+def _precompile_mixed_keyability(model, x):
+    # Only SOME graphs are unkeyable, which is the shape that used to leave a
+    # capture with most of its backends recorded and the rest missing.
+    y = model(x).relu()
+    torch._dynamo.graph_break()
+    y = _precompile_unkeyable(y)
+    torch._dynamo.graph_break()
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return _precompile_unkeyable(y).cos()
 
 
 _PRECOMPILE_ACCUM_RAN: list[str] = []
@@ -6068,6 +6118,118 @@ class TestPrecompile(TestCase):
             loaded = _load_pair(code, cache)
             with _maybe_scoped(loaded), torch.no_grad():
                 self.assertEqual(loaded(x), (x * 3.0).sum())
+
+    @parametrize("tracer", ["make_fx", "dynamo"])
+    def test_capture_accumulates_gradients_like_eager(self, tracer):
+        # The caller makes the calls inside the block, so precompile has no
+        # example backward of its own: a grad already present when capture starts
+        # is neither cleared nor snapshotted. Both tracers run each cap() for
+        # real, so a .backward() ACCUMULATES onto the model's .grad exactly as
+        # eager does, and the same grad OBJECT stays in place (the make_fx driver
+        # accumulates in place onto a pre-existing grad, so optimizer state keyed
+        # on its identity survives).
+        torch.manual_seed(0)
+        model = _PrecompileTrainMod()
+        xs = [torch.randn(n, 8) for n in (3, 5)]
+        # make_fx captures a single call; dynamo takes as many as we make. Each
+        # captured call runs for real either way, so its backward lands on .grad.
+        capture_calls = xs[:1] if tracer == "make_fx" else xs
+        extra = {} if tracer == "make_fx" else {"dynamic": False}
+        with torch.enable_grad():
+            _precompile_backward_step(model, xs[0])  # warmup populates .grad
+            before = [(p.grad, p.grad.detach().clone()) for p in model.parameters()]
+            # Deepcopy drops .grad, so replay the warmup on the reference and
+            # then every captured call cap() executes for real, so the reference
+            # is warmup plus the captured calls' contribution.
+            reference = copy.deepcopy(model)
+            _precompile_backward_step(reference, xs[0])
+            for x in capture_calls:
+                _precompile_backward_step(reference, x)
+            with _CaptureToFiles(
+                _precompile_backward_step,
+                backend="eager",
+                tracer=tracer,
+                training=True,
+                **extra,
+            ) as cap:
+                for x in capture_calls:
+                    cap(model, x)
+        for p, (grad_object, _warmup), ref in zip(
+            model.parameters(), before, reference.parameters()
+        ):
+            self.assertIs(p.grad, grad_object)
+            self.assertEqual(p.grad, ref.grad)
+
+    def test_precompile_records_a_backend_for_a_short_circuited_noop_graph(self):
+        # A graph that runs nothing and returns nothing never reaches the
+        # backend: output_graph substitutes noop_graph_call rather than pay a
+        # metadata pass and a joint trace for it. Ordinary torch.compile then
+        # discards the frame, but capture sets allow_empty_graphs, so it stays
+        # compiled, its id lands in backend_ids, and nothing was ever filed for
+        # it -- which the harvest reported as a compiled graph that lost its
+        # code, failing the whole capture. Only the inductor path: the eager
+        # one turns every cached backend into an artifact already.
+        #
+        # is_noop_graph is forced rather than provoked, on a graph whose output
+        # IS already empty and whose one call is dead, so short-circuiting it
+        # changes nothing observable; what this pins is the packaging.
+        import torch._dynamo.output_graph as output_graph
+
+        fired = []
+
+        def force_noop(gm):
+            outs = list(gm.graph.find_nodes(op="output"))
+            empty = bool(outs) and all(_pytree.tree_leaves(n.args) == [] for n in outs)
+            fired.append(empty)
+            return empty
+
+        model = _PrecompileDeadResultModel()
+        x = torch.randn(2, 4)
+        with mock.patch.object(output_graph, "is_noop_graph", force_noop):
+            with torch.no_grad():
+                with _CaptureToFiles(
+                    _precompile_dead_result,
+                    tracer="dynamo",
+                    backend="inductor",
+                    dynamic=False,
+                    require_complete=False,
+                    require_no_risky_drops=False,
+                ) as cap:
+                    cap(model, x)
+                code, cache = cap.result()
+        self.assertTrue(any(fired), "the no-op short-circuit never fired")
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertIsNone(loaded(model, x))
+
+    @parametrize("entry", [_precompile_calls_unkeyable, _precompile_mixed_keyability])
+    def test_capture_records_a_graph_the_cache_will_not_key(self, entry):
+        # AOTAutogradCache refuses to KEY a graph calling anything outside its
+        # allowlist, and a refusal means it never saves -- so the bundled
+        # artifact was never recorded and the capture ended with nothing to
+        # serialize. Any sharded model hits this: threading a process group or
+        # a stream into a graph goes through exactly such a call. Backend
+        # recording is all-or-nothing, so a capture that keys most of its graphs
+        # and not the rest is the worst case; capture pins
+        # bypass_autograd_cache_key, so every graph is recorded either way.
+        model, x = torch.nn.Linear(8, 8).eval(), torch.randn(4, 8)
+        with torch.no_grad():
+            want = entry(model, x)
+            with _CaptureToFiles(
+                entry,
+                backend="inductor",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                require_complete=False,
+            ) as cap:
+                cap(model, x)
+            code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(model, x), want)
 
     def test_installed_artifact_reports_what_it_compiles_at_serve(self):
         # An installed artifact answers a guard miss by COMPILING, not by
