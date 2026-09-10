@@ -105,7 +105,7 @@ bool should_use_cublaslt_grouped_gemm(
 #if CUDA_VERSION >= 13040
   return true;
 #else
-  return at::globalContext().preferCublasltGroupedGemm();
+  return false;
 #endif
 }
 #endif
