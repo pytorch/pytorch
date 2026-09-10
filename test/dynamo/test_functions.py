@@ -5498,6 +5498,105 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(is_same)
         self.assertTrue(dict_eq)
 
+    def test_method_vt_richcompare(self):
+        """method_richcompare: == on func+receiver, ordering is a TypeError."""
+
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+            def n(self, x):
+                return x + 2
+
+        a, b = Counter(), Counter()
+
+        def fn(x):
+            return (
+                a.m == a.m,  # same func, same receiver
+                a.m is a.m,  # distinct objects every access
+                a.m == b.m,  # same func, different receiver
+                a.m == a.n,  # different func, same receiver
+                a.m != a.m,
+                x + 1,
+            )
+
+        x = torch.randn(3)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(got[:5], fn(x)[:5])
+        self.assertEqual(got[:5], (True, False, False, False, False))
+
+    def test_method_vt_richcompare_ordering_is_type_error(self):
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+        c = Counter()
+
+        def fn(x):
+            return c.m < c.m
+
+        with self.assertRaises(TypeError):
+            fn(torch.randn(3))
+        # Ordering is NotImplemented on both operands, so Python raises. Dynamo
+        # surfaces it as an observed exception, which becomes a TypeError again
+        # once the graph break lets the comparison run in eager.
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_fn(torch.randn(3))
+
+    def test_dunder_method_source_does_not_recompile(self):
+        """The corrected dunder source must be stable across calls.
+
+        AttrSource(TypeSource(src), "__len__") denotes type(obj).__len__, which
+        is a stable function. The previous obj.__len__ source denoted a bound
+        method rebuilt on every access, so guarding it could never match.
+        """
+
+        class Sized:
+            def __init__(self, n):
+                self.n = n
+
+            def __len__(self):
+                return self.n
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, obj):
+            return x + len(obj)
+
+        x = torch.randn(3)
+        obj = Sized(2)
+        fn(x, obj)
+        self.assertEqual(cnt.frame_count, 1)
+        # Same type, same __len__ function: must reuse the compiled code.
+        for _ in range(3):
+            fn(x, Sized(2))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_method_vt_dunder_get_returns_self(self):
+        """method.__get__ returns the method unchanged; it does not re-bind.
+
+        True on 3.10 and 3.13+, which have method.__get__. 3.12 lacks it, so
+        the attribute forwards to __func__ there and does re-bind.
+        """
+
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+        c = Counter()
+        other = Counter()
+
+        def fn(x):
+            g = c.m.__get__(other)
+            return (g.__self__ is c), g(x)
+
+        x = torch.randn(3)
+        same, out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertTrue(same)
+        self.assertEqual(out, x + 1)
+
     def test_method_still_inlines_after_vt_split(self):
         """Method calls, attribute access and reconstruction survive the split."""
 

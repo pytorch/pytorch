@@ -762,7 +762,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def as_python_constant(self) -> Any:
         if istype(self, UserFunctionVariable):
             return self.fn
-        # subclasses (such as methods) usually aren't a constant
+        # istype, not isinstance: the wrapper subclasses below stand for a
+        # decorated callable, not for `fn` itself. Methods are no longer
+        # subclasses of this class at all.
         return super().as_python_constant()
 
     def reconstruct_pycode(self, codegen):
@@ -773,6 +775,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
 
     def get_real_python_backed_value(self) -> Any:
+        # Same istype reasoning as as_python_constant above.
         if istype(self, UserFunctionVariable):
             return self.fn
         return super().get_real_python_backed_value()
@@ -994,6 +997,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 # closes over `self` and nonstrict_trace only ever sees the
                 # explicit arguments, which is what its input-type restriction
                 # expects.
+                #
+                # Two consequences of capturing rather than passing: the
+                # receiver never reaches nonstrict_trace's graphable-input
+                # check, which the decorated path applies to everything it is
+                # handed, and nothing guards type(obj).m, so rebinding the
+                # method on the class is not detected. guard_as_python_constant
+                # does install ID_MATCH on the receiver itself.
                 return variables.TorchInGraphFunctionVariable(
                     fn_var.guard_as_python_constant(),
                     kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE,
@@ -1032,6 +1042,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             ):
                 return super().call_function(tx, args, kwargs)
 
+        # FSDP2 registers _pre_forward/_post_forward as bound methods, but a
+        # UserMethodVariable never reaches this branch: its call_function chains
+        # to BaseUserFunctionVariable, not here, and module-hook dispatch unwraps
+        # the bound method before the call. Instrumenting the branch over an
+        # FSDP2 + activation-checkpointing run, every arrival was a
+        # UserFunctionVariable and none was a method VT, so widening the check
+        # to method VTs would be dead code.
         if (
             getattr(tx.output.current_tracer, "description", None)
             == "torch.utils.checkpoint.checkpoint"
@@ -1811,7 +1828,7 @@ class UserMethodVariable(BaseUserFunctionVariable):
 
     def __init__(
         self,
-        im_func: BaseUserFunctionVariable,
+        im_func: "UserFunctionVariable",
         im_self: VariableTracker,
         **kwargs: Any,
     ) -> None:
@@ -1847,7 +1864,7 @@ class UserMethodVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> dict[str, VariableTracker]:
-        return self.im_func.bind_args(parent, args, kwargs)  # type: ignore[attr-defined]
+        return self.im_func.bind_args(parent, args, kwargs)
 
     def should_allow_nested_graph_breaks(self) -> bool:
         return self.im_func.should_allow_nested_graph_breaks()
@@ -1881,6 +1898,39 @@ class UserMethodVariable(BaseUserFunctionVariable):
         if h == -1:
             h = -2
         return h, self_fake
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        # method_richcompare: only == and != are handled, and only against
+        # another method; anything else is NotImplemented, which is why
+        # `obj.m < obj.m` is a TypeError. im_func is compared by equality and
+        # im_self by identity. Ref method_richcompare in CPython
+        # Objects/classobject.c.
+        if op not in ("__eq__", "__ne__") or not isinstance(other, UserMethodVariable):
+            return variables.ConstantVariable.create(NotImplemented)
+
+        if self.get_function() is not other.get_function():
+            equal = False
+        else:
+            from .object_protocol import vt_identity_compare
+
+            same_self = vt_identity_compare(self.im_self, other.im_self)
+            if same_self is None:
+                # Receiver identity is not decidable at trace time. Returning
+                # NotImplemented here would fall back to comparing the method
+                # objects by identity, which is always False for two separate
+                # attribute reads, so break instead of answering wrongly.
+                unimplemented(
+                    gb_type="method comparison with undecidable receiver",
+                    context=f"{self} {op} {other}",
+                    explanation="Dynamo cannot tell at trace time whether the "
+                    "two bound methods share a receiver.",
+                    hints=[*graph_break_hints.DIFFICULT],
+                )
+            equal = same_self.as_python_constant()
+
+        return variables.ConstantVariable.create(equal if op == "__eq__" else not equal)
 
     def self_args(self) -> list[VariableTracker]:
         return [self.im_self]
@@ -1991,10 +2041,28 @@ class UserMethodVariable(BaseUserFunctionVariable):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L269
         return self.im_func.read_func_slot(tx, name)
 
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # A bound method is already bound and does not re-bind to a new
+        # receiver: on 3.10 and 3.14, bm.__get__(other) is bm.
+        return self
+
+    def _method_get(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # `bm.__get__` is a callable that returns the method, not the method
+        # itself, so hand back something callable that ignores its arguments.
+        # Verified on 3.10 and 3.14: bm.__get__(other) is bm and __self__ is
+        # preserved. 3.12 is the exception - it has no method.__get__, so the
+        # attribute forwards to __func__ and does re-bind.
+        return variables.LambdaVariable(lambda *args, **kwargs: self)
+
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
     tp_getset = {
-        "__get__": GetSet(lambda s, tx: s.im_func._get_dunder_get(tx), readonly_setter),  # type: ignore[attr-defined]
+        "__get__": GetSet(_method_get, readonly_setter),
     }
     tp_members = {
         "__self__": Member(lambda s, _: s.im_self, readonly_setter),

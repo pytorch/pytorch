@@ -2371,7 +2371,7 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
             torch._dynamo.variables.UserDefinedObjectVariable(
                 self.value, source=self.source
             ),
-            source=AttrSource(self.source, "__call__"),
+            source=call_source,
         ).call_function(tx, args, kwargs)
 
 
@@ -4463,7 +4463,18 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                     torch._dynamo.variables.functions.FunctoolsPartialVariable,
                 ),
             ):
-                context_fn = ctx.guard_as_python_constant()
+                # guard_as_python_constant graph-breaks when the receiver (or a
+                # partial argument) is not a constant. Report that against
+                # context_fn rather than letting the generic message escape.
+                from torch._dynamo.exc import Unsupported
+
+                try:
+                    context_fn = ctx.guard_as_python_constant()
+                except Unsupported as e:
+                    raise NotImplementedError(
+                        f"checkpoint could not resolve {type(ctx)} context_fn to a "
+                        f"Python callable: {e}"
+                    ) from e
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"

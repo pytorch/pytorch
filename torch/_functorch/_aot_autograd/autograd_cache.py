@@ -9,6 +9,7 @@ import contextlib
 import dataclasses
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -407,10 +408,19 @@ def _get_context_fn_cache_hash(context_fn: Callable[..., Any]) -> str | None:
     For functools.partial objects, set the cache_hash on the partial object itself, not on
     the underlying function.
 
+    A bound method is always treated as unhashable here. CPython rejects
+    setting an attribute on a bound method, so the only place a `cache_hash`
+    could live is the underlying function, where every receiver shares it -
+    two receivers selecting different checkpoint policies would collide on one
+    key. Bypassing the cache is the only sound option.
+
     Returns:
         The cache hash if found
         None: If no hash is provided (caller should bypass caching)
     """
+    if inspect.ismethod(context_fn):
+        return None
+
     if hasattr(context_fn, "cache_hash"):
         return context_fn.cache_hash
 

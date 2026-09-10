@@ -404,9 +404,13 @@ class NNModuleVariable(VariableTracker):
             )
             try:
                 return variables.UserMethodVariable(
-                    # Do not install a guard on __getattr__/__getattribute__: it makes
-                    # the module's guard manager tag-unsafe
-                    # (test_nn_module_tag_overridden_getattr_safe).
+                    # Keep this off VariableTracker.build. The builder installs
+                    # a guard on the accessor eagerly, which made the module's
+                    # guard manager tag-unsafe
+                    # (test/dynamo/test_guard_manager.py,
+                    # test_nn_module_tag_overridden_getattr_safe).
+                    # Constructing directly records the source and leaves the
+                    # guard to whoever consumes it.
                     variables.UserFunctionVariable(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -455,7 +459,8 @@ class NNModuleVariable(VariableTracker):
         source = AttrSource(obj_source, "__getattr__")
 
         return variables.UserMethodVariable(
-            # See the note above: no guard here, for tag safety.
+            # See the note in _custom_getattr_fallback above: off the builder
+            # so the accessor guard is not installed eagerly.
             variables.UserFunctionVariable(
                 getattr_fn, source=AttrSource(source, "__func__")
             ),

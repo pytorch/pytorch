@@ -906,10 +906,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         none_var = ConstantVariable.create(None)
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[union-attr]
+            variables.UserFunctionVariable(
                 # descriptor_get_source is type(descriptor).__get__, which is
                 # already the function; it has no __func__ to unwrap.
-                descriptor.__get__.__func__,
+                descriptor.__get__.__func__,  # type: ignore[union-attr]
                 source=descriptor_get_source,
             ),
             descriptor_var,
@@ -1206,18 +1206,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if name in klass.__dict__:
                     method = klass.__dict__[name]
                     if isinstance(method, types.FunctionType):
-                        source = self.source and AttrSource(self.source, name)
-                        # `method` comes from the metaclass MRO. `source` is
-                        # cls.name, which resolves through cls.__mro__ and can
-                        # land on a different object entirely (object.__repr__).
-                        # type(cls).name is the metaclass attribute itself.
+                        # `method` comes from the metaclass MRO, so
+                        # type(cls).name denotes it exactly. cls.name does not:
+                        # it resolves through cls.__mro__ first and can land on
+                        # a different object (object.__repr__ rather than the
+                        # metaclass __repr__). There is no expression for the
+                        # bound method itself, and hash_impl and
+                        # reconstruct_pycode both read the method VT's source,
+                        # so leave it unset rather than give them cls.name.
                         fn_source = self.source and AttrSource(
                             TypeSource(self.source), name
                         )
                         return variables.UserMethodVariable(
                             variables.UserFunctionVariable(method, source=fn_source),
                             self,
-                            source=source,
                         ).call_function(tx, args, kwargs)
                     break
 
@@ -3540,9 +3542,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             try:
                 return variables.UserMethodVariable(
-                    # Do not install a guard on __getattr__/__getattribute__: it makes
-                    # the module's guard manager tag-unsafe
-                    # (test_nn_module_tag_overridden_getattr_safe).
+                    # Keep this off VariableTracker.build. The builder installs
+                    # a guard on the accessor eagerly; constructing directly
+                    # records the source and leaves the guard to whoever
+                    # consumes it. This path is generic, but an nn.Module
+                    # reaching it with an eager guard here made the guard
+                    # manager tag-unsafe (test/dynamo/test_guard_manager.py,
+                    # test_nn_module_tag_overridden_getattr_safe).
                     variables.UserFunctionVariable(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -3724,10 +3730,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             var_source = None
             if can_use_mro_source:
                 var_source = self.get_source_by_walking_mro(tx, name)
-            # type_attr came from mro_lookup(type(self.value), name), so
-            # type(obj).name denotes it exactly. `source` is obj.name, which is
-            # a bound method for instances but the plain function on a class,
-            # so it cannot be unwrapped with __func__ uniformly.
+            # The MRO walk is not always available: can_use_mro_source also
+            # requires cls_source, and a torch function mode reaches here with
+            # self.source set but cls_source None, for __torch_function__. Do
+            # not drop this fallback - without a source here, bind_args builds
+            # the method's closure sourcelessly and SourcelessBuilder fails on
+            # a captured tensor (test_modes.py,
+            # test_nested_torch_function_mode).
             fn_source = var_source or (
                 self.source and AttrSource(TypeSource(self.source), name)
             )
@@ -3779,10 +3788,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         owner_var = UserDefinedClassVariable(type(self.value))
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[union-attr]
+            variables.UserFunctionVariable(
                 # descriptor_get_source is type(descriptor).__get__, which is
                 # already the function; it has no __func__ to unwrap.
-                descriptor.__get__.__func__,
+                descriptor.__get__.__func__,  # type: ignore[union-attr]
                 source=descriptor_get_source,
             ),
             descriptor_var,
@@ -3837,8 +3846,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if self.source:
                     new_source = AttrSource(self.source, "__getattr__")
                 out = variables.UserMethodVariable(
-                    # See the note in tp_getattro_impl: no guard here, so the
-                    # module's guard manager stays tag-safe.
+                    # See the note in tp_getattro_impl above: off the builder so
+                    # the accessor guard is not installed eagerly.
                     variables.UserFunctionVariable(
                         getattr_fn,
                         source=new_source and AttrSource(new_source, "__func__"),

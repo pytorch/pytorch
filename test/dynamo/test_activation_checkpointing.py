@@ -2759,6 +2759,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
 
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
+    """Checkpointing the same module at two sibling call sites. See
+    https://github.com/pytorch/pytorch/issues/193194."""
+
     def test_sac_with_bound_method_context_fn(self):
         # A bound method is a valid context_fn; extracting the underlying
         # function instead would call it with the receiver missing.
@@ -2780,9 +2783,6 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         a = torch.randn(4, 4, requires_grad=True, device="cpu")
         b = torch.randn(4, 4, requires_grad=True, device="cpu")
         self.assertEqual(opt_fn(a, b), fn(a, b))
-
-    """Checkpointing the same module at two sibling call sites. See
-    https://github.com/pytorch/pytorch/issues/193194."""
 
     def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
         # An unspecialized plain-float module attribute (self.eps), read
