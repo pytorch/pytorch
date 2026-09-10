@@ -96,6 +96,16 @@ struct PythonDeviceGuard final : public c10::impl::DeviceGuardImplInterface {
     return 1;
   }
 
+  void synchronizeDevice(c10::DeviceIndex device_index) const override {
+    pybind11::gil_scoped_release no_gil;
+    PYBIND11_OVERRIDE_PURE_NAME(
+        void,
+        c10::impl::DeviceGuardImplInterface,
+        "synchronizeDevice",
+        synchronizeDevice,
+        device_index);
+  }
+
   // TODO(qihqi): support Event-related functions
   void record(
       void** /*event*/,
@@ -184,7 +194,10 @@ void initModule(PyObject* module) {
   py::class_<c10::impl::DeviceGuardImplInterface, PythonDeviceGuard>(
       _acc.ptr(), "DeviceGuard")
       .def(py::init<>())
-      .def("type_", &c10::impl::DeviceGuardImplInterface::type);
+      .def("type_", &c10::impl::DeviceGuardImplInterface::type)
+      .def(
+          "synchronize_device",
+          &c10::impl::DeviceGuardImplInterface::synchronizeDevice);
 
   _acc.def(
       "register_python_privateuseone_hook", &registerPythonPrivateUse1Hook);
