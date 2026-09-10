@@ -159,8 +159,7 @@ def inline_asm_elementwise_intrinsic(
         asm: PTX text using `$N` operand syntax, output first.
         constraints: LLVM constraint list, e.g. `"=h,r"`.
         result_type: Logical cutlass numeric type of the produced fragment, or
-            a tuple of types for multiple results. E8M0 integer results are
-            decoded to Float32 for fused consumers.
+            a tuple of types for multiple results.
         is_pure: Whether the block may be reordered and CSEd.
         pack: Elements consumed per asm invocation. Missing tail elements are
             zero-padded and their corresponding outputs are discarded.

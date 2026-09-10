@@ -398,9 +398,6 @@ class NormalizedToBlocked:
     source: torch.fx.Node
 
 
-NormalizedGemmReduction = NormalizedReduction | NormalizedPrepareSoftmax
-
-
 @dataclasses.dataclass(frozen=True)
 class NormalizedUnsupportedReduction:
     """Canonical source and target for an unsupported FX reduction."""
@@ -412,7 +409,8 @@ class NormalizedUnsupportedReduction:
 NormalizedNode = (
     NormalizedView
     | NormalizedDtypeView
-    | NormalizedGemmReduction
+    | NormalizedReduction
+    | NormalizedPrepareSoftmax
     | NormalizedSqueeze
     | NormalizedGetItem
     | NormalizedSplit

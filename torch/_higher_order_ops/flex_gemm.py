@@ -68,6 +68,11 @@ def mark_flex_gemm_body_gemm_node(
         node.meta[_PRESERVE_FLEX_GEMM_GEMM_OP] = True
 
 
+FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
+    Callable[[torch.fx.GraphModule, torch._ops.OpOverload], None], ...
+] = (mark_flex_gemm_body_gemm_node,)
+
+
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("x",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -234,6 +239,14 @@ def check_flex_gemm_alias_and_mutation(
         raise RuntimeError("flex_gemm might be modifying an input")
 
 
+def apply_flex_gemm_body_graph_passes(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Apply FlexGEMM body annotations before generic Inductor graph passes."""
+    for graph_pass in FLEX_GEMM_BODY_GRAPH_PASSES:
+        graph_pass(body_graph, gemm_op)
+
+
 class FlexGemm(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flex_gemm")
@@ -361,14 +374,18 @@ def flex_gemm_proxy_torch_dispatch_mode(
 ):
     if proxy_mode.enable_tracing:
         flat_args = tuple(args)
+
+        def tracing_body_fn(*flat_body_args):
+            return body_fn(*flat_body_args)
+
         body_graph = reenter_make_fx(
-            body_fn,
+            tracing_body_fn,
             subgraph_decomp_table=flex_gemm_body_decomposition_table(
                 kernel_options, proxy_mode.decomposition_table
             ),
         )(*flat_args)
         if kernel_options.get("backend") == "QUACK":
-            mark_flex_gemm_body_gemm_node(body_graph, gemm_op)
+            apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(
