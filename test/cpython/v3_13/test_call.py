@@ -113,7 +113,6 @@ class FunctionCalls(CPythonTestCase):
         # BOOM!
 
 
-@unittest.skip("CPython-only implementation-detail tests; not applicable under Dynamo")
 @cpython_only
 class CFunctionCallsErrorMessages(CPythonTestCase):
 
@@ -304,7 +303,6 @@ class CFunctionCallsErrorMessages(CPythonTestCase):
         self.assertRaisesRegex(TypeError, msg, mod)
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 @unittest.skipIf(_testcapi is None, "requires _testcapi")
 class TestCallingConventions(CPythonTestCase):
     """Test calling using various C calling conventions (METH_*) from Python
@@ -318,6 +316,7 @@ class TestCallingConventions(CPythonTestCase):
     """
 
     def setUp(self):
+        super().setUp()
         self.obj = self.expected_self = _testcapi
 
     def test_varargs(self):
@@ -445,36 +444,36 @@ class TestCallingConventions(CPythonTestCase):
         )
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 class TestCallingConventionsInstance(TestCallingConventions):
     """Test calling instance methods using various calling conventions"""
 
     def setUp(self):
+        super().setUp()
         self.obj = self.expected_self = _testcapi.MethInstance()
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 class TestCallingConventionsClass(TestCallingConventions):
     """Test calling class methods using various calling conventions"""
 
     def setUp(self):
+        super().setUp()
         self.obj = self.expected_self = _testcapi.MethClass
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 class TestCallingConventionsClassInstance(TestCallingConventions):
     """Test calling class methods on instance"""
 
     def setUp(self):
+        super().setUp()
         self.obj = _testcapi.MethClass()
         self.expected_self = _testcapi.MethClass
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 class TestCallingConventionsStatic(TestCallingConventions):
     """Test calling static methods using various calling conventions"""
 
     def setUp(self):
+        super().setUp()
         self.obj = _testcapi.MethStatic()
         self.expected_self = None
 
@@ -508,7 +507,6 @@ PYTHON_INSTANCE = PythonClass()
 NULL_OR_EMPTY = object()
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 class FastCallTests(CPythonTestCase):
     """Test calling using various callables from C
     """
@@ -681,7 +679,6 @@ def testfunction_kw(self, *, kw):
 ADAPTIVE_WARMUP_DELAY = 2
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 @unittest.skipIf(_testcapi is None, "requires _testcapi")
 class TestPEP590(CPythonTestCase):
 
@@ -962,7 +959,6 @@ class A:
     def positional_only(arg, /):
         pass
 
-@unittest.skip("CPython-only implementation-detail tests; not applicable under Dynamo")
 @cpython_only
 class TestErrorMessagesUseQualifiedName(CPythonTestCase):
 
@@ -997,7 +993,6 @@ class TestErrorMessagesUseQualifiedName(CPythonTestCase):
         with self.check_raises_type_error(msg):
             A().method_two_args("x", "y", x="oops")
 
-@unittest.skip("CPython-only implementation-detail tests; not applicable under Dynamo")
 @cpython_only
 class TestErrorMessagesSuggestions(CPythonTestCase):
     @contextlib.contextmanager
@@ -1092,7 +1087,6 @@ class TestErrorMessagesSuggestions(CPythonTestCase):
         with self.check_suggestion_not_present():
             ImportError(blech=1, namez="oops")
 
-@unittest.skip("CPython-only implementation-detail tests; not applicable under Dynamo")
 @cpython_only
 class TestRecursion(CPythonTestCase):
 
@@ -1131,7 +1125,6 @@ class TestRecursion(CPythonTestCase):
                 c_py_recurse(100_000)
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 class TestFunctionWithManyArgs(CPythonTestCase):
     def test_function_with_many_args(self):
         for N in (10, 500, 1000):
@@ -1143,7 +1136,6 @@ class TestFunctionWithManyArgs(CPythonTestCase):
                 self.assertEqual(l['f'](*range(N)), N//2)
 
 
-@unittest.skip("Exercises CPython C-API calling conventions via _testcapi; not applicable under Dynamo")
 @unittest.skipIf(_testcapi is None, 'need _testcapi')
 class TestCAPI(CPythonTestCase):
     def test_cfunction_call(self):
