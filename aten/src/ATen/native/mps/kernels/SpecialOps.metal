@@ -1,16 +1,7 @@
-#include <ATen/native/Math.h>
 #include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
 using namespace c10::metal;
 using namespace metal;
-
-// calc_ndtri is shared with the CPU, see ATen/native/Math.h. Evaluate it in
-// float: the Cephes coefficients carry more significant digits than half or
-// bfloat can hold.
-template <typename T>
-inline float ndtri(T y0) {
-  return calc_ndtri(static_cast<float>(y0));
-}
 
 DEFINE_UNARY_FLOATING_FUNCTOR(bessel_j0_forward);
 DEFINE_UNARY_FLOATING_FUNCTOR(bessel_j1_forward);

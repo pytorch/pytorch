@@ -13,10 +13,8 @@ endif()
 file(GLOB METAL_HEADER_DEPS CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/c10/metal/*.h"
      "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/mps/kernels/*.h")
-# Headers outside those directories that .metal sources include directly.
-list(APPEND METAL_HEADER_DEPS
-     "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/Distributions.h"
-     "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/Math.h")
+# Headers outside those directories that .metal sources pull in transitively.
+list(APPEND METAL_HEADER_DEPS "${CMAKE_SOURCE_DIR}/c10/util/ndtri.h")
 
 function(metal_to_air SRC TARGET FLAGS)
     add_custom_command(COMMAND xcrun metal -c ${SRC} -I ${CMAKE_SOURCE_DIR} -I ${CMAKE_SOURCE_DIR}/aten/src -o ${TARGET} ${FLAGS} ${METAL_CFLAGS}
@@ -42,8 +40,10 @@ function(metal_to_metallib_h SHADER)
     cmake_path(APPEND ${CMAKE_CURRENT_BINARY_DIR} native mps ${SHADER_STEM} OUTPUT_VARIABLE SHADER_HDR)
     cmake_path(APPEND_STRING SHADER_HDR "_metallib.h")
 
+    # write_metallib_headers.py inlines the includes, so the same header list
+    # the metal -> air step depends on has to retrigger this one too.
     add_custom_command(COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py ${SHADER_ABSOLUTE} ${SHADER_HDR}
-                       DEPENDS ${SHADER_ABSOLUTE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py
+                       DEPENDS ${SHADER_ABSOLUTE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py ${METAL_HEADER_DEPS}
                        OUTPUT ${SHADER_HDR}
                        COMMENT "Generating metallib wrapper header for ${SHADER}"
                        VERBATIM)
