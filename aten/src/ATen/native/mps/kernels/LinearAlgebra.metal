@@ -548,26 +548,13 @@ INSTANTIATE_APPLY_TRSM(L, false, float)
 INSTANTIATE_APPLY_TRSM(U, true, float2)
 INSTANTIATE_APPLY_TRSM(L, false, float2)
 
-// op(A)(i, j): row-major (n x n) A, optionally transposed and/or conjugated.
-template <typename T>
-inline T tri_opA(
-    device const T* Ab,
-    uint i,
-    uint j,
-    uint n,
-    bool transpose,
-    bool conj) {
-  T v = transpose ? Ab[j * n + i] : Ab[i * n + j];
-  return conj ? c10::metal::conj(v) : v;
-}
-
-// General batched triangular solve via forward/back substitution. One
-// threadgroup owns one independent RHS vector (a column for the left case, a
-// row for the right case) and walks the n substitution steps serially; the dot
-// product against the already-solved prefix is split across the threadgroup and
-// reduced. The prefix is kept in threadgroup memory when the host says it fits
-// (stage), otherwise it is read back from X. Complex support comes from the
-// c10::metal mul/div/conj helpers, which are no-ops for real T.
+// Batched triangular solve by forward/back substitution. One threadgroup owns
+// one right-hand side and walks the n substitution steps serially; the dot
+// product against the already-solved prefix is split across the group and
+// reduced. The caller normalizes to op(A) X = B with a materialized op(A), so
+// there is no transpose, conjugation or right-hand side to handle here, and it
+// keeps n small enough that the prefix always fits in threadgroup memory.
+// Complex support comes from the c10::metal mul/div helpers, no-ops for real T.
 template <typename T>
 kernel void triangular_solve(
     device const T* A [[buffer(0)]],
@@ -589,19 +576,10 @@ kernel void triangular_solve(
   const uint batch = tgid / k;
   const uint vec = tgid % k;
   device const T* Ab = A + batch * n * n;
-  const bool tr = p.transpose;
-  const bool cj = p.conj;
-  const bool left = p.left;
-  const bool staged = p.stage;
-  // A is upper before op; a transpose flips the effective triangle. The
-  // effective triangle and the side together decide the substitution direction.
-  const bool eff_upper = (p.upper != 0) != (p.transpose != 0);
-  const bool forward = left != eff_upper;
-  // Left: b/x are a column of an (n x k) matrix; right: a row of a (k x n) one.
-  const uint stride = left ? k : 1;
-  const uint offset = batch * n * k + (left ? vec : vec * n);
-  device const T* b = B + offset;
-  device T* x = X + offset;
+  // A lower triangle substitutes forward, an upper one backward.
+  const bool forward = p.upper == 0;
+  device const T* b = B + batch * n * k + vec;
+  device T* x = X + batch * n * k + vec;
   const uint nsimd = (tg_size + 31) / 32;
 
   for (uint step = 0; step < n; ++step) {
@@ -611,17 +589,7 @@ kernel void triangular_solve(
 
     T part = T(0);
     for (uint s = s_begin + lid; s < s_end; s += tg_size) {
-      // op(A)(t, s) for the left case, op(A)(s, t) for the right one; complex
-      // multiplication commutes, so the operand order needs no special casing.
-      const T a =
-          left ? tri_opA(Ab, t, s, n, tr, cj) : tri_opA(Ab, s, t, n, tr, cj);
-      T xv;
-      if (staged) {
-        xv = xs[s];
-      } else {
-        xv = x[s * stride];
-      }
-      part = part + c10::metal::mul(a, xv);
+      part = part + c10::metal::mul(Ab[t * n + s], xs[s]);
     }
     part = c10::metal::simd_sum(part);
     if (sg_lane == 0) {
@@ -630,18 +598,15 @@ kernel void triangular_solve(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     if (lid == 0) {
-      T sum = b[t * stride];
+      T sum = b[t * k];
       for (uint s = 0; s < nsimd; ++s) {
         sum = sum - red[s];
       }
-      const T xt =
-          p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, t, t, n, tr, cj));
-      if (staged) {
-        xs[t] = xt;
-      }
-      x[t * stride] = xt;
+      const T xt = p.unit ? sum : c10::metal::div(sum, Ab[t * n + t]);
+      xs[t] = xt;
+      x[t * k] = xt;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
 

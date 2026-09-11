@@ -1689,33 +1689,26 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   return result;
 }
 
-// Metal substitution kernel. MPSMatrixSolveTriangular is float-only, and even
-// for float it is built around having many right-hand sides: with few of them
-// its fixed overhead dominates, so this kernel wins there too (see the caller
-// for the cutoff). conjugate selects adjoint (A^H) instead of plain transpose
-// (A^T) when transpose is set; it is a no-op for real inputs.
+// Metal substitution kernel: one threadgroup per right-hand side, reducing the
+// dot product against the already-solved prefix across the group. conjugate
+// selects adjoint (A^H) instead of plain transpose (A^T) when transpose is set;
+// it is a no-op for real inputs.
 static void triangular_solve_metal(const Tensor& A_,
                                    const Tensor& B_,
                                    bool upper,
-                                   bool transpose,
-                                   bool left,
                                    bool unitriangular,
-                                   bool conjugate,
                                    const Tensor& out) {
   using namespace mps;
   const uint64_t batchSize =
       std::accumulate(A_.sizes().begin(), A_.sizes().end() - 2, 1ULL, std::multiplies<uint64_t>());
   const uint64_t n = A_.size(-1);
-  const uint64_t k = left ? B_.size(-1) : B_.size(-2);
+  const uint64_t k = B_.size(-1);
 
   TriangularSolveParams params;
   params.nbatch = safe_downcast<uint32_t, uint64_t>(batchSize);
   params.n = safe_downcast<uint32_t, uint64_t>(n);
   params.k = safe_downcast<uint32_t, uint64_t>(k);
   params.upper = upper;
-  params.left = left;
-  params.transpose = transpose;
-  params.conj = conjugate;
   params.unit = unitriangular;
 
   const uint64_t elem_size = A_.element_size();
@@ -1729,23 +1722,71 @@ static void triangular_solve_metal(const Tensor& A_,
       // Every substitution step reduces across the whole threadgroup, so don't
       // spread a short row over more threads than it has work for.
       const uint64_t maxThreads = std::min<uint64_t>(pso.maxTotalThreadsPerThreadgroup, 256);
-      const uint64_t tgSize = std::clamp<uint64_t>((n + 31) / 32 * 32, 32, maxThreads);
-      const uint64_t redBytes = tgSize / 32 * elem_size;
-      // Staging the solved prefix saves a device round-trip per substitution
-      // step, but only pays off if the whole vector fits next to the reduction
-      // buffer; past that the kernel reads the prefix back from out.
+      const uint64_t tgSize = std::clamp<uint64_t>(round_up(n, uint64_t(32)), 32, maxThreads);
+      // setThreadgroupMemoryLength rejects lengths that are not a multiple of 16.
+      constexpr uint64_t kTGMemAlign = 16;
+      const uint64_t redBytes = round_up(tgSize / 32 * elem_size, kTGMemAlign);
+      const uint64_t prefixBytes = round_up(n * elem_size, kTGMemAlign);
+      // The caller sends anything bigger down the blocked path, which only ever
+      // hands this kernel a block, so the prefix always fits.
       const uint64_t maxTGMem = [MPSDevice::getInstance()->device() maxThreadgroupMemoryLength];
-      const bool stage = n * elem_size + redBytes <= maxTGMem;
-      TriangularSolveParams tgParams = params;
-      tgParams.stage = stage;
-      mtl_setArgs(encoder, A_, B_, out, tgParams);
-      [encoder setThreadgroupMemoryLength:(stage ? n * elem_size : elem_size) atIndex:0];
+      TORCH_INTERNAL_ASSERT(
+          prefixBytes + redBytes <= maxTGMem, "triangular_solve: n=", n, " does not fit in threadgroup memory");
+      mtl_setArgs(encoder, A_, B_, out, params);
+      [encoder setThreadgroupMemoryLength:prefixBytes atIndex:0];
       [encoder setThreadgroupMemoryLength:redBytes atIndex:1];
       [encoder dispatchThreads:MTLSizeMake(tgSize * batchSize * k, 1, 1)
           threadsPerThreadgroup:MTLSizeMake(tgSize, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
+}
+
+// Right-looking blocked solve: substitution on the nb x nb diagonal block, then
+// one GEMM to push its contribution into the rest of the panel. Substitution
+// reads every element of A once per right-hand side, so it is bandwidth-bound
+// once there are many of them; blocking cuts that traffic by nb and moves the
+// work into matmul. X holds B on entry and the solution on exit, and M is a
+// contiguous op(A) whose triangle is given by upper.
+static void triangular_solve_blocked(const Tensor& M, bool upper, bool unitriangular, int64_t nb, Tensor& X) {
+  const int64_t n = M.size(-1);
+  const int64_t k = X.size(-1);
+  // Both are contiguous, so these fold the batch dims into one without copying
+  // and let the trailing update be a single baddbmm_.
+  const Tensor M3 = M.reshape({-1, n, n});
+  Tensor X3 = X.reshape({-1, n, k});
+  const int64_t nbatch = M3.size(0);
+
+  // An upper triangle is solved from the bottom block up.
+  for (int64_t b = 0; b < n; b += nb) {
+    const int64_t rows = std::min(nb, n - b);
+    const int64_t i0 = upper ? n - b - rows : b;
+    auto Xi = X3.narrow(1, i0, rows);
+    auto diag = M3.narrow(1, i0, rows).narrow(2, i0, rows).contiguous();
+    // Inverting the diagonal block turns the panel solve into a matmul, and the
+    // block is small enough that it does not measurably cost accuracy. But the
+    // inverse itself is a solve with `rows` right-hand sides, so it only pays
+    // off once there are at least that many to amortize it over.
+    Tensor Xi_new;
+    if (k >= rows) {
+      Tensor eye = at::eye(rows, M.options()).expand({nbatch, rows, rows}).contiguous();
+      Tensor dinv = at::empty_like(eye);
+      triangular_solve_metal(diag, eye, upper, unitriangular, dinv);
+      Xi_new = at::matmul(dinv, Xi);
+    } else {
+      Xi_new = at::empty_like(Xi, at::MemoryFormat::Contiguous);
+      triangular_solve_metal(diag, Xi.contiguous(), upper, unitriangular, Xi_new);
+    }
+    Xi.copy_(Xi_new);
+    const int64_t rest = upper ? i0 : n - i0 - rows;
+    if (rest > 0) {
+      const int64_t r0 = upper ? 0 : i0 + rows;
+      // Accumulate in place: a plain sub_(matmul(...)) would allocate a result
+      // per block, each a different size, which the caching allocator then
+      // holds on to one block per size.
+      X3.narrow(1, r0, rest).baddbmm_(M3.narrow(1, r0, rest).narrow(2, i0, rows), Xi_new, 1, -1);
+    }
+  }
 }
 
 static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
@@ -1799,80 +1840,38 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   // It is fully overwritten, hence empty rather than a copy of out.
   Tensor out_ = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
 
-  // MPSMatrixSolveTriangular only pulls ahead once there are enough right-hand
-  // sides to amortize its setup and feed its blocked inner loop; below that the
-  // substitution kernel is faster, and for complex it is the only option.
-  constexpr int64_t kMetalMaxRHS = 128;
-  if (scalar_type == kComplexFloat || (left ? B_.size(-1) : B_.size(-2)) <= kMetalMaxRHS) {
-    triangular_solve_metal(A_, B_, upper, transpose, left, unitriangular, conjugate, out_);
-    if (!out_.is_same(out)) {
-      out.copy_(out_);
-    }
-    return out;
+  // Normalize to op(A) X = B against a materialized op(A): X op(A) = B is the
+  // same as op(A)^T X^T = B^T. The O(n^2) copy is dominated by the O(n^2 k)
+  // solve, and it leaves the kernel a plain forward/back substitution with no
+  // transpose, conjugation or side to handle.
+  Tensor M = transpose ? A_.mT() : A_;
+  if (conjugate) {
+    M = M.conj();
   }
+  bool eff_upper = upper != transpose;
+  if (!left) {
+    M = M.mT();
+    eff_upper = !eff_upper;
+  }
+  M = M.resolve_conj().contiguous();
+  const Tensor Brhs = left ? B_ : B_.mT().contiguous();
+  Tensor X = left ? out_ : at::empty_like(Brhs, at::MemoryFormat::Contiguous);
 
-  id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
-  id<MTLBuffer> bBuffer = getMTLBufferStorage(B_);
-  id<MTLBuffer> outBuffer = getMTLBufferStorage(out_);
-  MPSStream* mpsStream = getCurrentMPSStream();
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
-
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      mpsStream->endKernelCoalescing();
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      uint64_t batchSize = std::accumulate(A.sizes().begin(), A.sizes().end() - 2, 1ULL, std::multiplies<uint64_t>());
-      uint64_t aRows = A_.size(-2);
-      uint64_t bRows = B_.size(-2);
-      uint64_t aCols = A_.size(-1);
-      uint64_t bCols = B_.size(-1);
-      uint64_t aElemSize = A_.element_size();
-      uint64_t bElemSize = B_.element_size();
-
-      auto filter = [[[MPSMatrixSolveTriangular alloc] initWithDevice:device
-                                                                right:!left
-                                                                upper:upper
-                                                            transpose:transpose
-                                                                 unit:unitriangular
-                                                                order:left ? bRows : bCols
-                                               numberOfRightHandSides:left ? bCols : bRows
-                                                                alpha:1.0f] autorelease];
-      // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(filter, " solve_triangular_mps", {A_, B_}, mpsStream);
-
-      auto sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                    columns:aCols
-                                                                   matrices:batchSize
-                                                                   rowBytes:aCols * aElemSize
-                                                                matrixBytes:aRows * aCols * aElemSize
-                                                                   dataType:getMPSDataType(A_)];
-      auto rightHandSideMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
-                                                                           columns:bCols
-                                                                          matrices:batchSize
-                                                                          rowBytes:bCols * bElemSize
-                                                                       matrixBytes:bRows * bCols * bElemSize
-                                                                          dataType:getMPSDataType(B_)];
-      for (const auto i : c10::irange(batchSize)) {
-        const uint64_t aBatchOffset = i * aRows * aCols;
-        const uint64_t bBatchOffset = i * bRows * bCols;
-        auto sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                        offset:(A_.storage_offset() + aBatchOffset) * aElemSize
-                                                    descriptor:sourceMatrixDesc] autorelease];
-        auto rightHandSideMatrix = [[[MPSMatrix alloc] initWithBuffer:bBuffer
-                                                               offset:(B_.storage_offset() + bBatchOffset) * bElemSize
-                                                           descriptor:rightHandSideMatrixDesc] autorelease];
-        auto solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
-                                                          offset:(out_.storage_offset() + bBatchOffset) * bElemSize
-                                                      descriptor:rightHandSideMatrixDesc] autorelease];
-
-        [filter encodeToCommandBuffer:commandBuffer
-                         sourceMatrix:sourceMatrix
-                  rightHandSideMatrix:rightHandSideMatrix
-                       solutionMatrix:solutionMatrix];
-      }
-      getMPSProfiler().endProfileKernel(filter, mpsStream);
-    }
-  });
+  // Substitution reads all of A once per right-hand side and runs a chain of n
+  // dependent steps; the blocked solve shortens that chain to nb and turns the
+  // rest into matmul, which wins for both dtypes. Below a handful of blocks the
+  // per-block dispatches cost more than the substitution they replace.
+  // nb trades a costlier diagonal-block inverse against fewer trailing matmuls.
+  constexpr int64_t kBlockSize = 128;
+  if (A_.size(-1) > 4 * kBlockSize) {
+    X.copy_(Brhs);
+    triangular_solve_blocked(M, eff_upper, unitriangular, kBlockSize, X);
+  } else {
+    triangular_solve_metal(M, Brhs, eff_upper, unitriangular, X);
+  }
+  if (!left) {
+    out_.copy_(X.mT());
+  }
   if (!out_.is_same(out)) {
     out.copy_(out_);
   }
