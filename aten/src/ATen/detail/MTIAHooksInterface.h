@@ -199,6 +199,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     static Generator dummy_generator;
     return dummy_generator;
   }
+
+  virtual bool isCurrentStreamCapturing() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return false;
+  }
 };
 
 // Deprecated: no longer used internally, kept for ABI compatibility.

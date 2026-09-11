@@ -19,10 +19,10 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
@@ -609,7 +609,7 @@ void test_aoti_user_managed_buffer() {
   size_t initTorchReserved = stats.reserved_bytes[0].current;
   size_t torchReserved = stats.reserved_bytes[0].current;
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
   // This should contain one set of weight (128MB) loaded from .so
   size_t initMemory = 0;
@@ -617,7 +617,7 @@ void test_aoti_user_managed_buffer() {
   size_t preFreeMemory = 0;
   cudaStatus = cudaMemGetInfo(&preFreeMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   // At this point, no memory should be consumed since we freed them all.
   runner->swap_constant_buffer();
@@ -625,7 +625,7 @@ void test_aoti_user_managed_buffer() {
   runner->swap_constant_buffer();
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, preFreeMemory);
 
@@ -639,7 +639,7 @@ void test_aoti_user_managed_buffer() {
   size_t updateMemory = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory, updateMemory);
 
@@ -652,7 +652,7 @@ void test_aoti_user_managed_buffer() {
   // consumption.
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   runner->update_constant_buffer(
       rand_map,
@@ -661,7 +661,7 @@ void test_aoti_user_managed_buffer() {
       /*user_managed = */ false);
   cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory);
 
@@ -779,7 +779,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   cudaError_t cudaStatus;
   cudaStatus = cudaGetDevice(&device_idx);
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
   c10::cuda::CUDACachingAllocator::DeviceStats stats =
       c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
@@ -792,7 +792,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t totalMemory = 0;
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
 
   // We update inactive buffer, this should create one copy (128MB) at buffer #2
@@ -800,7 +800,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t updateMemory2 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory2, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory2);
 
@@ -814,7 +814,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
     size_t constFoldMemory = 0;
     cudaStatus = cudaMemGetInfo(&constFoldMemory, &totalMemory);
     if (cudaStatus != cudaSuccess) {
-      throw std::runtime_error("cudaMemGetInfo failed!");
+      TORCH_CHECK(false, "cudaMemGetInfo failed!");
     }
     ASSERT_EQ(
         initMemory - DATASIZE - (torchReserved1 - initTorchReserved),
@@ -835,7 +835,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t postFreeMemory = 0;
   cudaStatus = cudaMemGetInfo(&postFreeMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   // We should only have one set of buffer (#2), available memory should equal
   // initial memory minus the folded constants.
@@ -853,7 +853,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t updateMemory1 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(
       initMemory - DATASIZE - (torchReserved1 - initTorchReserved),
@@ -868,7 +868,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   runner->free_inactive_constant_buffer();
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   torchActive2 = stats.active_bytes[0].current;
@@ -884,7 +884,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torchActive2 = stats.active_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - (torchReserved2 - initTorchReserved), updateMemory1);
   ASSERT_EQ(torchActive1 - torchActive2, 0);
@@ -902,7 +902,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torchReserved2 = stats.reserved_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
 
   ASSERT_EQ(
@@ -940,7 +940,7 @@ void test_cuda_alloc_test() {
   cudaError_t cudaStatus;
   cudaStatus = cudaGetDevice(&device_idx);
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
 
   c10::cuda::CUDACachingAllocator::emptyCache();
@@ -1102,6 +1102,217 @@ void test_multi_cuda_streams(const std::string& device) {
 }
 #endif // USE_CUDA
 
+void test_cuda_stream_affinity_bindings(const std::string& device) {
+  c10::InferenceMode mode;
+  const std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& pt2_package_path =
+      data_loader.attr(("pt2_package_path_" + device).c_str()).toStringRef();
+  const auto ref_output =
+      data_loader.attr(("outputs_" + device).c_str()).toTensorList().get(0);
+  const auto inputs =
+      data_loader.attr(("inputs_" + device).c_str()).toTensorList().vec();
+  const auto first_stream = c10::cuda::getStreamFromPool();
+  const auto second_stream = c10::cuda::getStreamFromPool();
+  ASSERT_NE(first_stream.stream(), second_stream.stream());
+
+  auto run_on_stream = [&](torch::inductor::AOTIModelPackageLoader& loader,
+                           const c10::cuda::CUDAStream& stream) {
+    c10::cuda::CUDAStreamGuard stream_guard(stream);
+    const auto outputs = loader.run(inputs, stream.stream());
+    stream.synchronize();
+    ASSERT_TRUE(torch::allclose(ref_output, outputs[0]));
+  };
+
+  torch::inductor::AOTIModelPackageLoader default_loader(
+      pt2_package_path, "model", false, 2);
+  run_on_stream(default_loader, first_stream);
+  EXPECT_EQ(
+      AOTI_STREAM_AFFINITY_DISABLED,
+      default_loader.get_runner()->get_stream_affinity_model_index_for_testing(
+          first_stream.stream()));
+
+  torch::inductor::AOTIModelPackageLoader affinity_loader(
+      pt2_package_path,
+      "model",
+      false,
+      2,
+      -1,
+      /*use_stream_affinity=*/true);
+  EXPECT_EQ(
+      AOTI_STREAM_AFFINITY_UNBOUND,
+      affinity_loader.get_runner()->get_stream_affinity_model_index_for_testing(
+          first_stream.stream()));
+
+  run_on_stream(affinity_loader, first_stream);
+  const auto first_model =
+      affinity_loader.get_runner()->get_stream_affinity_model_index_for_testing(
+          first_stream.stream());
+  ASSERT_GE(first_model, 0);
+  try {
+    affinity_loader.get_runner()->set_use_stream_affinity(true);
+    FAIL() << "Expected affinity reconfiguration after a run to be rejected";
+  } catch (const c10::Error& error) {
+    EXPECT_THAT(
+        error.what(),
+        ::testing::HasSubstr(
+            "Stream affinity can only be reconfigured while the model pool is "
+            "quiescent"));
+  }
+  run_on_stream(affinity_loader, first_stream);
+  EXPECT_EQ(
+      first_model,
+      affinity_loader.get_runner()->get_stream_affinity_model_index_for_testing(
+          first_stream.stream()));
+
+  run_on_stream(affinity_loader, second_stream);
+  const auto second_model =
+      affinity_loader.get_runner()->get_stream_affinity_model_index_for_testing(
+          second_stream.stream());
+  ASSERT_GE(second_model, 0);
+  EXPECT_NE(first_model, second_model);
+
+  torch::inductor::AOTIModelPackageLoader oversubscribed_loader(
+      pt2_package_path,
+      "model",
+      false,
+      1,
+      -1,
+      /*use_stream_affinity=*/true);
+  run_on_stream(oversubscribed_loader, first_stream);
+  const auto only_model =
+      oversubscribed_loader.get_runner()
+          ->get_stream_affinity_model_index_for_testing(first_stream.stream());
+  ASSERT_GE(only_model, 0);
+  run_on_stream(oversubscribed_loader, second_stream);
+  EXPECT_EQ(
+      AOTI_STREAM_AFFINITY_UNBOUND,
+      oversubscribed_loader.get_runner()
+          ->get_stream_affinity_model_index_for_testing(first_stream.stream()));
+  EXPECT_EQ(
+      only_model,
+      oversubscribed_loader.get_runner()
+          ->get_stream_affinity_model_index_for_testing(
+              second_stream.stream()));
+}
+
+void test_concurrent_same_cuda_stream_affinity(const std::string& device) {
+  c10::InferenceMode mode;
+  const std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& pt2_package_path =
+      data_loader.attr(("pt2_package_path_" + device).c_str()).toStringRef();
+  const auto ref_output =
+      data_loader.attr(("outputs_" + device).c_str()).toTensorList().get(0);
+  const auto inputs =
+      data_loader.attr(("inputs_" + device).c_str()).toTensorList().vec();
+
+  constexpr int num_threads = 2;
+  torch::inductor::AOTIModelPackageLoader loader(
+      pt2_package_path,
+      "model",
+      false,
+      num_threads,
+      -1,
+      /*use_stream_affinity=*/true);
+  const auto stream = c10::cuda::getStreamFromPool();
+  std::atomic<int> ready{0};
+  std::vector<std::vector<torch::Tensor>> all_outputs(num_threads);
+  std::vector<std::thread> threads;
+  for (int i = 0; i < num_threads; ++i) {
+    threads.emplace_back([&, i]() {
+      c10::cuda::CUDAStreamGuard stream_guard(stream);
+      ready.fetch_add(1);
+      while (ready.load() < num_threads) {
+        std::this_thread::yield();
+      }
+      all_outputs[i] = loader.run(inputs, stream.stream());
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  stream.synchronize();
+
+  for (const auto& outputs : all_outputs) {
+    ASSERT_TRUE(torch::allclose(ref_output, outputs[0]));
+  }
+  EXPECT_GE(
+      loader.get_runner()->get_stream_affinity_model_index_for_testing(
+          stream.stream()),
+      0);
+}
+#endif // USE_CUDA || USE_ROCM
+
+void test_stream_affinity_rejected_for_cpu() {
+  const std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& pt2_package_path =
+      data_loader.attr("pt2_package_path_cpu").toStringRef();
+
+  try {
+    torch::inductor::AOTIModelPackageLoader loader(
+        pt2_package_path,
+        "model",
+        false,
+        1,
+        -1,
+        /*use_stream_affinity=*/true);
+    FAIL() << "Expected CPU stream affinity to be rejected";
+  } catch (const c10::Error& error) {
+    EXPECT_THAT(
+        error.what(),
+        ::testing::HasSubstr(
+            "Stream affinity is only supported for device runtimes"));
+  }
+}
+
+void test_stream_affinity_rejected_with_single_threaded() {
+  try {
+    torch::inductor::AOTIModelPackageLoader loader(
+        "does_not_exist.pt2",
+        "model",
+        true,
+        1,
+        -1,
+        /*use_stream_affinity=*/true);
+    FAIL() << "Expected single-threaded stream affinity to be rejected";
+  } catch (const c10::Error& error) {
+    EXPECT_THAT(
+        error.what(),
+        ::testing::HasSubstr("use_stream_affinity cannot be enabled when "
+                             "run_single_threaded is true"));
+  }
+}
+
+void test_stream_affinity_rejected_by_single_threaded_runner() {
+  const std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& pt2_package_path =
+      data_loader.attr("pt2_package_path_cpu").toStringRef();
+
+  try {
+    torch::inductor::AOTIModelPackageLoader loader(
+        pt2_package_path, "model", true, 1, -1);
+    loader.get_runner()->set_use_stream_affinity(true);
+    FAIL() << "Expected the single-threaded runner to reject stream affinity";
+  } catch (const c10::Error& error) {
+    EXPECT_THAT(
+        error.what(),
+        ::testing::HasSubstr("use_stream_affinity cannot be enabled when "
+                             "run_single_threaded is true"));
+  }
+}
+
+#if defined(USE_CUDA) || defined(USE_ROCM)
 void test_concurrent_run_with_const_fold(const std::string& device) {
   torch::NoGradGuard no_grad;
 
@@ -1168,7 +1379,9 @@ void test_concurrent_run_with_const_fold(const std::string& device) {
 // run depends on the cudaStreamSynchronize(0) at the end of
 // update_constant_buffer (model_container.h). On NVIDIA the legacy default
 // stream implicitly serializes, so this passes regardless.
-void test_aoti_const_fold_separate_stream() {
+void test_aoti_const_fold_separate_stream(
+    bool use_stream_affinity,
+    int num_iters) {
   torch::NoGradGuard no_grad;
 
   // Use the large (size=4096) model so the per-weight D2D copy is big enough to
@@ -1186,14 +1399,16 @@ void test_aoti_const_fold_separate_stream() {
   const int64_t size = x.size(1);
 
   auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
-      model_so_path);
+      model_so_path, use_stream_affinity ? 2 : 1);
+  if (use_stream_affinity) {
+    runner->set_use_stream_affinity(true);
+  }
 
   // Dedicated non-blocking pool stream for folding, distinct from the default
   // stream that update_constant_buffer copies the weights on.
   c10::cuda::CUDAStream fold_stream = c10::cuda::getStreamFromPool();
 
-  constexpr int kIters = 100;
-  for (int i = 0; i < kIters; ++i) {
+  for (int i = 0; i < num_iters; ++i) {
     at::Tensor w_pre = at::randn({size, size}, x.options());
     at::Tensor w_add = at::randn({size, size}, x.options());
     // Independent reference, mirroring Net.forward in test.py.
@@ -1211,12 +1426,24 @@ void test_aoti_const_fold_separate_stream() {
     runner->run_const_fold(
         /* use_inactive = */ true,
         reinterpret_cast<AOTInductorStreamHandle>(fold_stream.stream()));
+    if (use_stream_affinity) {
+      ASSERT_GE(
+          runner->get_stream_affinity_model_index_for_testing(
+              fold_stream.stream()),
+          0);
+    }
     // Isolate the copy->fold edge (under test) from the fold->inference edge by
     // finishing the fold before swapping the freshly folded buffer in.
     fold_stream.synchronize();
     runner->swap_constant_buffer();
 
-    auto actual = runner->run(input_tensors);
+    std::vector<at::Tensor> actual;
+    if (use_stream_affinity) {
+      actual = runner->run(input_tensors, fold_stream.stream());
+      fold_stream.synchronize();
+    } else {
+      actual = runner->run(input_tensors);
+    }
     ASSERT_TRUE(torch::allclose(
         expected, actual[0], /* rtol = */ 1e-2, /* atol = */ 1e-2))
         << "iter " << i
@@ -1454,6 +1681,18 @@ TEST_F(AotInductorTest, BasicPackageLoaderTestCpu) {
   test_aoti_package_loader("cpu", false);
 }
 
+TEST_F(AotInductorTest, StreamAffinityRejectedForCpu) {
+  test_stream_affinity_rejected_for_cpu();
+}
+
+TEST_F(AotInductorTest, StreamAffinityRejectedWithSingleThreaded) {
+  test_stream_affinity_rejected_with_single_threaded();
+}
+
+TEST_F(AotInductorTest, StreamAffinityRejectedBySingleThreadedRunner) {
+  test_stream_affinity_rejected_by_single_threaded_runner();
+}
+
 TEST_F(AotInductorTest, ExtractConstantsMapCpu) {
   test_aoti_extract_constants_map("cpu");
 }
@@ -1528,8 +1767,20 @@ TEST_F(AotInductorTest, ConcurrentRunConstFoldCuda) {
 // Registered for ROCm as well as CUDA: the S638065 race only manifests on AMD
 // (on NVIDIA the legacy default stream implicitly orders with the fold stream).
 #if defined(USE_CUDA) || defined(USE_ROCM)
+TEST_F(AotInductorTest, MultiStreamAffinityTestCuda) {
+  test_cuda_stream_affinity_bindings("cuda");
+}
+
+TEST_F(AotInductorTest, ConcurrentSameStreamAffinityTestCuda) {
+  test_concurrent_same_cuda_stream_affinity("cuda");
+}
+
 TEST_F(AotInductorTest, ConstFoldSeparateStreamCuda) {
-  test_aoti_const_fold_separate_stream();
+  test_aoti_const_fold_separate_stream(false, 100);
+}
+
+TEST_F(AotInductorTest, ConstFoldSeparateStreamWithAffinityCuda) {
+  test_aoti_const_fold_separate_stream(true, 100);
 }
 #endif // USE_CUDA || USE_ROCM
 

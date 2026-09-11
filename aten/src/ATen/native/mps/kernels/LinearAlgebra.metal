@@ -548,6 +548,105 @@ INSTANTIATE_APPLY_TRSM(L, false, float)
 INSTANTIATE_APPLY_TRSM(U, true, float2)
 INSTANTIATE_APPLY_TRSM(L, false, float2)
 
+// op(A)(i, j): row-major (n x n) A, optionally transposed and/or conjugated.
+template <typename T>
+inline T tri_opA(
+    device const T* Ab,
+    uint i,
+    uint j,
+    uint n,
+    bool transpose,
+    bool conj) {
+  T v = transpose ? Ab[j * n + i] : Ab[i * n + j];
+  return conj ? c10::metal::conj(v) : v;
+}
+
+// Batched triangular solve by forward/back substitution. One threadgroup owns
+// one right-hand side and walks the n substitution steps serially; the dot
+// product against the already-solved prefix is split across the group and
+// reduced. The caller folds the side into the transpose so only op(A) X = B is
+// handled here, and keeps n small enough that the prefix always fits in
+// threadgroup memory; op itself stays in the kernel so that a transposed or
+// conjugated solve does not have to materialize an n x n copy.
+// Complex support comes from the c10::metal mul/div helpers, no-ops for real T.
+template <typename T>
+kernel void triangular_solve(
+    device const T* A [[buffer(0)]],
+    device const T* B [[buffer(1)]],
+    device T* X [[buffer(2)]],
+    constant TriangularSolveParams& p [[buffer(3)]],
+    threadgroup T* xs [[threadgroup(0)]],
+    threadgroup T* red [[threadgroup(1)]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    uint sg_lane [[thread_index_in_simdgroup]],
+    uint sg_id [[simdgroup_index_in_threadgroup]],
+    uint nsimd [[simdgroups_per_threadgroup]]) {
+  const uint n = p.n;
+  const uint k = p.k;
+  if (tgid >= p.nbatch * k) {
+    return;
+  }
+  const uint batch = tgid / k;
+  const uint vec = tgid % k;
+  device const T* Ab = A + batch * n * n;
+  const bool tr = p.transpose;
+  const bool cj = p.conj;
+  // A is upper before op; a transpose flips the effective triangle, and a lower
+  // one substitutes forward.
+  const bool forward = p.upper == p.transpose;
+  device const T* b = B + batch * n * k + vec;
+  device T* x = X + batch * n * k + vec;
+
+  for (uint step = 0; step < n; ++step) {
+    const uint t = forward ? step : n - 1 - step;
+    const uint s_begin = forward ? 0 : t + 1;
+    const uint s_end = forward ? t : n;
+
+    T part = T(0);
+    for (uint s = s_begin + lid; s < s_end; s += tg_size) {
+      part = part + c10::metal::mul(tri_opA(Ab, t, s, n, tr, cj), xs[s]);
+    }
+    part = c10::metal::simd_sum(part);
+    if (sg_lane == 0) {
+      red[sg_id] = part;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (lid == 0) {
+      T sum = b[t * k];
+      for (uint s = 0; s < nsimd; ++s) {
+        sum = sum - red[s];
+      }
+      const T xt =
+          p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, t, t, n, tr, cj));
+      xs[t] = xt;
+      x[t * k] = xt;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+}
+
+#define INSTANTIATE_TRIANGULAR_SOLVE(DTYPE)                      \
+  template [[host_name("triangular_solve_" #DTYPE)]] kernel void \
+  triangular_solve<DTYPE>(                                       \
+      device const DTYPE* A [[buffer(0)]],                       \
+      device const DTYPE* B [[buffer(1)]],                       \
+      device DTYPE* X [[buffer(2)]],                             \
+      constant TriangularSolveParams& p [[buffer(3)]],           \
+      threadgroup DTYPE* xs [[threadgroup(0)]],                  \
+      threadgroup DTYPE* red [[threadgroup(1)]],                 \
+      uint tgid [[threadgroup_position_in_grid]],                \
+      uint lid [[thread_position_in_threadgroup]],               \
+      uint tg_size [[threads_per_threadgroup]],                  \
+      uint sg_lane [[thread_index_in_simdgroup]],                \
+      uint sg_id [[simdgroup_index_in_threadgroup]],             \
+      uint nsimd [[simdgroups_per_threadgroup]]);
+
+INSTANTIATE_TRIANGULAR_SOLVE(float);
+INSTANTIATE_TRIANGULAR_SOLVE(float2);
+
 template <bool upper>
 inline void syrk_simdgroup_tile(
     device float* A,
@@ -3324,10 +3423,13 @@ kernel void svd_jacobi(
           }
         }
       }
-      threadgroup_barrier(
-          params.stage_v
-              ? mem_flags::mem_threadgroup
-              : (mem_flags::mem_threadgroup | mem_flags::mem_device));
+      // Barrier scope must be a compile-time constant (runtime mem_flags
+      // crashes the AGX compiler)
+      if (params.stage_v) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      } else {
+        threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+      }
     }
 
     threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
@@ -3409,6 +3511,73 @@ kernel void svd_jacobi(
     }
   }
   threadgroup_barrier(mem_flags::mem_device);
+
+  // The Jacobi update forms the range factor's columns as (A V)_j / sigma_j,
+  // which collapses to 0 when sigma_j <= eps, leaving U (or V, when transposed)
+  // non-orthonormal for rank-deficient inputs. Replace those null columns with
+  // an orthonormal basis of the complement of the emitted columns (two-pass
+  // Gram-Schmidt of canonical vectors), matching LAPACK gesdd. Columns are
+  // sorted by descending sigma, so the null ones are a contiguous tail. One
+  // simd-group runs it (each lane owns a strided slice of the working column,
+  // so the projections are simd_sum reductions needing no barriers); the rare
+  // degenerate path. Reuses Atg as scratch.
+  if (params.compute_uv && simd_group == 0) {
+    device T* out = (params.transposed == 0u) ? U_b : V_b;
+    const uint32_t ld = (params.transposed == 0u) ? params.u_ld : params.v_ld;
+    // U_b is column-major (elem i of col c at out[c*ld + i]); the transposed
+    // run emits V_b row-major (out[i*ld + c]), so index columns accordingly.
+    const uint32_t col_off = (params.transposed == 0u) ? ld : 1u;
+    const uint32_t elem_step = (params.transposed == 0u) ? 1u : ld;
+    // Relative rank cutoff: sigma_j at or below the Jacobi noise floor
+    // (~m*eps*sigma_max) is numerically zero, so its column is arbitrary and
+    // gets completed. An absolute eps would keep noise-amplified columns.
+    const float thresh = eps * sig[ord[0]] * static_cast<float>(m);
+    uint32_t rank = 0;
+    while (rank < n && sig[ord[rank]] > thresh) {
+      ++rank;
+    }
+    // Accept a candidate as a null-space column when its squared residual after
+    // orthogonalization clears this: loose (well above the fp32 roundoff
+    // floor), but enough that the canonicals span the complement. Cf.
+    // Rutishauser/DGKS Gram-Schmidt reorthogonalization.
+    constexpr float kIndepThreshSq = 1e-2f;
+    threadgroup T* col = Atg;
+    uint32_t cand = 0;
+    for (uint32_t j = rank; j < n; ++j) {
+      while (cand < m) {
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          col[i] = (i == cand) ? svd_one(T(0)) : T(0);
+        }
+        ++cand;
+        for (uint32_t pass = 0; pass < 2; ++pass) {
+          for (uint32_t l = 0; l < j; ++l) {
+            device T* cl = out + l * col_off;
+            T partial = T(0);
+            for (uint32_t i = simd_lane; i < m; i += kSimd) {
+              partial += svd_conjmul(cl[i * elem_step], col[i]);
+            }
+            T dot = svd_simd_sum(partial);
+            for (uint32_t i = simd_lane; i < m; i += kSimd) {
+              col[i] -= svd_mul(dot, cl[i * elem_step]);
+            }
+          }
+        }
+        float partial_n = 0;
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          partial_n += svd_abs2(col[i]);
+        }
+        const float nrm_sq = c10::metal::simd_sum(partial_n);
+        if (nrm_sq > kIndepThreshSq) {
+          const float inv = 1.0f / precise::sqrt(nrm_sq);
+          device T* cj = out + j * col_off;
+          for (uint32_t i = simd_lane; i < m; i += kSimd) {
+            cj[i * elem_step] = col[i] * inv;
+          }
+          break;
+        }
+      }
+    }
+  }
 
   if (tid == 0) {
     // NaN/Inf never triggers a rotation, so flag info to raise like the CPU
