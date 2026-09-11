@@ -57,7 +57,6 @@ from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
-from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     _aot_export_function,
     aot_export_joint_simple,
@@ -73,6 +72,7 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
+from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
@@ -13126,11 +13126,14 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         make_inputs_subclasses: bool = False,
     ):
         self.inductor_cache = MockFXGraphCache()
-        AOTAutogradCache.clear()
-        with patch(
+        mock_fx_graph_cache = patch(
             "torch._inductor.codecache.FxGraphCache.load_with_key",
             new=self.inductor_cache.load_with_key,
-        ):
+        )
+        # fresh_cache() rather than AOTAutogradCache.clear(): clear() rmtree's the
+        # cache root shared by every process of this user, so under a parallel
+        # runner it deletes entries other workers are mid-read/mid-write on.
+        with fresh_cache(), mock_fx_graph_cache:
             return super().verify_aot_autograd(
                 f,
                 inp_,
