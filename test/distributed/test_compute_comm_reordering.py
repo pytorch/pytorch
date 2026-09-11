@@ -22,21 +22,20 @@ from torch._inductor.comm_analysis import (
     NVIDIA_GPU_TYPE,
 )
 from torch._inductor.utils import run_and_get_triton_code
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
-    requires_accelerator_dist_backend,
 )
-from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
+    HardwareClassification,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
-
-
-device_type = get_devtype().type
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 def get_snode_runtime_for_reorder_compute_test(snode):
@@ -87,16 +86,15 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
     return new_snode_order
 
 
-@requires_accelerator_dist_backend()
 @unittest.skipIf(
     torch._inductor.config.triton.native_matmul,
     "native matmul is fused with surrounding ops",
 )
-@instantiate_parametrized_tests
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def get_world_trs(self):
         return {
@@ -111,7 +109,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         # works around issue with skipif<2 and workers with unpredictable #s gpu
         return 2
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -124,7 +123,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             "sink_waits",
         ],
     )
-    def test_sink_waits(self):
+    def test_sink_waits(self, device):
+        device_type = torch.device(device).type
+
         def func(a):
             ar = _functional_collectives.all_reduce(a, "sum", "0")
             b = torch.matmul(a, a)
@@ -153,7 +154,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs)
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -166,7 +168,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             "raise_comms",
         ],
     )
-    def test_raise_comms(self):
+    def test_raise_comms(self, device):
+        device_type = torch.device(device).type
+
         def func(a):
             b = torch.matmul(a, a)
             c = torch.relu(b)
@@ -205,7 +209,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs)
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -218,7 +223,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             "raise_comms",
         ],
     )
-    def test_sink_waits_raise_comms(self):
+    def test_sink_waits_raise_comms(self, device):
+        device_type = torch.device(device).type
+
         def func(a, *, tag, ranks, group_size):
             b = torch.matmul(a, a)
             c = torch.relu(b)
@@ -261,7 +268,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -278,7 +286,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         "runtime_estimations_mms_benchmark",
         False,
     )
-    def test_reorder_compute_for_overlap(self):
+    def test_reorder_compute_for_overlap(self, device):
+        device_type = torch.device(device).type
+
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
             g = torch.matmul(a, a)
@@ -321,7 +331,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -338,7 +349,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         "estimate_op_runtime",
         get_snode_runtime_for_reorder_compute_test,
     )
-    def test_reorder_compute_for_overlap_custom_runtime_estimation(self):
+    def test_reorder_compute_for_overlap_custom_runtime_estimation(self, device):
+        device_type = torch.device(device).type
+
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
             g = torch.matmul(a, a)
@@ -381,7 +394,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(
         torch._inductor.config.triton.native_matmul,
         "native matmul is fused with surrounding ops",
@@ -393,46 +407,52 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         "_pre_fusion_custom_pass",
         create_grouped_node_for_allreduce_and_its_deps,
     )
-    @parametrize("combo_kernels", (False, True))
-    def test_grouped_scheduler_node(self, combo_kernels):
-        def func(a, *, tag, ranks, group_size):
-            add = a + a
-            div = add / a
-            ar = _functional_collectives.all_reduce(div, "sum", ranks, tag)
-            # Normally, we would fuse `add = a + a`, `div = add / a` and `mul = a * a` together into a single fused op,
-            # but here in this unit test, we intentionally put `add`, `div` and `ar` computation
-            # into a GroupedSchedulerNode, which prevents them from being fused with any other ops.
-            mul = a * a
-            mm = torch.matmul(mul, ar)
-            return (mm,)
+    def test_grouped_scheduler_node(self, device):
+        device_type = torch.device(device).type
+        for combo_kernels in (False, True):
+            with self.subTest(combo_kernels=combo_kernels):
 
-        with torch._inductor.config.patch(combo_kernels=combo_kernels):
-            with _dynamo_dist_per_rank_init(
-                self.rank,
-                self.world_size,
-                self.backend(device_type),
-                fake_pg=not at_least_x_gpu(2),
-            ):
-                inputs = (
-                    torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
-                )
-                compiled = torch.compile(func)
-                code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-                # Expectations:
-                # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
-                #    still happens among nodes within a GroupedSchedulerNode.
-                # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
-                #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
-                FileCheck().check("triton_poi_fused_add_all_reduce_div_0.").check(
-                    "_c10d_functional.all_reduce_."
-                ).check("triton_poi_fused_mul_1.").run(code)
-                out = compiled(inputs, **self.get_world_trs())
-                correct = func(inputs, **self.get_world_trs())
-                self.assertTrue(same(out, correct))
+                def func(a, *, tag, ranks, group_size):
+                    add = a + a
+                    div = add / a
+                    ar = _functional_collectives.all_reduce(div, "sum", ranks, tag)
+                    # Normally, we would fuse `add = a + a`, `div = add / a` and `mul = a * a` together into a single fused op,
+                    # but here in this unit test, we intentionally put `add`, `div` and `ar` computation
+                    # into a GroupedSchedulerNode, which prevents them from being fused with any other ops.
+                    mul = a * a
+                    mm = torch.matmul(mul, ar)
+                    return (mm,)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+                with torch._inductor.config.patch(combo_kernels=combo_kernels):
+                    with _dynamo_dist_per_rank_init(
+                        self.rank,
+                        self.world_size,
+                        self.backend(device_type),
+                        fake_pg=not at_least_x_gpu(2),
+                    ):
+                        inputs = (
+                            torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
+                        )
+                        compiled = torch.compile(func)
+                        code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+                        # Expectations:
+                        # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
+                        #    still happens among nodes within a GroupedSchedulerNode.
+                        # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
+                        #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
+                        FileCheck().check("triton_poi_fused_add_all_reduce_div_0.").check(
+                            "_c10d_functional.all_reduce_."
+                        ).check("triton_poi_fused_mul_1.").run(code)
+                        out = compiled(inputs, **self.get_world_trs())
+                        correct = func(inputs, **self.get_world_trs())
+                        self.assertTrue(same(out, correct))
+
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_inductor_default_comms_ordering(self):
+    def test_inductor_default_comms_ordering(self, device):
+        device_type = torch.device(device).type
+
         pg_info = self.get_world_trs()
         tag = pg_info["tag"]
         ranks = pg_info["ranks"]
@@ -485,6 +505,10 @@ graph():
         ):
             fn(g1, g2, g3)
 
+
+class TestCommAnalysisHeuristics(DynamoDistributedMultiProcTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_nccl_heuristics(self):
         if len(baseLat) != len(NCCL_ALGO):
             raise AssertionError(
@@ -513,6 +537,8 @@ graph():
                 f"Expected len(llMaxBws) == len(NVIDIA_GPU_TYPE), got {len(llMaxBws)} vs {len(NVIDIA_GPU_TYPE)}"
             )
 
+
+instantiate_device_type_tests(TestComputeCommReorderingMultiProc, globals(), except_for="cpu", allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
