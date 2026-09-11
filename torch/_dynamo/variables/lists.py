@@ -587,9 +587,8 @@ class BaseListVariable(VariableTracker):
             return None
         check_positional(tx, "pop", len(args), 0, 1)
 
-        # Clinic converts the index (`Py_ssize_t = -1`) with _PyNumber_Index then
-        # PyLong_AsSsize_t, before the body, so a bad index raises ahead of the
-        # empty-list check below.
+        # Clinic converts the index before the body, so a bad index raises ahead
+        # of the empty-list check.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h#L163-L174
         idx = -1
         if args:

@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import operator
 import sys
 import types
 import typing
@@ -36,6 +37,7 @@ from ..exc import (
     unimplemented,
 )
 from ..source import AttrSource, Source
+from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -814,24 +816,6 @@ def getindex(
     return i
 
 
-def _ssize_t_value(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
-    """Concrete int behind an int-like tracker, for the C ssize_t conversions.
-
-    A Py_ssize_t cannot hold a symbol, so a backed SymInt has to specialize here,
-    which installs a guard; an unbacked one raises instead of guessing.
-    """
-    from .tensor import SymNodeVariable
-
-    if isinstance(obj, SymNodeVariable):
-        val = obj.evaluate_expr(tx.output)
-    else:
-        val = obj.as_python_constant()
-
-    if not isinstance(val, int):
-        raise AssertionError(f"expected an int-like value, got {type(val).__name__}")
-    return val
-
-
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
     """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
     values outside the Py_ssize_t range raise OverflowError.
@@ -842,14 +826,16 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
     if not issubclass(obj.python_type(), int):
         raise_type_error(tx, "an integer is required")
-    val = _ssize_t_value(tx, obj)
+    # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
+    val = specialize_symnode(obj).as_python_constant()
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
             tx,
             args=["Python int too large to convert to C ssize_t"],
         )
-    return val
+    # A C ssize_t, so a bool or an int subclass comes back as a plain int.
+    return int(val)
 
 
 def pynumber_as_ssize_t(
@@ -864,7 +850,19 @@ def pynumber_as_ssize_t(
 
     https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/abstract.c#L1469
     """
-    val = _ssize_t_value(tx, pynumber_index(tx, item))
+    from .tensor import SymNodeVariable
+
+    value = pynumber_index(tx, item)
+
+    # PyLong_AsSsize_t: a symbolic int must be specialized to a concrete
+    # ssize_t (with guard) to be usable as a C index.
+    if isinstance(value, SymNodeVariable):
+        val = value.evaluate_expr(tx.output)
+    else:
+        val = value.as_python_constant()
+
+    if not isinstance(val, int):
+        raise AssertionError("pynumber_index did not return an int-like value")
 
     if -sys.maxsize - 1 <= val <= sys.maxsize:
         return ConstantVariable.create(int(val))
@@ -882,6 +880,13 @@ def pynumber_index(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
     """Mirrors PyNumber_Index (index(x) dispatch)."""
+
+    # An int or subclass never sees its own __index__, then normalizes to an
+    # exact int. A SymInt is not constant: nb_index is where it specializes.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
+    if obj.is_python_constant() and issubclass(obj.python_type(), int):
+        return ConstantVariable.create(operator.index(obj.as_python_constant()))
 
     if obj.tp_as_number.nb_index is None:
         raise_type_error(
