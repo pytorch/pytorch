@@ -151,8 +151,6 @@ def use_fa3():
 
 if HAS_GPU:
     import triton  # @manual
-    from triton import language as tl
-
     from torch.testing._internal.triton_utils import (
         add_kernel,
         add_kernel_2d_autotuned,
@@ -174,6 +172,7 @@ if HAS_GPU:
         strange_config_matmul_kernel,
         sub_kernel_autotuned,
     )
+    from triton import language as tl
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -316,6 +315,18 @@ def profiled_ivalue_kinds(code, kernel_name):
         "scalar" if "_scalar_" in entry else "tensor"
         for entry in vector.group(1).split(",")
     ]
+def compile_whole_cudagraph(model, example_inputs, dynamic_shapes=None, **cfg):
+    """Compile and load `model` with whole-graph cuda graph enabled.
+
+    Module-level rather than a method because `copy_tests` only copies `test_*`
+    methods into the generated device classes, so a helper method would not
+    exist on them.
+    """
+    with config.patch({"aot_inductor.cudagraph_mode": "whole", **cfg}), torch.no_grad():
+        package_path = AOTIRunnerUtil.compile(
+            model, example_inputs, dynamic_shapes=dynamic_shapes
+        )
+    return torch._inductor.aoti_load_package(package_path)
 
 
 class AOTInductorTestsTemplate:
@@ -6297,6 +6308,97 @@ class AOTInductorTestsTemplate:
         mem_after = device_interface.memory_allocated(device)
         self.assertEqual(mem_after, mem_before)
 
+    def test_cudagraph_whole_capture_replay_and_recapture(self):
+        # cudagraph_mode="whole" captures the entire lowered component. The first
+        # call at a shape records, later calls at that shape replay, and a new
+        # shape records a second graph. All three must match eager.
+        if self.device != "cuda":
+            raise unittest.SkipTest("AOTI whole-graph cuda graph requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.linear(x).relu().sum(dim=1)
+
+        model = Model().to(self.device)
+        example = torch.randn(8, 64, device=self.device)
+        compiled = compile_whole_cudagraph(
+            model, (example,), {"x": {0: Dim("b", min=1, max=256)}}
+        )
+
+        with torch.no_grad():
+            # Shape 8 twice: the second call is a replay of the first capture.
+            for _ in range(2):
+                x = torch.randn(8, 64, device=self.device)
+                self.assertEqual(compiled(x), model(x))
+            # A new shape must record its own graph rather than replay shape 8's.
+            for batch in (32, 8, 32):
+                x = torch.randn(batch, 64, device=self.device)
+                self.assertEqual(compiled(x), model(x))
+
+    def test_cudagraph_whole_capture_cap_falls_back_to_eager(self):
+        # Past cudagraph_max_captures a new shape runs UNCAPTURED. It must still
+        # be correct -- the cap trades the launch saving for bounded pool memory,
+        # never correctness.
+        if self.device != "cuda":
+            raise unittest.SkipTest("AOTI whole-graph cuda graph requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return (x * 2).sin().sum(dim=1)
+
+        model = Model().to(self.device)
+        example = torch.randn(8, 32, device=self.device)
+        compiled = compile_whole_cudagraph(
+            model,
+            (example,),
+            {"x": {0: Dim("b", min=1, max=256)}},
+            **{"aot_inductor.cudagraph_max_captures": 1},
+        )
+
+        with torch.no_grad():
+            # Shape 8 fills the single capture slot; 16 and 24 exceed it and run
+            # uncaptured. Re-running 8 afterwards must still hit its capture.
+            for batch in (8, 16, 24, 8):
+                x = torch.randn(batch, 32, device=self.device)
+                self.assertEqual(compiled(x), model(x))
+
+    def test_cudagraph_whole_rejects_uncapturable_graph(self):
+        # RNG cannot be captured: capture freezes the philox seed, so replays
+        # would stop advancing. The lowering must fail, naming the blocker,
+        # rather than silently producing a model that repeats one draw forever.
+        if self.device != "cuda":
+            raise unittest.SkipTest("AOTI whole-graph cuda graph requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand_like(x)
+
+        model = Model().to(self.device)
+        example = torch.randn(8, 64, device=self.device)
+        with self.assertRaisesRegex(Exception, "RNG"):
+            compile_whole_cudagraph(model, (example,), None)
+
+    def test_cudagraph_mode_regional_rejected(self):
+        # "regional" is reserved for the follow-up stack; it must fail loudly
+        # instead of silently behaving like "off".
+        if self.device != "cuda":
+            raise unittest.SkipTest("AOTI whole-graph cuda graph requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = Model().to(self.device)
+        example = torch.randn(8, 64, device=self.device)
+        with self.assertRaisesRegex(Exception, "not implemented yet"):
+            with config.patch({"aot_inductor.cudagraph_mode": "regional"}):
+                with torch.no_grad():
+                    AOTIRunnerUtil.compile(model, (example,))
+
     def test_add_complex(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
@@ -10493,6 +10595,17 @@ GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
     # mode runs the generated JIT wrapper during compile, so it fails before
     # the AOTI package can be loaded.
     "test_aoti_custom_op_bad_fake_dtype_fails_fast": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    # cudagraph_mode="whole" is rejected in dual-wrapper mode: it emits a JIT
+    # entry point alongside the AOTI one and only the latter can be captured.
+    "test_cudagraph_whole_capture_replay_and_recapture": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cudagraph_whole_capture_cap_falls_back_to_eager": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cudagraph_whole_rejects_uncapturable_graph": fail_gpu(
         ("cuda", "xpu"), is_skip=True
     ),
 }
