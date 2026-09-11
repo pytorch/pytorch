@@ -40,6 +40,11 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.remote_device import _remote_device
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -47,6 +52,7 @@ from torch.testing._internal.common_distributed import (
     tp_transports,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -1451,31 +1457,33 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
 
 class TestShardedTensorEnumerable(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharded_tensor_metadata(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_tensor_metadata(self, device):
         spec = EnumerableShardingSpec(
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:2/cuda:2",
+                    placement=f"rank:2/{self.device_type}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{self.device_type}:3",
                 ),
             ]
         )
@@ -1527,29 +1535,29 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_grid_sharding(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_grid_sharding(self, device):
         spec = EnumerableShardingSpec(
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:2/cuda:2",
+                    placement=f"rank:2/{self.device_type}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{self.device_type}:3",
                 ),
             ]
         )
@@ -1560,7 +1568,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(self.device_type, self.rank), local_shard.tensor.device
+        )
         self.assertEqual((5, 5), local_shard.tensor.size())
 
         # Verify local shard metadata.
@@ -1570,7 +1580,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         )
         self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"rank:{self.rank}/cuda:{self.rank}", str(local_shard.metadata.placement)
+            f"rank:{self.rank}/{self.device_type}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -1582,7 +1593,10 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
             )
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{self.device_type}:{rank}",
+                str(shard_metadata.placement),
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -1597,8 +1611,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_create_sharded_tensor_with_ones(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_create_sharded_tensor_with_ones(self, device):
         """Test sharded_tensor.ones(...)"""
 
         spec = EnumerableShardingSpec(
@@ -1606,22 +1620,22 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:2/cuda:2",
+                    placement=f"rank:2/{self.device_type}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{self.device_type}:3",
                 ),
             ]
         )
@@ -1632,14 +1646,16 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         # Verify local shard is initialized with torch.ones
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(self.device_type, self.rank), local_shard.tensor.device
+        )
         self.assertEqual((5, 5), local_shard.tensor.size())
         self.assertEqual(local_shard.tensor, torch.ones(5, 5))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_gather_even(self) -> None:
+    @requires_capabilities(Capability.distributed.backend)
+    def test_gather_even(self, device) -> None:
         """Test _sharded_tensor.gather(...) with evenly distributed._shards"""
 
         spec = EnumerableShardingSpec(
@@ -1647,22 +1663,22 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:2/cuda:2",
+                    placement=f"rank:2/{self.device_type}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{self.device_type}:3",
                 ),
             ]
         )
@@ -1673,7 +1689,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         full_tensor = None
         dst = 0
         if self.rank == dst:
-            full_tensor = torch.zeros(h, w, device=torch.device(f"cuda:{dst}"))
+            full_tensor = torch.zeros(h, w, device=torch.device(self.device_type, dst))
         st.gather(dst, full_tensor)
 
         if self.rank == dst:
@@ -1683,8 +1699,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_gather_uneven(self) -> None:
+    @requires_capabilities(Capability.distributed.backend)
+    def test_gather_uneven(self, device) -> None:
         """Test _sharded_tensor.gather(...) with unevenly distributed._shards"""
 
         spec = EnumerableShardingSpec(
@@ -1692,22 +1708,22 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{self.device_type}:3",
                 ),
             ]
         )
@@ -1718,7 +1734,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         full_tensor = None
         dst = 0
         if self.rank == dst:
-            full_tensor = torch.zeros(h, w, device=torch.device(f"cuda:{dst}"))
+            full_tensor = torch.zeros(h, w, device=torch.device(self.device_type, dst))
         st.gather(dst, full_tensor)
 
         if self.rank == dst:
@@ -1728,8 +1744,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharded_tensor_to_cpu(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_tensor_to_cpu(self, device):
         cpu_spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -1742,10 +1758,10 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 10, 20
@@ -1788,8 +1804,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             placements=[
                 "rank:0/cpu",
                 "rank:1/cpu",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
 
@@ -1815,8 +1831,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharded_tensor_to_cuda(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_tensor_to_cuda(self, device):
         cpu_spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -1829,17 +1845,17 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 10, 20
         # CUDA sharded tensor should return a new ShardedTensor, but same
         # local shards(no movements)
         st_cuda = sharded_tensor.zeros(spec, h, w)
-        new_st_cuda = st_cuda.cuda()
+        new_st_cuda = st_cuda.to(self.device_type, copy=True)
         self.assertTrue(st_cuda is not new_st_cuda)
         self.assertTrue(st_cuda.local_tensor() is new_st_cuda.local_tensor())
 
@@ -1849,7 +1865,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
         # test ability to move st to GPU
         spec_before_move = st_cpu.sharding_spec()
-        new_st_gpu = st_cpu.cuda()
+        new_st_gpu = st_cpu.to(self.device_type)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st_gpu.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
@@ -1862,24 +1878,24 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             remote_device_before = spec_before_move.placements[i]
             self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
             self.assertEqual(str(remote_device_before.device().type), "cpu")
-            self.assertEqual(str(remote_device_after.device().type), "cuda")
+            self.assertEqual(str(remote_device_after.device().type), self.device_type)
 
         # ensure metadata also get changed to GPU
         metas = new_st_gpu.metadata().shards_metadata
         for meta in metas:
-            self.assertEqual(str(meta.placement.device().type), "cuda")
+            self.assertEqual(str(meta.placement.device().type), self.device_type)
 
-    @with_comms
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharded_tensor_to_test(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_tensor_to_test(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 10, 20
@@ -1887,7 +1903,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         # local shards(no movements)
         st = sharded_tensor.zeros(spec, h, w)
         # test same dtype, device return itself
-        st_self = st.to(dtype=st.dtype, device="cuda")
+        st_self = st.to(dtype=st.dtype, device=f"{self.device_type}:{self.rank}")
         self.assertTrue(st_self is st)
 
         # test dtype to
@@ -1898,31 +1914,35 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st_cpu = st.to(device=torch.device("cpu"))
         self.assertFalse(st_cpu is st)
         self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
-        st_cuda = st_cpu.to(device=torch.device("cuda"))
-        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        st_cuda = st_cpu.to(device=torch.device(self.device_type, self.rank))
+        self.assertEqual(st_cuda.local_tensor().device.type, self.device_type)
         # non-kwarg device to
-        st_cuda = st_cpu.to(torch.device("cuda"))
-        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        st_cuda = st_cpu.to(torch.device(self.device_type, self.rank))
+        self.assertEqual(st_cuda.local_tensor().device.type, self.device_type)
         st_cpu = st_cuda.to(torch.device("cpu"))
         self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
         # with string like device conversion
         st_cpu = st_cuda.to("cpu")
         self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
-        st_cuda = st_cpu.to("cuda")
-        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        st_cuda = st_cpu.to(f"{self.device_type}:{self.rank}")
+        self.assertEqual(st_cuda.local_tensor().device.type, self.device_type)
         # with int like device conversion
         st_cpu = st_cuda.to("cpu")
         self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
-        st_cuda = st_cpu.to(self.rank)
-        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        st_cuda = st_cpu.to(f"{self.device_type}:{self.rank}")
+        self.assertEqual(st_cuda.local_tensor().device.type, self.device_type)
 
         # test tensor to
-        cuda_tensor = torch.randn(3, 4, dtype=torch.float16, device="cuda")
+        cuda_tensor = torch.randn(
+            3, 4, dtype=torch.float16, device=f"{self.device_type}:{self.rank}"
+        )
         st_cuda = st.to(cuda_tensor)
         self.assertFalse(st_cuda is st)
         self.assertEqual(st_cuda.dtype, torch.float16)
 
-        cuda_tensor = torch.randn(3, 4, dtype=torch.float16, device="cuda:2")
+        cuda_tensor = torch.randn(
+            3, 4, dtype=torch.float16, device=f"{self.device_type}:2"
+        )
         st_cuda = st.to(cuda_tensor)
         self.assertEqual(st_cuda.dtype, torch.float16)
 
@@ -1931,9 +1951,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertEqual(st_cpu_16.dtype, torch.float16)
         self.assertEqual(st_cpu_16.local_tensor().device.type, "cpu")
 
-        st_cuda_32 = st_cpu_16.to("cuda", torch.float32)
+        st_cuda_32 = st_cpu_16.to(f"{self.device_type}:{self.rank}", torch.float32)
         self.assertEqual(st_cuda_32.dtype, torch.float32)
-        self.assertEqual(st_cuda_32.local_tensor().device.type, "cuda")
+        self.assertEqual(st_cuda_32.local_tensor().device.type, self.device_type)
 
         # test pass additional process group
         gloo_pg = dist.new_group(backend="gloo")
@@ -1944,22 +1964,22 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharded_tensor_device(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_tensor_device(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 10, 20
         # CUDA sharded tensor should return a new ShardedTensor, but same
         # local shards(no movements)
         st = sharded_tensor.zeros(spec, h, w)
-        current_device = torch.device(torch.cuda.current_device())
+        current_device = torch.device(self.device_type, self.rank)
         self.assertEqual(current_device, st.device)
 
         # test after to cpu, device get changed
@@ -1968,31 +1988,31 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertEqual(st_cpu.device, cpu_device)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_uneven_shards(self):
-        self.init_pg()
+    @requires_capabilities(Capability.distributed.backend)
+    def test_uneven_shards(self, device):
+        self.init_pg(backend=self.backend)
 
         spec = EnumerableShardingSpec(
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[2, 4],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 4],
                     shard_sizes=[4, 2],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[2, 0],
                     shard_sizes=[4, 4],
-                    placement="rank:2/cuda:2",
+                    placement=f"rank:2/{self.device_type}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[4, 4],
                     shard_sizes=[2, 2],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{self.device_type}:3",
                 ),
             ]
         )
@@ -2023,14 +2043,17 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(self.device_type, self.rank), local_shard.tensor.device
+        )
         verify_size(self.rank, local_shard.tensor.size())
 
         # Verify local shard metadata.
         verify_offsets(self.rank, local_shard.metadata.shard_offsets)
         verify_size(self.rank, local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"rank:{self.rank}/cuda:{self.rank}", str(local_shard.metadata.placement)
+            f"rank:{self.rank}/{self.device_type}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -2040,24 +2063,27 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         for rank, shard_metadata in enumerate(shards_metadata):
             verify_offsets(rank, shard_metadata.shard_offsets)
             verify_size(rank, shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{self.device_type}:{rank}",
+                str(shard_metadata.placement),
+            )
 
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_partial_world_size(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_partial_world_size(self, device):
         spec = EnumerableShardingSpec(
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
             ]
         )
@@ -2073,7 +2099,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             # Verify local shard.
             local_shard = st.local_shards()[0]
             self.assertEqual(
-                torch.device(f"cuda:{self.rank}"), local_shard.tensor.device
+                torch.device(self.device_type, self.rank), local_shard.tensor.device
             )
             self.assertEqual((5, 5), local_shard.tensor.size())
 
@@ -2081,7 +2107,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual((self.rank * 5, 0), local_shard.metadata.shard_offsets)
             self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
             self.assertEqual(
-                f"rank:{self.rank}/cuda:{self.rank}",
+                f"rank:{self.rank}/{self.device_type}:{self.rank}",
                 str(local_shard.metadata.placement),
             )
 
@@ -2092,7 +2118,10 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         for rank, shard_metadata in enumerate(shards_metadata):
             self.assertEqual((rank * 5, 0), shard_metadata.shard_offsets)
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{self.device_type}:{rank}",
+                str(shard_metadata.placement),
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -2112,19 +2141,19 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_new_group(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_new_group(self, device):
         spec = EnumerableShardingSpec(
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{self.device_type}:3",
                 ),
             ]
         )
@@ -2137,7 +2166,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             # Verify local shard.
             local_shard = st.local_shards()[0]
             self.assertEqual(
-                torch.device(f"cuda:{self.rank}"), local_shard.tensor.device
+                torch.device(self.device_type, self.rank), local_shard.tensor.device
             )
             self.assertEqual((5, 5), local_shard.tensor.size())
 
@@ -2147,7 +2176,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             )
             self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
             self.assertEqual(
-                f"rank:{self.rank}/cuda:{self.rank}",
+                f"rank:{self.rank}/{self.device_type}:{self.rank}",
                 str(local_shard.metadata.placement),
             )
 
@@ -2159,7 +2188,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual((rank * 5, 0), shard_metadata.shard_offsets)
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
             self.assertEqual(
-                f"rank:{rank * 2 + 1}/cuda:{rank * 2 + 1}",
+                f"rank:{rank * 2 + 1}/{self.device_type}:{rank * 2 + 1}",
                 str(shard_metadata.placement),
             )
 
@@ -2181,29 +2210,29 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_multiple_local_shards(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_multiple_local_shards(self, device):
         spec = EnumerableShardingSpec(
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{self.device_type}:1",
                 ),
             ]
         )
@@ -2217,7 +2246,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             # Verify local shards.
             for idx, local_shard in enumerate(st.local_shards()):
                 self.assertEqual(
-                    torch.device(f"cuda:{self.rank}"), local_shard.tensor.device
+                    torch.device(self.device_type, self.rank), local_shard.tensor.device
                 )
                 self.assertEqual((5, 5), local_shard.tensor.size())
 
@@ -2227,7 +2256,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 )
                 self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
                 self.assertEqual(
-                    f"rank:{self.rank}/cuda:{self.rank}",
+                    f"rank:{self.rank}/{self.device_type}:{self.rank}",
                     str(local_shard.metadata.placement),
                 )
         else:
@@ -2244,7 +2273,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             )
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
             self.assertEqual(
-                f"rank:{shard_rank % 2}/cuda:{shard_rank % 2}",
+                f"rank:{shard_rank % 2}/{self.device_type}:{shard_rank % 2}",
                 str(shard_metadata.placement),
             )
 
@@ -2265,29 +2294,29 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_with_rpc_names(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_with_rpc_names(self, device):
         spec = EnumerableShardingSpec(
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="worker0/cuda:0",
+                    placement=f"worker0/{self.device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="worker1/cuda:1",
+                    placement=f"worker1/{self.device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="worker2/cuda:2",
+                    placement=f"worker2/{self.device_type}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="worker3/cuda:3",
+                    placement=f"worker3/{self.device_type}:3",
                 ),
             ]
         )
@@ -2298,7 +2327,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(self.device_type, self.rank), local_shard.tensor.device
+        )
         self.assertEqual((5, 5), local_shard.tensor.size())
 
         # Verify local shard metadata.
@@ -2308,7 +2339,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         )
         self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"worker{self.rank}/cuda:{self.rank}", str(local_shard.metadata.placement)
+            f"worker{self.rank}/{self.device_type}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -2320,7 +2352,10 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
             )
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"worker{rank}/cuda:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"worker{rank}/{self.device_type}:{rank}",
+                str(shard_metadata.placement),
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -3574,6 +3609,11 @@ class TestCreateTensorNoProcessGroupMode(TestCase):
             local_shards=st_local_shards,
             sharded_tensor_metadata=st_metadata,
         )
+
+
+instantiate_device_type_tests(
+    TestShardedTensorEnumerable, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
