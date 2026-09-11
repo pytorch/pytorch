@@ -4279,15 +4279,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         return getattr(torch.nn.attention.SDPBackend, name)
 
     @classmethod
-    def _unpickle_cell(cls, val: Any) -> Any:
-        def _() -> Any:
-            return val
-
-        if _.__closure__ is None:
-            raise AssertionError("Closure must not be None when unpickling cell")
-        return _.__closure__[0]
-
-    @classmethod
     def _unpickle_named_tuple_type(
         cls, name: str, fields: tuple[str, ...]
     ) -> type[NamedTuple]:
@@ -4478,8 +4469,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             if func is not inner_func:
                 return type(self)._unpickle_bound_method, (func, method_self)
 
-        elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+        elif isinstance(obj, types.CellType):
+            return self._reduce_cell(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
