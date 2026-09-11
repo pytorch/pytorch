@@ -2388,6 +2388,28 @@ class TestCuptiAnnotationBackend(TestCase):
         self.assertEqual(seen, ["edge_walk"])
         self.assertEqual(len(self._annotations()), 1)
 
+    def test_source_keying_needs_a_new_enough_cupti(self):
+        # A 13.4 driver with an older CUPTI is the quiet failure: the driver would report
+        # source node ids but the consumer's CUPTI has no field to carry them, so
+        # annotations kept on the capture graph resolve to nothing. Both ends are checked.
+        import torch.cuda._graph_annotations as _ga
+
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=130301
+        ):
+            self.assertFalse(_ga.source_node_ids_available())
+        # No CUPTI in the process yet: nothing to be wrong about, so the driver alone
+        # decides -- the same answer a new-enough CUPTI gives.
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=None
+        ):
+            absent = _ga.source_node_ids_available()
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=130400
+        ):
+            new_enough = _ga.source_node_ids_available()
+        self.assertEqual(absent, new_enough)
+
     def test_invalid_backend_rejected(self):
         with self.assertRaisesRegex(ValueError, r"annotation_config\['backend'\]"):
             torch.cuda.graph(
