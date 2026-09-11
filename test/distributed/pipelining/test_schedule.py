@@ -4,6 +4,7 @@ import copy
 import csv
 import logging
 import os
+from collections import Counter
 from unittest.mock import MagicMock, patch
 
 from model_registry import MultiMLP
@@ -44,10 +45,12 @@ from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     RECV_B,
     RECV_F,
+    REDUCE_GRAD,
     RESHARD,
     SEND_B,
     UNSHARD,
     W,
+    WAIT_REDUCE_GRAD,
 )
 from torch.distributed.pipelining.stage import (
     _PipelineStageBase,
@@ -704,6 +707,72 @@ class TestSchedulePlan(TestCase):
 
         self.assertEqual(count_stage_15_unshards(default_schedule), 4)
         self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
+
+    def test_wait_reduce_grad_round_trip(self):
+        action = _Action(3, WAIT_REDUCE_GRAD, None)
+        self.assertEqual(str(action), "3WAIT_REDUCE_GRAD")
+        self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_defer_reduce_grad_wait_lowering(self):
+        actions = [
+            _Action(6, B, 0),
+            _Action(4, B, 0),
+            _Action(2, B, 0),
+        ]
+        default = _add_reduce_grad(actions, n_microbatches=1)
+        self.assertEqual(
+            default,
+            [
+                _Action(6, B, 0),
+                _Action(6, REDUCE_GRAD, None),
+                _Action(4, B, 0),
+                _Action(4, REDUCE_GRAD, None),
+                _Action(2, B, 0),
+                _Action(2, REDUCE_GRAD, None),
+            ],
+        )
+        self.assertFalse(
+            any(action.computation_type == WAIT_REDUCE_GRAD for action in default)
+        )
+
+        deferred = _add_reduce_grad(
+            actions,
+            n_microbatches=1,
+            defer_reduce_grad_wait=True,
+        )
+        self.assertEqual(
+            deferred,
+            [
+                _Action(6, B, 0),
+                _Action(6, REDUCE_GRAD, None),
+                _Action(4, B, 0),
+                _Action(6, WAIT_REDUCE_GRAD, None),
+                _Action(4, REDUCE_GRAD, None),
+                _Action(2, B, 0),
+                _Action(4, WAIT_REDUCE_GRAD, None),
+                _Action(2, REDUCE_GRAD, None),
+                _Action(2, WAIT_REDUCE_GRAD, None),
+            ],
+        )
+        self.assertEqual(
+            Counter(
+                action.computation_type
+                for action in deferred
+                if action.computation_type != WAIT_REDUCE_GRAD
+            ),
+            Counter(action.computation_type for action in default),
+        )
+
+        outstanding = 0
+        peak = 0
+        for action in deferred:
+            if action.computation_type == REDUCE_GRAD:
+                outstanding += 1
+                peak = max(peak, outstanding)
+            elif action.computation_type == WAIT_REDUCE_GRAD:
+                outstanding -= 1
+        self.assertEqual(outstanding, 0)
+        self.assertEqual(peak, 1)
 
     @parametrize(
         "ScheduleClass",
