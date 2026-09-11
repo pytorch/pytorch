@@ -1724,12 +1724,15 @@ static void triangular_solve_metal(const Tensor& A_,
       getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {A_, B_}, stream);
       [encoder setComputePipelineState:pso];
       // Every substitution step reduces across the whole threadgroup, so don't
-      // spread a short row over more threads than it has work for.
-      const uint64_t maxThreads = std::min<uint64_t>(pso.maxTotalThreadsPerThreadgroup, 256);
-      const uint64_t tgSize = std::clamp<uint64_t>(round_up(n, uint64_t(32)), 32, maxThreads);
+      // spread a short row over more threads than it has work for, and keep the
+      // group a whole number of simdgroups so the reduction stays exact.
+      constexpr uint64_t kSimd = c10::metal::simdgroup_size;
+      constexpr uint64_t kMaxThreadsPerGroup = 8 * kSimd;
+      const uint64_t maxThreads = std::min<uint64_t>(pso.maxTotalThreadsPerThreadgroup, kMaxThreadsPerGroup);
+      const uint64_t tgSize = std::clamp<uint64_t>(round_up(n, kSimd), kSimd, maxThreads);
       // setThreadgroupMemoryLength rejects lengths that are not a multiple of 16.
       constexpr uint64_t kTGMemAlign = 16;
-      const uint64_t redBytes = round_up(tgSize / 32 * elem_size, kTGMemAlign);
+      const uint64_t redBytes = round_up(tgSize / kSimd * elem_size, kTGMemAlign);
       const uint64_t prefixBytes = round_up(n * elem_size, kTGMemAlign);
       // The caller sends anything bigger down the blocked path, which only ever
       // hands this kernel a block, so the prefix always fits.
@@ -1793,7 +1796,7 @@ static void triangular_solve_blocked(const Tensor& M, bool upper, bool unitriang
       // Accumulate in place: a plain sub_(matmul(...)) would allocate a result
       // per block, each a different size, which the caching allocator then
       // holds on to one block per size.
-      X3.narrow(1, r0, rest).baddbmm_(M3.narrow(1, r0, rest).narrow(2, i0, rows), Xi_new, 1, -1);
+      X3.narrow(1, r0, rest).baddbmm_(M3.narrow(1, r0, rest).narrow(2, i0, rows), Xi_new, /*beta=*/1, /*alpha=*/-1);
     }
   }
 }
@@ -1867,7 +1870,8 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   // per-block dispatches cost more than the substitution they replace.
   // nb trades a costlier diagonal-block inverse against fewer trailing matmuls.
   constexpr int64_t kBlockSize = 128;
-  if (A_.size(-1) > 4 * kBlockSize) {
+  constexpr int64_t kMinBlocks = 4;
+  if (A_.size(-1) > kMinBlocks * kBlockSize) {
     Tensor M = kernel_transpose ? A_.mT() : A_;
     if (conjugate) {
       M = M.conj();

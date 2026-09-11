@@ -594,10 +594,11 @@ kernel void triangular_solve(
   const bool cj = p.conj;
   // A is upper before op; a transpose flips the effective triangle, and a lower
   // one substitutes forward.
-  const bool forward = (p.upper != 0) == (p.transpose != 0);
+  const bool forward = p.upper == p.transpose;
   device const T* b = B + batch * n * k + vec;
   device T* x = X + batch * n * k + vec;
-  const uint nsimd = (tg_size + 31) / 32;
+  const uint nsimd =
+      (tg_size + c10::metal::simdgroup_size - 1) / c10::metal::simdgroup_size;
 
   for (uint step = 0; step < n; ++step) {
     const uint t = forward ? step : n - 1 - step;
