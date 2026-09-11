@@ -718,16 +718,18 @@ class ConfigModule(ModuleType):
                         raw_rollback.callback(restore_hide, entry, hide)
                     else:
                         external_undo.append((module, key, value))
-                targets, resolved_modules = self._resolve_patch_changes(changes)
-                modules.update(resolved_modules)
-                for module, key, value in targets:
+                for name, value in changes.items():
+                    resolved, touched = self._resolve_patch_changes({name: value})
+                    targets.extend(resolved)
+                    modules.update(touched)
+                    module, key, value = resolved[0]
                     if isinstance(module, _ImplicationConfigModule):
                         changed.setdefault(module, set()).add(key)
                         if key in module._implication_sources:
                             _validate_implication_source(key, value)
                     if isinstance(module, ConfigModule):
                         entry = module._config[key]
-                        # Snapshot before external getters can materialize config defaults.
+                        # Snapshot before later alias imports can change this value.
                         prior_value = entry.user_override.get()
                         token = entry.user_override.set(prior_value)
                         rollback.callback(entry.user_override.set, prior_value)
@@ -749,14 +751,19 @@ class ConfigModule(ModuleType):
                         entry.user_override.set(value)
                         if entry.hide:
                             entry.hide = False
-                    else:
-                        if (module, key) in external_prior:
-                            external_undo.append(
-                                (module, key, external_prior.pop((module, key)))
-                            )
-                        invalidate()
-                        setattr(module, key, value)
+                invalidate()
                 validate()
+                for module, key, value in targets:
+                    if isinstance(module, ConfigModule):
+                        continue
+                    if (module, key) in external_prior:
+                        external_undo.append(
+                            (module, key, external_prior.pop((module, key)))
+                        )
+                    invalidate()
+                    setattr(module, key, value)
+                if external_undo:
+                    validate()
                 undo = rollback.pop_all()
         finally:
             invalidate()

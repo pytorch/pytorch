@@ -1133,7 +1133,7 @@ class TestConfigImplications(TestCase):
         self.assertIs(wrapper._config["items"].user_override.get(), _UNSET_SENTINEL)
 
     @parametrize("alias_offset", (False, True))
-    def test_external_alias_setters_observe_restored_config(self, alias_offset):
+    def test_external_alias_setters_observe_complete_config(self, alias_offset):
         class External(ModuleType):
             @property
             def mirror(self):
@@ -1141,6 +1141,8 @@ class TestConfigImplications(TestCase):
 
             @mirror.setter
             def mirror(self, value):
+                self.writes.append(value)
+                self.observed_flag = cfg.flag
                 self.raw = value + cfg.offset
                 self.observed_hash = cfg.get_hash()
                 self.observed_items = cfg.items
@@ -1148,25 +1150,35 @@ class TestConfigImplications(TestCase):
         external = External("test_config_external_setter")
         external.raw = 0
         external.offset = 0
+        external.writes = []
         with patch.dict(sys.modules, {external.__name__: external}):
             offset = (
                 f"Config(alias='{external.__name__}.offset')" if alias_offset else "0"
             )
             cfg = self._make_config(
-                "mode = Config(default=False, implies={True: {'flag': True}})\n"
-                f"flag = False\noffset = {offset}\nitems = []\n"
+                "a = Config(default=False, implies={True: {'flag': 1}})\n"
+                "b = Config(default=True, implies={True: {'flag': 2}})\n"
+                f"flag = 0\noffset = {offset}\nitems = []\n"
                 f"mirror = Config(alias='{external.__name__}.mirror')"
             )
             before_hash = cfg.get_hash()
-            with cfg.patch(offset=1, items=[1], mirror=4):
+            with cfg.patch(a=True, offset=1, items=[1], mirror=4, b=False):
                 self.assertEqual(cfg.mirror, 4)
+                self.assertEqual(external.observed_flag, 1)
                 self.assertNotEqual(cfg.get_hash(), before_hash)
                 self.assertEqual(external.observed_hash, cfg.get_hash())
             self.assertEqual(cfg.offset, 0)
             self.assertEqual(cfg.mirror, 0)
+            self.assertEqual(external.observed_flag, 2)
             self.assertEqual(external.observed_hash, before_hash)
             self.assertEqual(external.observed_items, [])
             self.assertIs(cfg._config["items"].user_override.get(), _UNSET_SENTINEL)
+            external.writes.clear()
+            with self.assertRaisesRegex(ValueError, "conflicting.*flag"):
+                with cfg.patch(a=True, mirror=4):
+                    pass
+            self.assertEqual(external.writes, [])
+            self.assertEqual(cfg.get_hash(), before_hash)
 
     def test_alias_load_restores_raw_target_values(self):
         cfg = self._make_config(
@@ -1201,6 +1213,28 @@ class TestConfigImplications(TestCase):
         cfg.load_config({"value": 2, "other": 3})
         self.assertEqual(sys.modules[lazy_name].observed, 2)
         self.assertEqual(cfg.other, 3)
+
+    @parametrize("overridden", (False, True))
+    def test_alias_import_restores_prior_raw_value(self, overridden):
+        cfg = self._make_config(
+            "mode = Config(default=False, implies={True: {'flag': True}})\n"
+            "flag = False\nvalue = 1\n"
+            "other = Config(alias=__name__ + '_lazy.value')"
+        )
+        self._make_lazy_module(
+            cfg, f"import {cfg.__name__} as owner\nowner.value = 7\nvalue = 0"
+        )
+        if overridden:
+            cfg.value = 3
+        before = cfg.value
+        before_raw = cfg._config["value"].user_override.get()
+        before_hash = cfg.get_hash()
+        with cfg.patch(value=2, other=3):
+            self.assertEqual(cfg.value, 2)
+            self.assertEqual(cfg.other, 3)
+        self.assertEqual(cfg.value, before)
+        self.assertIs(cfg._config["value"].user_override.get(), before_raw)
+        self.assertEqual(cfg.get_hash(), before_hash)
 
     def test_failed_cleanup_invalidates_cache(self):
         class RejectRestore(ModuleType):
