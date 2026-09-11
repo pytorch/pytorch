@@ -145,8 +145,11 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.backend_ids, [])
         with package.code_context(fn.__code__):
             package.add_guarded_code(b"", code)
+            # A bypass used to stick to the entry and suppress this too.
+            package.add_inlined_source([fn.__code__])
         self.assertFalse(entry.bypassed)
         self.assertEqual(entry.backend_ids, [backend_id])
+        self.assertTrue(package.cache_entry().source_info.inlined_sources)
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_bypassed_guards_keep_the_frames_earlier_variant(self):
@@ -167,12 +170,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x, cfg), fn(x, cfg))
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
-        # The bypassed compile's backend was recorded but is referenced by no
-        # entry, so it is not written; both artifacts were recorded, one is saved.
+        # The bypassed compile's backend id is referenced by no entry, so the
+        # written cache entry carries exactly the surviving compile's backend.
         info = PrecompileContext.save_to_dynamo_cache()
         (entry,) = info["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
-        self.assertEqual(len(info["backends"]), 2)
+        written = DynamoCache.load(fn)
+        self.assertEqual(list(written.backends), entry["backend_ids"])
         torch._dynamo.reset()
         PrecompileContext.clear()
         # Wrapping reloads from the on-disk DynamoCache (per-test fresh_cache dir).
