@@ -121,11 +121,11 @@ class FunctionPicklerBase(pickle.Pickler):
     keeps its own copies of these reducers until it is moved onto this base
     separately; once both share it, a fix here cannot be missed in one pickler.
 
-    Defaults travel as pickle STATE, applied after memoization, so a default
-    that reaches back to its own function ends. A closure cell is a reduce
-    ARGUMENT: a function closing over itself is reduced twice, and
-    save_reduce's recursive-object fallback (present in both the C and the
-    pure-Python pickler) drops the outer copy.
+    Defaults, kwdefaults, __doc__, __dict__, __annotations__ and __type_params__
+    travel as pickle STATE, applied after memoization, so `wrapper.me = wrapper`
+    cycles end. A closure cell is a reduce ARGUMENT: a function closing over
+    itself is reduced twice, and save_reduce's recursive-object fallback
+    (present in both the C and the pure-Python pickler) drops the outer copy.
     """
 
     # The reducers stay classmethods: pickle reduces a bound classmethod to
@@ -215,8 +215,39 @@ class FunctionPicklerBase(pickle.Pickler):
     def _apply_function_state(
         cls, fn: types.FunctionType, state: tuple[Any, ...]
     ) -> None:
-        (defaults,) = state
+        defaults, kwdefaults, attributes, doc, annotations, type_params = state
         fn.__defaults__ = defaults
+        fn.__kwdefaults__ = kwdefaults
+        # FunctionType() takes __doc__ from the code object and leaves
+        # __annotations__/__type_params__ empty (the compiler sets them on the
+        # function after creating it);
+        # functools.wraps overwrote them on the live function and a guard rooted
+        # there rebakes, so restore what the reducer captured.
+        fn.__doc__ = doc
+        fn.__annotations__ = annotations
+        # On Python < 3.12 there is no __type_params__ slot, so both a live
+        # function's __type_params__ and the write below land in __dict__.
+        # Assign __dict__ first so the reducer's (possibly pruned) type_params
+        # wins over whatever the carried __dict__ holds under that key.
+        fn.__dict__ = attributes
+        if type_params is not None:
+            fn.__type_params__ = type_params
+
+    @staticmethod
+    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+        # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
+        # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the
+        # FORWARDREF format instead: it evaluates what it can and falls back to
+        # proxies only for names that do not resolve, returning a COPY either
+        # way. A ForwardRef proxy carries its owner and may not pickle (it does
+        # not for a local function), so the caller prunes any it does not need.
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            return annotationlib.get_annotations(
+                obj, format=annotationlib.Format.FORWARDREF
+            )
+        return obj.__annotations__
 
     def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
         try:
@@ -298,13 +329,21 @@ class FunctionPicklerBase(pickle.Pickler):
         fn: types.FunctionType,
         *,
         defaults: tuple[Any, ...] | None,
+        kwdefaults: dict[str, Any] | None,
         closure: tuple[types.CellType, ...] | None,
+        attributes: dict[str, Any],
+        doc: Any,
+        annotations: dict[str, Any],
+        type_params: tuple[Any, ...] | None,
     ) -> tuple[Any, ...]:
-        # defaults/closure are passed in rather than read off fn so the subclass
-        # decides what the rebuilt function carries.
+        # Everything is passed in rather than read off fn: the subclass decides
+        # what the rebuilt function carries, and the guard pickler prunes what
+        # no guard reads so an unpicklable local class in an annotation -- or a
+        # __doc__ reassigned to an unpicklable object -- cannot fail the whole
+        # dump (a failure there silently bypasses the package).
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         unpickle = type(self)._unpickle_fn_from_module
-        state = (defaults,)
+        state = (defaults, kwdefaults, attributes, doc, annotations, type_params)
         return unpickle, args, state, None, None, type(self)._apply_function_state
 
 
