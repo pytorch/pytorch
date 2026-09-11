@@ -8642,9 +8642,9 @@ class TestNNDeviceType(NNTestCase):
                     msg=lambda msg: f"{msg}\ndbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
                 )
 
-    @expectedFailureMPS  # Double is not supported on MPS
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_pad(self, device, dtype):
         # Assert assertion errors are raised for invalid circular padding values
         inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
@@ -8674,9 +8674,9 @@ class TestNNDeviceType(NNTestCase):
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
 
-    @expectedFailureMPS  # Unsupported float64/complex128
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_ReplicationPad_empty(self, device, dtype):
         for mod, inp in [
                 (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device, dtype=dtype)),
@@ -8739,19 +8739,19 @@ class TestNNDeviceType(NNTestCase):
                 padding=[0, 0, 0, 0, -2, -2])
 
     @onlyNativeDeviceTypes
-    @skipMPS  # MPS routes through a separate kernel (mps::pad_out_template) that does not validate the channel dim
-    def test_ReplicationPad_backward_channel_mismatch(self, device):
+    def test_Pad_backward_channel_mismatch(self, device):
         # regression test for https://github.com/pytorch/pytorch/issues/142834: a
         # gradOutput whose channel dim doesn't match the input used to segfault in
         # the backward pass instead of raising a clear error.
-        for backward, inp, grad_output, padding in [
-            (torch.ops.aten.replication_pad1d_backward,
-             torch.ones(2, 2, 4, device=device), torch.ones(2, 0, 8, device=device), [2, 2]),
-            (torch.ops.aten.replication_pad2d_backward,
-             torch.ones(2, 2, 4, 4, device=device), torch.ones(2, 0, 6, 8, device=device), [2, 2, 1, 1]),
-        ]:
-            with self.assertRaisesRegex(RuntimeError, "gradOutput channel unexpected"):
-                backward(grad_output, inp, padding)
+        for name in ["reflection", "replication"]:
+            for inp, grad_output, padding in [
+                ((2, 2, 4), (2, 0, 8), [2, 2]),
+                ((2, 2, 4, 4), (2, 0, 6, 8), [2, 2, 1, 1]),
+                ((2, 2, 4, 4, 4), (2, 0, 6, 6, 8), [2, 2, 1, 1, 1, 1]),
+            ]:
+                backward = getattr(torch.ops.aten, f"{name}_pad{len(padding) // 2}d_backward")
+                with self.assertRaisesRegex(RuntimeError, "grad_output channel unexpected"):
+                    backward(torch.ones(grad_output, device=device), torch.ones(inp, device=device), padding)
 
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
@@ -9725,7 +9725,6 @@ class TestNNDeviceType(NNTestCase):
             expected_out = in_t.repeat_interleave(2, dim=-1)
             self.assertEqual(out_t, expected_out)
 
-    @skipIfMPS  # Partially passes https://github.com/pytorch/pytorch/issues/134430
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact1d_correctness(self, device, isize, osize):
         # Here we check if output matches Scikit-Image/Scipy-like result
@@ -9833,7 +9832,6 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
-    @skipIfMPS  # Partially passes https://github.com/pytorch/pytorch/issues/134430
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact2d_correctness(self, device, memory_format, isize, osize):
@@ -10091,8 +10089,6 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bilinear", align_corners=False, antialias=True)
         self.assertEqual(expected_out.expand([*shape[:2], 2, 2]), t_out)
 
-    # Partially passes. NotImplementedError: aten::upsample_bicubic2d.out https://github.com/pytorch/pytorch/issues/77764
-    @skipIfMPS
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])
     @parametrize_test("antialias", [True, False])
@@ -10102,6 +10098,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
     @parametrize_test("non_contig", [False, "sliced", "restrided"])
     @parametrize_test("batch_size", [1, 5])
+    @skipIfMPS
     def test_upsamplingBiMode2d_consistency(
         self,
         device,
@@ -13597,7 +13594,6 @@ if __name__ == '__main__':
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
-    @skipIfMPS  # RuntimeError: foreach=True was passed, but can't use the foreach API on mps tensors
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -13627,7 +13623,6 @@ if __name__ == '__main__':
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
-    @skipIfMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):
