@@ -968,6 +968,23 @@ ldl_diagonal_panel_fused_kernel(
       }
     }
 
+    // Column/Row swaps {
+    // 1x1 pivot -> swap with the current diagonal,
+    // 2x2 pivot -> swap with the next to the current diagonal
+    int swp = curr_step + pivot_rank - 1;
+    if (swp != piv) {
+      // Swap columns -- contiguous access
+      for (int i = curr_step + tid; i < n; i += BS) {
+        thrust::swap(dLD[LinOff(i, swp, lda)], dLD[LinOff(i, piv, lda)]);
+      }
+      // Swap rows -- noncontiguous access -- paying penatly here
+      for (int i = curr_step + tid; i < n; i += BS) {
+        thrust::swap(dLD[LinOff(swp, i, lda)], dLD[LinOff(piv, i, lda)]);
+      }
+    }
+    __syncthreads();
+    // }
+
   }
 }
 
