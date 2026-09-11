@@ -4392,16 +4392,21 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in f_globals.items()
             }
             # FunctionType binds builtins from the scope's __builtins__ at
-            # creation, so that entry is always the real module (pickled by
-            # reference): for an imported module it is builtins.__dict__, the
-            # very dict any compile that guards a builtin registers, so keeping
-            # it "as read" would carry all of builtins (~6 KB) in every snapshot
-            # next to the filtered copy G already holds. The key set is the
-            # module dict's at save time, names Dynamo installed into it
-            # included; a guard on the dict's shape compares against the live
+            # creation, so that entry, when the dict has one, is always the real
+            # module (pickled by reference), exempt from the keep contract: for
+            # an imported module it is builtins.__dict__, the very dict any
+            # compile that guards a builtin registers, so keeping it "as read"
+            # would carry all of builtins (~6 KB) in a cross-module snapshot (a
+            # snapshot of the traced module's own dict carries that dict anyway
+            # under __builtins_dict___N). A dict without the key stays without
+            # it, since FunctionType falls back to the loading frame's builtins
+            # and a guard on the dict's shape must see the same keys. The key
+            # set is the module dict's at save time, names Dynamo installed into
+            # it included; a guard on the dict's shape compares against the live
             # dict at run time and is only as portable as those names (see the
             # commit message).
-            snapshot["__builtins__"] = builtins
+            if "__builtins__" in snapshot:
+                snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
 
@@ -4636,7 +4641,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
-            if "<locals>" in obj.__qualname__:
+            if "<locals>" in obj.__qualname__.split("."):
                 # Rebuilt whether or not a guard is rooted at it, as before this
                 # change: it can never be found by name, and unlike a wraps
                 # wrapper it has no module-level neighbourhood to drag along.

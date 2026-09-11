@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import collections
 import dataclasses
 import functools
@@ -1287,7 +1288,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler.dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
-        self.assertIsNot(out["a"], a)  # rebuilt by value, not by reference
+        # The gate carried the cell's contents rather than pruning them.
+        self.assertNotIsInstance(out["a"].__closure__[0].cell_contents, _Missing)
 
     def test_rebuilt_locals_function_keeps_its_name(self):
         # The old <locals> rebuild passed __qualname__ where FunctionType wants
@@ -1375,20 +1377,23 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         odd = types.FunctionType(global_func.__code__, globals(), "global_func")
         odd.__module__ = ["not", "a", "module"]  # unhashable: must not TypeError
         # The oracle is pickle itself: every False case fails a by-reference
-        # dump (the C pickler raises a bare AttributeError for a <locals> name).
+        # dump. save_global replaces the import/lookup failure with a
+        # PicklingError; the C pickler raises a bare AttributeError for a
+        # <locals> name below 3.14 and PicklingError from 3.14 on.
+        locals_exc = (
+            pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
+        )
         cases = {
-            "locals": local_fn,
-            "wraps_wrapper": wrapper,
-            "bad_qualname": renamed,
-            "module_not_imported": exec_fn,
-            "unhashable_module": odd,
+            "locals": (local_fn, locals_exc),
+            "wraps_wrapper": (wrapper, pickle.PicklingError),
+            "bad_qualname": (renamed, pickle.PicklingError),
+            "module_not_imported": (exec_fn, pickle.PicklingError),
+            "unhashable_module": (odd, pickle.PicklingError),
         }
-        for case, fn in cases.items():
+        for case, (fn, exc) in cases.items():
             with self.subTest(case=case):
                 self.assertFalse(resolves(fn))
-                with self.assertRaises(
-                    (pickle.PicklingError, AttributeError, TypeError)
-                ):
+                with self.assertRaises(exc):
                     pickle.dumps(fn)
 
     def test_pruned_shared_closure_cell_stays_shared(self):
@@ -1432,14 +1437,31 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
         # Captured before the dump: a CleanupHook for a traced code object can
         # drop a __builtins_dict___N key out of the live dict during the load.
+        # (A band-aid: the dict is this module's live globals, so anything that
+        # installs or removes a global between here and the assertion still
+        # flips it.)
         expected_keys = set(g)
         pickler.dump(fn)
         out = pickle.loads(buf.getvalue())
         self.assertEqual(out.__module__, torch._dynamo.testing.__name__)
         self.assertEqual(out.__globals__["__name__"], __name__)
+        # The builtins entry is the module by reference, never the ~6 KB dict.
+        self.assertIs(out.__globals__["__builtins__"], builtins)
         # And the state really did arrive, so a guard on the scope's shape
         # (DICT_KEYS_MATCH, len) still sees the module it was captured from.
         self.assertEqual(set(out.__globals__), expected_keys)
+
+    def test_snapshot_of_a_scope_without_builtins_stays_without(self):
+        # A hand-built globals dict may lack __builtins__ (FunctionType reads
+        # the key, never writes it); the snapshot must not add one, or a guard
+        # on the dict's shape would compare a key the live dict does not have.
+        scope = {"__name__": "_scope_without_builtins", "X": 1}
+        fn = types.FunctionType(global_func.__code__, scope, "global_func")
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn, id(scope): scope}, {}, {}, {}, buf).dump(fn)
+        out = pickle.loads(buf.getvalue())
+        self.assertNotIn("__builtins__", out.__globals__)
+        self.assertEqual(set(out.__globals__), set(scope))
 
     def test_snapshot_keeps_the_save_time_value_of_a_guarded_global(self):
         # The guard is baked from the value the compile saw; a rebuild that
@@ -1862,8 +1884,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_guard_through_globals_of_a_wrapper_from_another_module(self):
         # A guard reads through wrapper.__globals__, so the dict it read travels
-        # as a snapshot rather than being re-imported at load; __module__ is
-        # the wrapped function's and is restored as an attribute.
+        # as a snapshot; __module__ is the wrapped function's and is restored as
+        # an attribute. The wrapper lives in this module, so an import of its
+        # compile scope would land on the same live dict; what only the snapshot
+        # provides is pinned by test_snapshot_keeps_the_save_time_value_of_a_guarded_global.
         global OTHER_MODULE_CONST
         wrapper = WRAPPED_FROM_OTHER_MODULE
         self.assertEqual(wrapper.__module__, torch._dynamo.testing.__name__)

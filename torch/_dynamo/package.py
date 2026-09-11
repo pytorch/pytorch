@@ -202,15 +202,19 @@ class FunctionPicklerBase(pickle.Pickler):
         # load error. A scope of "__main__" imports the LOADING process's
         # __main__, the same module pickle itself resolves a by-reference
         # __main__ function against; right in-process, and cross-process only
-        # as right as the two scripts agree.
-        f_globals: dict[str, object]
+        # as right as the two scripts agree. A module that replaced its own
+        # sys.modules entry with a proxy (torch.backends.cudnn) imports as a
+        # small dict that is not empty, so a global read from it fails at call
+        # without the log below; the old import of __module__ landed on the
+        # same object.
         # Not every __name__ is importable: a <locals>/exec function can carry
         # None or "" (bare globals with no __name__), and a relative name
         # (".rel") or a module whose body raises fails import with something
         # other than ImportError. None of those should fail the load, so require
-        # a non-empty str and swallow any import failure into the empty scope.
-        f_globals = {}
-        why: Any = f"scope {scope!r} is not an importable name"
+        # a non-empty str and swallow any Exception from the import into the
+        # empty scope (a SystemExit or KeyboardInterrupt still propagates).
+        f_globals: dict[str, object] = {}
+        why: str | Exception = f"scope {scope!r} is not an importable name"
         if isinstance(scope, str) and scope:
             try:
                 f_globals = importlib.import_module(scope).__dict__
@@ -223,7 +227,7 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_snapshot(
         cls,
-        scope: dict[str, Any],
+        scope: dict[str, object],
         module: Any,
         code: types.CodeType,
         qualname: str,
@@ -293,13 +297,15 @@ class FunctionPicklerBase(pickle.Pickler):
         lands back on fn. False for a <locals> function, a functools.wraps
         wrapper (it carries the wrappee's names), an exec-created function, or
         a module absent from sys.modules; pickling those by reference fails at
-        dump (PicklingError, or a bare AttributeError from the C pickler for a
-        <locals> name), so the caller rebuilds them from the code object (or
-        prunes them). Conservative on purpose: pickle would import a module that
-        is not in sys.modules yet, this reports False for it (guards.py explains
-        why on its caller), and a "<locals>" qualname component is refused like
-        pickle refuses it. GuardsStatePickler handles <locals> on its own branch
-        before asking; AOTCompilePickler dispatches on this alone."""
+        dump with PicklingError (a bare AttributeError from the C pickler for a
+        <locals> name below 3.14), so the caller rebuilds them from the code
+        object (or prunes them). Conservative on purpose: pickle would import a
+        module that is not in sys.modules yet, this reports False for it
+        (guards.py explains why on its caller), and a "<locals>" qualname
+        component is refused like pickle refuses it. GuardsStatePickler handles
+        <locals> on its own branch before asking; the helper keeps the check so
+        that AOTCompilePickler can dispatch on it alone once it moves onto this
+        base."""
         if "<locals>" in fn.__qualname__.split("."):
             return False
         # __module__ need not be a str (a decorator can set anything); an
@@ -329,12 +335,23 @@ class FunctionPicklerBase(pickle.Pickler):
             # proxied, so it absorbs a missing name, a raising attribute or a
             # raising call, but a sub-expression with no name in it (an
             # f-string, `()[0]`) still raises out of it; that would fail the
-            # dump for a slot the prune exists to make optional.
+            # dump for a slot the prune exists to make optional. Dropping the
+            # whole set is safe for guards: a guard rooted at fn.__annotations__
+            # evaluated them at trace time (VALUE format, cached on the
+            # function), so a read that raises here is one no guard performed.
             try:
                 return annotationlib.get_annotations(
                     obj, format=annotationlib.Format.FORWARDREF
                 )
-            except Exception:
+            except Exception as e:
+                code = obj.__code__
+                logger.debug(
+                    "dropping the annotations of %s (%s:%d): %s",
+                    getattr(code, "co_qualname", code.co_name),
+                    code.co_filename,
+                    code.co_firstlineno,
+                    e,
+                )
                 return {}
         return obj.__annotations__
 
@@ -355,7 +372,7 @@ class FunctionPicklerBase(pickle.Pickler):
 
     def _reduce_bound_method(
         self, method: types.MethodType, *, receiver_is_live: bool = False
-    ) -> tuple[object, ...] | None:
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]] | None:
         # pickle rebuilds a bound method by getattr() on self at load, which is
         # wrong when that does not resolve back to the same bound method; those
         # carry the function and self explicitly. `receiver_is_live` says the
@@ -370,9 +387,10 @@ class FunctionPicklerBase(pickle.Pickler):
         # func+self explicitly: getattr() at load hands back whatever the dict
         # or slot holds, a raw function or a method bound elsewhere, never a
         # method over this pair, and in the self-cycle case the slot is not even
-        # restored yet. Only a plain receiver reaches the __dict__ clause: a
+        # restored yet. Only a plain receiver can be carried by the __dict__
+        # clause (a __slots__ receiver falls through it to the slot check). A
         # class defining __getattr__ (nn.Module included) takes the pair before
-        # it, without probing: the probe would run that user code, and
+        # either, without probing, since the probe would run that user code and
         # a subclass may rebuild such a receiver as a DIFFERENT type at load
         # (GuardsStatePickler._unpickle_module turns a non-referenceable module
         # into a bare torch.nn.Module), on which getattr() would not resolve
@@ -382,13 +400,14 @@ class FunctionPicklerBase(pickle.Pickler):
         explicit = (type(self)._unpickle_bound_method, (func, receiver))
         is_type = issubclass(cls, type) or receiver_is_live
         try:
+            if not is_type and hasattr(cls, "__getattr__"):
+                return explicit
             # __name__ is not guaranteed: MethodType accepts any callable, so
             # func may be a functools.partial with no __name__, or a proxy whose
             # __getattr__ raises something other than AttributeError; both fall
-            # through to the explicit reduce rather than out of the reducer.
+            # through to the explicit reduce rather than out of the reducer. Read
+            # after the gate above, which takes the pair without probing func.
             name = getattr(func, "__name__", None)
-            if not is_type and hasattr(cls, "__getattr__"):
-                return explicit
             self_dict = getattr(receiver, "__dict__", None)
             if not is_type and (
                 (isinstance(self_dict, dict) and name in self_dict)
@@ -573,6 +592,8 @@ class _DynamoCodeCacheEntry:
          one of its backend artifacts is missing; CompilePackage.initialize then
          loads it without its stale guarded codes and backend ids, every variant
          of that code object included, since install() would have used none.
+         TODO(#196773): prune only the guarded codes whose bytecode names the
+         missing backend at write time, so the other variants stay installable.
     """
 
     python_code: SerializedCode
@@ -1044,10 +1065,16 @@ class CompilePackage:
                     # codes and backend ids are dead; start from a copy without
                     # them so the fresh compile's record replaces them and the
                     # next save writes an installable entry. A copy, not a
-                    # clear: the caller's entry may be a store's own object
+                    # clear, with the mutable containers the fresh compile
+                    # writes to (import_sources, function_names) detached too:
+                    # the caller's entry may be a store's own object
                     # (InMemoryDynamoStore hands out what it holds).
                     self._codes[key] = dataclasses.replace(
-                        code, guarded_codes=[], backend_ids=[]
+                        code,
+                        guarded_codes=[],
+                        backend_ids=[],
+                        function_names=list(code.function_names),
+                        import_sources=dict(code.import_sources),
                     )
         else:
             self._add_function(
