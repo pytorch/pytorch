@@ -8256,7 +8256,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             dtype=dtype,
         )
         for batch_shape in ((), (1,), (2,), (1, 2)):
-            x = a.expand(*batch_shape, 2, 2).contiguous()
+            x = a.expand(*batch_shape, 2, 2)
             self.assertEqual(torch.linalg.matrix_exp(x), expected.expand_as(x),
                              atol=atol, rtol=0)
 
@@ -8277,7 +8277,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             dtype=dtype,
         )
         for batch_shape in ((), (1,), (2,), (1, 2)):
-            x = a.expand(*batch_shape, 2, 2).contiguous().requires_grad_()
+            x = a.expand(*batch_shape, 2, 2).requires_grad_()
             (actual,) = torch.autograd.grad(torch.linalg.matrix_exp(x), x, g.expand_as(x))
             self.assertEqual(actual, expected.expand_as(x), atol=atol, rtol=0)
 
