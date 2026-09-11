@@ -74,6 +74,7 @@ class TestTraitProtocol(TestCase):
     def test_butterfly_width_is_a_power_of_two(self):
         self.assertEqual(T._offsets(1), [])
         self.assertEqual(T._offsets(8), [4, 2, 1])
+        self.assertEqual(T._offsets(8, ascending=True), [1, 2, 4])
         for width in (0, 3, 6):
             with (
                 self.subTest(width=width),
