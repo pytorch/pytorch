@@ -63,7 +63,7 @@ def merge_lanes(trait, acc, tm: cutlass.Constexpr, asc: cutlass.Constexpr = Fals
     """Merge row lanes; `asc` controls numeric association and index ties. No-op at tpr=1."""
     if const_expr(tm.tpr == 1):
         return acc
-    from .._cutedsl.traits import warp_reduce
+    from .traits import warp_reduce
 
     return warp_reduce(trait, acc, tm.tpr, ascending=asc)
 
@@ -285,7 +285,7 @@ class TileReduce:
             )
             acc = merge_lanes(trait, acc, self.tm)
             if const_expr(self.warps_per_row > 1):
-                from .._cutedsl.traits import block_reduce
+                from .traits import block_reduce
 
                 smem = cutlass.utils.SmemAllocator()
                 bufs = [
