@@ -37,6 +37,10 @@ from torch.testing._internal.common_cuda import (
     TEST_MULTIGPU,
     tf32_on_and_off,
 )
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
@@ -3153,6 +3157,199 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         ).run(code)
         self.assertEqual(out, compiled_out)
 
+    def _check_topk(self, fn, x, source, k, *, dim=-1, expect_triton=True):
+        """Check topk through gathers since the index chosen among ties is free."""
+        expected = fn(x)
+        torch._dynamo.reset()
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        values, indices = actual[0], actual[1]
+        self.assertEqual(values, expected[0], equal_nan=True)
+        self.assertEqual(indices.dtype, torch.int64)
+        source = source.movedim(dim, -1).reshape(-1, source.shape[dim])
+        values = values.movedim(dim, -1).reshape(-1, k).contiguous()
+        indices = indices.movedim(dim, -1).reshape(-1, k)
+        gathered = torch.gather(source, -1, indices).contiguous()
+        # Selected values are bit-identical to the inputs, NaN payloads included.
+        int_dtype = torch.int32 if source.dtype == torch.float32 else torch.int16
+        self.assertEqual(gathered.view(int_dtype), values.view(int_dtype))
+        self.assertTrue((indices.sort(dim=-1).values.diff(dim=-1) > 0).all())
+        self.assertEqual(actual[2:], expected[2:])
+        if expect_triton and k == 1:
+            # A single rank lowers to a fused max/min reduction instead.
+            FileCheck().check_not("torch.ops.aten.topk.default(").check_not(
+                "topk_with_index"
+            ).run(code)
+        elif expect_triton:
+            FileCheck().check("topk_with_index").check_not(
+                "torch.ops.aten.topk.default("
+            ).run(code)
+        else:
+            FileCheck().check("torch.ops.aten.topk.default(").check_not(
+                "topk_with_index"
+            ).run(code)
+        return code
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    def test_topk_fusible_ir(self):
+        def f(x):
+            values, indices = torch.topk(x * 2, 4, dim=-1)
+            return values.flatten(), indices.flatten()
+
+        x = torch.randn(32, 1000, dtype=torch.bfloat16, device=device_type).T
+        self.assertFalse(x.is_contiguous())
+        code = self._check_topk(f, x, x * 2, 4)
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    @parametrize("largest", [True, False])
+    def test_topk_fusible_ir_specials(self, largest):
+        def f(x):
+            return torch.topk(x, 16, dim=-1, largest=largest)
+
+        # Width 17 leaves 15 padding lanes in the 32-wide block.
+        x = torch.randn(128, 17, dtype=torch.float32, device=device_type)
+        x[:, 0] = torch.nan
+        x[:, 1] = -torch.nan
+        x[:, 2] = torch.inf
+        x[:, 3] = -torch.inf
+        x[:, 4:8] = 2
+        x[:, 8] = 0.0
+        x[:, 9] = -0.0
+        x[100:, :] = -torch.inf
+        x[110:, :] = torch.nan
+        self._check_topk(f, x, x, 16)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    @parametrize(
+        "dtype, k, width, largest",
+        [
+            (torch.float32, 2, 33, True),  # bitonic path with padded lanes
+            (torch.bfloat16, 3, 65, False),  # non-power-of-two k, ascending
+            (torch.float16, 6, 17, True),
+            (torch.float32, 8, 65, False),
+            (torch.bfloat16, 16, 17, True),
+            (torch.float32, 16, 16, True),  # k == width
+            (torch.float32, 2, 512, True),  # fp32 extraction on 32-bit keys
+            (torch.bfloat16, 2, 512, False),  # packed 16-bit key extraction
+            (torch.float16, 4, 4096, True),
+            (torch.float32, 52, 256, True),  # large k on the bitonic path
+            (torch.bfloat16, 64, 1000, False),
+            (torch.float32, 2, 12000, True),
+            (torch.float32, 8, 16384, True),  # widest persistent block
+            (torch.float32, 1, 33, True),  # max.dim
+            (torch.bfloat16, 1, 33, False),  # k=1 smallest stays on ATen
+        ],
+        name_fn=lambda dtype, k, width, largest: (
+            f"{str(dtype).split('.')[-1]}_k{k}_w{width}_{'largest' if largest else 'smallest'}"
+        ),
+    )
+    def test_topk_fusible_ir_dtypes_and_k(self, dtype, k, width, largest):
+        def f(x):
+            values, indices = torch.topk(x, k, dim=-1, largest=largest)
+            return values, indices, values.float().sum(-1)
+
+        x = torch.randn(128, width, dtype=dtype, device=device_type)
+        # A single smallest value is not a min: min.dim propagates NaN.
+        self._check_topk(f, x, x, k, expect_triton=largest or k > 1)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    @config.patch({"emulate_precision_casts": True})
+    def test_topk_fusible_ir_emulate_precision_casts(self):
+        def f(x):
+            return torch.topk(torch.sin(x) + 0.25, 4, dim=-1)
+
+        x = torch.randn(1000, 32, dtype=torch.bfloat16, device=device_type)
+        self._check_topk(f, x, torch.sin(x) + 0.25, 4)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    def test_topk_fusible_ir_preserves_selected_values(self):
+        def f(x):
+            return torch.topk(x, 2, dim=-1)
+
+        bits = torch.full((2, 33), 0xBF800000, dtype=torch.uint32, device=device_type)
+        bits[0, 0] = 0xFFC12345
+        bits[0, 1] = 0x7FC54321
+        bits[1, 0] = 0x80000000
+        bits[1, 1] = 0xBF000000
+        x = bits.view(torch.float32)
+        self._check_topk(f, x, x, 2)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    def test_topk_fusible_ir_backend_without_sort(self):
+        from unittest import mock
+
+        from torch._inductor.codegen.common import BackendFeature
+        from torch._inductor.graph import GraphLowering
+
+        def f(x):
+            return torch.topk(x * 2, 4)
+
+        original_has_feature = GraphLowering.has_feature
+
+        def has_feature_without_sort(graph, device, feature):
+            if feature is BackendFeature.SORT:
+                return False
+            return original_has_feature(graph, device, feature)
+
+        x = torch.randn(16, 65, device=device_type)
+        with mock.patch.object(GraphLowering, "has_feature", has_feature_without_sort):
+            self._check_topk(f, x, x * 2, 4, expect_triton=False)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    @config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_topk_fusible_ir_mix_order_reduction(self):
+        def f(x):
+            return *torch.topk(x, 4, dim=1), x.sum(dim=0)
+
+        x = torch.randn(16, 65, device=device_type)
+        code = self._check_topk(f, x, x, 4)
+        # Ranked results do not join mix-order reductions; the column sum splits.
+        self.assertEqual(code.count("async_compile.triton("), 2)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    def test_topk_fusible_ir_dynamic_rows(self):
+        def f(x):
+            return torch.topk(x * 2, 4, dim=-1)
+
+        x = torch.randn(1000, 32, dtype=torch.bfloat16, device=device_type)
+        torch._dynamo.mark_dynamic(x, 0)
+        self._check_topk(f, x, x * 2, 4)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    @parametrize(
+        "name, shape, k, dim",
+        [
+            ("k_over_budget", (128, 1024), 65, -1),
+            ("too_much_work", (256, 4096), 32, -1),
+            ("wide_input", (128, 16385), 4, -1),
+            ("non_last_dim", (33, 128), 4, 0),
+        ],
+        name_fn=lambda name, shape, k, dim: name,
+    )
+    def test_topk_fusible_ir_fallback(self, name, shape, k, dim):
+        def f(x):
+            return torch.topk(x, k, dim=dim)
+
+        x = torch.randn(shape, dtype=torch.bfloat16, device=device_type)
+        self._check_topk(f, x, x, k, dim=dim, expect_triton=False)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    def test_topk_fusible_ir_dynamic_k_fallback(self):
+        def f(x, k):
+            return torch.topk(x, k, dim=-1)
+
+        x = torch.randn(128, 33, dtype=torch.bfloat16, device=device_type)
+        torch._dynamo.reset()
+        torch._dynamo.mark_dynamic(x, 0)
+        expected = f(x, 4)
+        actual, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True, dynamic=True), x, 4
+        )
+        self.assertEqual(actual, expected)
+        FileCheck().check("torch.ops.aten.topk.default(").check_not(
+            "topk_with_index"
+        ).run(code)
+
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):
         device_stats = torch.cuda.memory_stats("cuda:0")
@@ -3767,6 +3964,335 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             return torch.linalg.vector_norm(x, dim=(-2, -1))
 
         self.common(fn4, [y])
+
+
+class TopkRegressionTests(TestCase):
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @config.patch("triton.native_matmul", True)
+    def test_topk_fusible_ir_native_matmul_sibling(self, device):
+        def f(a, b):
+            candidates = a[:, None, :].expand(16, 16, 64)
+            return a @ b, torch.topk(candidates, 3)
+
+        a = torch.randn(16, 64, device=device, dtype=torch.float16)
+        b = torch.randn(64, 16, device=device, dtype=torch.float16)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), a, b)
+        expected = f(a, b)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1].values, expected[1].values)
+        candidates = a[:, None, :].expand(16, 16, 64)
+        self.assertEqual(actual[1].values, candidates.gather(-1, actual[1].indices))
+        FileCheck().check("tl.dot(").run(code)
+        FileCheck().check("topk_with_index").run(code)
+        self.assertEqual(code.count("async_compile.triton("), 2)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("width", [33, 8192])
+    @parametrize("dependent", [False, True])
+    def test_topk_fusible_ir_scan_kernel(self, device, width, dependent):
+        def f(x):
+            scanned = x.cumsum(-1)
+            values, indices = torch.topk(scanned if dependent else x, 3)
+            return values + 1, indices, scanned
+
+        x = (torch.arange(width * 64, device=device) % 97).float()
+        x = x.reshape(width, 64).t()
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        expected = f(x)
+        self.assertEqual(actual[0], expected[0], atol=0, rtol=0)
+        self.assertEqual(actual[2], expected[2], atol=0, rtol=0)
+        source = expected[2] if dependent else x
+        self.assertEqual(actual[0] - 1, source.gather(-1, actual[1]), atol=0, rtol=0)
+        FileCheck().check("topk_with_index").run(code)
+        if width == 8192:
+            FileCheck().check("triton_heuristics.split_scan").run(code)
+        self.assertEqual(code.count("async_compile.triton("), 2 if width == 8192 else 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("shape", [(33,), (4, 33), (2, 3, 512)])
+    @parametrize("upcast", [False, True])
+    def test_topk_fusible_ir_result_domain(self, device, dtype, shape, upcast):
+        def f(x):
+            values, indices = torch.topk(x * 2, 3)
+            return values + 1, indices + 1, values.float() + indices.float()
+
+        x = torch.randn(shape, device=device, dtype=dtype)
+        with config.patch("triton.codegen_upcast_to_fp32", upcast):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        indices = actual[1] - 1
+        selected = (x * 2).gather(-1, indices)
+        self.assertEqual(actual[0], torch.topk(x * 2, 3).values + 1)
+        self.assertEqual(actual[0], selected + 1)
+        self.assertEqual(actual[2], selected.float() + indices.float())
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("reorder", [False, True])
+    def test_topk_fusible_ir_flat_result(self, device, reorder):
+        def f(x):
+            values, indices = torch.topk(x * 2, 3)
+            return values.flatten() + 1, indices.flatten() + 1
+
+        x = torch.arange(132, device=device, dtype=torch.float32).reshape(4, 33)
+        with config.patch("loop_ordering_after_fusion", reorder):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @config.patch(
+        {
+            "expand_dimension_for_pointwise_nodes": True,
+            "loop_ordering_after_fusion": True,
+            "loop_reindexing_after_fusion": True,
+            "loop_index_inversion_in_fusion": True,
+        }
+    )
+    @parametrize("consumer", ["flat", "transpose", "repeat", "gather"])
+    def test_topk_fusible_ir_loop_transforms(self, device, consumer):
+        def f(x):
+            values, indices = torch.topk(x * 2, 3)
+            if consumer == "flat":
+                return values.flatten() + 1, indices.flatten() + 1
+            if consumer == "transpose":
+                return values.T.contiguous() + 1, indices.T.contiguous() + 1
+            if consumer == "repeat":
+                return values.repeat(1, 11) + 1, indices.repeat(1, 11) + 1
+            return values.gather(-1, indices % 3) + 1, indices
+
+        x = torch.arange(264, device=device, dtype=torch.float32).reshape(8, 33)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        FileCheck().check("topk_with_index").run(code)
+        if consumer == "flat":
+            self.assertEqual(code.count("async_compile.triton("), 1)
+        elif consumer in ("repeat", "gather"):
+            self.assertGreater(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("source", ["input", "producer", "result"])
+    @parametrize("reorder", [False, True])
+    def test_topk_fusible_ir_gather_epilogue(self, device, source, reorder):
+        def f(x):
+            candidates = x * 2 if source == "producer" else x
+            values, indices = torch.topk(candidates, 3)
+            if source == "result":
+                return values.gather(-1, indices % 3) + values, indices
+            return candidates.gather(-1, indices) + values, indices
+
+        x = torch.arange(132, device=device, dtype=torch.float32).reshape(4, 33)
+        with config.patch("loop_ordering_after_fusion", reorder):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        expected_kernels = 2 if source == "result" else 1
+        self.assertEqual(code.count("async_compile.triton("), expected_kernels)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("width", [33, 512])
+    @parametrize("sum_first", [False, True])
+    def test_topk_fusible_ir_scalar_and_ranked_results(self, device, width, sum_first):
+        def f(x):
+            if sum_first:
+                total = x.sum(-1, keepdim=True)
+            values, indices = torch.topk(x, 3)
+            if not sum_first:
+                total = x.sum(-1, keepdim=True)
+            return values + total, indices, total + 1
+
+        x = torch.randn(4, width, device=device)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("case", ["parent", "siblings", "column", "rowless"])
+    def test_topk_fusible_ir_result_stage_transitions(self, device, case):
+        def f(x):
+            if case == "rowless":
+                x = x.flatten()
+            total = x.sum(-1, keepdim=True) * 2 + 1
+            if case == "siblings":
+                values, indices = torch.topk(x, 3)
+                values2, indices2 = torch.topk(-x, 3)
+                return values + values2 + total, indices, indices2, total
+            candidates = x + (total.T if case == "column" else total)
+            values, indices = torch.topk(candidates, 3)
+            return values + total, indices, candidates, total
+
+        width = 17 if case == "column" else 33
+        x = torch.arange(17 * width, device=device, dtype=torch.float32)
+        x = x.reshape(17, width)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        if case != "column":
+            self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    def test_topk_fusible_ir_result_aliases(self, device):
+        def f(x):
+            values2, indices2 = torch.topk(x, 2)
+            values3, indices3 = torch.topk(x, 3)
+            return torch.cat((values2, values3), -1), torch.cat(
+                (indices2, indices3), -1
+            )
+
+        x = torch.arange(90, device=device, dtype=torch.float32).reshape(6, 15)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("reorder", [False, True])
+    def test_topk_fusible_ir_producer_into_cat(self, device, reorder):
+        def f(x):
+            values, indices = torch.topk(x * 2, 3)
+            return torch.cat((values, x[:, :1]), -1), indices
+
+        x = torch.arange(132, device=device, dtype=torch.float32).reshape(4, 33)
+        with config.patch("loop_ordering_after_fusion", reorder):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        self.assertEqual(code.count("async_compile.triton("), 2)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    def test_topk_fusible_ir_candidate_and_result(self, device):
+        def f(x):
+            candidates = x.sin() * 2
+            values, indices = torch.topk(candidates, 3)
+            return candidates, values + candidates[:, :3], indices
+
+        x = torch.randn(4, 33, device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("rows", [33, 129])
+    @config.patch(
+        {
+            "triton.mix_order_reduction_non_strict_mode": True,
+            "triton.mix_order_reduction_split_size": 16,
+        }
+    )
+    def test_topk_fusible_ir_result_partial_row_tile(self, device, rows):
+        def f(x):
+            return *torch.topk(x, 3, dim=1), x.sum(dim=0)
+
+        x = torch.arange(rows * 65, device=device, dtype=torch.float32).reshape(
+            rows, 65
+        )
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        # The column sum stays out of the top-k kernel (it may itself split).
+        self.assertGreaterEqual(code.count("async_compile.triton("), 2)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("tiling", ["prefer_nd_tiling", "tile_reductions"])
+    def test_topk_fusible_ir_tiling_configs(self, device, tiling):
+        # Ranked results only support the persistent [rows, k] tile. Other
+        # tiling preferences must neither error nor change that layout, even
+        # with a mixed-stride producer that would tile a pointwise kernel.
+        def f(x, y):
+            values, indices = torch.topk(x + y.t(), 3)
+            return values + 1, indices
+
+        x = torch.randn(256, 64, device=device)
+        y = torch.randn(64, 256, device=device)
+        with config.patch({f"triton.{tiling}": True}):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(actual, f(x, y))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+        FileCheck().check("topk_with_index").check_not("YBLOCK").check_not(
+            "R1_BLOCK"
+        ).run(code)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("case", ["epilogue", "scalar", "flat", "gather"])
+    @config.patch(
+        {
+            "test_configs.runtime_triton_shape_assert": True,
+            "test_configs.runtime_triton_dtype_assert": True,
+        }
+    )
+    def test_topk_fusible_ir_shape_asserts(self, device, case):
+        # Every value in the result stage carries the compact block shape; the
+        # runtime asserts turn a wrong recorded shape into a compile failure.
+        def f(x):
+            values, indices = torch.topk(x, 3)
+            if case == "scalar":
+                total = x.sum(-1, keepdim=True)
+                return values + total, indices, total + 1
+            if case == "flat":
+                return values.flatten() + 1, indices.flatten()
+            if case == "gather":
+                return x.gather(-1, indices) * values, indices
+            return values + 1, indices + 1
+
+        x = torch.randn(64, 33, device=device)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+        FileCheck().check("tl.static_assert(").check("shape == (XBLOCK, 4)").run(code)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("width", [33, 512])
+    @parametrize("largest", [True, False])
+    @config.patch({"triton.codegen_upcast_to_fp32": False})
+    def test_topk_fusible_ir_without_upcast(self, device, dtype, width, largest):
+        def f(x):
+            values, indices = torch.topk(x, 4, largest=largest)
+            return values, indices, values * 2
+
+        x = torch.randn(4, width, device=device, dtype=dtype)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        expected = f(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[0], x.gather(-1, actual[1]))
+        self.assertEqual(actual[2], expected[2])
+        FileCheck().check("topk_with_index").run(code)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    def test_topk_fusible_ir_single_rank_rounding(self, device, dtype):
+        def f(x):
+            values, indices = torch.topk(x * 1.1, 1)
+            return values.float(), indices
+
+        x = torch.arange(16, device=device, dtype=dtype).reshape(2, 8)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    def test_topk_fusible_ir_single_rank_nan_payload(self, device, dtype):
+        nan_bits = {
+            torch.float16: (0x7C01, 0xFE55),
+            torch.bfloat16: (0x7F81, 0xFFD5),
+            torch.float32: (0x7F800001, 0xFFC12345),
+        }
+        bits_dtype = torch.uint32 if dtype == torch.float32 else torch.uint16
+        x = torch.tensor(nan_bits[dtype], device=device, dtype=bits_dtype)
+        x = x.view(dtype).reshape(2, 1).expand(2, 33).contiguous()
+        values, indices = torch.compile(torch.topk, fullgraph=True)(x, 1)
+        selected = x.gather(-1, indices)
+        self.assertEqual(values.view(bits_dtype), selected.view(bits_dtype))
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("width, k", [(8, 2), (12, 3), (33, 3), (512, 4)])
+    @parametrize("add", [False, True])
+    def test_topk_fusible_ir_repeated_output(self, device, width, k, add):
+        def f(x):
+            values, indices = torch.topk(x, k)
+            if add:
+                values = values + 1
+                indices = indices + 1
+            return values.repeat(1, width // k), indices.repeat(1, width // k)
+
+        x = torch.arange(4 * width, device=device, dtype=torch.float32)
+        x = x.reshape(4, width)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+
+instantiate_device_type_tests(TopkRegressionTests, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":

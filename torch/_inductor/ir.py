@@ -3208,9 +3208,15 @@ class SplitScan(Scan):
     pass
 
 
+# Top-k only keeps k lanes live past the first selection stages, so it
+# tolerates persistent blocks up to the codegen limit; a full sort stays at 512.
+TOPK_MAX_SORT_BLOCK = 16384
+
+
 @ir_dataclass
 class Sort(Loops):
-    # Sorts a tuple of key, value pairs
+    """Sort a tuple of key/value pairs, optionally retaining only a Top-K prefix."""
+
     sort_ranges: list[Integer]
     size: list[Integer]
     reindex: Callable[[Sequence[Expr], Sequence[Expr]], Sequence[Expr]]
@@ -3222,6 +3228,7 @@ class Sort(Loops):
 
     stable: bool
     descending: bool
+    top_k: int | None = None
 
     # HACK we mimic reduction
 
@@ -3253,10 +3260,19 @@ class Sort(Loops):
     ) -> Any:
         idx = self.reindex(vars, reduction_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
-        result = ops.sort(self.dtypes, values, self.stable, self.descending)
-        return ops.store(
-            output_name or "unnamed", indexer(idx), result[self.output_index]
+        result = ops.sort(
+            self.dtypes, values, self.stable, self.descending, top_k=self.top_k
         )
+        value = result[self.output_index]
+        if self.top_k is not None and self.top_k != self.sort_ranges[0]:
+            (rank,) = reduction_vars
+            return ops.store_reduction(
+                output_name or "unnamed",
+                indexer(idx),
+                value,
+                result_range=(rank, self.top_k),
+            )
+        return ops.store(output_name or "unnamed", indexer(idx), value)
 
     def get_reduction_type(self) -> str | None:
         return "sort"
@@ -3295,11 +3311,15 @@ class Sort(Loops):
         axis: int,
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs: Any,
     ) -> Sequence[TensorBox | None]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         sort_ranges = [size[axis]]
+        output_size = list(size)
+        if top_k is not None:
+            output_size[axis] = top_k
 
         if not V.graph.has_feature(device, BackendFeature.SORT):
             return [None] * len(dtypes)
@@ -3314,7 +3334,7 @@ class Sort(Loops):
         if config.triton.decompose_sort_ops:
             is_persistent_kernel = config.triton.persistent_reductions
         else:
-            max_rblock = 512
+            max_rblock = 512 if top_k is None else TOPK_MAX_SORT_BLOCK
             is_persistent_kernel = (
                 config.triton.persistent_reductions
                 and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
@@ -3353,7 +3373,7 @@ class Sort(Loops):
                     dtypes=dtypes,
                     inner_fn=inner_fns[output_index],
                     inner_fns=inner_fns,
-                    size=size,
+                    size=output_size,
                     ranges=pointwise_ranges,
                     sort_ranges=sort_ranges,
                     reindex=reindex,
@@ -3361,6 +3381,7 @@ class Sort(Loops):
                     output_index=output_index,
                     stable=stable,
                     descending=descending,
+                    top_k=top_k,
                     **kwargs,
                 )
             )

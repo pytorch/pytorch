@@ -956,6 +956,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         values: Sequence[object],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 

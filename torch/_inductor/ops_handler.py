@@ -326,6 +326,7 @@ class OpsHandler(Generic[T]):
         values: tuple[T, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
     ) -> tuple[T, ...]:
         """
         Sort values along the reduction dimension.
@@ -913,7 +914,7 @@ class NoopHandler(DefaultHandler):
         return (None,) * len(values)
 
     @staticmethod
-    def sort(dtypes, values, stable, descending) -> tuple[None, ...]:
+    def sort(dtypes, values, stable, descending, top_k=None) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
@@ -1027,9 +1028,9 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         )
 
     @staticmethod
-    def sort(dtypes, values, stable, descending):
+    def sort(dtypes, values, stable, descending, top_k=None):
         return tuple(
-            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending}, top_k={top_k})[{i}]"
             for i in range(len(values))
         )
 
