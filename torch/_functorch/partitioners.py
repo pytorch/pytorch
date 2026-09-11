@@ -75,6 +75,7 @@ from ._activation_checkpointing.knapsack import (
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.descriptors import (
     AOTOutput,
+    GradAOTOutput,
     SavedForBackwardsAOTOutput,
     SavedForBackwardsNoVcCheckAOTOutput,
 )
@@ -693,6 +694,32 @@ def _extract_graph_with_inputs_outputs(
             output_values.append(x)
     out = new_graph.output(tuple(output_values))
     out.meta["desc"] = outputs_descs
+
+    if subgraph == "backward":
+        # Name each returned gradient grad_<primal_name> via the GradAOTOutput
+        # descriptor's grad_of. None slots (non-differentiable inputs) and
+        # passed-through placeholder gradients are skipped: renaming a backward
+        # input is unsafe (e.g. tangents that inductor's SDPA matcher keys on).
+        # The `renamed` guard keeps a gradient shared by several inputs named
+        # after the first. Subclass grads (SubclassGetAttrAOTOutput) are not
+        # GradAOTOutput (no 1-1 grad/input correspondence) and are left as-is.
+        desc_to_name = {
+            node.meta["desc"]: node.name
+            for node in joint_graph.nodes
+            if node.op == "placeholder" and node.meta.get("desc") is not None
+        }
+        renamed: OrderedSet[fx.Node] = OrderedSet()
+        for value, desc in zip(output_values, outputs_descs, strict=True):
+            if (
+                isinstance(desc, GradAOTOutput)
+                and isinstance(value, fx.Node)
+                and value.op != "placeholder"
+                and value not in renamed
+            ):
+                primal_name = desc_to_name.get(desc.grad_of)
+                if primal_name is not None:
+                    value._rename(f"grad_{primal_name}")
+                    renamed.add(value)
     # Snapshot stack traces on the output node before passes run,
     # as later passes may strip stack_trace from individual nodes.
     out.meta["output_stack_traces"] = [
