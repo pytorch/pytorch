@@ -1505,8 +1505,6 @@ class AutogradFunctionVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
-        if name == "apply":
-            return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
         if source is None:
             return GetAttrVariable(self, name)
 
