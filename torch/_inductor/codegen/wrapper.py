@@ -20,11 +20,10 @@ from itertools import chain, count
 from typing import Any, Literal, Protocol, TYPE_CHECKING
 
 import sympy
-from sympy import Expr
-
 import torch
 import torch._ops
 import torch.utils._pytree as pytree
+from sympy import Expr
 from torch import dtype as torch_dtype
 from torch._dynamo.utils import counters, dynamo_timed, get_debug_dir
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
@@ -2305,6 +2304,12 @@ class PythonWrapperCodegen(CodeGen):
         return name
 
     def get_codegened_graph(self):
+        # With graph-partition / cuda-graph codegen, a partition body is codegened
+        # through a fresh subgraph wrapper whose codegened_graph_stack is never
+        # pushed, so allocation codegen here can run with an empty stack. Fall back
+        # to the active top-level GraphLowering instead of raising IndexError.
+        if not self.codegened_graph_stack:
+            return V.graph
         return self.codegened_graph_stack[-1]
 
     def push_codegened_graph(self, graph):
@@ -2473,7 +2478,9 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if config.graph_partition:
+        # Const graphs (runtime const folding) skip _codegen_partitions in
+        # Scheduler.codegen, so all_partition_names is unset for them.
+        if config.graph_partition and not V.graph.is_const_graph:
             all_partition_name_list = ", ".join(self.all_partition_names) + (
                 "," if len(self.all_partition_names) == 1 else ""
             )
@@ -3259,17 +3266,20 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_alloc_from_pool(
         self, name, offset, dtype, shape, stride
     ) -> tuple[str, list[str]]:
-        return "alloc_from_pool({})".format(
-            ", ".join(
-                [
-                    name,
-                    pexpr(offset),  # bytes not numel
-                    str(dtype),
-                    self.codegen_python_shape_tuple(shape),
-                    self.codegen_python_shape_tuple(stride),
-                ]
-            )
-        ), []
+        return (
+            "alloc_from_pool({})".format(
+                ", ".join(
+                    [
+                        name,
+                        pexpr(offset),  # bytes not numel
+                        str(dtype),
+                        self.codegen_python_shape_tuple(shape),
+                        self.codegen_python_shape_tuple(stride),
+                    ]
+                )
+            ),
+            [],
+        )
 
     def codegen_reinterpret_view(
         self,
