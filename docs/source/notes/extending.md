@@ -136,42 +136,50 @@ the autograd engine.
   to calling backward, and so your code will need to handle such objects as if they were
   tensors filled with zeros. The default value of this setting is True.
 
+When a tensor is used by multiple operations during forward, multiple backward
+nodes contribute to its gradient. Normally, each producer returns a separate
+tensor that the engine adds into an ``InputBuffer``. ``ctx.input_grad_buffers``
+lets a custom backward fuse that accumulation into its backward kernel by writing
+directly into an existing partial sum and returning ``None``.
+
 During a first-order {meth}`~torch.Tensor.backward` call without an ``inputs``
 argument, ``ctx.input_grad_buffers`` provides a tuple aligned with the inputs to
 {meth}`~Function.forward`. Each entry is either ``None`` or the autograd engine's
-current accumulation buffer for that input. A custom backward kernel can accumulate
-its contribution directly into a non-``None`` buffer and return ``None`` for that
-input instead of returning a separate gradient tensor::
+current accumulation buffer for that input. For example, ``x`` has another forward
+use here, while ``weight`` does not::
+
+    loss = Matmul.apply(x, weight).sum() + other_op(x).sum()
+
+The custom backward can conditionally fuse only its contribution to ``x``.
+Here, ``matmul_backward_input_acc`` represents a kernel that computes the input
+gradient matmul and accumulates it into ``out``::
 
     @staticmethod
     def backward(ctx, grad_output):
-        x, y = ctx.saved_tensors
-        x_buffer, y_buffer = ctx.input_grad_buffers
+        x, weight = ctx.saved_tensors
+        x_buffer, _ = ctx.input_grad_buffers
 
         if x_buffer is not None:
-            kernel_out(grad_output, y, out=x_buffer)
+            matmul_backward_input_acc(grad_output, weight, out=x_buffer)
             grad_x = None
         else:
-            grad_x = kernel(grad_output, y)
+            grad_x = matmul_backward_input(grad_output, weight)
 
-        if y_buffer is not None:
-            kernel_out(grad_output, x, out=y_buffer)
-            grad_y = None
-        else:
-            grad_y = kernel(grad_output, x)
+        grad_weight = matmul_backward_weight(grad_output, x)
+        return grad_x, grad_weight
 
-        return grad_x, grad_y
+If ``other_op`` produces its contribution first, ``x_buffer`` can expose that
+partial sum. If this custom backward runs first, ``x_buffer`` is ``None`` and it
+returns a separate tensor instead. The gradient for ``weight`` always follows the
+normal return path. Buffer availability depends on backward execution order, so
+the ``None`` fallback is required.
 
-Each input is independent, so neither, either, or both buffers may be available.
-Buffer availability depends on backward execution order, so the ``None`` fallback is
-required. The first producer normally receives ``None``; a later producer can receive
-the partial sum produced so far. The buffer may only be used synchronously while that
-custom ``backward`` method is running. Do not retain it: later producers may replace
-the engine's buffer, making a retained tensor stale. All producers that use or
-subsequently update an exposed buffer must execute on the same device, engine thread,
-and stream. PyTorch diagnoses engine-visible violations, but a custom function that
-launches work on another thread or stream is responsible for synchronizing it before
-returning.
+The buffer may only be used synchronously while that custom ``backward`` method is
+running. Do not retain it: later producers may replace the engine's buffer, making a
+retained tensor stale. All producers that use or subsequently update an exposed
+buffer must execute on the same device, engine thread, and stream. PyTorch diagnoses
+engine-visible violations, but a custom function that launches work on another
+thread or stream is responsible for synchronizing it before returning.
 
 This interface is unavailable with {func}`torch.autograd.grad`, the ``inputs``
 argument to ``backward``, ``create_graph=True``, anomaly detection, or a post-hook on
