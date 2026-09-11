@@ -1386,10 +1386,9 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
-        # The plain dict/tuple values an EQUALS_MATCH reads whole, keyed by id
-        # and holding the value so the id stays live. The serializer carries
-        # those verbatim and prunes every other container per value
-        # (GuardsStatePickler._keep_container_verbatim). Save-path only.
+        # The plain tuples an EQUALS_MATCH reads whole, keyed by id and holding
+        # the value so the id stays live; see Note [Reconstructing a function a
+        # guard is rooted at] in GuardsStatePickler. Save-path only.
         self.value_guarded_containers: dict[int, Any] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
@@ -1732,7 +1731,8 @@ class GuardBuilder(GuardBuilderBase):
             # rebuilt by value (the reducer's isfunction branch), so only that is
             # seeded; a partial or builtin __func__ would merely be kept verbatim
             # wherever else it appears. The serializer is the only reader, hence
-            # the save_guards gate (dropping it would be equally correct).
+            # the save_guards gate. See Note [Reconstructing a function a guard
+            # is rooted at] in GuardsStatePickler for the rebuild rule.
             if self.save_guards and inspect.ismethod(example_value):
                 func = example_value.__func__
                 if inspect.isfunction(func):
@@ -2875,9 +2875,9 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
-        # Only a plain tuple can get here as a function container: a whole-dict
-        # comparison lowers to DICT_KEYS_MATCH plus per-value guards, and
-        # EQUALS_MATCH's allowlist below rejects a plain dict.
+        # See Note [Reconstructing a function a guard is rooted at] in
+        # GuardsStatePickler: a plain tuple this guard compares whole must be
+        # carried verbatim by the serializer.
         if self.save_guards and type(val) is tuple:
             self.value_guarded_containers[id(val)] = val
         if np:
@@ -4194,9 +4194,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
-        # The plain tuples an EQUALS_MATCH reads whole, by id; see
-        # _keep_container_verbatim. Required, because omitting it silently
-        # prunes every container per value.
+        # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
+        # above _keep. Required, because omitting it silently prunes every
+        # container per value.
         self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
@@ -4344,7 +4344,14 @@ class GuardsStatePickler(FunctionPicklerBase):
     # a whole-dict comparison lowers to DICT_KEYS_MATCH plus per-value guards.
     # A container registered by a length or type guard alone -- what bind_args
     # installs on __defaults__ for every called function with a positional
-    # default -- is pruned per value, since those guards survive it
+    # default -- is pruned per value, since those guards survive it. Being
+    # registered is not what decides this: a whole-tuple EQUALS_MATCH and a
+    # per-element guard through the same tuple coexist in ordinary code (a
+    # call-site default binding next to `f.__defaults__ == (...)`), and only
+    # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
+    # records those tuples in value_guarded_containers, which the pickler takes
+    # as a required argument. A dict/tuple SUBCLASS is verbatim whenever kept,
+    # since its type must survive for the guard reading the slot
     # (_keep_container_verbatim).
 
     def _keep(self, value: object) -> bool:
@@ -4385,29 +4392,14 @@ class GuardsStatePickler(FunctionPicklerBase):
         return self._missing(reason)
 
     def _keep_container_verbatim(self, container: object) -> bool:
-        """Whether a function container (__defaults__/__dict__/...) is carried whole.
-
-        A dict/tuple SUBCLASS is verbatim whenever it is kept: its type must
-        survive for the guard reading the slot. A plain tuple is verbatim only
-        when an EQUALS_MATCH reads its values whole, since that guard rebakes
-        its constant from the reconstructed function at load; the one path that
-        installs such a guard is wrap_listlike's CONSTANT_MATCH on an all-literal
-        tuple under an unspecialized nn.Module source, which also makes the
-        elements SOURCELESS, so it is exactly the shape with no per-element
-        registration to keep them. A plain dict is never verbatim: a whole-dict
-        comparison lowers to DICT_KEYS_MATCH plus per-value guards. Every other
-        guard that can register a container -- SEQUENCE_LENGTH, TYPE_MATCH,
-        DICT_KEYS_MATCH, a guard rooted at one element -- survives pruning the
-        other values, so the container is pruned per value and an unguarded
-        unpicklable sibling (a threading.Lock a decorator stashed) cannot fail
-        the dump. Being registered is not what decides this: a whole-tuple
-        EQUALS_MATCH and a per-element guard through the same tuple coexist in
-        ordinary code (a call-site default binding next to `f.__defaults__ ==
-        (...)`), and only the value guard says the tuple must stay whole.
-        """
+        """Whether a function container (__defaults__/__dict__/...) is carried whole
+        rather than pruned per value; the rule and its reasons are in the Note
+        [Reconstructing a function a guard is rooted at] above."""
         if not self._keep(container):
             return False
-        if type(container) in (dict, tuple):
+        if type(container) is dict:
+            return False
+        if type(container) is tuple:
             return id(container) in self.value_guarded_containers
         return True
 
@@ -4475,9 +4467,10 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         closure = obj.__closure__
         if closure is not None:
-            # No _keep_container_verbatim gate like the other containers: a cell
-            # is never a value an EQUALS_MATCH could read whole, and _prune_cell
-            # is length-preserving, so pruning every cell is always safe.
+            # No _keep_container_verbatim gate like the other containers: a
+            # guard through __closure__ always ends at cell_contents, which
+            # registers the contents _prune_cell keys on, so per-cell pruning
+            # already keeps what is read, and _prune_cell is length-preserving.
             closure = tuple(self._prune_cell(cell) for cell in closure)
         if self._keep_container_verbatim(obj.__dict__):
             attributes = obj.__dict__
@@ -4683,7 +4676,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # would not round back to this object -- it fails to resolve, or
                 # resolves to a different one -- so rebuild a guarded function by
                 # value and prune an unguarded one, rather than fall through and
-                # mis-serialize.
+                # fail the dump with pickle's PicklingError (a bypass).
                 if id(obj) not in self.guard_tree_values:
                     return _Missing, ("fqn mismatch",)
                 return self._reduce_function_by_value(obj)
