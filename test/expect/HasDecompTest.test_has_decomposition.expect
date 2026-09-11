@@ -77,6 +77,7 @@ aten::_ctc_loss_backward.Tensor
 aten::_ctc_loss_backward.out
 aten::_cudnn_attention_backward
 aten::_cudnn_attention_forward
+aten::_cudnn_attention_forward_no_dropout_inplace
 aten::_cudnn_ctc_loss
 aten::_cudnn_ctc_loss.Tensor
 aten::_cudnn_ctc_loss.out
@@ -533,6 +534,9 @@ aten::_resize_output.out
 aten::_resize_output_
 aten::_sample_dirichlet
 aten::_sample_dirichlet.out
+aten::_scaled_addmm
+aten::_scaled_addmm.out
+aten::_scaled_addmm_
 aten::_scaled_dot_product_attention_math_for_mps
 aten::_scaled_dot_product_cudnn_attention
 aten::_scaled_dot_product_cudnn_attention_backward
