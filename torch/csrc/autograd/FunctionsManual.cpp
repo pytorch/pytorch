@@ -1193,36 +1193,38 @@ Tensor logcumsumexp_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
     int64_t dim) {
-  // Mostly taken from logsumexp_jvp
-
-  // NB: for simplicity, we recompute some values that can be reused from
-  // forward
-  auto self_p_exp = [&self_p, dim]() {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (!at::is_complex(self_p)) {
-      return (self_p - std::get<0>(at::max(self_p, dim, true)))
-          .exp(); // Use the exp-normalize trick
-    } else {
-      // at::max doesn't support complex128
-      return self_p.exp();
-    }
-  }();
-
-  auto cumsumexp_p = self_p_exp.cumsum(dim);
+  // JVP of y = logcumsumexp(x) along dim:
+  //   y_t[0] = exp(x[0] - y[0]) * x_t[0]   (= x_t[0] for real inputs)
+  //   y_t[i] = exp(y[i-1] - y[i]) * y_t[i-1] + exp(x[i] - y[i]) * x_t[i]
+  //
+  // The previous formula copied logsumexp_jvp's single max-along-dim shift.
+  // That underflows early prefixes when a later element is much larger, so
+  // those prefixes' JVP contributions become 0 (#196705).
 
   TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
 
-  constexpr double eps = 1e-13;
-
-  if (areAnyTensorSubclassLike({self_p, self_t})) {
-    auto result = (self_p_exp * self_t).cumsum(dim);
-    result /= cumsumexp_p.add_(eps);
-    return result;
-  } else {
-    self_p_exp *= self_t;
-    auto cumsumexp_t = self_p_exp.cumsum(dim);
-    return cumsumexp_t /= cumsumexp_p.add_(eps);
+  dim = at::maybe_wrap_dim(dim, self_p.dim());
+  const auto n = self_p.size(dim);
+  if (n == 0) {
+    return at::empty_like(self_t);
   }
+
+  auto y = at::logcumsumexp(self_p, dim);
+  auto result = at::empty_like(self_t);
+  result.select(dim, 0).copy_(
+      (self_p.select(dim, 0) - y.select(dim, 0)).exp() *
+      self_t.select(dim, 0));
+
+  for (const auto i : c10::irange(1, n)) {
+    auto y_i = y.select(dim, static_cast<int64_t>(i));
+    auto z_i =
+        (y.select(dim, static_cast<int64_t>(i - 1)) - y_i).exp() *
+            result.select(dim, static_cast<int64_t>(i - 1)) +
+        (self_p.select(dim, static_cast<int64_t>(i)) - y_i).exp() *
+            self_t.select(dim, static_cast<int64_t>(i));
+    result.select(dim, static_cast<int64_t>(i)).copy_(z_i);
+  }
+  return result;
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
