@@ -90,6 +90,12 @@ _ITREE_VEC_MUL = 1
 # Occupancy-only block target; 64 threads starves small-N rows (145.3us versus 68.2us).
 _ITREE_BLOCK_THREADS = 256
 
+# Smem resolves coalesced vec loads versus contiguous per-lane trees, replacing butterflies
+# without changing bits. cp.async tiles cut (65536, 1024) from 48.2 to 40.9us. Single-batch
+# full runs only: shorter runs, register staging, and untiled buffers lost. 32 columns/lane
+# reached 40.7us at N=1024 and caps wider rows at 4.6 KB smem each.
+_ITREE_STAGE_E = 32
+
 
 def inner_tree_order_enabled() -> bool:
     """Is the reproducible-DAG order requested? Read live, so tests can toggle it."""
@@ -117,6 +123,8 @@ class _ItreePlan(NamedTuple):
     kchunk: int = 1
     # Fold each thread run linearly instead of as a tree, changing the DAG.
     vec_linear: bool = False
+    # Staged columns/lane; 0 disables. One butterfly preserves ATen's chunk nesting.
+    stage_e: int = 0
 
     @property
     def sig(self):
@@ -131,6 +139,7 @@ class _ItreePlan(NamedTuple):
             self.split,
             self.kchunk,
             self.vec_linear,
+            self.stage_e,
         )
 
 
@@ -154,6 +163,7 @@ def itree_plan(
     kchunk: int | None = None,
     vmul: int | None = None,
     vec_linear: bool = False,
+    stage: bool | None = None,
 ):
     """Return the upstream-matching plan, or None to use default order without declining."""
     from .inner_tree_plan import (
@@ -240,6 +250,37 @@ def itree_plan(
     )
     k = _fuse_factor(kc, wpr, vec, prm.effective_loads)
     rpb = max(1, min(M, _ITREE_BLOCK_THREADS // max(1, WARP * (wpr // k))))
+    # Stage one bounded batch only when removing multiple butterflies repays the smem trip.
+    span = wpr * prm.effective_loads * WARP * vec
+    # Fixed-smem tiles each end in one butterfly over stage_e columns/lane.
+    e = min(span // WARP, _ITREE_STAGE_E)
+    while e > vec and (span // (e * WARP)) * e * WARP != span:
+        e //= 2
+    # Require a full run (short: 74.0us versus 51.3us) and multiple butterflies.
+    want_stage = (e == _ITREE_STAGE_E and span > WARP * vec) if stage is None else stage
+    if (
+        want_stage
+        and prm.num_batches == 1
+        and not vec_linear
+        # 128-bit cp.async needs static 16-byte alignment; ragged rows keep register folding.
+        and N % vec == 0
+        and e % vec == 0
+        and e <= tile.MAX_UNROLL
+        and (e // vec) & (e // vec - 1) == 0
+    ):
+        return _ItreePlan(
+            "looped",
+            vec,
+            wpr,
+            min(M, prm.rows_per_block) or 1,
+            prm.depth,
+            tuple(batches),
+            tms,
+            (),
+            1,
+            False,
+            e,
+        )
     return _ItreePlan(
         "looped",
         vec,
