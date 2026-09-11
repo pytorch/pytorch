@@ -3366,7 +3366,7 @@ class TestReductions(TestCase):
         # Matching dtype should succeed and write in-place
         out_ok = torch.empty(4, dtype=dtype, device=device)
         h = torch.histc(x, bins=4, min=-2.0, max=2.0, out=out_ok)
-        self.assertIs(h.data_ptr(), out_ok.data_ptr())
+        self.assertEqual(h.data_ptr(), out_ok.data_ptr())
         expected = torch.histc(x, bins=4, min=-2.0, max=2.0)
         self.assertEqual(out_ok, expected)
 
