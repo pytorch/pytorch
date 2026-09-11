@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 __all__ = [
     "fully_shard",
     "FSDPModule",
+    "GradientReductionHandle",
     "UnshardHandle",
     "register_fsdp_forward_method",
     "get_cls_to_fsdp_cls",
@@ -409,6 +410,103 @@ class FSDPModule:
         """
         state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
+
+    @overload
+    def finalize_gradient_accumulation(
+        self, *, async_op: Literal[False] = False
+    ) -> None: ...
+
+    @overload
+    def finalize_gradient_accumulation(
+        self, *, async_op: Literal[True]
+    ) -> GradientReductionHandle: ...
+
+    @_dynamo_disable
+    def finalize_gradient_accumulation(
+        self, *, async_op: bool = False
+    ) -> GradientReductionHandle | None:
+        """Finish gradient accumulation on the calling thread.
+
+        Call this after backward passes run with
+        ``set_is_last_backward(False)`` and
+        ``set_reshard_after_backward(False)``. Earlier backward passes may use
+        ``set_requires_gradient_sync(False)``. The final backward may enable
+        synchronization to overlap reduction with its remaining computation.
+
+        The autograd final callback runs on the autograd thread, where its
+        stream waits cannot be CUDA graph captured. This method runs the work
+        on the calling thread and is safe to call during CUDA graph capture.
+
+        Args:
+            async_op (bool): If ``True``, return a
+                :class:`GradientReductionHandle` without waiting for gradient
+                reduction. The caller must call :meth:`wait` before using the
+                gradients or starting more work on this FSDP module. If
+                ``False``, wait before returning.
+
+        HSDP accumulation that disables only all-reduce is not supported.
+        Enable all-reduce on the final backward pass instead.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is None:
+            raise RuntimeError("A forward pass must run on the root FSDP module first")
+        if not state._is_root:
+            raise RuntimeError(
+                "finalize_gradient_accumulation must be called on the root FSDP module"
+            )
+        if state._state_ctx.gradient_reduction_pending:
+            raise RuntimeError(
+                "The previous gradient reduction must be waited on before "
+                "finalizing gradient accumulation again"
+            )
+        param_groups = [
+            group
+            for fsdp_state in state._state_ctx.all_states
+            for group in fsdp_state._fsdp_param_groups
+        ]
+        settings = [
+            (group.reduce_grads, group.all_reduce_grads, group.reshard_after_backward)
+            for group in param_groups
+        ]
+        if any(group._partial_reduce_output is not None for group in param_groups):
+            raise RuntimeError(
+                "finalize_gradient_accumulation does not support HSDP accumulation "
+                "with all-reduce disabled. Enable all-reduce on the final backward pass"
+            )
+        is_last_backward = state._state_ctx.is_last_backward
+        try:
+            self.set_requires_gradient_sync(True)
+            self.set_reshard_after_backward(True)
+            self.set_is_last_backward(True)
+            max_input_buffers = state._comm_ctx.reduce_scatter_max_input_buffers
+            num_pending_reductions = sum(
+                group._deferred_gradient_reduction for group in param_groups
+            )
+            state._comm_ctx.reduce_scatter_max_input_buffers = max(
+                max_input_buffers,
+                len(state._comm_ctx.reduce_scatter_states) + num_pending_reductions,
+            )
+            try:
+                state._root_post_backward_final_callback(
+                    finalize_gradient_accumulation=True,
+                    wait_for_gradient_reduction=False,
+                )
+            finally:
+                state._comm_ctx.reduce_scatter_max_input_buffers = max_input_buffers
+        finally:
+            for group, group_settings in zip(param_groups, settings):
+                (
+                    group.reduce_grads,
+                    group.all_reduce_grads,
+                    group.reshard_after_backward,
+                ) = group_settings
+            self.set_is_last_backward(is_last_backward)
+        state._state_ctx.gradient_reduction_pending = True
+        handle = _GradientReductionHandleImpl(state)
+        if async_op:
+            return handle
+        handle.wait()
+        return None
 
     def set_requires_gradient_sync(
         self, requires_gradient_sync: bool, *, recurse: bool = True
@@ -897,6 +995,28 @@ class FSDPModule:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     fsdp_param.reset_sharded_param()
         return ret
+
+
+class GradientReductionHandle:
+    """A handle for asynchronous gradient accumulation finalization."""
+
+    def wait(self) -> None:
+        """Wait for gradient reduction and release its retained buffers."""
+        return
+
+
+class _GradientReductionHandleImpl(GradientReductionHandle):
+    def __init__(self, state: FSDPState):
+        self._state: FSDPState | None = state
+
+    def wait(self) -> None:
+        if self._state is None:
+            return
+        state = self._state
+        state._wait_for_gradient_reduction()
+        state._join_comm_streams()
+        state._state_ctx.gradient_reduction_pending = False
+        self._state = None
 
 
 class UnshardHandle:

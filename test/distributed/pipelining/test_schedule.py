@@ -4,6 +4,7 @@ import copy
 import csv
 import logging
 import os
+from collections import Counter
 from unittest.mock import MagicMock, patch
 
 from model_registry import MultiMLP
@@ -44,10 +45,15 @@ from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     RECV_B,
     RECV_F,
+    REDUCE_GRAD,
     RESHARD,
     SEND_B,
+    SEND_F,
     UNSHARD,
     W,
+    WAIT_REDUCE_GRAD,
+    WAIT_SEND_B,
+    WAIT_SEND_F,
 )
 from torch.distributed.pipelining.stage import (
     _PipelineStageBase,
@@ -704,6 +710,102 @@ class TestSchedulePlan(TestCase):
 
         self.assertEqual(count_stage_15_unshards(default_schedule), 4)
         self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
+
+    def test_wait_reduce_grad_round_trip(self):
+        action = _Action(3, WAIT_REDUCE_GRAD, None)
+        self.assertEqual(str(action), "3WAIT_REDUCE_GRAD")
+        self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_wait_send_round_trip(self):
+        for action in (
+            _Action(1, WAIT_SEND_F, 2),
+            _Action(3, WAIT_SEND_B, 4),
+        ):
+            self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_wait_send_simulation(self):
+        actions = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, RECV_B, 0),
+                _Action(0, B, 0),
+            ],
+            1: [
+                _Action(1, RECV_F, 0),
+                _Action(1, F, 0),
+                _Action(1, B, 0),
+                _Action(1, SEND_B, 0),
+                _Action(1, WAIT_SEND_B, 0),
+            ],
+        }
+        _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
+
+        actions[0][1:3] = reversed(actions[0][1:3])
+        with self.assertRaisesRegex(ValueError, "Schedule is not progressing"):
+            _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
+
+    def test_defer_reduce_grad_wait_lowering(self):
+        actions = [
+            _Action(6, B, 0),
+            _Action(4, B, 0),
+            _Action(2, B, 0),
+        ]
+        default = _add_reduce_grad(actions, n_microbatches=1)
+        self.assertEqual(
+            default,
+            [
+                _Action(6, B, 0),
+                _Action(6, REDUCE_GRAD, None),
+                _Action(4, B, 0),
+                _Action(4, REDUCE_GRAD, None),
+                _Action(2, B, 0),
+                _Action(2, REDUCE_GRAD, None),
+            ],
+        )
+        self.assertFalse(
+            any(action.computation_type == WAIT_REDUCE_GRAD for action in default)
+        )
+
+        deferred = _add_reduce_grad(
+            actions,
+            n_microbatches=1,
+            defer_reduce_grad_wait=True,
+        )
+        self.assertEqual(
+            deferred,
+            [
+                _Action(6, B, 0),
+                _Action(6, REDUCE_GRAD, None),
+                _Action(4, B, 0),
+                _Action(6, WAIT_REDUCE_GRAD, None),
+                _Action(4, REDUCE_GRAD, None),
+                _Action(2, B, 0),
+                _Action(4, WAIT_REDUCE_GRAD, None),
+                _Action(2, REDUCE_GRAD, None),
+                _Action(2, WAIT_REDUCE_GRAD, None),
+            ],
+        )
+        self.assertEqual(
+            Counter(
+                action.computation_type
+                for action in deferred
+                if action.computation_type != WAIT_REDUCE_GRAD
+            ),
+            Counter(action.computation_type for action in default),
+        )
+
+        outstanding = 0
+        peak = 0
+        for action in deferred:
+            if action.computation_type == REDUCE_GRAD:
+                outstanding += 1
+                peak = max(peak, outstanding)
+            elif action.computation_type == WAIT_REDUCE_GRAD:
+                outstanding -= 1
+        self.assertEqual(outstanding, 0)
+        self.assertEqual(peak, 1)
 
     @parametrize(
         "ScheduleClass",
