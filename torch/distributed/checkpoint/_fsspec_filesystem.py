@@ -5,7 +5,6 @@ import concurrent.futures
 import inspect
 import io
 import os
-import statistics
 import sys
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
@@ -160,32 +159,6 @@ class FsspecWriter(FileSystemWriter):
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
-def _compute_adaptive_max_gap(
-    storage_data: dict,
-    reqs: Sequence,
-    max_cap: int = 1048576,
-    ratio: float = 0.05,
-) -> int:
-    """Analyze ReadItems to dynamically derive an optimal max_gap for range coalescing.
-
-    Calculates the median chunk size from the requested storage items. For large tensors
-    (e.g., in LLMs and distributed checkpoints with megabyte-scale chunks), allows coalescing
-    gaps proportional to the chunk size (default 5%, capped at max_cap = 1 MB). For small
-    chunks, scales down proportionately to prevent read amplification.
-    """
-    if not reqs or not storage_data:
-        return 0
-    lengths = [
-        storage_data[r.storage_index].length
-        for r in reqs
-        if getattr(r, "storage_index", None) in storage_data
-    ]
-    if not lengths:
-        return 0
-    median_length = statistics.median(lengths)
-    return min(max_cap, max(0, int(median_length * ratio)))
-
-
 class FsspecReader(FileSystemReader):
     def __init__(
         self,
@@ -213,15 +186,10 @@ class FsspecReader(FileSystemReader):
 
         # If the underlying fsspec filesystem supports cat_ranges, use batched range reading
         if self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges"):
-            effective_max_gap = self.max_gap
-            if effective_max_gap is None:
-                effective_max_gap = _compute_adaptive_max_gap(self.storage_data, reqs)
-
             # Check if backend overrides cat_ranges and supports max_gap
             # (base fsspec.AbstractFileSystem.cat_ranges raises NotImplementedError when max_gap is passed)
             supports_max_gap = (
-                effective_max_gap is not None
-                and effective_max_gap >= 0
+                self.max_gap is not None
                 and type(self.fs.fs).cat_ranges
                 is not fsspec.AbstractFileSystem.cat_ranges
             )
@@ -255,7 +223,7 @@ class FsspecReader(FileSystemReader):
                 if supports_max_gap:
                     try:
                         chunks = self.fs.fs.cat_ranges(
-                            bp, bs, be, max_gap=effective_max_gap, on_error="raise"
+                            bp, bs, be, max_gap=self.max_gap, on_error="raise"
                         )
                         return chunks, br
                     except (NotImplementedError, TypeError):

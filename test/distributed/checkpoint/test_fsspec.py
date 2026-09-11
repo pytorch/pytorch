@@ -16,7 +16,6 @@ import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed.checkpoint._fsspec_filesystem import (
-    _compute_adaptive_max_gap,
     FileSystem,
     FsspecReader,
     FsspecWriter,
@@ -408,39 +407,6 @@ class TestFileSystem(TestCase):
             no_dist=True,
         )
         self.assertTrue(torch.allclose(state_dict["t1"], load_dict["t1"]))
-
-    def test_compute_adaptive_max_gap(self):
-        class MockReq:
-            def __init__(self, idx):
-                self.storage_index = idx
-
-        class MockStorageInfo:
-            def __init__(self, length):
-                self.length = length
-
-        # 1. Empty requests or empty storage_data returns 0
-        self.assertEqual(_compute_adaptive_max_gap({}, []), 0)
-
-        # 2. Small tensors (1 KB) -> returns small gap (51 bytes)
-        small_storage = {i: MockStorageInfo(1024) for i in range(10)}
-        small_reqs = [MockReq(i) for i in range(10)]
-        self.assertEqual(
-            _compute_adaptive_max_gap(small_storage, small_reqs), int(1024 * 0.05)
-        )
-
-        # 3. Large tensors (10 MB chunks) -> 5% is 524,288 bytes (512 KB)
-        large_storage = {i: MockStorageInfo(10 * 1024 * 1024) for i in range(10)}
-        large_reqs = [MockReq(i) for i in range(10)]
-        self.assertEqual(
-            _compute_adaptive_max_gap(large_storage, large_reqs), 524288
-        )
-
-        # 4. Very large tensors (50 MB chunks) -> capped at max_cap (1 MB = 1048576 bytes)
-        huge_storage = {i: MockStorageInfo(50 * 1024 * 1024) for i in range(10)}
-        huge_reqs = [MockReq(i) for i in range(10)]
-        self.assertEqual(
-            _compute_adaptive_max_gap(huge_storage, huge_reqs), 1048576
-        )
 
     def test_fsspec_reader_max_gap_config(self):
         checkpoint_dir = "memory://test_max_gap_config"
