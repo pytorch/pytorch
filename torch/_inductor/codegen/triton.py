@@ -8536,7 +8536,6 @@ class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
     supports_sub_parent_epilogue = True
-    supports_reduction_result = True
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [
@@ -8546,6 +8545,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
             BackendFeature.SORT,
+            BackendFeature.REDUCTION_RESULT,
             BackendFeature.TRITON_TEMPLATES,
             BackendFeature.TUPLE_REDUCTION,
         ]

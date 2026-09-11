@@ -507,6 +507,7 @@ class BackendFeature(Enum):
     MASKED_SCATTER_WITH_INDEX = auto()
     SCAN = auto()
     SORT = auto()
+    REDUCTION_RESULT = auto()
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
     TRITON_TEMPLATES = auto()
