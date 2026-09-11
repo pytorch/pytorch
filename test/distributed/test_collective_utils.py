@@ -13,13 +13,13 @@ from torch.distributed.collective_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
+    HardwareClassification,
     run_tests,
     TestCase,
 )
@@ -27,6 +27,8 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -137,20 +139,25 @@ class TestCollectiveUtils(MultiProcessTestCase):
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
 
-    @parametrize("device", ["cpu", "cuda"])
+
+class TestCollectiveUtilsDevice(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+
     @skip_if_lt_x_gpu(4)
-    def test_check_rng_sync(
-        self,
-        device,
-    ) -> None:
-        if device == "cuda" and not torch.cuda.is_available():
-            self.skipTest("Cuda is not available")
+    def test_check_rng_sync(self, device) -> None:
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
         )
         group = torch.distributed.distributed_c10d._get_default_group()
-        generator = torch.Generator(device=device)
+        generator = torch.Generator(device=torch.device(device).type)
         generator.manual_seed(123)
         value_ranks, _ = _check_rng_sync_internal(generator, group)
         self.assertEqual(len(value_ranks), 1, value_ranks)
@@ -158,7 +165,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
             self.assertEqual(actual, expected, actual)
 
         if torch.distributed.get_rank() == 1:
-            torch.randn((10,), device=device, generator=generator)
+            torch.randn((10,), device=torch.device(device).type, generator=generator)
         value_ranks, _ = _check_rng_sync_internal(generator, group)
         self.assertEqual(len(value_ranks), 2, value_ranks)
         for actual, expected in zip(value_ranks.values(), [{0, 2, 3}, {1}]):
@@ -178,6 +185,8 @@ class TestCollectiveUtils(MultiProcessTestCase):
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -217,7 +226,8 @@ class TestUtils(TestCase):
         )
 
 
-instantiate_parametrized_tests(TestCollectiveUtils)
+instantiate_device_type_tests(TestCollectiveUtilsDevice, globals(), allow_xpu=True)
+
 
 if __name__ == "__main__":
     run_tests()
