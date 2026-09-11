@@ -140,6 +140,10 @@ def blackwell_bmm_grid(*args, cdiv, max, min):
     # The BMM template supports both [B, M, N] and flattened [B * M, N]
     # outputs.  Read the logical problem from its compile-time mapping instead
     # of inferring it from the output layout passed before ``meta``.
+    # X supplies at most one SM-wide persistent M/N worker set per matrix;
+    # Y/Z enumerate independent batches, with Z used only when B exceeds the
+    # CUDA grid-Y limit. The rounded Y/Z product can exceed B, so the kernel
+    # must retain its batch guard.
     meta = args[-1]
     b = meta["BATCH_SIZE"]
     m = meta["LOGICAL_M"]
