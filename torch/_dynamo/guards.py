@@ -4364,28 +4364,6 @@ class GuardsStatePickler(FunctionPicklerBase):
             self._missing_cache[reason] = _Missing(reason)
         return self._missing_cache[reason]
 
-    @staticmethod
-    def _is_literal(value: object) -> bool:
-        # An always-picklable constant is carried whether or not a guard reads
-        # it: pruning it buys nothing and would make the rebuilt state depend on
-        # whether some unrelated guard happened to register the interned value.
-        # These are the singletons and scalars dynamo treats as constants; NOT
-        # every common_constant_type (torch.finfo/iinfo do not pickle).
-        if value is None or value is Ellipsis or value is NotImplemented:
-            return True
-        return type(value) in (
-            bool,
-            int,
-            float,
-            complex,
-            str,
-            bytes,
-            torch.dtype,
-            torch.device,
-            torch.layout,
-            torch.memory_format,
-        )
-
     def _prune(self, value: object, reason: str) -> object:
         if self._is_literal(value) or self._keep(value):
             return value
