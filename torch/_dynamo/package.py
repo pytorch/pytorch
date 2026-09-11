@@ -263,15 +263,19 @@ class FunctionPicklerBase(pickle.Pickler):
         """Whether pickling fn by reference (import __module__, walk __qualname__)
         lands back on fn. False for a <locals> function, a functools.wraps
         wrapper (it carries the wrappee's names), an exec-created function, or
-        a module absent from sys.modules; those must be rebuilt from the code
-        object or pickle silently hands back a different function at load."""
+        a module absent from sys.modules; pickling those by reference raises
+        PicklingError at dump, so the caller rebuilds them from the code object
+        (or prunes them)."""
         if "<locals>" in fn.__qualname__:
             return False
         # __module__ need not be a str (a decorator can set anything); an
         # unhashable one must not TypeError out of the reducer.
-        if not (isinstance(fn.__module__, str) and fn.__module__ in sys.modules):
+        module = (
+            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
+        )
+        if module is None:
             return False
-        resolved: Any = sys.modules[fn.__module__]
+        resolved: Any = module
         for name in fn.__qualname__.split("."):
             resolved = getattr(resolved, name, None)
         return resolved is fn
@@ -285,10 +289,11 @@ class FunctionPicklerBase(pickle.Pickler):
         # way. A ForwardRef proxy carries its owner and may not pickle (it does
         # not for a local function), so the caller prunes any it does not need.
         # A caller that must SERIALIZE the annotations passes resolve=True: it
-        # gets real values, and an empty dict when a name will not resolve,
-        # because a ForwardRef -- even nested in list[Bar] -- is not picklable.
-        # That resolves the whole set or nothing; a caller that also needs
-        # per-value picklability filters on top.
+        # gets real values, and an empty dict when they cannot be evaluated (a
+        # TYPE_CHECKING-only name is the common case), because a ForwardRef --
+        # even nested in list[Bar] -- is not picklable. That resolves the whole
+        # set or nothing; a caller that also needs per-value picklability
+        # filters on top.
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -297,7 +302,8 @@ class FunctionPicklerBase(pickle.Pickler):
                     return annotationlib.get_annotations(
                         obj, format=annotationlib.Format.VALUE
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug("dropping the annotations of %s: %s", obj, e)
                     return {}
             return annotationlib.get_annotations(
                 obj, format=annotationlib.Format.FORWARDREF
