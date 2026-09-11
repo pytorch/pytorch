@@ -11,6 +11,7 @@ import torch._dynamo.testing
 from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -59,6 +60,8 @@ def f_warning_once(x):
 
 @instantiate_parametrized_tests
 class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "ignore_method, fn, captured_logger, should_ignore_logger",
         [
@@ -186,6 +189,8 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dont_reorder_print(self):
         def f(x):
             x = x + x
