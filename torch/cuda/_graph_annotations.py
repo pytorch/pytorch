@@ -43,7 +43,9 @@ control (e.g. resolving once before remapping several graphs).
 
 from __future__ import annotations
 
+import ctypes
 import importlib.metadata
+import os
 import threading
 import warnings
 from collections.abc import Mapping
@@ -146,14 +148,12 @@ def _set_annotations_enabled(enabled: bool) -> None:
     to scope annotations to a capture; not a public API."""
     global _annotations_enabled, _capture_root_graph_id
     _annotations_enabled = enabled
-    if enabled:
-        # A previous capture that raised before its ids were taken must not leak them
-        # into this one.
-        _body_graph_ids.clear()
     if not enabled:
         _capture_root_graph_id = None
         # A capture that raised mid-scope would otherwise leak its scopes into the next one.
         _active_scopes.clear()
+        # Likewise the body ids, though capture end normally takes them first.
+        _body_graph_ids.clear()
 
 
 def _set_annotation_backend(backend: str) -> None:
@@ -307,18 +307,50 @@ def _probe_tools_id() -> bool:
     return True
 
 
+# The CUPTI ABI that first reports sourceGraphNodeId, and the driver that first populates
+# it. Both ends have to be new enough: the field is only in 13.4 headers, and an older
+# user-mode driver leaves it unset.
+_MIN_SOURCE_NODE_CUPTI_VERSION = 130400
+_MIN_SOURCE_NODE_DRIVER_VERSION = 13040
+
+
+def _loaded_cupti_version() -> int | None:
+    """CUPTI's version if libcupti is already in this process, else ``None``.
+
+    RTLD_NOLOAD so the probe never pulls CUPTI in: loading it is a side effect a capture
+    should not have, and a process that has not loaded it has no consumer of source node
+    ids to be wrong about yet. ``torch`` front-loads the CUPTI wheel at import (see
+    ``_preload_cuda_deps``), so in practice the check does run. Not a public API."""
+    try:
+        lib = ctypes.CDLL("libcupti.so.13", mode=os.RTLD_NOLOAD)
+    except OSError:
+        return None
+    try:
+        version = ctypes.c_uint32()
+        lib.cuptiGetVersion.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+        if lib.cuptiGetVersion(ctypes.byref(version)) != 0:  # CUPTI_SUCCESS
+            return None
+    except AttributeError:
+        return None
+    return version.value
+
+
 def source_node_ids_available() -> bool:
-    """Whether the driver reports a node's source (capture-time) graph node on replayed
-    work, which is what lets annotations stay keyed to the capture graph instead of being
-    rekeyed to each exec graph. CUPTI surfaces it as ``sourceGraphNodeId``, added in the
-    13.4 ABI and only populated by a 13.4 user-mode driver, so the driver version is the
-    gate. Not a public API."""
+    """Whether a node's source (capture-time) graph node is reported on replayed work,
+    which is what lets annotations stay keyed to the capture graph instead of being rekeyed
+    to each exec graph. CUPTI surfaces it as ``sourceGraphNodeId``: the field arrived in the
+    13.4 ABI and only a 13.4 user-mode driver fills it in, so both are checked. A CUPTI too
+    old to have the field is the quiet failure worth catching -- a 13.4 driver with a 13.3
+    CUPTI reports nothing and the annotations resolve to nothing. Not a public API."""
     if not _HAS_CUDA_BINDINGS:
+        return False
+    cupti_version = _loaded_cupti_version()
+    if cupti_version is not None and cupti_version < _MIN_SOURCE_NODE_CUPTI_VERSION:
         return False
     rt = _cuda_runtime
     ok = rt.cudaError_t.cudaSuccess  # pyrefly: ignore[missing-attribute]
     err, version = rt.cudaDriverGetVersion()  # pyrefly: ignore[missing-attribute]
-    return err == ok and version >= 13040
+    return err == ok and version >= _MIN_SOURCE_NODE_DRIVER_VERSION
 
 
 def _is_tools_id_unavailable() -> bool:
