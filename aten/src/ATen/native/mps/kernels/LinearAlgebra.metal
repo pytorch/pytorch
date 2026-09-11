@@ -561,80 +561,70 @@ inline T tri_opA(
   return conj ? c10::metal::conj(v) : v;
 }
 
-// General batched triangular solve via forward/back substitution. Each thread
-// owns one independent RHS vector (a column for the left case, a row for the
-// right case) and solves it serially, so there are no cross-thread hazards.
-// Correctness-first: this is O(n^2) per RHS with no blocking. Complex support
-// comes from the c10::metal mul/div/conj helpers, which are no-ops for real T.
+// Batched triangular solve by forward/back substitution. One threadgroup owns
+// one right-hand side and walks the n substitution steps serially; the dot
+// product against the already-solved prefix is split across the group and
+// reduced. The caller folds the side into the transpose so only op(A) X = B is
+// handled here, and keeps n small enough that the prefix always fits in
+// threadgroup memory; op itself stays in the kernel so that a transposed or
+// conjugated solve does not have to materialize an n x n copy.
+// Complex support comes from the c10::metal mul/div helpers, no-ops for real T.
 template <typename T>
 kernel void triangular_solve(
     device const T* A [[buffer(0)]],
     device const T* B [[buffer(1)]],
     device T* X [[buffer(2)]],
     constant TriangularSolveParams& p [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
+    threadgroup T* xs [[threadgroup(0)]],
+    threadgroup T* red [[threadgroup(1)]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    uint sg_lane [[thread_index_in_simdgroup]],
+    uint sg_id [[simdgroup_index_in_threadgroup]],
+    uint nsimd [[simdgroups_per_threadgroup]]) {
   const uint n = p.n;
   const uint k = p.k;
-  if (tid >= p.nbatch * k) {
+  if (tgid >= p.nbatch * k) {
     return;
   }
-  const uint batch = tid / k;
-  const uint vec = tid % k;
+  const uint batch = tgid / k;
+  const uint vec = tgid % k;
   device const T* Ab = A + batch * n * n;
   const bool tr = p.transpose;
   const bool cj = p.conj;
-  // A is upper before op; a transpose flips the effective triangle.
-  const bool eff_upper = (p.upper != 0) != (p.transpose != 0);
+  // A is upper before op; a transpose flips the effective triangle, and a lower
+  // one substitutes forward.
+  const bool forward = p.upper == p.transpose;
+  device const T* b = B + batch * n * k + vec;
+  device T* x = X + batch * n * k + vec;
 
-  if (p.left) {
-    // op(A) x = b, x/b are columns of an (n x k) matrix; solve over rows.
-    device const T* b = B + batch * n * k + vec;
-    device T* x = X + batch * n * k + vec;
-    if (eff_upper) {
-      for (int i = int(n) - 1; i >= 0; --i) {
-        T sum = b[uint(i) * k];
-        for (uint j = uint(i) + 1; j < n; ++j) {
-          sum = sum -
-              c10::metal::mul(tri_opA(Ab, uint(i), j, n, tr, cj), x[j * k]);
-        }
-        x[uint(i) * k] = p.unit
-            ? sum
-            : c10::metal::div(sum, tri_opA(Ab, uint(i), uint(i), n, tr, cj));
-      }
-    } else {
-      for (uint i = 0; i < n; ++i) {
-        T sum = b[i * k];
-        for (uint j = 0; j < i; ++j) {
-          sum = sum - c10::metal::mul(tri_opA(Ab, i, j, n, tr, cj), x[j * k]);
-        }
-        x[i * k] =
-            p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, i, i, n, tr, cj));
-      }
+  for (uint step = 0; step < n; ++step) {
+    const uint t = forward ? step : n - 1 - step;
+    const uint s_begin = forward ? 0 : t + 1;
+    const uint s_end = forward ? t : n;
+
+    T part = T(0);
+    for (uint s = s_begin + lid; s < s_end; s += tg_size) {
+      part = part + c10::metal::mul(tri_opA(Ab, t, s, n, tr, cj), xs[s]);
     }
-  } else {
-    // x op(A) = b, x/b are rows of a (k x n) matrix; solve over columns.
-    device const T* b = B + batch * k * n + vec * n;
-    device T* x = X + batch * k * n + vec * n;
-    if (eff_upper) {
-      for (uint j = 0; j < n; ++j) {
-        T sum = b[j];
-        for (uint i = 0; i < j; ++i) {
-          sum = sum - c10::metal::mul(x[i], tri_opA(Ab, i, j, n, tr, cj));
-        }
-        x[j] =
-            p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, j, j, n, tr, cj));
-      }
-    } else {
-      for (int j = int(n) - 1; j >= 0; --j) {
-        T sum = b[uint(j)];
-        for (uint i = uint(j) + 1; i < n; ++i) {
-          sum = sum - c10::metal::mul(x[i], tri_opA(Ab, i, uint(j), n, tr, cj));
-        }
-        x[uint(j)] = p.unit
-            ? sum
-            : c10::metal::div(sum, tri_opA(Ab, uint(j), uint(j), n, tr, cj));
-      }
+    part = c10::metal::simd_sum(part);
+    if (sg_lane == 0) {
+      red[sg_id] = part;
     }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (lid == 0) {
+      T sum = b[t * k];
+      for (uint s = 0; s < nsimd; ++s) {
+        sum = sum - red[s];
+      }
+      const T xt =
+          p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, t, t, n, tr, cj));
+      xs[t] = xt;
+      x[t * k] = xt;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
 
@@ -645,7 +635,14 @@ kernel void triangular_solve(
       device const DTYPE* B [[buffer(1)]],                       \
       device DTYPE* X [[buffer(2)]],                             \
       constant TriangularSolveParams& p [[buffer(3)]],           \
-      uint tid [[thread_position_in_grid]]);
+      threadgroup DTYPE* xs [[threadgroup(0)]],                  \
+      threadgroup DTYPE* red [[threadgroup(1)]],                 \
+      uint tgid [[threadgroup_position_in_grid]],                \
+      uint lid [[thread_position_in_threadgroup]],               \
+      uint tg_size [[threads_per_threadgroup]],                  \
+      uint sg_lane [[thread_index_in_simdgroup]],                \
+      uint sg_id [[simdgroup_index_in_threadgroup]],             \
+      uint nsimd [[simdgroups_per_threadgroup]]);
 
 INSTANTIATE_TRIANGULAR_SOLVE(float);
 INSTANTIATE_TRIANGULAR_SOLVE(float2);
