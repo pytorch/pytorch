@@ -79,6 +79,9 @@ class _ProbeState:
     # over itself is reduced twice, and the second pass must not re-probe or
     # re-warn.
     attributes: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    # id(function) -> its kept __doc__ (None when pruned), for the same warn-once
+    # reason.
+    docs: dict[int, Any] = dataclasses.field(default_factory=dict)
     # Whether a probe short-circuited on an in-flight id; such a verdict is
     # not cached as final but parked (as unpicklable) for the rest of the
     # probe tree.
@@ -136,13 +139,14 @@ class AOTCompilePickler(FunctionPicklerBase):
             if reduced is not None:
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
-            # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except __dict__ entries that
-            # will not pickle. The runtime assigns those back and never forces
-            # the pruned ones, so a value this pickler cannot serialize (a
-            # __dict__ entry like the __wrapped__ functools.wraps stashes, which
-            # can drag an unrelated lock/Module in) is dropped rather than left
-            # to fail the whole dump.
+            # The runtime env has to RUN this function, so what a call needs
+            # (defaults, keyword defaults, closure) is carried verbatim, while
+            # __dict__ entries and __doc__ are pruned per value: the runtime
+            # assigns those back and never forces a pruned one, so a value this
+            # pickler cannot serialize (a __dict__ entry like the __wrapped__
+            # functools.wraps stashes, which can drag an unrelated lock/Module
+            # in) is dropped rather than left to fail the whole dump.
+            # Annotations and type params follow in later commits.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
@@ -150,7 +154,7 @@ class AOTCompilePickler(FunctionPicklerBase):
                 closure=obj.__closure__,
                 attributes=self._pickleable_attributes(obj),
                 annotations={},
-                doc=obj.__doc__,
+                doc=self._pickleable_doc(obj),
                 type_params=None,
                 globals_snapshot=None,
             )
@@ -208,6 +212,24 @@ class AOTCompilePickler(FunctionPicklerBase):
         if not self._probing:
             state.attributes[id(obj)] = attributes
         return attributes
+
+    def _pickleable_doc(self, obj: Any) -> Any:
+        # Nothing on the load path forces __doc__ (_apply_function_state
+        # assigns it, that is all), so an unpicklable docstring is dropped like
+        # a pruned attribute rather than failing the dump. A plain str is not
+        # probed. Memoized for the real dump so a function reduced twice (it
+        # closes over itself) warns once; unlike the attributes memo there is no
+        # write-back to snapshot against, a single read cannot be mutated.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.docs:
+            return state.docs[id(obj)]
+        doc = obj.__doc__
+        if not self._dumps_cleanly(doc):
+            self._warn_dropped(obj, "__doc__", doc)
+            doc = None
+        if not self._probing:
+            state.docs[id(obj)] = doc
+        return doc
 
     def _dumps_cleanly(self, value: Any) -> bool:
         # "does it pickle?" has no cheaper predicate than trying. A throwaway

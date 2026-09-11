@@ -1986,6 +1986,30 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
             [f.__doc__ for f in out], ["native", "assigned by a decorator"]
         )
 
+    def test_pickler_prunes_an_unpicklable_docstring(self):
+        # Nothing on the load path forces __doc__, so an unpicklable one is
+        # dropped to None with a warning rather than failing the dump; carried
+        # verbatim the dump fails on the lock.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                """native docstring, so the pruned None has to override it"""
+                return inner if x is None else x  # closes over itself: reduced twice
+
+            inner.__doc__ = threading.Lock()
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("inner.__doc__ (lock) from the artifact", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertIsNone(out.__doc__)
+        self.assertEqual(out(5), 5)
+
     def test_pickler_keeps_an_external_modules_method_by_reference(self):
         # The receiver is external data, so it is the live object at load and
         # pickle's default getattr(receiver, name) resolves the method on it.
