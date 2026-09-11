@@ -258,6 +258,29 @@ class FunctionPicklerBase(pickle.Pickler):
             fn.__type_params__ = type_params
 
     @staticmethod
+    def _fqn_resolves(fn: types.FunctionType) -> bool:
+        """Whether pickling fn by reference (import __module__, walk __qualname__)
+        lands back on fn. False for a <locals> function, a functools.wraps
+        wrapper (it carries the wrappee's names), an exec-created function, or
+        a module absent from sys.modules; pickling those by reference fails at
+        dump (PicklingError, or a bare AttributeError from the C pickler for a
+        <locals> name), so the caller rebuilds them from the code object (or
+        prunes them)."""
+        if "<locals>" in fn.__qualname__:
+            return False
+        # __module__ need not be a str (a decorator can set anything); an
+        # unhashable one must not TypeError out of the reducer.
+        module = (
+            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
+        )
+        if module is None:
+            return False
+        resolved: Any = module
+        for name in fn.__qualname__.split("."):
+            resolved = getattr(resolved, name, None)
+        return resolved is fn
+
+    @staticmethod
     def _read_raw_annotations(obj: Any) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the
