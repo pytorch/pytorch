@@ -452,15 +452,20 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
           max_elements_per_tensor, batchCounter);
 #else
     dim3 applyBlock, catGrid;
-    if (isInOutAligned) {
-      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, alignment>(
-        max_elements_per_tensor, batchCounter);
-    } else if (isContig && isAligned && sizeof(scalar_t) > 2) {
-      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_16>(
+    if constexpr (isContig) {
+      if (isInOutAligned) {
+        std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, alignment>(
           max_elements_per_tensor, batchCounter);
-    } else if (isContig && isAligned && sizeof(scalar_t) == 2) {
-      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_8>(
-          max_elements_per_tensor, batchCounter);
+      } else if (isAligned && sizeof(scalar_t) > 2) {
+        std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_16>(
+            max_elements_per_tensor, batchCounter);
+      } else if (isAligned && sizeof(scalar_t) == 2) {
+        std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_8>(
+            max_elements_per_tensor, batchCounter);
+      } else {
+        applyBlock = dim3(32 * 16);
+        getCatGrid(batchCounter, catGrid);
+      }
     } else {
       applyBlock = dim3(32 * 16);
       getCatGrid(batchCounter, catGrid);
