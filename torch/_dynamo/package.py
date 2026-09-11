@@ -113,7 +113,7 @@ class SerializedCode:
 
 class FunctionPicklerBase(pickle.Pickler):
     """Reducers for objects pickle cannot rebuild by reference: code objects,
-    python modules, and bound methods.
+    closure cells, python modules, and bound methods.
 
     GuardsStatePickler is the one subclass today. AOTCompilePickler keeps its
     own copies of these reducers until it is moved onto this base separately;
@@ -136,6 +136,32 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
         return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @classmethod
+    def _set_cell_contents(cls, cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
 
 
 @dataclasses.dataclass
