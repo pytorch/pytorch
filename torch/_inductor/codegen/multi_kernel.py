@@ -366,15 +366,12 @@ class MultiKernelPlan:
                 "multi-kernel plans with different internal workspaces are not supported"
             )
         if any(
-            kernel.mutations or kernel.inplace_update_buffers
-            for kernel in all_kernels
+            kernel.mutations or kernel.inplace_update_buffers for kernel in all_kernels
         ):
             raise NotImplementedError(
                 "multi-kernel plans with in-place updates are not supported"
             )
-        if any(
-            kernel.inductor_meta.get("atomic_add_found") for kernel in all_kernels
-        ):
+        if any(kernel.inductor_meta.get("atomic_add_found") for kernel in all_kernels):
             raise NotImplementedError(
                 "multi-kernel plans with atomic output updates are not supported"
             )
@@ -436,9 +433,7 @@ class MultiKernelPlan:
         for plan in self.plans:
             plan_args.append(
                 OrderedSet(
-                    arg
-                    for kernel in plan
-                    for arg in kernel.args.python_argdefs()[1]
+                    arg for kernel in plan for arg in kernel.args.python_argdefs()[1]
                 )
             )
         common_args = OrderedSet.intersection(*plan_args)
