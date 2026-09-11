@@ -1712,27 +1712,28 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
 
+    def _get_dirty_tensors(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.dirty_tensors is None:
+            return variables.ConstantVariable.create(None)
+        return variables.TupleVariable(list(self.dirty_tensors))
+
+    def _get_saved_tensors(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        if self.saved_tensors is not None:
+            return variables.TupleVariable(list(self.saved_tensors.tensors))
+        return None
+
     tp_methods = {
         "mark_non_differentiable": Method(mark_non_differentiable),
         "mark_dirty": Method(mark_dirty),
         "save_for_backward": Method(save_for_backward),
     }
 
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
-            return LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
-            )
-        if name == "dirty_tensors":
-            if self.dirty_tensors is None:
-                return variables.ConstantVariable.create(None)
-            return variables.TupleVariable(list(self.dirty_tensors))
-        if name == "saved_tensors" and self.saved_tensors is not None:
-            return variables.TupleVariable(list(self.saved_tensors.tensors))
-
-        return super().tp_getattro_impl(tx, name)
+    tp_getset = {
+        "dirty_tensors": GetSet(_get_dirty_tensors, readonly_setter),
+        "saved_tensors": GetSet(_get_saved_tensors, readonly_setter),
+    }
 
 
 class AutogradEngineVariable(UserDefinedObjectVariable):
