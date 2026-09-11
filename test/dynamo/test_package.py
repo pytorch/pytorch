@@ -86,6 +86,9 @@ class ConfigThatCannotPickle:
     scale = 2.0
 
     def __reduce__(self):
+        # AttributeError was the one exception the bypass mapped to a
+        # PackageError before #196470 widened it; UnpicklableConfig covers the
+        # rest.
         raise AttributeError("config cannot pickle")
 
 
@@ -216,6 +219,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
         # The bypassed compile's backend id is referenced by no entry, so the
         # written cache entry carries exactly the surviving compile's backend.
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
         info = PrecompileContext.save_to_dynamo_cache()
         (entry,) = info["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
@@ -229,10 +233,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), fn(x))
         # Deliberate: re-triggers the bypass in the loading process against an
-        # entry that already holds one installed guarded code.
+        # entry that already holds one installed guarded code. The installed
+        # variant served the first call; only this one traced a new frame.
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x, cfg), fn(x, cfg))
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames + 1)
 
     @torch._dynamo.config.patch(
         caching_precompile=True, strict_precompile=False, prepare_freezing=True
@@ -943,6 +949,52 @@ def add(x, y):
             expected2.sum().backward()
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_a_poisoned_entry_is_reset_on_load_instead_of_growing(self):
+        # A resume frame whose backend artifact is missing at save time is
+        # written bypassed. install() skips it and the frame is traced fresh;
+        # that compile used to append its guarded code to the stale one and
+        # re-register the missing backend id, so every reload/save cycle
+        # re-poisoned the entry and grew it. Loading a bypassed entry now drops
+        # its stale codes and ids: the entry stops growing and the next save is
+        # installable, so the third process hits without a recompile.
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return x.sin() + y
+
+        x = torch.randn(3, 2)
+        expected = torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
+        dynamo_entry = next(iter(PrecompileContext._dynamo_cache_entries.values()))
+        for code in dynamo_entry.codes:
+            if any("resume" in name for name in code.function_names):
+                (backend,) = code.backend_ids
+                del PrecompileContext._backend_artifacts_by_key[backend]
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        def resume_entry():
+            (code,) = [
+                c
+                for c in DynamoCache.load(fn).dynamo.codes
+                if any("resume" in n for n in c.function_names)
+            ]
+            return code
+
+        self.assertTrue(resume_entry().bypassed)
+        self.assertEqual(len(resume_entry().guarded_codes), 1)
+        self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+        # One guarded code and one backend id, not two of each; and installable:
+        # the third process compiles nothing (FRAME_COUNTER also advances for
+        # installed entries, so count actual compiles).
+        self.assertFalse(resume_entry().bypassed)
+        self.assertEqual(len(resume_entry().guarded_codes), 1)
+        self.assertEqual(len(resume_entry().backend_ids), 1)
+        compiles = torch._dynamo.utils.counters["frames"]["total"]
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)

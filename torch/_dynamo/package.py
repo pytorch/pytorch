@@ -558,9 +558,10 @@ class _DynamoCodeCacheEntry:
          it was bypassed (its guards could not be serialized), or a backend
          artifact was missing when the package was saved. install() then leaves
          the frame to be traced fresh rather than skipping it as trivial.
-         Cleared once a compile records a guarded code. (The save-time writer,
-         PrecompileCacheEntry.from_cache_entry, still flags the whole entry and
-         keeps the stale guarded codes.)
+         Cleared once a compile records a guarded code. The save-time writer,
+         PrecompileCacheEntry.from_cache_entry, flags the whole entry when a
+         backend artifact is missing; CompilePackage.initialize drops such an
+         entry's stale guarded codes and backend ids on load.
     """
 
     python_code: SerializedCode
@@ -1026,6 +1027,17 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            for code in dynamo.codes:
+                if code.bypassed:
+                    # Nothing on a bypassed entry is installable, and the fresh
+                    # compile install() leaves the frame to would otherwise
+                    # append its guarded code to the stale ones and re-register
+                    # the backend id the save found missing, so every
+                    # reload/save cycle re-poisoned the entry and grew it. Start
+                    # it clean: the fresh compile's record is the whole entry
+                    # and the next save can write an installable one.
+                    code.guarded_codes.clear()
+                    code.backend_ids.clear()
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
