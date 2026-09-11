@@ -26,6 +26,9 @@ from pathlib import Path
 SCRIPT = Path(__file__).with_name("extract_verdict.py")
 sys.path.insert(0, str(SCRIPT.parent))
 
+# Collected as a test of THIS module, so the suite notices if this file is the
+# one deleted. See _suite_manifest for why the guard is shared, not copied.
+from _suite_manifest import TestTheSuiteIsWhole  # noqa: E402,F401
 from extract_verdict import (  # noqa: E402
     build,
     check_charset,
