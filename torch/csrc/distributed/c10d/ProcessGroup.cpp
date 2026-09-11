@@ -184,6 +184,10 @@ void ProcessGroup::enableCollectivesTiming() {
 }
 
 void ProcessGroup::release_resources() {
+  {
+    const std::lock_guard<std::mutex> lock(splitStoreMutex_);
+    splitStore_.reset();
+  }
   store_.reset();
   deviceTypeToBackend_.clear();
   backendTypeToBackend_.clear();
@@ -242,9 +246,17 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   std::string groupName = name.has_value()
       ? name.value()
       : c10::str(getGroupName(), ":split:", fmt::format("{}", ranks));
+  c10::intrusive_ptr<Store> splitStore;
+  {
+    const std::lock_guard<std::mutex> lock(splitStoreMutex_);
+    if (!splitStore_) {
+      splitStore_ = store_->clone();
+    }
+    splitStore = splitStore_;
+  }
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
       c10::make_intrusive<PrefixStore>(
-          fmt::format("{}/", groupName), store_->clone()));
+          fmt::format("{}/", groupName), std::move(splitStore)));
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
