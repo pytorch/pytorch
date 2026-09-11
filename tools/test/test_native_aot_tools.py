@@ -362,7 +362,66 @@ class TestExportJobs(unittest.TestCase):
     def test_pool_preload_stays_fork_safe(self):
         # The forkserver's server process is the fork parent, so only modules inert
         # there may be preloaded: cutlass or triton would build state workers inherit.
-        self.assertEqual(export.POOL_PRELOAD, ("torch",))
+        self.assertEqual(export.POOL_PRELOAD, ("tools.native_aot.forkserver_preload",))
+
+    def test_pool_preload_ignores_source_torch(self):
+        # The forkserver starts with `python -c` from REPO, putting the checkout
+        # before PYTHONPATH. Its preload helper must still import the installed torch.
+        with tempfile.TemporaryDirectory() as d:
+            installed = os.path.join(d, "site-packages")
+            os.makedirs(os.path.join(installed, "torch"))
+            with open(os.path.join(installed, "torch", "__init__.py"), "w") as f:
+                f.write("ORIGIN = 'installed'\n")
+            probe = os.path.join(d, "probe.py")
+            with open(probe, "w") as f:
+                f.write(
+                    """
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+
+from tools.native_aot import export
+
+
+def torch_origin():
+    import torch
+
+    return torch.ORIGIN
+
+
+if __name__ == "__main__":
+    ctx = multiprocessing.get_context(export.POOL_START_METHOD)
+    ctx.set_forkserver_preload(list(export.POOL_PRELOAD))
+    with export._forkserver_torch_env():
+        with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
+            print("ORIGIN=" + pool.submit(torch_origin).result())
+"""
+                )
+            env = dict(os.environ)
+            env["PYTHONPATH"] = os.pathsep.join(
+                part for part in (installed, REPO, env.get("PYTHONPATH")) if part
+            )
+            proc = subprocess.run(
+                [sys.executable, probe],
+                cwd=REPO,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("ORIGIN=installed", proc.stdout)
+
+    def test_builder_import_error_is_not_misreported_as_missing_runtime(self):
+        with mock.patch.object(
+            export, "load_builder", side_effect=ImportError("torch import failed")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "builder import failed"):
+                export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
+
+        missing = ModuleNotFoundError("No module named 'cutlass'", name="cutlass")
+        with mock.patch.object(export, "load_builder", side_effect=missing):
+            with self.assertRaisesRegex(RuntimeError, "DSL runtime not installed"):
+                export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
 
     def test_json_normal_matches_sidecar_round_trip(self):
         # It stands in for a json.dumps/loads pair, so any divergence makes a spec
