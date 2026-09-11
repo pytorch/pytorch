@@ -653,9 +653,9 @@ template<typename T>
 std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
-  for (const auto i : c10::irange(vals.size())) {
-    result.push_back(std::move(vals[i].first));
-    result.push_back(std::move(vals[i].second));
+  for (auto& val : vals) {
+    result.push_back(std::move(val.first));
+    result.push_back(std::move(val.second));
   }
   return result;
 }

@@ -112,12 +112,14 @@ using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 using ActivityFilter = std::unordered_map<
     torch::autograd::profiler::ActivityType,
     std::unordered_set<std::string>>;
+using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
 TORCH_API void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
     const std::string& trace_id = "",
-    const ActivityFilter& activity_filter = {});
+    const ActivityFilter& activity_filter = {},
+    const ProfilerExtensionMap& profiler_extensions = {});
 
 void toggleCollectionDynamic(const bool enable);
 void startTrace();
