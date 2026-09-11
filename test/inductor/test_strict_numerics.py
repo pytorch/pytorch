@@ -95,11 +95,11 @@ FUSION_CASES = (
     "multi_output",
 )
 
-EFFECTIVE_NUMERICS = {
-    "eager_numerics.division_rounding": config.use_eager_division_rounding,
-    "eager_numerics.disable_ftz": config.should_disable_ftz,
-    "emulate_precision_casts": config.should_emulate_precision_casts,
-}
+EFFECTIVE_NUMERICS = (
+    "eager_numerics.division_rounding",
+    "eager_numerics.disable_ftz",
+    "emulate_precision_casts",
+)
 
 
 def _numerics_options(numerics, enabled):
@@ -110,7 +110,11 @@ def _numerics_options(numerics, enabled):
 
 
 def _effective_numerics():
-    return {key: value() for key, value in EFFECTIVE_NUMERICS.items()}
+    return {
+        "eager_numerics.division_rounding": config.eager_numerics.division_rounding,
+        "eager_numerics.disable_ftz": config.eager_numerics.disable_ftz,
+        "emulate_precision_casts": config.emulate_precision_casts,
+    }
 
 
 class StrictNumericsConfigTest(TestCase):
@@ -139,9 +143,9 @@ class StrictNumericsConfigTest(TestCase):
                 "-c",
                 (
                     "from torch._inductor import config; "
-                    "print(config.use_eager_division_rounding(), "
-                    "config.should_disable_ftz(), "
-                    "config.should_emulate_precision_casts())"
+                    "print(config.eager_numerics.division_rounding, "
+                    "config.eager_numerics.disable_ftz, "
+                    "config.emulate_precision_casts)"
                 ),
             ],
             env=env,
