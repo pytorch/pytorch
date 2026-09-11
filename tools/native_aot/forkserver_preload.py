@@ -22,8 +22,7 @@ try:
     sys.path[:] = [_TORCH_PARENT] + [
         path
         for path in _ORIGINAL_PATH
-        if os.path.realpath(path or os.getcwd())
-        not in {_REPO, _TORCH_PARENT_REAL}
+        if os.path.realpath(path or os.getcwd()) not in {_REPO, _TORCH_PARENT_REAL}
     ]
     try:
         importlib.import_module("torch")
