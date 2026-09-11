@@ -39,11 +39,11 @@ from torch._inductor.cudagraph_utils import (
     cudagraph_trees_clone_live_user_visible_outputs,
     CudagraphCachedInfo,
     CudagraphMetadata,
-    CUDAGraphPolicy,
     get_input_storage_mutation_info,
     get_input_storage_mutation_reason,
     get_partition_cudagraph_metadata,
     get_placeholder_info,
+    is_graph_capture_runtime_ready,
     log_cudagraph_skip_and_bump_counter,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
@@ -228,26 +228,21 @@ def prepare_cudagraph_post_compile(
         boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
 
-def _cudagraph_capture_runtime_ready(device_types: OrderedSet[str]) -> bool:
-    """Whether ``cudagraph_post_compile`` may dispatch to a capture runtime.
+def _skip_cudagraphs_without_capture_runtime(
+    compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
+    boxed_forward_device_index: BoxedDeviceIndex | None,
+) -> bool:
+    if is_graph_capture_runtime_ready(compiled_graph.device_types):
+        return False
 
-    The lowering device gate only checks device-type compatibility; this
-    second check ensures a non-CUDA graph is not handed to the built-in CUDA
-    ``compile_fx.cudagraphify``. OOT backends replace that entry point or
-    override ``CUDAGraphPolicy.cudagraphify``.
-    """
-    if not device_types or device_types <= OrderedSet(["cuda"]):
-        return True
-    policy = config.cudagraph_policy
-    if (
-        policy is not None
-        and type(policy).cudagraphify is not CUDAGraphPolicy.cudagraphify
-    ):
-        return True
-    # compile_fx imports output_code; import lazily to avoid a cycle.
-    from torch._inductor import compile_fx
-
-    return compile_fx.cudagraphify.__name__ != "cudagraphify"
+    BoxedBool.disable(cudagraphs)
+    maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+    log_cudagraph_skip_and_bump_counter(
+        "skipping cudagraphs due to no capture runtime for "
+        f"{set(compiled_graph.device_types)}"
+    )
+    return True
 
 
 def cudagraph_post_compile(
@@ -296,13 +291,9 @@ def cudagraph_post_compile(
             compiled_graph, example_inputs, boxed_forward_device_index
         )
 
-        if not _cudagraph_capture_runtime_ready(compiled_graph.device_types):
-            BoxedBool.disable(cudagraphs)
-            maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
-            log_cudagraph_skip_and_bump_counter(
-                "skipping cudagraphs due to no capture runtime for "
-                f"{set(compiled_graph.device_types)}"
-            )
+        if _skip_cudagraphs_without_capture_runtime(
+            compiled_graph, cudagraphs, boxed_forward_device_index
+        ):
             return
 
         current_callable = compiled_graph.current_callable
@@ -429,6 +420,11 @@ def cudagraph_partition_post_compile(
     prepare_cudagraph_post_compile(
         compiled_graph, example_inputs, boxed_forward_device_index
     )
+
+    if _skip_cudagraphs_without_capture_runtime(
+        compiled_graph, cudagraphs, boxed_forward_device_index
+    ):
+        return
 
     from .compile_fx import cudagraphify
 

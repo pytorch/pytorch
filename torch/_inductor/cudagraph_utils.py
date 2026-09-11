@@ -341,6 +341,36 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
     return None
 
 
+def get_single_accelerator_device_type(
+    device_types: AbstractSet[str],
+) -> str | None:
+    accelerator_types = [
+        device_type
+        for device_type in device_types
+        if device_type not in ("cpu", "meta")
+    ]
+    if len(accelerator_types) == 1:
+        return accelerator_types[0]
+    return None
+
+
+def is_graph_capture_runtime_ready(device_types: AbstractSet[str]) -> bool:
+    """Whether post-compile may dispatch to a graph capture runtime.
+
+    CUDA is always ready. Other accelerators require
+    ``DeviceInterface.is_graph_capture_supported()`` on the registered backend.
+    """
+    device_type = get_single_accelerator_device_type(device_types)
+    if device_type is None:
+        return False
+    if device_type == "cuda":
+        return True
+    try:
+        return get_interface_for_device(device_type).is_graph_capture_supported()
+    except NotImplementedError:
+        return False
+
+
 def _graph_capture_compatible_device_type(device_type: str) -> bool:
     """Whether a single-device FX graph may pass the cudagraph device gate.
 
