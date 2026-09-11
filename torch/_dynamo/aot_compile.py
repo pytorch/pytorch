@@ -80,8 +80,13 @@ class _ProbeState:
     # function that closes over itself is reduced twice, and the second pass
     # must not re-probe or re-warn.
     attributes: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    # id(function) -> its kept __doc__ (None when pruned), for the same warn-once
+    # reason.
     docs: dict[int, Any] = dataclasses.field(default_factory=dict)
     annotations: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    type_params: dict[int, tuple[Any, ...] | None] = dataclasses.field(
+        default_factory=dict
+    )
     # Whether a probe short-circuited on an in-flight id; such a verdict is
     # not cached as final but parked (as unpicklable) for the rest of the
     # probe tree.
@@ -139,17 +144,18 @@ class AOTCompilePickler(FunctionPicklerBase):
             if reduced is not None:
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
-            # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except annotations, type
-            # params, __doc__, and __dict__ entries that will not pickle. The runtime
-            # assigns those back and never forces the pruned ones, so a value
-            # this pickler cannot serialize (a <locals> annotation class, a PEP
-            # 695 function-scoped TypeVar, or a __dict__ entry like the
-            # __wrapped__ functools.wraps stashes, which can drag an unrelated
-            # lock/Module in) is dropped rather than left to fail the whole
-            # dump. Known limitation: the top-level function's own annotations
-            # ride on CompileArtifacts.signature, which serialize() dumps
-            # unpruned, so this only protects the nested functions reached here.
+            # The runtime env has to RUN this function, so what a call needs
+            # (defaults, keyword defaults, closure) is carried verbatim, while
+            # annotations, type params, __dict__ entries and __doc__ are pruned
+            # per value: the runtime assigns those back and never forces a pruned
+            # one, so a value this pickler cannot serialize (a <locals>
+            # annotation class, a PEP 695 function-scoped TypeVar, or a __dict__
+            # entry like the __wrapped__ functools.wraps stashes, which can drag
+            # an unrelated lock/Module in) is dropped rather than left to fail
+            # the whole dump. Known limitation: the top-level function's own
+            # annotations ride on CompileArtifacts.signature, which serialize()
+            # dumps unpruned, so this only protects the nested functions reached
+            # here.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
@@ -215,7 +221,9 @@ class AOTCompilePickler(FunctionPicklerBase):
         # Nothing on the load path forces __doc__ (_apply_function_state
         # assigns it, that is all), so an unpicklable docstring is dropped like
         # a pruned attribute rather than failing the dump. A plain str is not
-        # probed. Memoized like the attributes, for the same reason.
+        # probed. Memoized for the real dump so a function reduced twice (it
+        # closes over itself) warns once; unlike the attributes memo there is no
+        # write-back to snapshot against, a single read cannot be mutated.
         state = self._probe_state
         if not self._probing and id(obj) in state.docs:
             return state.docs[id(obj)]
@@ -233,10 +241,14 @@ class AOTCompilePickler(FunctionPicklerBase):
         # identical to the real dump. The cache stops a value from being probed
         # twice, not from being dumped again inside an ancestor's probe, so the
         # total work is the reachable bytes times the nesting depth, and user
-        # __reduce__ code runs once per probe that reaches it. A recursion
-        # overflow counts as unpicklable (the value is pruned) rather than
-        # re-raising: a deep-but-finite value in an optional slot must not fail a
-        # save that has nothing wrong with it.
+        # __reduce__ code runs once per probe that reaches it; a tensor stashed
+        # on a function is serialized into the throwaway buffer too (a transient
+        # copy of its storage, and its hook warning fires once more). A
+        # recursion overflow counts as unpicklable (the value is pruned) rather
+        # than re-raising: a deep-but-finite value in an optional slot must not
+        # fail a save that has nothing wrong with it; the guard pickler makes
+        # the opposite call for the same condition, since it has a bypass to
+        # fall back to and this pickler does not.
         if self._is_literal(value):
             return True
         state = self._probe_state
@@ -253,9 +265,12 @@ class AOTCompilePickler(FunctionPicklerBase):
             # of it is not cached as final.
             state.leaned = True
             return True
-        # Every probed value is reachable from the function being pickled, which
-        # pickle keeps alive until dump() returns, so an id is not reused within
-        # one dump; the cache lives as long as this pickler, one per serialize().
+        # Every probed value is reachable from the object being dumped, which
+        # the REAL pickler's memo keeps alive until dump() returns, so an id is
+        # not reused within one dump; the cache lives as long as this pickler,
+        # one per serialize(). (A function a user __reduce__ manufactures inside
+        # a probe is not held that way; a later object at its address would
+        # inherit its verdict.)
         probe = type(self)(self.external_data, io.BytesIO(), probe_state=state)
         state.inflight.add(vid)
         leaned_before = state.leaned
@@ -284,22 +299,28 @@ class AOTCompilePickler(FunctionPicklerBase):
                 )
         finally:
             state.inflight.discard(vid)
-        leaned = state.leaned
-        state.leaned = leaned_before or leaned
+            # The lean travels back through this shared flag because the nested
+            # probe is reached through pickle's own dump stack, not a return
+            # value; restore it here so an aborting dump cannot leave the
+            # child's value behind.
+            leaned = state.leaned
+            state.leaned = leaned_before or leaned
         # A False that leaned on an in-flight True may be a false negative, so
         # it is not cached as final. It is parked for the rest of this probe
         # tree -- re-deriving it is exponential on a cyclic cluster -- and
         # dropped when the tree finishes, so the real dump never consults it.
         # Consulting a park is not a lean: it can make a probe over-prune, and
-        # over-pruning CAN flip a probe's verdict False -> True, but such a True
-        # is only ever consumed as a keep decision inside probes (a probe's
-        # attribute set never reaches the real dump; the memo above is gated on
-        # not _probing), and every value the real dump asks about is probed
-        # outermost, cached final, after the parks were cleared. A True, or a
-        # False that leaned on nothing, is final. So is the OUTERMOST probe's
-        # verdict, leaned or not: the only in-flight id it can lean on is its
-        # own, and that lean is exact because pickle's memo resolves the
-        # back-reference; the caller acts on it irrevocably.
+        # over-pruning CAN flip a probe's verdict False -> True, and the real
+        # dump may read that True straight from the cache. It cannot hurt: the
+        # real dump never reuses a probe's ATTRIBUTE SET (the memo above is
+        # gated on not _probing), so every prunable edge below such a value is
+        # re-decided by an outermost probe of its own, and the non-prunable
+        # slots (defaults, kwdefaults, closure) are traversed identically in
+        # every probe, so a failure there would have failed the earlier probe
+        # too. A True, or a False that leaned on nothing, is final. So is the
+        # OUTERMOST probe's verdict, leaned or not: the only in-flight id it can
+        # lean on is its own, and that lean is exact because pickle's memo
+        # resolves the back-reference; the caller acts on it irrevocably.
         if result or not leaned or not state.inflight:
             state.cache[vid] = result
         else:
@@ -365,11 +386,23 @@ class AOTCompilePickler(FunctionPicklerBase):
         # functions carry (), which dumps and is kept.
         # A TypeVar the body itself references sits in a closure cell, which is
         # never pruned (the body needs it), so that shape still fails the dump.
+        # Memoized for the real dump like the other slots, so a function reduced
+        # twice warns once; below 3.12 the tuple lives in __dict__ and the
+        # attributes pass has already reported it, so this pass stays quiet.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.type_params:
+            return state.type_params[id(obj)]
         type_params = getattr(obj, "__type_params__", None)
-        if type_params and not all(self._dumps_cleanly(p) for p in type_params):
-            self._warn_dropped(obj, "__type_params__", type_params)
-            return None
-        return type_params
+        kept = type_params
+        if type_params:
+            bad = [p for p in type_params if not self._dumps_cleanly(p)]
+            if bad:
+                if "__type_params__" not in obj.__dict__:
+                    self._warn_dropped(obj, "__type_params__", bad[0])
+                kept = None
+        if not self._probing:
+            state.type_params[id(obj)] = kept
+        return kept
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
@@ -513,10 +546,15 @@ class AOTCompiledFunction:
             # message. str(e) of the result is still a tuple repr in that case,
             # which is the price of keeping the tail.
             message = str(e.args[0]) if e.args else ""
+            if _EXTERNAL_DATA_HINT in message:
+                raise  # a re-raised singleton already carries the guidance
             prefix = f"{message}\n" if message else ""
             modules = ""
             if pickler.errors:
-                modules = f" It also reached these unmarked nn.Modules: {list(pickler.errors.values())}."
+                # Class names, not reprs: nn.Module.__repr__ renders the whole
+                # child tree and runs user code inside this handler.
+                names = ", ".join(type(m).__name__ for m in pickler.errors.values())
+                modules = f" It also reached unmarked nn.Modules ({names})."
             e.args = (
                 prefix + "Some value reached by the artifact is not picklable (a "
                 "closure cell, a default/kwdefault, or the top-level function's "
