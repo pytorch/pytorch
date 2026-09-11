@@ -1,7 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Inner-tree order promises upstream's exact bits, not closeness. Unsupported configurations
-# keep the default order, and the feature stays off by default.
+# Inner-tree order promises upstream's exact bits, not closeness. The opt-in gate leaves
+# unsupported configurations on the default order; explicit requests raise.
 
 import os
 import unittest

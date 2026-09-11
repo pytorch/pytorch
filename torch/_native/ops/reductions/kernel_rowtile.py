@@ -490,8 +490,8 @@ def reduce_row_tile(
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     M, N = x.shape
-    # leaf/combine serves every trait and N. Raw partial stages impose a layout, and explicit
-    # tpr requests launch shape; both keep default order rather than falling back to ATen.
+    # leaf/combine serves every trait and N. The opt-in gate leaves partial stages and
+    # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
     itree = None
