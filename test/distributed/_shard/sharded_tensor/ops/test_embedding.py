@@ -5,11 +5,17 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed._shard import shard_parameter
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     TEST_GPU_NUM,
@@ -36,16 +42,22 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedEmbedding(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_sharded_embedding(
         self,
         spec,
         input_size,
         num_embeddings,
         embedding_dim,
+        device,
         max_norm=None,
         norm_type=2.0,
         padding_idx=None,
     ):
+        # Extract bare device type to avoid PrivateUse1 indexed-device pitfall
+        device_type = torch.device(device).type
+
         # Use same seed.
         torch.manual_seed(0)
         local_embedding = torch.nn.Embedding(
@@ -54,7 +66,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             max_norm=max_norm,
             norm_type=norm_type,
             padding_idx=padding_idx,
-        ).to(self.rank)
+        ).to(torch.device(device_type, self.rank))
 
         sharded_embedding = torch.nn.Embedding(
             num_embeddings,
@@ -72,7 +84,9 @@ class TestShardedEmbedding(ShardedTensorTestBase):
 
         # Run sharded computation
         torch.manual_seed(self.rank)  # inputs different on each rank
-        inp = torch.randint(0, num_embeddings, tuple(input_size)).to(self.rank)
+        inp = torch.randint(0, num_embeddings, tuple(input_size)).to(
+            torch.device(device_type, self.rank)
+        )
         sharded_output = sharded_embedding(inp)
 
         # If max_norm is set, we need to ensure that the renorm has been applied across
@@ -122,21 +136,24 @@ class TestShardedEmbedding(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_sharded_embedding_colwise(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_embedding_colwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(1):
-            self._run_sharded_embedding(spec, [5, 4], 17, 12)
-            self._run_sharded_embedding(spec, [6, 7, 6], 21, 11)
-            self._run_sharded_embedding(spec, [8, 6, 5, 4], 23, 13)
-            self._run_sharded_embedding(spec, [8, 6, 5, 4, 7], 23, 16)
-            self._run_sharded_embedding(spec, [4], 15, 14)
-            self._run_sharded_embedding(spec, [34], 15, 14, padding_idx=10)
-            self._run_sharded_embedding(spec, [8, 6, 5, 4], 23, 13, padding_idx=12)
+            self._run_sharded_embedding(spec, [5, 4], 17, 12, device)
+            self._run_sharded_embedding(spec, [6, 7, 6], 21, 11, device)
+            self._run_sharded_embedding(spec, [8, 6, 5, 4], 23, 13, device)
+            self._run_sharded_embedding(spec, [8, 6, 5, 4, 7], 23, 16, device)
+            self._run_sharded_embedding(spec, [4], 15, 14, device)
+            self._run_sharded_embedding(spec, [34], 15, 14, device, padding_idx=10)
+            self._run_sharded_embedding(
+                spec, [8, 6, 5, 4], 23, 13, device, padding_idx=12
+            )
             self._run_sharded_embedding(
                 spec,
                 [4, 5, 6],
                 23,
                 13,
+                device,
                 max_norm=2.5,
             )
             self._run_sharded_embedding(
@@ -144,6 +161,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
                 [12, 7, 16],
                 23,
                 13,
+                device,
                 max_norm=2.5,
             )
             self._run_sharded_embedding(
@@ -151,49 +169,60 @@ class TestShardedEmbedding(ShardedTensorTestBase):
                 [8, 16, 20],
                 12,
                 12,
+                device,
                 max_norm=1.25,
                 norm_type=1.0,
             )
-            self._run_sharded_embedding(spec, [30], 15, 14, max_norm=2.0)
+            self._run_sharded_embedding(spec, [30], 15, 14, device, max_norm=2.0)
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_sharded_embedding_rowwise(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_embedding_rowwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(0):
             # Test even split.
-            self._run_sharded_embedding(spec, [5, 12], 16, 22)
-            self._run_sharded_embedding(spec, [5, 4], 32, 12)
-            self._run_sharded_embedding(spec, [6, 7, 6], 64, 11)
+            self._run_sharded_embedding(spec, [5, 12], 16, 22, device)
+            self._run_sharded_embedding(spec, [5, 4], 32, 12, device)
+            self._run_sharded_embedding(spec, [6, 7, 6], 64, 11, device)
             self._run_sharded_embedding(
                 spec,
                 [5, 12],
                 16,
                 22,
+                device,
                 max_norm=2.5,
             )
-            self._run_sharded_embedding(spec, [6, 7, 6], 64, 11, padding_idx=30)
+            self._run_sharded_embedding(spec, [6, 7, 6], 64, 11, device, padding_idx=30)
             self._run_sharded_embedding(
                 spec,
                 [6, 5, 3],
                 26,
                 11,
+                device,
                 max_norm=2.0,
             )
 
             # Test uneven split.
-            self._run_sharded_embedding(spec, [8, 6, 5, 4], 19, 11)
-            self._run_sharded_embedding(spec, [6, 7, 6], 21, 11)
-            self._run_sharded_embedding(spec, [4], 21, 11)
-            self._run_sharded_embedding(spec, [8, 6, 5, 4], 21, 11, padding_idx=10)
+            self._run_sharded_embedding(spec, [8, 6, 5, 4], 19, 11, device)
+            self._run_sharded_embedding(spec, [6, 7, 6], 21, 11, device)
+            self._run_sharded_embedding(spec, [4], 21, 11, device)
+            self._run_sharded_embedding(
+                spec, [8, 6, 5, 4], 21, 11, device, padding_idx=10
+            )
             self._run_sharded_embedding(
                 spec,
                 [6, 5, 8],
                 28,
                 5,
+                device,
                 max_norm=2.0,
             )
-            self._run_sharded_embedding(spec, [4], 14, 11, max_norm=2.5)
+            self._run_sharded_embedding(spec, [4], 14, 11, device, max_norm=2.5)
+
+
+instantiate_device_type_tests(
+    TestShardedEmbedding, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
