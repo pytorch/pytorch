@@ -4,7 +4,7 @@
     N = LOGICAL_N
     K = DESCRIPTOR_K
     batch = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)).to(tl.int32)
-    if batch >= BATCH or M * N == 0:
+    if batch >= BATCH or M == 0 or N == 0:
         return
 
     a_base = A + batch * A_BATCH_STRIDE
@@ -12,8 +12,10 @@
     k_base = batch * K_BATCH_OFFSET
 
     # Map each logical batch onto rank-2 descriptors over the physical inputs.
-    # Ordinary BMM advances the descriptor bases, while logically padded or
-    # ragged batches can retain the physical bounds and advance the K offset.
+    # Keeping batch in the launch grid hoists descriptor construction out of
+    # the persistent tile loop and supports zero batch strides, which a rank-3
+    # TMA descriptor cannot encode. Ordinary BMM advances the descriptor bases,
+    # while ragged batches can retain the physical bounds and advance K.
     a_desc = triton.language.make_tensor_descriptor(
         base=a_base,
         shape=[M, K] if A_ROW_MAJOR else [K, M],
@@ -35,6 +37,8 @@
     grid_n = tl.cdiv(N, BLOCK_N)
     num_tiles = grid_m * grid_n
     num_pid_in_group = GROUP_M * grid_n
+    # Track the epilogue tile separately to break its dependency on the
+    # prologue's loop induction variable (as in the Blackwell MM template).
     tile_id_c = start_pid - NUM_SMS
 
     {%- if USE_META_WS %}
