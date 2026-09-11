@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -503,6 +504,8 @@ class _MultiprocessingTestMixin:
 class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
     """Device-generic multiprocessing tests, instantiated per available backend."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def tearDown(self):
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
@@ -585,10 +588,8 @@ instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
     TEST_WITH_TSAN,
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
-class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
-    def tearDown(self):
-        if torch.cuda.is_available():
-            torch.cuda.ipc_collect()
+class TestMultiprocessingGeneric(_MultiprocessingTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_spawn_child_keyboard_interrupt(self):
         # A child interrupted while the parent lives must be reported as a
@@ -722,6 +723,65 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         simple_autograd_function()
         with ctx.Pool(3) as pool:
             pool.map(simple_autograd_function, [1, 2, 3])
+
+    def test_empty_tensor_sharing_meta(self):
+        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
+        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
+
+    def test_tensor_sharing_meta(self):
+        dtype = torch.float32
+        device = torch.device("meta")
+        q = mp.Queue()
+        empty = torch.tensor([1], dtype=dtype, device=device)
+        q.put(empty)
+        out = q.get(timeout=1)
+        self.assertEqual(out, empty)
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/167522"
+    )
+    def test_meta_simple(self):
+        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
+
+    def test_empty_shared(self):
+        t = torch.tensor([])
+        t.share_memory_()
+
+    def _test_is_shared(self):
+        t = torch.randn(5, 5)
+        self.assertFalse(t.is_shared())
+        t.share_memory_()
+        self.assertTrue(t.is_shared())
+
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
+    def test_is_shared(self):
+        self._test_is_shared()
+
+    # torch_shm_manager cannot resolve librocprofiler-sdk.so.1 in CI child processes.
+    @skipIfRocmVersionAtLeast([7, 14])
+    def test_fs_is_shared(self):
+        with fs_sharing():
+            self._test_is_shared()
+
+    @unittest.skipIf(sys.platform != "linux", "Only runs on Linux; requires prctl(2)")
+    def test_set_thread_name(self):
+        name = "test name"
+        mp._set_thread_name(name)
+        self.assertEqual(mp._get_thread_name(), name)
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
+class TestMultiprocessingCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def tearDown(self):
+        if torch.cuda.is_available():
+            torch.cuda.ipc_collect()
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_memory_allocation(self):
@@ -1023,25 +1083,6 @@ if __name__ == "__main__":
         self.assertTrue(e0.query())
         p2c.put(0)
         p.join()
-
-    def test_empty_tensor_sharing_meta(self):
-        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
-        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
-
-    def test_tensor_sharing_meta(self):
-        dtype = torch.float32
-        device = torch.device("meta")
-        q = mp.Queue()
-        empty = torch.tensor([1], dtype=dtype, device=device)
-        q.put(empty)
-        out = q.get(timeout=1)
-        self.assertEqual(out, empty)
-
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/167522"
-    )
-    def test_meta_simple(self):
-        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
 
     # Check sharing a cudaMalloc allocation with different types of storage.
     # (Issue #11422)
