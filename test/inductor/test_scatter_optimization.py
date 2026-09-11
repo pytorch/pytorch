@@ -11,6 +11,7 @@ from torch._inductor import config, metrics
 from torch._inductor.fx_passes.reduced_atomic_contention import _compute_num_partitions
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -227,11 +228,11 @@ class TestScatterOpt(TestCase):
                 raise unittest.SkipTest(
                     "torch.xpu.reset_peak_memory_stats not implemented."
                 )
-            torch.cuda.reset_peak_memory_stats()
+            torch.accelerator.reset_peak_memory_stats()
             for _ in range(3):
                 opt_f(opt_model, x, label)
             ms = benchmarker.benchmark_gpu(lambda: opt_f(opt_model, x, label))
-            peak_mem = torch.cuda.max_memory_allocated() / 10**9
+            peak_mem = torch.accelerator.max_memory_allocated() / 10**9
             print(f"{ms=:.3f}, {peak_mem=:.3f} GB")
 
 
@@ -540,6 +541,7 @@ class TestPartitionedScatterOpt(TestCase):
             "output_numel instead of scatter_dim_size",
         )
 
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
     @config.patch(partitioned_scatter_min_contention_ratio=1.0)
     def test_memory_aware_partition_count(self):
@@ -575,7 +577,9 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             expected = f(out, idx, vals, persistent)
 
-        _, total_gpu = torch.cuda.mem_get_info()
+        _, total_gpu = (
+            torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
+        )
 
         out_bytes = output_size * 4
         baseline_peak = out_bytes + N * 8 + N * 4 + persist_n * 4 + out_bytes
@@ -631,6 +635,7 @@ class TestPartitionedScatterOpt(TestCase):
             "floor=total_gpu: output should still be correct (pass gracefully skips)",
         )
 
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
     @config.patch(partitioned_scatter_min_contention_ratio=1.0)
     def test_memory_budget_shared_across_scatters(self):
@@ -662,7 +667,9 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             expected = f(*args)
 
-        _, total_gpu = torch.cuda.mem_get_info()
+        _, total_gpu = (
+            torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
+        )
 
         # Each out dies right after its own scatter, so the peak at every
         # index_put is the three inputs plus that node's 20 MB output.
