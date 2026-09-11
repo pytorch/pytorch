@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import collections
 import dataclasses
 import functools
@@ -679,6 +680,9 @@ FQN_MISMATCH_CASES = [
         name="module",
     ),
     subtest(
+        # Prunes only because the harness's guard_filter_fn drops the bind_args
+        # __defaults__ guard; in a real compile that guard registers the tuple,
+        # and until the value-guard rule below it is carried verbatim.
         ("EQUALS_MATCH", DecoratedUnpicklableDefaultForwardModule, ("__name__", "x")),
         name="name_beside_unpicklable_default",
     ),
@@ -1443,13 +1447,33 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         g = fn.__globals__
         gtv = {id(fn): fn, id(g): g}
         pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
+        # Captured before the dump: a CleanupHook for a traced code object can
+        # drop a __builtins_dict___N key out of the live dict during the load.
+        # (A band-aid: the dict is this module's live globals, so anything that
+        # installs or removes a global between here and the assertion still
+        # flips it.)
+        expected_keys = set(g)
         pickler.dump(fn)
         out = pickle.loads(buf.getvalue())
         self.assertEqual(out.__module__, torch._dynamo.testing.__name__)
         self.assertEqual(out.__globals__["__name__"], __name__)
+        # The builtins entry is the module by reference, never the ~6 KB dict.
+        self.assertIs(out.__globals__["__builtins__"], builtins)
         # And the state really did arrive, so a guard on the scope's shape
         # (DICT_KEYS_MATCH, len) still sees the module it was captured from.
-        self.assertEqual(out.__globals__.keys(), g.keys())
+        self.assertEqual(set(out.__globals__), expected_keys)
+
+    def test_snapshot_of_a_scope_without_builtins_stays_without(self):
+        # A hand-built globals dict may lack __builtins__ (FunctionType reads
+        # the key, never writes it); the snapshot must not add one, or a guard
+        # on the dict's shape would compare a key the live dict does not have.
+        scope = {"__name__": "_scope_without_builtins", "X": 1}
+        fn = types.FunctionType(global_func.__code__, scope, "global_func")
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn, id(scope): scope}, {}, {}, {}, buf).dump(fn)
+        out = pickle.loads(buf.getvalue())
+        self.assertNotIn("__builtins__", out.__globals__)
+        self.assertEqual(set(out.__globals__), set(scope))
 
     def test_snapshot_keeps_the_save_time_value_of_a_guarded_global(self):
         # The guard is baked from the value the compile saw; a rebuild that
@@ -1478,11 +1502,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         g = a.__globals__
         gtv = {id(a): a, id(b): b, id(g): g}
         buf = io.BytesIO()
+        expected_keys = set(g)
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__globals__, out["b"].__globals__)
-        self.assertEqual(out["a"].__globals__.keys(), g.keys())
-        self.assertEqual(out["b"].__globals__.keys(), g.keys())
+        self.assertEqual(set(out["a"].__globals__), expected_keys)
+        self.assertEqual(set(out["b"].__globals__), expected_keys)
         self.assertIs(out["a"].__globals__["MODULE_SCOPE_WRAPPED_A"], out["a"])
         self.assertIs(out["b"].__globals__["MODULE_SCOPE_WRAPPED_B"], out["b"])
 
@@ -1614,6 +1639,34 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(len(out.__type_params__), 1)
         self.assertIsInstance(out.__type_params__[0], _Missing)
+
+    @unittest.skipIf(sys.version_info < (3, 14), "PEP 649 lazy annotations are 3.14+")
+    def test_reduce_prunes_a_type_checking_only_annotation(self):
+        # On 3.14 reading __annotations__ evaluates them lazily and raises
+        # NameError for a name that exists only under TYPE_CHECKING; the
+        # FORWARDREF read hands back a proxy instead, which is unguarded and
+        # pruned, so the dump neither raises nor fails on the proxy. An
+        # annotation with no name in it that raises (an f-string) is caught and
+        # drops the set.
+        ns = {"__name__": __name__}
+        exec(
+            "def outer():\n"
+            "    def inner(x: OnlyUnderTypeChecking, y: int) -> int:\n"
+            "        return y\n"
+            "    def odd(x: f'{Missing}'):\n"
+            "        return x\n"
+            "    return inner, odd\n",
+            ns,
+        )
+        inner, odd = ns["outer"]()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(inner): inner, id(odd): odd}, {}, {}, {}, buf).dump(
+            {"inner": inner, "odd": odd}
+        )
+        out = pickle.loads(buf.getvalue())
+        self.assertIsInstance(out["inner"].__annotations__["x"], _Missing)
+        self.assertEqual(out["inner"](1, 2), 2)
+        self.assertEqual(out["odd"].__annotations__, {})
 
     def test_reduce_restores_a_manually_set_type_params(self):
         # __type_params__ can be assigned on any version. Below 3.12 it lives in
@@ -2130,8 +2183,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # A rebuilt local function's __defaults__ and __kwdefaults__ (the latter
         # never carried before) round-trip and reject a change. Every default
         # here is a float, which _is_literal carries unconditionally, so this
-        # test cannot tell a whole-container guard from a per-element one; a
-        # later commit in this stack adds a full-compile round trip that can.
+        # test cannot tell a whole-container guard from a per-element one;
+        # test_whole_defaults_equals_match_survives_a_called_default does.
         mod = GuardedDefaultsTupleModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
         self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, True)
