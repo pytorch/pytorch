@@ -111,10 +111,10 @@ class FunctionCtx:
             completed buffer still passes through ``AccumulateGrad`` and its hooks
             before becoming ``.grad``.
 
-            A custom backward that instead accumulates directly into a
-            preinitialized leaf ``.grad`` and returns ``None`` does not use this
-            interface. It is responsible for the ``.grad`` buffer's initialization
-            and lifetime, synchronization with all other producers, and any
+            A custom backward that instead accumulates directly into a leaf
+            ``.grad`` and returns ``None`` does not use this interface. It is
+            responsible for managing ``.grad`` state, including initialization and
+            lifetime, synchronization with all other producers, and any
             ``AccumulateGrad`` hook behavior bypassed by the direct write.
         """
         return self._input_grad_buffers
