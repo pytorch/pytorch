@@ -219,18 +219,34 @@ class TestMaxAutotune(TestCase):
 
     def _run_blackwell_bmm_template(
         self,
+        broadcast_a: bool,
         broadcast_b: bool,
         data_partition_factor: int,
         epilogue_subtile: int,
+        shape: tuple[int, int, int, int] = (3, 256, 8193, 128),
+        check_global_persistence: bool = False,
+        transpose_a: bool = True,
+        transpose_b: bool = False,
     ) -> None:
-        bsz, m, k, n = 3, 256, 8193, 128
-        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
-        a = a_storage.transpose(1, 2)
+        bsz, m, k, n = shape
+        if broadcast_a:
+            a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+            if transpose_a:
+                a = a.T.contiguous().T
+            a = a.unsqueeze(0).expand(bsz, -1, -1)
+        else:
+            a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+            if transpose_a:
+                a = a.transpose(1, 2).contiguous().transpose(1, 2)
         if broadcast_b:
             b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+            if transpose_b:
+                b = b.T.contiguous().T
             b = b.unsqueeze(0).expand(bsz, -1, -1)
         else:
             b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+            if transpose_b:
+                b = b.transpose(1, 2).contiguous().transpose(1, 2)
 
         class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
             def _get_template_configs_impl(self, kernel_inputs, op_name):
@@ -280,6 +296,19 @@ class TestMaxAutotune(TestCase):
         self.assertIn("make_tensor_descriptor", codes[0])
         self.assertNotIn("two_ctas=True", codes[0])
         self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0])
+        if check_global_persistence:
+            self.assertNotIn("tl.program_id(1)", codes[0])
+            self.assertIn(
+                "shape=[BATCH, M, K] if A_ROW_MAJOR else [BATCH, K, M]",
+                codes[0],
+            )
+            self.assertIn(
+                "block_shape=[1, BLOCK_M, BLOCK_K] if A_ROW_MAJOR else "
+                "[1, BLOCK_K, BLOCK_M]",
+                codes[0],
+            )
+            self.assertIn("for tile_id in tl.range", codes[0])
+            self.assertIn("num_tiles = BATCH * num_tiles_per_batch", codes[0])
         if meta_ws_enabled():
             self.assertIn(
                 f"DATA_PARTITION_FACTOR : tl.constexpr = {data_partition_factor}",
@@ -298,6 +327,7 @@ class TestMaxAutotune(TestCase):
         epilogue_subtile: int,
     ) -> None:
         self._run_blackwell_bmm_template(
+            broadcast_a=False,
             broadcast_b=False,
             data_partition_factor=data_partition_factor,
             epilogue_subtile=epilogue_subtile,
@@ -306,9 +336,40 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     def test_blackwell_bmm_template_broadcast_b(self) -> None:
         self._run_blackwell_bmm_template(
+            broadcast_a=False,
             broadcast_b=True,
             data_partition_factor=1,
             epilogue_subtile=1,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("broadcast_b", (False, True))
+    def test_blackwell_bmm_template_broadcast_a(self, broadcast_b: bool) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_a=True,
+            broadcast_b=broadcast_b,
+            data_partition_factor=1,
+            epilogue_subtile=1,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("transpose_a", (False, True))
+    @parametrize("transpose_b", (False, True))
+    def test_blackwell_bmm_template_global_persistence(
+        self, transpose_a: bool, transpose_b: bool
+    ) -> None:
+        # More logical tiles than SMs makes each of the first workers process
+        # a second tile from a different batch through the same rank-3 TMA
+        # descriptors.
+        self._run_blackwell_bmm_template(
+            broadcast_a=False,
+            broadcast_b=False,
+            data_partition_factor=1,
+            epilogue_subtile=1,
+            shape=(160, 128, 264, 128),
+            check_global_persistence=True,
+            transpose_a=transpose_a,
+            transpose_b=transpose_b,
         )
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")

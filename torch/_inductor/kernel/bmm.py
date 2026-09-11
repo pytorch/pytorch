@@ -137,20 +137,15 @@ def _bmm_shared_a_configs(dtype):
 
 @SymbolicGridFn
 def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
-    # Keep the persistent M/N tile loop local to one logical batch.  grid_x
-    # supplies at most one SM-wide wave of workers for that matrix, while
-    # grid_y/grid_z enumerate independent batches.  The z split is needed only
-    # when the batch count would exceed CUDA's grid_y limit.
+    # Flatten batch and matrix tiles into one global persistent work queue.
     grid_m = cdiv(m, meta["BLOCK_M"])
     if meta["TWO_CTAS"]:
         grid_m = cdiv(grid_m, 2) * 2
-    tiles = grid_m * cdiv(n, meta["BLOCK_N"])
+    tiles = b * grid_m * cdiv(n, meta["BLOCK_N"])
     grid_x = min(meta["NUM_SMS"], tiles)
     if meta["TWO_CTAS"]:
         grid_x = grid_x // 2 * 2
-    max_y_grid = get_max_y_grid()
-    grid_z = max(cdiv(b, max_y_grid), 1)
-    return (grid_x, cdiv(b, grid_z), grid_z)
+    return (grid_x, 1, 1)
 
 
 blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
