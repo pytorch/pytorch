@@ -18,7 +18,12 @@ import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
 from torch._dynamo.graph_utils import _graph_device_types
-from torch._dynamo.package import FunctionPicklerBase, SerializedCode, SystemInfo
+from torch._dynamo.package import (
+    emits_native_code,
+    FunctionPicklerBase,
+    SerializedCode,
+    SystemInfo,
+)
 
 from . import convert_frame
 from .aot_compile_types import (
@@ -63,6 +68,10 @@ class CompileArtifacts:
     system_info: SystemInfo = dataclasses.field(
         default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
     )
+    # False for a backend that bakes no native code (the eager family, or a user
+    # backend declaring `emits_native_code = False`), so the ISA gate is skipped.
+    # Defaults True so an artifact saved before the field existed keeps loading.
+    requires_native_backend_compatibility: bool = True
 
     def check_compatibility(self) -> None:
         # The cached info is the receiver so mismatch messages label self
@@ -71,13 +80,20 @@ class CompileArtifacts:
         # cached info as receiver they skip only when the artifact itself
         # recorded no Triton/GPU, requiring a match otherwise -- the correct
         # direction for a compatibility check.
+        check_codegen = (
+            self.requires_native_backend_compatibility
+            and emits_native_code(self.backend_name)
+        )
         current = SystemInfo.current(
             cpu_codegen=(
-                self.device_type == "cpu"
+                check_codegen
+                and self.device_type == "cpu"
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(current, self.device_type)
+        self.system_info.check_compatibility(
+            current, self.device_type, check_codegen=check_codegen
+        )
 
 
 @dataclasses.dataclass
@@ -766,7 +782,8 @@ def aot_compile_fullgraph(
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         # A graph naming no device lowers to CPU code.
         graph_devices = _graph_device_types(backend_input.graph_module.graph)
-        device_type = next((d for d in sorted(graph_devices) if d != "cpu"), "cpu")
+        device_types = graph_devices or frozenset(("cpu",))
+        device_type = next((d for d in sorted(device_types) if d != "cpu"), "cpu")
         if (
             backend_input.fake_mode.shape_env
             is not graph_capture_output.output_graph.shape_env
@@ -838,6 +855,18 @@ def aot_compile_fullgraph(
         for traced_code in graph_capture_output.traced_code:
             source_info.add_code(traced_code)
 
+        backend_name = getattr(backend, "compiler_name", "unknown")
+        # A user backend that bakes no native code can say so (on the callable
+        # torch.compile wrapped); the eager family is exempt by name.
+        user_backend = getattr(backend, "compiler_fn", backend)
+        native_backend = getattr(
+            user_backend, "emits_native_code", True
+        ) is not False and emits_native_code(backend_name)
+        # The codegen probe runs the C++ toolchain; only pay for it when the
+        # artifact can hold native CPU code.
+        system_info = SystemInfo.current(
+            cpu_codegen=(native_backend and "cpu" in device_types)
+        )
         artifacts = CompileArtifacts(
             signature=convert_frame._get_signature(fn),
             guard_manager=check_fn.guard_manager,
@@ -848,7 +877,9 @@ def aot_compile_fullgraph(
             runtime_env=graph_capture_output.get_runtime_env(),
             source_info=source_info,
             device_type=device_type,
-            backend_name=getattr(backend, "compiler_name", "unknown"),
+            backend_name=backend_name,
+            system_info=system_info,
+            requires_native_backend_compatibility=native_backend,
         )
         aot_compiled_fn = AOTCompiledFunction(
             _artifacts=artifacts, _extra_globals=fn.__globals__

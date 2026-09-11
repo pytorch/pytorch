@@ -159,8 +159,11 @@ Load a previously saved AOT-compiled function from a file.
   that could not be serialized (e.g., `nn.Module` instances). The keys should
   match those passed to `save_compiled_function(external_data=...)`.
 
-**Returns:** A callable with compilation preloaded from disk.
+**Returns:** A callable with compilation preloaded from disk. An artifact that
+may hold native CPU code is also checked against the host's CPU codegen target;
+see {ref}`Choosing a backend <choosing-a-backend>`.
 
+(choosing-a-backend)=
 ## Choosing a backend
 
 `aot_compile()` works with any backend that implements the
@@ -178,6 +181,32 @@ compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
     ((torch.randn(3, 4),), {})
 )
 ```
+
+The backend also decides where the artifact can be loaded. An artifact from a
+backend that may emit native CPU code -- `"inductor"`, and every other backend
+including a user callable unless it declares `emits_native_code = False` -- records
+the CPU codegen target it was tiled for (the machine, vector ISA, width and
+build macros `pick_vec_isa()` resolved at capture), and loading it on a host
+that resolves a different target fails with `RuntimeError: Compile package was
+created for a CPU codegen target this host cannot run: cached=..., current=...`.
+Kernels tiled for one ISA are not run on another, even a wider one. To load on
+such a host, make it resolve the recorded ISA before loading, with the
+`ATEN_CPU_CAPABILITY` environment variable or the global
+`torch._inductor.config.cpp.simdlen`; `torch.compile(options={"cpp.simdlen":
+...})` does not apply at load time. The target is recorded and checked only
+when the graph names a CPU device (a pure accelerator graph emits no CPU
+kernels). `"eager"`, `"aot_eager"` and the rest of the eager family (the
+`_NO_NATIVE_CODE_BACKENDS` set in `torch/_dynamo/package.py`) bake no
+generated code and are not subject to this check, and neither is a user
+backend that declares the plain attribute `emits_native_code = False` (any
+other value, including a method, counts as native). The attribute is read off
+the object handed to `torch.compile` as `backend` (for a registered backend
+name, off the function that name resolves to), never off anything that object
+wraps: for `aot_autograd(fw_compiler=...)` set it on the object `aot_autograd`
+returns, not on `fw_compiler`. Declaring it on a backend that does emit
+native code disables the only check standing between a mis-targeted artifact
+and a crash or wrong result at first call; opt out only a backend whose
+artifacts hold no compiled kernels.
 
 ## Handling closures and external references
 
