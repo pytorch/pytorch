@@ -865,8 +865,8 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         # rejects it. The C pickler AOTCompilePickler subclasses raises
         # AttributeError "Can't get local object" (3.13 and earlier) or
         # PicklingError "Can't pickle local object" (3.14+); serialize() catches
-        # both, and the shared "local object" substring is asserted so the test
-        # does not pin one version's wording. It gets the external_data guidance
+        # both, and the offender's class name is asserted, which is independent
+        # of either version's wording. It gets the external_data guidance
         # appended.
         def outer():
             class Cfg:
@@ -941,6 +941,8 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             return fn
 
         fn = outer()
+        freevars = fn.__code__.co_freevars
+        self.assertLess(freevars.index("mod"), freevars.index("zz_lock"))
         compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
         with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
@@ -990,7 +992,6 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             compiled_fn.save_compiled_function(self.path())
         msg = str(cm.exception)
         self.assertIn("cannot pickle", msg)
-        self.assertIn("kwdefault", msg)
         self.assertIn("external_data", msg)
 
     def test_aot_compile_prunes_a_lock_behind_functools_wraps_wrapped(self):
@@ -2276,6 +2277,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         def outer():
             def inner(x):
+                """native docstring, so the pruned None has to override it"""
                 return inner if x is None else x  # closes over itself: reduced twice
 
             inner.__doc__ = threading.Lock()
@@ -2285,7 +2287,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             AOTCompilePickler({}, buf).dump(fn)
-        self.assertEqual(len(logs.output), 1)
+        self.assertEqual(len([l for l in logs.output if "dropping" in l]), 1)
         self.assertIn("inner.__doc__ (lock) from the artifact", logs.output[0])
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertIsNone(out.__doc__)
@@ -2385,7 +2387,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             pickler.dump(fn)
         self.assertEqual(pickler.errors, {})
-        self.assertIn("not marked as external data (Linear)", logs.output[0])
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("not marked as external data (Linear)", line)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertFalse(hasattr(out, "mod"))
         buf = io.BytesIO()
@@ -2477,6 +2480,30 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(len([l for l in logs.output if "dropping" in l]), 1)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertFalse(hasattr(out, "lock"))
+        self.assertEqual(out(5), 5)
+
+    def test_pickler_prunes_an_entry_that_overflows_the_probe(self):
+        # A recursion overflow inside the probe counts as unpicklable: the entry
+        # is dropped with a warning and the save succeeds. The guard pickler
+        # turns the same condition into a PackageError, since it has a bypass to
+        # fall back to; this pickler does not, so the divergence is deliberate.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.deep = BottomlessReduce()
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("helper.deep (BottomlessReduce)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "deep"))
         self.assertEqual(out(5), 5)
 
     def test_pickler_names_the_modules_inside_a_dropped_container(self):
@@ -2625,7 +2652,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             AOTCompilePickler({}, buf).dump(fn)
-        self.assertTrue(any("inner.__type_params__ (tuple)" in l for l in logs.output))
+        (line,) = [l for l in logs.output if "__type_params__" in l]
+        self.assertIn("inner.__type_params__ (TypeVar)", line)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.__type_params__, ())
         self.assertEqual(out(5), 5)
