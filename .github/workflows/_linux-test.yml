@@ -299,6 +299,10 @@ jobs:
           TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
+          TORCHBENCH_ONLY_MODELS: ${{ matrix.only_models || '' }}
+          TRITON_KERNEL_DUMP: ${{ matrix.triton_kernel_dump || '' }}
+          TRITON_ALWAYS_COMPILE: ${{ matrix.triton_kernel_dump || '' }}
+          TRITON_DUMP_DIR: ${{ github.workspace }}/test/test-reports/triton-kernel-dumps
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -344,6 +348,24 @@ jobs:
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
           ${TEST_COMMAND}
+
+      - name: Record A10G bisect metadata
+        if: always() && matrix.a10g_bisect == true
+        shell: bash
+        run: |
+          mkdir -p test/test-reports/a10g-bisect
+          cp .ci/docker/ci_commit_pins/triton.txt test/test-reports/a10g-bisect/triton-sha.txt
+          git rev-parse HEAD > test/test-reports/a10g-bisect/pytorch-sha.txt
+          nvidia-smi -q > test/test-reports/a10g-bisect/nvidia-smi.txt
+
+      - name: Upload A10G bisect artifacts
+        if: always() && matrix.a10g_bisect == true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: a10g-triton-bisect-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test/test-reports
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Configure AWS credentials
         id: aws-creds-benchmark
