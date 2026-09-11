@@ -302,7 +302,7 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        autowrap_modules: tuple[ModuleType] = (math,),
+        autowrap_modules: tuple[ModuleType, ...] = (math,),
         autowrap_functions: tuple[Callable[..., Any], ...] = (),
         param_shapes_constant: bool = False,
     ) -> None:
@@ -315,7 +315,7 @@ class Tracer(TracerBase):
 
         Args:
 
-            autowrap_modules (Tuple[ModuleType]): defaults to `(math, )`,
+            autowrap_modules (Tuple[ModuleType, ...]): defaults to `(math, )`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap(). Backward-compatibility for
                 this parameter is guaranteed.

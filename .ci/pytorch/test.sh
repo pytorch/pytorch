@@ -172,6 +172,13 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
+if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+  # These custom run_test.py targets cannot be filtered cleanly by -m periodic:
+  # doctests and autoload bypass pytest; AOT builds extensions before pytest;
+  # CI sanity expects its unmarked test to fail.
+  TESTS_TO_EXCLUDE="$TESTS_TO_EXCLUDE doctests test_cpp_extensions_aot_ninja test_cpp_extensions_aot_no_ninja test_autoload_enable test_autoload_disable test_ci_sanity_check_fail"
+fi
+
 # Exclude tests from run_test.py (symmetric to TESTS_TO_INCLUDE).
 if [[ -n $TESTS_TO_EXCLUDE ]]; then
   echo "Setting EXCLUDE_CLAUSE"
@@ -462,6 +469,7 @@ test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_linalg -k polar $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -483,11 +491,12 @@ test_python_smoke_b200() {
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
-      python_native/test_cutedsl_smoketest \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
+      inductor/test_cutedsl_grouped_mm \
+      inductor/test_cutedsl_template \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
 
@@ -511,6 +520,12 @@ test_python_smoke_b200() {
     --pytest-xdist-workers 32
 
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # Dynamically discover the DSL override tests so new ones are picked up. This
+  # is the only job with CuTeDSL installed, so they skip everywhere else.
+  # shellcheck disable=SC2046
+  time python test/run_test.py \
+    --include $(find test/python_native -name 'test_*.py' -printf '%P\n' | sed 's|\.py$||; s|^|python_native/|' | sort | tr '\n' ' ') \
+    --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -549,7 +564,7 @@ _run_fabric_handle_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLSymmMemWatchdogTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -571,6 +586,8 @@ test_h100_fabric() {
 }
 
 test_b200_symm_mem() {
+  # TODO: fix the op to reuse/free teams instead of raising this limit.
+  export NVSHMEM_MAX_TEAMS=512
   _run_fabric_handle_tests
 }
 
@@ -744,6 +761,35 @@ test_inductor_aoti_cpp() {
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+}
+
+test_inductor_aoti_fallback_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
+  # Re-run the AOTInductor suites under Inductor lite / all-fallback mode: every
+  # op goes to ATen unless it sits inside a regional-inductor annotation.
+  # TORCHINDUCTOR_LITE_MODE is read once when torch._inductor.config is imported,
+  # so it also reaches the model-generation subprocess behind the C++ tests --
+  # which is why those can be reused as-is rather than reimplemented.
+  export TORCHINDUCTOR_LITE_MODE=1
+
+  # --upload-artifacts-while-running is load bearing here, not cosmetic: this mode
+  # can abort the interpreter mid-file (a proxy-executor CHECK failure), and an
+  # aborted process writes no junit XML at exit. Streaming the reports out keeps
+  # the failure visible on HUD instead of leaving a shard that is red with no
+  # per-test record of why.
+  python test/run_test.py \
+    --include inductor/test_inductor_lite_mode \
+              inductor/test_aot_inductor \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_aot_inductor_custom_ops \
+              inductor/test_aot_inductor_package \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose \
+    --upload-artifacts-while-running
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
@@ -1659,6 +1705,9 @@ test_libtorch_profiler() {
   # Tests for torch/csrc/profiler/collection.cpp.
   python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
 
+  # Tests for MTIA profiler activity filtering.
+  python test/run_test.py --cpp --verbose -i cpp/test_mtia_activity_filter
+
   # Tests for torch/csrc/profiler/util.h GlobalStateManager.
   python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
 }
@@ -2552,6 +2601,18 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
     test_inductor_aoti_cpp
   fi
   collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == *inductor_aoti_fallback* ]]; then
+  setup_torch_trace
+  # This config is expected to be red while the all-fallback bugs are triaged, and
+  # test.sh runs under `set -e`. Guard each leg so a red Python shard still lets the
+  # C++ leg run and still uploads tlparse, then report the first failure at the end.
+  aoti_fallback_status=0
+  test_inductor_aoti_fallback_shard "$SHARD_NUMBER" || aoti_fallback_status=$?
+  if [[ "$SHARD_NUMBER" -eq "1" ]]; then
+    TORCHINDUCTOR_LITE_MODE=1 test_inductor_aoti_cpp || aoti_fallback_status=$?
+  fi
+  collect_tlparse_output
+  exit "$aoti_fallback_status"
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
   setup_torch_trace
   test_inductor_core
