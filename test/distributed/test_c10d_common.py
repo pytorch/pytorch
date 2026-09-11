@@ -32,6 +32,7 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import Backend as C10DBackend
 from torch.nn.parallel import DistributedDataParallel
+from torch.nn.parallel.distributed import _MixedPrecision
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -1407,6 +1408,312 @@ class CommonDistributedDataParallelTest:
     @skip_if_lt_x_gpu(2)
     def test_dataclass_output_unused_param(self):
         self._test_dataclass_output(skip_o1=True)
+
+    def _create_ddp_model(self, model=None, process_group=None, **kwargs):
+        if model is None:
+            model = Net()
+        if process_group is None:
+            process_group = self._get_process_group()
+        return DistributedDataParallel(
+            model.to(self.rank),
+            device_ids=[self.rank],
+            process_group=process_group,
+            bucket_cap_mb=0.001,
+            **kwargs,
+        )
+
+    def _create_manual_ddp_model(self, **kwargs):
+        ddp_model = self._create_ddp_model(**kwargs)
+        ddp_model.require_manual_backward_finalization = True
+        return ddp_model
+
+    def _register_finalize_backward_hook(self, ddp_model, param=None):
+        if param is None:
+            param = ddp_model.module.fc1.weight
+        grad_accumulator = param.expand_as(param).grad_fn.next_functions[0][0]
+        # DDP registered its node post-hook first, so this runs after the
+        # reducer processes this parameter.
+        return grad_accumulator.register_hook(lambda *_: ddp_model.finalize_backward())
+
+    def _register_ones_comm_hook(self, ddp_model):
+        def ones_hook(state, bucket):
+            future = torch.futures.Future()
+            future.set_result(torch.ones_like(bucket.buffer()))
+            return future
+
+        ddp_model.register_comm_hook(state=None, hook=ones_hook)
+
+    def _assert_gradients_equal(self, ddp_model, value):
+        for param in ddp_model.parameters():
+            self.assertEqual(param.grad, torch.full_like(param.grad, value))
+
+    def _assert_gradients_equal_across_ranks(self, ddp_model):
+        process_group = ddp_model.process_group
+        for param in ddp_model.parameters():
+            rank_grads = [
+                torch.empty_like(param.grad) for _ in range(process_group.size())
+            ]
+            dist.all_gather(rank_grads, param.grad, group=process_group)
+            for rank_grad in rank_grads[1:]:
+                self.assertEqual(rank_grads[0], rank_grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_backward_finalization_scheduling(self):
+        ddp_model = self._create_manual_ddp_model()
+        self._register_ones_comm_hook(ddp_model)
+        input = torch.randn(4, 2, device=self.rank)
+
+        loss = ddp_model(input).sum() * 0
+        self.assertTrue(ddp_model.should_finalize_after_backward)
+        loss.backward()
+        self._assert_gradients_equal(ddp_model, 0)
+        ddp_model.finalize_backward()
+        self._assert_gradients_equal(ddp_model, 1)
+
+        ddp_model.zero_grad()
+        loss = ddp_model(input).sum() * 0
+        self.assertFalse(ddp_model.should_finalize_after_backward)
+        with self._register_finalize_backward_hook(ddp_model):
+            loss.backward()
+        self._assert_gradients_equal(ddp_model, 1)
+
+    @skip_if_lt_x_gpu(2)
+    def test_finalize_backward_requires_manual_mode(self):
+        ddp_model = self._create_ddp_model()
+        with self.assertRaisesRegex(
+            RuntimeError, "manual backward finalization is not required"
+        ):
+            ddp_model.finalize_backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_backward_finalization_with_comm_hook(self):
+        ddp_model = self._create_manual_ddp_model()
+        process_group = ddp_model.process_group
+
+        def allreduce_hook(state, bucket):
+            buf = bucket.buffer()
+            buf.div_(process_group.size())
+            work = dist.all_reduce(buf, group=process_group, async_op=True)
+            return work.get_future().then(lambda f: f.value()[0])
+
+        ddp_model.register_comm_hook(state=None, hook=allreduce_hook)
+
+        input = torch.full((4, 2), self.rank + 1.0, device=self.rank)
+        loss = ddp_model(input).sum()
+        loss.backward()
+        ddp_model.finalize_backward()
+
+        self._assert_gradients_equal_across_ranks(ddp_model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_finalize_backward_rejects_incomplete_buckets(self):
+        ddp_model = self._create_manual_ddp_model()
+        input = torch.randn(4, 2, device=self.rank)
+        ddp_model(input).sum().backward()
+        ddp_model.finalize_backward()
+        ddp_model.zero_grad()
+        loss = ddp_model(input).sum()
+        self.assertFalse(ddp_model.should_finalize_after_backward)
+        with self._register_finalize_backward_hook(
+            ddp_model, ddp_model.module.fc3.weight
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "before all DDP buckets were ready"
+            ):
+                loss.backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_finalize_backward_rejects_inactive_reduction(self):
+        ddp_model = self._create_manual_ddp_model()
+        input = torch.randn(4, 2, device=self.rank)
+
+        with ddp_model.no_sync():
+            ddp_model(input).sum().backward()
+        with self.assertRaisesRegex(
+            RuntimeError, "no gradient reduction requires finalization"
+        ):
+            ddp_model.finalize_backward()
+
+        ddp_model(input).sum().backward()
+        ddp_model.finalize_backward()
+        with self.assertRaisesRegex(RuntimeError, "already called"):
+            ddp_model.finalize_backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_changing_manual_finalization_during_backward_errors(self):
+        process_group = self._get_process_group()
+        input = torch.randn(4, 2, device=self.rank)
+
+        for initial, updated in ((False, True), (True, False)):
+            with self.subTest(initial=initial, updated=updated):
+                ddp_model = self._create_ddp_model(process_group=process_group)
+                ddp_model.require_manual_backward_finalization = initial
+                loss = ddp_model(input).sum()
+
+                with loss.register_hook(
+                    lambda grad: setattr(
+                        ddp_model, "require_manual_backward_finalization", updated
+                    )
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "cannot be called after forward"
+                    ):
+                        loss.backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_finalization_required_before_next_iteration(self):
+        ddp_model = self._create_manual_ddp_model()
+        input = torch.randn(4, 2, device=self.rank)
+
+        ddp_model(input).sum().backward()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected to have finalized the prior backward pass"
+        ):
+            ddp_model(input)
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_finalization_with_find_unused_parameters(self):
+        model = Net()
+        model.unused = nn.Parameter(torch.ones(1))
+        ddp_model = self._create_manual_ddp_model(
+            model=model, find_unused_parameters=True
+        )
+        input = torch.randn(4, 2, device=self.rank)
+
+        self.assertFalse(ddp_model.should_finalize_after_backward)
+        with self._register_finalize_backward_hook(ddp_model):
+            ddp_model(input).sum().backward()
+
+        self.assertIsNone(ddp_model.module.unused.grad)
+        self.assertIsNotNone(ddp_model.module.fc1.weight.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_finalization_error_mentions_unused_parameters(self):
+        model = Net()
+        model.unused = nn.Parameter(torch.ones(1))
+        ddp_model = self._create_manual_ddp_model(model=model)
+        input = torch.randn(4, 2, device=self.rank)
+
+        ddp_model(input).sum().backward()
+
+        with self.assertRaises(RuntimeError) as context:
+            ddp_model(input)
+
+        error = str(context.exception)
+        self.assertIn("parameters that were not used", error)
+        self.assertIn("Manual backward finalization is enabled", error)
+
+    @skip_if_lt_x_gpu(2)
+    def test_static_graph_manual_finalization_scheduling(self):
+        ddp_model = self._create_manual_ddp_model(static_graph=True)
+        self._register_ones_comm_hook(ddp_model)
+        input = torch.randn(4, 2, device=self.rank)
+
+        # Static graph first records hook counts, then the bucket rebuild order.
+        for should_finalize_after_backward in (True, True, False):
+            ddp_model.zero_grad()
+            loss = ddp_model(input).sum() * 0
+            self.assertEqual(
+                ddp_model.should_finalize_after_backward,
+                should_finalize_after_backward,
+            )
+            if should_finalize_after_backward:
+                loss.backward()
+                ddp_model.finalize_backward()
+            else:
+                with self._register_finalize_backward_hook(ddp_model):
+                    loss.backward()
+            self._assert_gradients_equal(ddp_model, 1)
+
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_precision_uses_post_backward_finalization(self):
+        ddp_model = self._create_manual_ddp_model(
+            mixed_precision=_MixedPrecision(
+                param_dtype=torch.float16,
+                reduce_dtype=torch.float16,
+                buffer_dtype=torch.float16,
+            ),
+        )
+        input = torch.full((4, 2), self.rank + 1.0, device=self.rank)
+
+        loss = ddp_model(input).sum()
+        self.assertTrue(ddp_model.should_finalize_after_backward)
+        loss.backward()
+        ddp_model.finalize_backward()
+
+        for param in ddp_model.parameters():
+            self.assertEqual(param.grad.dtype, param.dtype)
+        self._assert_gradients_equal_across_ranks(ddp_model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_process_group_update_requires_post_backward_finalization(self):
+        ddp_model = self._create_manual_ddp_model()
+        input = torch.randn(4, 2, device=self.rank)
+
+        ddp_model(input).sum().backward()
+        ddp_model.finalize_backward()
+
+        loss = ddp_model(input).sum()
+        self.assertFalse(ddp_model.should_finalize_after_backward)
+        loss.backward()
+        ddp_model.finalize_backward()
+
+        ddp_model._update_process_group(ddp_model.process_group)
+
+        loss = ddp_model(input).sum()
+        self.assertTrue(ddp_model.should_finalize_after_backward)
+        loss.backward()
+        ddp_model.finalize_backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_finalization_rejects_unsupported_configurations(self):
+        process_group = self._get_process_group()
+
+        with torch._dynamo.config.patch(optimize_ddp="python_reducer"):
+            python_reducer_model = self._create_ddp_model(process_group=process_group)
+
+        delayed_model = Net().to(self.rank)
+        delayed_model.fc3.weight.requires_grad_(False)
+        delayed_params = [
+            (name, param)
+            for name, param in delayed_model.named_parameters()
+            if param.requires_grad
+        ]
+        delayed_ddp_model = DistributedDataParallel(
+            delayed_model,
+            device_ids=[self.rank],
+            process_group=process_group,
+            delay_all_reduce_named_params=delayed_params,
+            param_to_hook_all_reduce=delayed_params[0][1],
+        )
+
+        for ddp_model, expected_error in (
+            (python_reducer_model, "Python reducer"),
+            (delayed_ddp_model, "delay_all_reduce_named_params"),
+        ):
+            with self.subTest(expected_error=expected_error):
+                with self.assertRaisesRegex(RuntimeError, expected_error):
+                    ddp_model.require_manual_backward_finalization = True
+                self.assertFalse(ddp_model.require_manual_backward_finalization)
+                with self.assertRaisesRegex(RuntimeError, expected_error):
+                    ddp_model.finalize_backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_backward_finalization_pickle_compatibility(self):
+        ddp_model = self._create_ddp_model()
+        old_state = ddp_model.__getstate__()
+        old_state.pop("_require_manual_backward_finalization")
+        restored_old = DistributedDataParallel.__new__(DistributedDataParallel)
+        restored_old.__setstate__(old_state)
+        self.assertFalse(restored_old.require_manual_backward_finalization)
+
+        ddp_model.require_manual_backward_finalization = True
+        restored = pickle.loads(pickle.dumps(ddp_model))
+        self.assertTrue(restored.require_manual_backward_finalization)
+
+        restored(torch.randn(4, 2, device=self.rank)).sum().backward()
+        restored.finalize_backward()
 
 
 class ComputeBucketAssignmentTest(TestCase):
