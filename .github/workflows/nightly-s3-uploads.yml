@@ -18,7 +18,14 @@ permissions:
   id-token: write
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/_check-ci.yml
+
   upload-stats-to-s3:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     environment: upload-stats

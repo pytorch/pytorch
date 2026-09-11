@@ -79,6 +79,7 @@ jobs:
       docker_image: "pytorch/manylinux2_28-builder:cpu"
 
   build-wheel-win:
+    needs: select-runner
     if: github.repository_owner == 'pytorch'
     name: "Build Triton Windows Wheel"
     runs-on: "windows.4xlarge"

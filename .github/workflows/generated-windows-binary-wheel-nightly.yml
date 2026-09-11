@@ -649,11 +649,11 @@ jobs:
 
   wheel-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-test
+    needs: [get-label-type, wheel-test]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
