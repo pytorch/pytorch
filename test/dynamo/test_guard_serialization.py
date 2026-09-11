@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import functools
+import io
 import itertools
 import pickle
 import sys
@@ -20,7 +22,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
-from torch._dynamo.guards import CheckFunctionManager, CompileId
+from torch._dynamo.guards import CheckFunctionManager, CompileId, GuardsStatePickler
 from torch._dynamo.package import CompilePackage
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -67,6 +69,34 @@ class GlobalNestedModule(torch.nn.Module):
 
 def global_func(x):
     return x + 1
+
+
+def _cell_is_empty(cell):
+    try:
+        cell.cell_contents
+    except ValueError:
+        return True
+    return False
+
+
+def keep_name_with_empty_cell(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        if x is None:
+            return unset
+        return func(x)
+
+    if func is None:
+        unset = 1  # never runs, so the cell wrapper closes over stays EMPTY
+
+    return wrapper
+
+
+def _empty_cell_base(x):
+    return x * 2
+
+
+EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
 
 
 class RecursingGuardedDefault:
@@ -495,6 +525,58 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         self.assertEqual(ref.check(inputs), loaded.check(inputs))
 
 
+class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    # Pickler-level: these drive GuardsStatePickler directly rather than
+    # through a capture, so none of TestGuardSerialization's setup applies.
+
+    def test_reduce_handles_an_empty_cell_reached_directly(self):
+        # reducer_override's CellType branch read cell_contents unguarded and
+        # raised ValueError out of the pickler for an empty cell. Pickler-level
+        # because a guard cannot root at a raw cell through a capture:
+        # CLOSURE_MATCH is in UNSUPPORTED_SERIALIZATION_GUARD_TYPES.
+        empty = [c for c in EMPTY_CELL_WRAPPED.__closure__ if _cell_is_empty(c)]
+        self.assertEqual(len(empty), 1)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
+        self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
+
+    def test_reduce_keeps_a_none_valued_cell(self):
+        # None is a value, not an empty cell; see
+        # FunctionPicklerBase._set_cell_contents.
+        def outer():
+            scale = None
+
+            def inner():
+                return scale
+
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertFalse(_cell_is_empty(out.__closure__[0]))
+        self.assertIsNone(out())
+
+    def test_reduce_preserves_a_self_referential_cell(self):
+        # A recursive local function's cell holds the function itself. With the
+        # contents as a reduce ARGUMENT, fn -> __closure__ -> cell -> fn recursed
+        # until the pickler overflowed (a package bypass); as STATE the cell is
+        # memoized before its contents, so the cycle terminates.
+        def outer():
+            def fact(n):
+                return 1 if n <= 1 else n * fact(n - 1)
+
+            return fact
+
+        fn = outer()
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIs(out.__closure__[0].cell_contents, out)
+        self.assertEqual(out(5), 120)
+
+
 @torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerialization(TestGuardSerializationBase):
     def test_function_locals(self):
@@ -505,6 +587,30 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return g(x) + 1
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
+    def test_empty_closure_cell_of_a_traced_local_function(self):
+        # A local function reached through a capture is pickled with its whole
+        # __closure__, so a sibling cell left empty beside the guarded one has to
+        # round-trip as an empty cell rather than fail the dump.
+        def make(captured):
+            def fn(x):
+                if x is None:
+                    return unset
+                return x + captured
+
+            if captured is None:
+                unset = 1  # never runs, so the cell fn closes over stays EMPTY
+
+            return fn
+
+        def foo(f, x):
+            return f(x)
+
+        f = make(torch.randn(3))
+        self.assertEqual(sum(_cell_is_empty(c) for c in f.__closure__), 1)
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", foo, f, x)
+        self._test_check_fn(ref, loaded, {"f": f, "x": x}, True)
 
     def test_unserializable_guarded_value_is_a_package_error(self):
         # Whatever the pickler raises for a value some guard reads -- here a
