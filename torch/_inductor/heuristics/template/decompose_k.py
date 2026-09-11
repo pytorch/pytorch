@@ -15,10 +15,7 @@ from ...kernel.decompose_k import (
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
-from ...utils import (
-    get_k_splits,
-    use_triton_blackwell_tma_template,
-)
+from ...utils import get_k_splits, use_triton_blackwell_tma_template
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
