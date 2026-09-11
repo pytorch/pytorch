@@ -23,17 +23,15 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import ensure_nv_universal_gemm_available, fresh_cache
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     skipIfNoCuteDSL,
     skipIfWindows,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    requires_gpu,
-    requires_triton,
-)
+from torch.testing._internal.inductor_utils import requires_triton
 
 
 CUTEDSL_ADD_TEMPLATE = r"""
@@ -97,11 +95,13 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
 
 
 class TestNVGemmPickling(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         not ensure_nv_universal_gemm_available(),
         "NVIDIA Universal GEMM (cutlass_api) library not available",
     )
-    def test_scaled_operand_constraints_pickle_round_trip(self):
+    def test_scaled_operand_constraints_pickle_round_trip(self, device):
         import cutlass
         from cutlass.operators import ScaleMode, ScaleSwizzleMode
         from cutlass.operators.metadata import (
@@ -164,7 +164,9 @@ def _forked_daemon_compile_worker(q):
 
 
 @instantiate_parametrized_tests
-class TestAsyncCompile(TestCase):
+class TestAsyncCompileGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_flydsl_returns_kernel_wrapper(self):
         source = """
 def test_flydsl_loader_main(value, stream):
@@ -312,47 +314,6 @@ def test_flydsl_loader_main(value, stream):
             self.assertTrue(ready_future_cleared)
             self.assertFalse(use_process_pool)
 
-    @requires_gpu()
-    @requires_triton()
-    @parametrize("method", ("subprocess", "fork", "spawn"))
-    def test_pool(self, method):
-        def fn(x, y):
-            return x + y
-
-        x = torch.rand(10).to(GPU_TYPE)
-        y = torch.rand(10).to(GPU_TYPE)
-
-        with config.patch("worker_start_method", method):
-            shutdown_compile_workers()
-            AsyncCompile.wait_pool_ready()
-
-            with fresh_cache():
-                compiled_fn = torch.compile(fn)
-                self.assertEqual(fn(x, y), compiled_fn(x, y))
-
-    @requires_gpu()
-    @requires_triton()
-    def test_bad_kernel(self):
-        shutdown_compile_workers()
-
-        with config.patch(worker_start_method="subprocess", compile_threads=8):
-            async_compile = AsyncCompile()
-            AsyncCompile.wait_pool_ready()
-            with self.assertRaises(SubprocException):
-                async_compile.triton(
-                    "fake_kernel_name", source_code="This definitely doesn't exist"
-                ).result()
-
-    @requires_gpu()
-    @requires_triton()
-    def test_wait_pool_ready(self):
-        shutdown_compile_workers()
-
-        with config.patch(worker_start_method="subprocess", compile_threads=8):
-            AsyncCompile.wait_pool_ready()
-            self.assertTrue(AsyncCompile._ready_future.done())
-            self.assertTrue(AsyncCompile.use_process_pool())
-
     def test_subprocess_pool_registers_multiprocessing_finalizer(self):
         class FakeSubprocPool:
             def __init__(self, *args, **kwargs):
@@ -381,11 +342,80 @@ def test_flydsl_loader_main(value, stream):
         finally:
             shutdown_compile_workers()
 
-    @requires_gpu()
+    def test_wait_futures_timeout(self):
+        """A compile future that doesn't finish within
+        compile_worker_wait_timeout causes _wait_futures to raise
+        RuntimeError naming the kernel.
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Use an Event so the worker thread exits promptly once the assertion
+        # passes. A plain time.sleep here would keep the interpreter alive
+        # until it completes.
+        release = threading.Event()
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            hanging_future = pool.submit(release.wait)
+            scope = {"kernel_that_hangs": hanging_future}
+            with config.patch(compile_worker_wait_timeout=1):
+                async_compile = AsyncCompile()
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"compile-worker future for 'kernel_that_hangs' did not "
+                    r"complete within",
+                ):
+                    async_compile._wait_futures(scope)
+        finally:
+            release.set()
+            pool.shutdown(wait=True)
+
+
+class TestAsyncCompileDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_triton()
+    @parametrize("method", ("subprocess", "fork", "spawn"))
+    def test_pool(self, device, method):
+        def fn(x, y):
+            return x + y
+
+        x = torch.rand(10).to(device)
+        y = torch.rand(10).to(device)
+
+        with config.patch("worker_start_method", method):
+            shutdown_compile_workers()
+            AsyncCompile.wait_pool_ready()
+
+            with fresh_cache():
+                compiled_fn = torch.compile(fn)
+                self.assertEqual(fn(x, y), compiled_fn(x, y))
+
+    @requires_triton()
+    def test_bad_kernel(self, device):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method="subprocess", compile_threads=8):
+            async_compile = AsyncCompile()
+            AsyncCompile.wait_pool_ready()
+            with self.assertRaises(SubprocException):
+                async_compile.triton(
+                    "fake_kernel_name", source_code="This definitely doesn't exist"
+                ).result()
+
+    @requires_triton()
+    def test_wait_pool_ready(self, device):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method="subprocess", compile_threads=8):
+            AsyncCompile.wait_pool_ready()
+            self.assertTrue(AsyncCompile._ready_future.done())
+            self.assertTrue(AsyncCompile.use_process_pool())
+
     @requires_triton()
     @patch("torch._inductor.runtime.coordinate_descent_tuner.CoordescTuner.autotune")
     @parametrize("method", ("subprocess", "fork", "spawn"))
-    def test_autotune_lookup_table(self, mock_autotune, method):
+    def test_autotune_lookup_table(self, device, mock_autotune, method):
         def f(a, b):
             return (a @ b).to(torch.float32).sum(dim=1)
 
@@ -443,8 +473,8 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         )
         mock_autotune.return_value = autotune_config
 
-        a = torch.randn(1152, 1024, device=GPU_TYPE, dtype=torch.float16).T
-        b = torch.randn(1152, 11776, device=GPU_TYPE, dtype=torch.float16)
+        a = torch.randn(1152, 1024, device=device, dtype=torch.float16).T
+        b = torch.randn(1152, 11776, device=device, dtype=torch.float16)
         compiled_f = torch.compile(f)
 
         with config.patch(
@@ -469,38 +499,12 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].num_warps, autotune_config.num_warps)
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
 
-    def test_wait_futures_timeout(self):
-        """A compile future that doesn't finish within
-        compile_worker_wait_timeout causes _wait_futures to raise
-        RuntimeError naming the kernel.
-        """
-        import threading
-        from concurrent.futures import ThreadPoolExecutor
-
-        # Use an Event so the worker thread exits promptly once the assertion
-        # passes. A plain time.sleep here would keep the interpreter alive
-        # until it completes.
-        release = threading.Event()
-        pool = ThreadPoolExecutor(max_workers=1)
-        try:
-            hanging_future = pool.submit(release.wait)
-            scope = {"kernel_that_hangs": hanging_future}
-            with config.patch(compile_worker_wait_timeout=1):
-                async_compile = AsyncCompile()
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    r"compile-worker future for 'kernel_that_hangs' did not "
-                    r"complete within",
-                ):
-                    async_compile._wait_futures(scope)
-        finally:
-            release.set()
-            pool.shutdown(wait=True)
-
 
 @skipIfNoCuteDSL
 class TestCuteDSLSubprocessCompile(TestCase):
-    def _compile_and_run_add(self, template_name):
+    hw_classification = HardwareClassification.CUDA
+
+    def _compile_and_run_add(self, device, template_name):
         """Compile a CuteDSL add kernel via torch.compile and verify correctness."""
         from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
         from torch._inductor.ir import TensorBox
@@ -530,8 +534,8 @@ class TestCuteDSLSubprocessCompile(TestCase):
             def test_add(x, y):
                 return x + y
 
-            x = torch.randn(128, 4, device="cuda", dtype=torch.float32)
-            y = torch.randn(128, 4, device="cuda", dtype=torch.float32)
+            x = torch.randn(128, 4, device=device, dtype=torch.float32)
+            y = torch.randn(128, 4, device=device, dtype=torch.float32)
 
             compiled_fn = torch.compile(test_add, backend="inductor")
             result, (code,) = run_and_get_code(compiled_fn, x, y)
@@ -540,7 +544,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             expected = x + y
             self.assertEqual(result, expected)
 
-    def test_cutedsl_subprocess_e2e(self):
+    def test_cutedsl_subprocess_e2e(self, device):
         shutdown_compile_workers()
         with config.patch(worker_start_method="subprocess", compile_threads=4):
             AsyncCompile.wait_pool_ready()
@@ -554,10 +558,10 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     side_effect=AsyncCompile._load_kernel_wrapper,
                 ) as mock_reload,
             ):
-                self._compile_and_run_add("test_add_subprocess")
+                self._compile_and_run_add(device, "test_add_subprocess")
                 mock_reload.assert_called()
 
-    def test_cutedsl_synchronous_e2e(self):
+    def test_cutedsl_synchronous_e2e(self, device):
         with config.patch(compile_threads=1):
             with (
                 fresh_cache(),
@@ -568,10 +572,10 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     side_effect=AsyncCompile._load_kernel_wrapper,
                 ) as mock_reload,
             ):
-                self._compile_and_run_add("test_add_synchronous")
+                self._compile_and_run_add(device, "test_add_synchronous")
                 mock_reload.assert_not_called()
 
-    def test_cutedsl_bad_source_subprocess(self):
+    def test_cutedsl_bad_source_subprocess(self, device):
         shutdown_compile_workers()
         with config.patch(worker_start_method="subprocess", compile_threads=4):
             AsyncCompile.wait_pool_ready()
@@ -583,7 +587,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     "bad_kernel", "this is not valid python!!!"
                 ).result()
 
-    def test_cutedsl_missing_entry_point_subprocess(self):
+    def test_cutedsl_missing_entry_point_subprocess(self, device):
         shutdown_compile_workers()
         with config.patch(worker_start_method="subprocess", compile_threads=4):
             AsyncCompile.wait_pool_ready()
@@ -595,7 +599,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     "test_kernel", "import torch\ndef other_func(): pass\n"
                 ).result()
 
-    def test_cutedsl_subprocess_precompile_invoked(self):
+    def test_cutedsl_subprocess_precompile_invoked(self, device):
         """Verify that subprocess actually calls _precompile for a template that defines it."""
         import uuid
 
@@ -640,8 +644,8 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     def test_add(x, y):
                         return x + y
 
-                    x = torch.randn(128, 4, device="cuda", dtype=torch.float32)
-                    y = torch.randn(128, 4, device="cuda", dtype=torch.float32)
+                    x = torch.randn(128, 4, device=device, dtype=torch.float32)
+                    y = torch.randn(128, 4, device=device, dtype=torch.float32)
 
                     compiled_fn = torch.compile(test_add, backend="inductor")
                     with fresh_cache():
@@ -656,7 +660,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             if os.path.exists(sentinel_path):
                 os.unlink(sentinel_path)
 
-    def test_cutedsl_precompile_metadata_in_generated_code(self):
+    def test_cutedsl_precompile_metadata_in_generated_code(self, device):
         """Verify codegen includes precompile_metadata in the generated wrapper."""
         from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
         from torch._inductor.ir import TensorBox
@@ -686,8 +690,8 @@ class TestCuteDSLSubprocessCompile(TestCase):
             def test_add(x, y):
                 return x + y
 
-            x = torch.randn(128, 4, device="cuda", dtype=torch.float32)
-            y = torch.randn(128, 4, device="cuda", dtype=torch.float32)
+            x = torch.randn(128, 4, device=device, dtype=torch.float32)
+            y = torch.randn(128, 4, device=device, dtype=torch.float32)
 
             compiled_fn = torch.compile(test_add, backend="inductor")
             with fresh_cache():
@@ -697,7 +701,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             self.assertIn("precompile_shapes", code)
             self.assertIn("precompile_dtypes", code)
 
-    def test_cutedsl_worker_precompile_cache_roundtrip(self):
+    def test_cutedsl_worker_precompile_cache_roundtrip(self, device):
         """Test that _precompile writes a cache artifact that _main can load.
 
         Simulates the subprocess/parent round-trip: _precompile writes a file
@@ -767,7 +771,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             if os.path.exists(cache_dir):
                 shutil.rmtree(cache_dir)
 
-    def test_cutedsl_worker_skips_precompile_without_metadata(self):
+    def test_cutedsl_worker_skips_precompile_without_metadata(self, device):
         """Test _worker_compile_pycodecache_kernel skips _precompile when metadata is None."""
         from torch._inductor.runtime.compile_tasks import (
             _worker_compile_pycodecache_kernel,
@@ -792,7 +796,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             mod = codecache.PyCodeCache.load_by_key_path(key, path)
             self.assertFalse(mod.precompile_was_called)
 
-    def test_cutedsl_worker_warns_missing_precompile_with_metadata(self):
+    def test_cutedsl_worker_warns_missing_precompile_with_metadata(self, device):
         """Worker should warn when metadata is provided but _precompile hook is absent."""
         import logging
 
@@ -818,7 +822,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 any("Precompile metadata was provided" in msg for msg in cm.output)
             )
 
-    def test_disk_cache_key_includes_arch_and_version(self):
+    def test_disk_cache_key_includes_arch_and_version(self, device):
         """Verify disk cache keys incorporate GPU arch and CUDA version."""
         from torch._inductor.runtime.cutedsl_cache import _make_disk_key
 
@@ -832,7 +836,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         key_same_2 = _make_disk_key("/path/a.py", ("cfg",), ("rt",))
         self.assertEqual(key_same_1, key_same_2, "Same inputs should produce same key")
 
-    def test_disk_cache_key_varies_by_device_arch(self):
+    def test_disk_cache_key_varies_by_device_arch(self, device):
         """Verify different GPU architectures produce different cache keys.
 
         The disk key includes the device capability (arch), so devices with
@@ -862,7 +866,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             "Different GPU architectures must produce different keys",
         )
 
-    def test_mem_cache_keys_include_device_index(self):
+    def test_mem_cache_keys_include_device_index(self, device):
         """Verify in-memory cache in disk_cache_get/set is keyed by (runtime_key, device_index)."""
         from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 
@@ -918,7 +922,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             got0, got1, "different devices must not share in-memory entries"
         )
 
-    def test_cutedsl_disk_cache_hot_load(self):
+    def test_cutedsl_disk_cache_hot_load(self, device):
         """End-to-end test: subprocess compiles via TVM FFI, writes .o to disk,
         parent loads .o without recompiling, produces correct results.
 
@@ -1082,7 +1086,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 if cache_dir.exists():
                     shutil.rmtree(cache_dir)
 
-    def test_nv_universal_gemm_disk_cache_hot_load(self):
+    def test_nv_universal_gemm_disk_cache_hot_load(self, device):
         """End-to-end test for the NV Universal GEMM subprocess hot-load path.
 
         NV Universal GEMM differs from CuteDSL in that it wraps compiled
@@ -1266,7 +1270,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 if cache_dir.exists():
                     shutil.rmtree(cache_dir)
 
-    def test_cutedsl_subprocess_pool_handoff(self):
+    def test_cutedsl_subprocess_pool_handoff(self, device):
         """Test the real subprocess pool path: serialization, result handoff, parent reload.
 
         Goes through AsyncCompile.cutedsl() -> SubprocPool -> parent reload
@@ -1305,7 +1309,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 kernel_wrapper.run(x, y, out)
                 self.assertEqual(out, x + y)
 
-    def test_cutedsl_subprocess_precompile_no_cuda_init(self):
+    def test_cutedsl_subprocess_precompile_no_cuda_init(self, device):
         """Regression: precompile in subprocess workers must not call torch.cuda.*.
 
         SubprocPool workers are forked from a sidecar that has already initialized
@@ -1422,7 +1426,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         not ensure_nv_universal_gemm_available(),
         "NVIDIA Universal GEMM (cutlass_api) library not available",
     )
-    def test_nv_universal_gemm_subprocess_precompile_skips_bad_fork(self):
+    def test_nv_universal_gemm_subprocess_precompile_skips_bad_fork(self, device):
         """NV Universal GEMM precompile skips compile in bad-fork workers."""
         import json
         import uuid
@@ -1558,7 +1562,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             if os.path.exists(compile_sentinel_path):
                 os.unlink(compile_sentinel_path)
 
-    def test_concurrent_disk_cache_set_atomic(self):
+    def test_concurrent_disk_cache_set_atomic(self, device):
         """Verify concurrent disk_cache_set calls to the same key don't corrupt the .o file.
 
         Simulates multiple workers compiling the same kernel by calling
@@ -1677,7 +1681,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 if cache_dir.exists():
                     shutil.rmtree(cache_dir)
 
-    def test_corrupt_cache_falls_back_cleanly(self):
+    def test_corrupt_cache_falls_back_cleanly(self, device):
         """A corrupt .o on disk should not crash -- disk_cache_get returns None
         so the caller falls back to recompile."""
         import shutil
@@ -1721,7 +1725,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 if cache_dir.exists():
                     shutil.rmtree(cache_dir)
 
-    def test_corrupt_cache_recompile_end_to_end(self):
+    def test_corrupt_cache_recompile_end_to_end(self, device):
         """Full round-trip: corrupt .o on disk, kernel falls back to recompile,
         produces correct results, and writes a valid .o replacing the corrupt one."""
         import shutil
@@ -1866,7 +1870,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 if cache_dir.exists():
                     shutil.rmtree(cache_dir)
 
-    def test_fix_elf_dup_text_patches_duplicate_sections(self):
+    def test_fix_elf_dup_text_patches_duplicate_sections(self, device):
         """_fix_elf_dup_text_flags rewrites flags on duplicate .text sections."""
         import struct
 
@@ -1923,7 +1927,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         orig_flags = struct.unpack_from("<Q", patched, sh1_offset + 8)[0]
         self.assertEqual(orig_flags, 0x6, "First .text section should remain unchanged")
 
-    def test_fix_elf_dup_text_noop_single_text(self):
+    def test_fix_elf_dup_text_noop_single_text(self, device):
         """_fix_elf_dup_text_flags is a no-op when there's only one .text section."""
         import struct
 
@@ -1960,7 +1964,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         result = _fix_elf_dup_text_flags(elf)
         self.assertEqual(elf, result, "Single .text section should not be modified")
 
-    def test_fix_elf_dup_text_noop_non_elf(self):
+    def test_fix_elf_dup_text_noop_non_elf(self, device):
         """_fix_elf_dup_text_flags is a no-op for non-ELF data."""
         from torch._inductor.runtime.cutedsl_cache import _fix_elf_dup_text_flags
 
@@ -1971,7 +1975,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             b"\x7fELF" + b"\x00" * 10,
         )
 
-    def test_fix_elf_dup_text_old_artifacts_patched_on_load(self):
+    def test_fix_elf_dup_text_old_artifacts_patched_on_load(self, device):
         """disk_cache_get patches old unpatched .o files in-place on load."""
         import shutil
         import struct
@@ -2043,7 +2047,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 if cache_dir.exists():
                     shutil.rmtree(cache_dir)
 
-    def test_symbolic_shapes_skip_precompile_metadata(self):
+    def test_symbolic_shapes_skip_precompile_metadata(self, device):
         """_build_precompile_metadata returns None for symbolic (dynamic) sizes,
         causing the async path to skip _precompile and compile lazily."""
         from unittest.mock import MagicMock
@@ -2079,7 +2083,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             "_build_precompile_metadata should return None for symbolic sizes",
         )
 
-    def test_symbolic_shapes_worker_skips_precompile(self):
+    def test_symbolic_shapes_worker_skips_precompile(self, device):
         """When precompile_metadata is None (symbolic shapes), the worker writes
         source but skips _precompile. The kernel still works via lazy compilation."""
         from torch._inductor.runtime.compile_tasks import (
@@ -2120,7 +2124,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             if os.path.exists(compile_sentinel):
                 os.unlink(compile_sentinel)
 
-    def test_cache_key_changes_with_source_content(self):
+    def test_cache_key_changes_with_source_content(self, device):
         """Different template/codegen output produces different disk cache keys.
 
         The disk key includes module_path which is content-addressed via PyCodeCache,
@@ -2158,7 +2162,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         )
         self.assertEqual(key_v1, key_again)
 
-    def test_cache_key_changes_with_config(self):
+    def test_cache_key_changes_with_config(self, device):
         """Different config keys (e.g., kernel name, tile sizes) produce different
         disk cache keys even for the same module path."""
         from torch._inductor.runtime.cutedsl_cache import _make_disk_key
@@ -2197,10 +2201,11 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
     subprocess compilation -> precompile metadata -> disk cache -> correctness.
     """
 
-    def test_grouped_gemm_subprocess_e2e(self):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_grouped_gemm_subprocess_e2e(self, device):
         shutdown_compile_workers()
 
-        device = "cuda"
         dtype = torch.bfloat16
         group_size, K, N = 4, 64, 128
         alignment = 16
@@ -2235,6 +2240,15 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
 
         torch.testing.assert_close(c_eager, c_compiled)
 
+
+instantiate_device_type_tests(TestNVGemmPickling, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestAsyncCompileDevice, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
+)
+instantiate_device_type_tests(TestCuteDSLSubprocessCompile, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestCuteDSLSubprocessGroupedGemm, globals(), only_for="cuda"
+)
 
 if __name__ == "__main__":
     run_tests()
