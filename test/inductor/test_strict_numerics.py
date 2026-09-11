@@ -103,6 +103,15 @@ EFFECTIVE_NUMERICS = (
     "emulate_precision_casts",
 )
 
+# Two distinct NaN encodings per dtype: a canonical NaN on both sides cannot
+# tell "first operand wins" apart from "second operand wins".
+NAN_PAYLOADS = {
+    torch.float16: (torch.int16, 0x7C11, 0x7E22),
+    torch.bfloat16: (torch.int16, 0x7F81, 0x7FC2),
+    torch.float32: (torch.int32, 0x7FAB2AC8, 0x7FC13579),
+    torch.float64: (torch.int64, 0x7FFABCDEF0123456, 0x7FF8123456789ABC),
+}
+
 
 def _numerics_options(numerics, enabled):
     return {
@@ -183,6 +192,22 @@ class StrictNumericsCompileTest(TestCase):
 
         self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
         self.assertIn("div_rn", "\n".join(codes))
+
+    @parametrize("dtype", tuple(NAN_PAYLOADS), name_fn=lambda d: str(d).split(".")[-1])
+    @parametrize("op", (torch.minimum, torch.maximum), name_fn=lambda f: f.__name__)
+    def test_min_max_nan_payload(self, device, dtype, op):
+        int_dtype, first, second = NAN_PAYLOADS[dtype]
+
+        def nan(bits):
+            return torch.tensor([bits], dtype=int_dtype, device=device).view(dtype)
+
+        a, b = nan(first), nan(second)
+        with config.patch(force_disable_caches=True):
+            compiled = torch.compile(op, fullgraph=True, options={"numerics": "strict"})
+            # Swapping operands must swap the preserved NaN payload.
+            for x, y in ((a, b), (b, a)):
+                result = compiled(x, y)
+                self.assertEqual(result.view(int_dtype), op(x, y).view(int_dtype))
 
 
 @unittest.skipUnless(
@@ -726,12 +751,6 @@ POINTWISE_XFAIL = frozenset(
         ("clamp", "bfloat16"),
         ("clamp", "float16"),
         ("clamp", "float32"),
-        ("clamp_max", "bfloat16"),
-        ("clamp_max", "float16"),
-        ("clamp_max", "float32"),
-        ("clamp_min", "bfloat16"),
-        ("clamp_min", "float16"),
-        ("clamp_min", "float32"),
         ("copysign", "bfloat16"),
         ("copysign", "float16"),
         ("div_floor_rounding", "bfloat16"),
@@ -763,18 +782,6 @@ POINTWISE_XFAIL = frozenset(
         ("logaddexp2", "bfloat16"),
         ("logaddexp2", "float16"),
         ("logaddexp2", "float32"),
-        ("max_binary", "bfloat16"),
-        ("max_binary", "float16"),
-        ("max_binary", "float32"),
-        ("maximum", "bfloat16"),
-        ("maximum", "float16"),
-        ("maximum", "float32"),
-        ("min_binary", "bfloat16"),
-        ("min_binary", "float16"),
-        ("min_binary", "float32"),
-        ("minimum", "bfloat16"),
-        ("minimum", "float16"),
-        ("minimum", "float32"),
         ("mvlgamma_mvlgamma_p_1", "bfloat16"),
         ("mvlgamma_mvlgamma_p_1", "float16"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
