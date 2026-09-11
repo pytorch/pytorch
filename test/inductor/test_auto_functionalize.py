@@ -14,10 +14,13 @@ from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.logging_utils import logs_to_string
 
 
 class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_auto_functionalize_can_with_default(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
