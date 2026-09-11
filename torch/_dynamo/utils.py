@@ -74,6 +74,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
@@ -5769,10 +5770,6 @@ def set_torch_function_mode_stack(stack: list[Any]) -> None:
 def clear_torch_function_mode_stack() -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
-
-
-def get_current_stream(device: torch.device) -> torch.Stream:
-    return torch.accelerator.current_stream(device)
 
 
 # call from C dynamo in order to inspect values in pdb
