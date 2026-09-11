@@ -89,6 +89,8 @@ FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
 
+_UnshardLookahead = Literal["default", "auto"] | tuple[int, ...]
+
 
 # Targets (e.g. labels) are always split along the batch dim (0). Use
 # _split_tensor so DTensor targets preserve their Shard placements instead of
@@ -1888,6 +1890,39 @@ def _add_unshard_reshard(
     return fsdp_aware_actions
 
 
+def _resolve_unshard_lookahead(
+    unshard_lookahead: _UnshardLookahead,
+    num_pp_ranks: int,
+    max_active_stages: int,
+) -> tuple[int, ...]:
+    """Resolve one all-gather prefetch distance per pipeline rank."""
+    if unshard_lookahead == "default":
+        return (max_active_stages,) * num_pp_ranks
+    if unshard_lookahead == "auto":
+        return tuple(min(rank + 2, max_active_stages) for rank in range(num_pp_ranks))
+    if not isinstance(unshard_lookahead, tuple):
+        raise ValueError(
+            "unshard_lookahead must be 'default', 'auto', or a tuple of "
+            f"{num_pp_ranks} integers, got {unshard_lookahead!r}"
+        )
+    if len(unshard_lookahead) != num_pp_ranks:
+        raise ValueError(
+            "unshard_lookahead tuple length must equal the pipeline degree "
+            f"({num_pp_ranks}), got {len(unshard_lookahead)}"
+        )
+    for rank, lookahead in enumerate(unshard_lookahead):
+        if (
+            isinstance(lookahead, bool)
+            or not isinstance(lookahead, int)
+            or not (1 <= lookahead <= max_active_stages)
+        ):
+            raise ValueError(
+                f"unshard_lookahead[{rank}] must be an integer within "
+                f"[1, max_active_stages={max_active_stages}], got {lookahead!r}"
+            )
+    return unshard_lookahead
+
+
 def _merge_bw(
     compute_actions: list[_Action | None],
 ) -> list[_Action]:
@@ -2794,7 +2829,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     def __init__(self, *args, **kwargs):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
         self._max_active_stages: int = kwargs.pop("max_active_stages", 3)
-        self._unshard_lookahead: int | None = kwargs.pop("unshard_lookahead", None)
+        self._unshard_lookahead: _UnshardLookahead = kwargs.pop(
+            "unshard_lookahead", "default"
+        )
         self._reuse_recv_buffers: bool = kwargs.pop("reuse_recv_buffers", False)
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
@@ -2867,7 +2904,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
         self.pipeline_order_with_comms: dict[int, list[_Action]] = {}
         if format == "compute_comms":
-            if self._unshard_lookahead is not None:
+            if self._unshard_lookahead != "default":
                 raise ValueError(
                     "unshard_lookahead cannot be applied to an already-lowered "
                     "compute_comms schedule"
@@ -2895,16 +2932,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             )
 
             # Perform schedule lowering
-            unshard_lookahead = (
-                self._max_active_stages
-                if self._unshard_lookahead is None
-                else self._unshard_lookahead
+            unshard_lookahead = _resolve_unshard_lookahead(
+                self._unshard_lookahead,
+                num_pp_ranks=len(actions),
+                max_active_stages=self._max_active_stages,
             )
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
                     actions[rank],
                     max_active_stages=self._max_active_stages,
-                    unshard_lookahead=unshard_lookahead,
+                    unshard_lookahead=unshard_lookahead[rank],
                 )
                 self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
                     self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
@@ -3316,7 +3353,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: int | None = None,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         super().__init__(
             stages=stages,
@@ -3559,7 +3596,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: int | None = None,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3674,7 +3711,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: int | None = None,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3877,7 +3914,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: int | None = None,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -4069,7 +4106,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: int | None = None,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)

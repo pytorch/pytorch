@@ -1011,7 +1011,7 @@ class TestSchedulePlan(TestCase):
         self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
 
     @staticmethod
-    def _interleaved_schedule(*, unshard_lookahead=None):
+    def _interleaved_schedule(*, unshard_lookahead="default"):
         stages = [
             MockPipelineStage(group_size=4, group_rank=3, num_stages=16)
             for _ in range(4)
@@ -1045,8 +1045,8 @@ class TestSchedulePlan(TestCase):
             [4, 4, 4, 4],
         )
 
-    def test_unshard_lookahead_override_staggers_prefetch(self):
-        schedule = self._interleaved_schedule(unshard_lookahead=2)
+    def test_unshard_lookahead_tuple_selects_each_rank(self):
+        schedule = self._interleaved_schedule(unshard_lookahead=(1, 2, 3, 4))
         self.assertEqual(
             [
                 self._unshards_before_first_compute(
@@ -1054,11 +1054,32 @@ class TestSchedulePlan(TestCase):
                 )
                 for rank in range(4)
             ],
-            [2, 2, 2, 2],
+            [1, 2, 3, 4],
+        )
+
+    def test_unshard_lookahead_auto_is_rank_aware(self):
+        schedule = self._interleaved_schedule(unshard_lookahead="auto")
+        self.assertEqual(
+            [
+                self._unshards_before_first_compute(
+                    schedule.pipeline_order_with_comms[rank]
+                )
+                for rank in range(4)
+            ],
+            [2, 3, 4, 4],
         )
 
     def test_unshard_lookahead_rejects_invalid_values(self):
-        for lookahead in (True, False, 0, -1, 5, "auto"):
+        for lookahead in (
+            None,
+            True,
+            2,
+            "adaptive",
+            [1, 2, 3, 4],
+            (1, 2, 3),
+            (1, 2, 3, 5),
+            (1, 2, 3, False),
+        ):
             with self.subTest(unshard_lookahead=lookahead):
                 with self.assertRaises(ValueError):
                     self._interleaved_schedule(  # type: ignore[arg-type]
@@ -1094,49 +1115,54 @@ class TestSchedulePlan(TestCase):
                 unshard_lookahead=lookahead,
             )
 
-        staggered = build(1)
-        default = build(None)
+        default = build("default")
         p2p = (SEND_F, SEND_B, RECV_F, RECV_B)
 
-        for rank in range(group_size):
-            with self.subTest(rank=rank):
-                staggered_actions = staggered.pipeline_order_with_comms[rank]
-                default_actions = default.pipeline_order_with_comms[rank]
-                self.assertEqual(
-                    sum(a.computation_type == UNSHARD for a in staggered_actions),
-                    sum(a.computation_type == UNSHARD for a in default_actions),
-                )
-                self.assertEqual(
-                    sum(a.computation_type == RESHARD for a in staggered_actions),
-                    sum(a.computation_type == RESHARD for a in default_actions),
-                )
-                self.assertEqual(
-                    [
-                        a
-                        for a in staggered_actions
-                        if a.computation_type != UNSHARD
-                        and a.computation_type not in p2p
-                    ],
-                    [
-                        a
-                        for a in default_actions
-                        if a.computation_type != UNSHARD
-                        and a.computation_type not in p2p
-                    ],
-                )
-                self.assertEqual(
-                    {
-                        kind: sum(a.computation_type == kind for a in staggered_actions)
-                        for kind in p2p
-                    },
-                    {
-                        kind: sum(a.computation_type == kind for a in default_actions)
-                        for kind in p2p
-                    },
-                )
+        for lookahead in ((1,) * group_size, "auto"):
+            staggered = build(lookahead)
+            for rank in range(group_size):
+                with self.subTest(lookahead=lookahead, rank=rank):
+                    staggered_actions = staggered.pipeline_order_with_comms[rank]
+                    default_actions = default.pipeline_order_with_comms[rank]
+                    self.assertEqual(
+                        sum(a.computation_type == UNSHARD for a in staggered_actions),
+                        sum(a.computation_type == UNSHARD for a in default_actions),
+                    )
+                    self.assertEqual(
+                        sum(a.computation_type == RESHARD for a in staggered_actions),
+                        sum(a.computation_type == RESHARD for a in default_actions),
+                    )
+                    self.assertEqual(
+                        [
+                            a
+                            for a in staggered_actions
+                            if a.computation_type != UNSHARD
+                            and a.computation_type not in p2p
+                        ],
+                        [
+                            a
+                            for a in default_actions
+                            if a.computation_type != UNSHARD
+                            and a.computation_type not in p2p
+                        ],
+                    )
+                    self.assertEqual(
+                        {
+                            kind: sum(
+                                a.computation_type == kind for a in staggered_actions
+                            )
+                            for kind in p2p
+                        },
+                        {
+                            kind: sum(
+                                a.computation_type == kind for a in default_actions
+                            )
+                            for kind in p2p
+                        },
+                    )
 
     def test_unshard_lookahead_rejects_prelowered_schedule(self):
-        schedule = self._interleaved_schedule(unshard_lookahead=2)
+        schedule = self._interleaved_schedule(unshard_lookahead=(2, 2, 2, 2))
         with self.assertRaisesRegex(ValueError, "already-lowered"):
             schedule._prepare_schedule_with_comms(
                 schedule.pipeline_order_with_comms,
