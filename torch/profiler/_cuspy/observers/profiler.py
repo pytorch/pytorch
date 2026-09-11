@@ -253,6 +253,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
         defer_export: bool = True,
         enable_pm_sampling: bool = False,
         pm_metrics: Iterable[str] | None = None,
+        pm_sampling_interval_ms: float | None = None,
+        pm_lookback_window_ms: float | None = None,
         enable_graph_dependencies: bool = False,
         enable_event_node_ids: bool = False,
         pftrace_compression_level: int = 1,
@@ -345,7 +347,12 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
         # a monotonic guard so each sample is enqueued at most once.
         self._pm_last_ns: dict[int, int] = {}
         if self._pm_enabled and self._cuspy is not None:
-            self._cuspy.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
+            self._cuspy.request_pm_sampling(
+                self.on_pm_samples,
+                self._pm_metrics,
+                sampling_interval_ms=pm_sampling_interval_ms,
+                lookback_window_ms=pm_lookback_window_ms,
+            )
 
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
