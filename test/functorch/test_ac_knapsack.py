@@ -1,4 +1,6 @@
 # Owner(s): ["module: functorch"]
+import networkx as nx
+
 from torch._functorch._activation_checkpointing.graph_info_provider import (
     GraphInfoProvider,
 )
@@ -134,8 +136,8 @@ class TestGraphInfoProvider(TestCase):
         # node2 has an indirect path to node5
         expected_edges = [("node1", "node2"), ("node2", "node5")]
         self.assertEqual(
-            sorted(recomputable_node_only_graph_with_larger_graph_context.nodes),
-            sorted(expected_nodes),
+            list(recomputable_node_only_graph_with_larger_graph_context.nodes),
+            expected_nodes,
         )
         self.assertEqual(
             sorted(recomputable_node_only_graph_with_larger_graph_context.edges),
@@ -328,6 +330,80 @@ class TestKnapsackEvaluator(TestCase):
         for result_item, expected_result_item in zip(result, expected_result):
             self.assertAlmostEqual(result_item[0], expected_result_item[0])
             self.assertEqual(result_item[1], expected_result_item[1])
+
+    def test_backward_memory_is_deterministic_across_graph_orderings(self):
+        provider = GraphInfoProvider(
+            graph_nodes_in_order=["src", "a1", "a2", "b1", "b2"],
+            graph_edges=[
+                ("src", "a1"),
+                ("src", "b1"),
+                ("a1", "a2"),
+                ("b1", "b2"),
+            ],
+            all_recomputable_banned_nodes=["src", "a1", "a2", "b1", "b2"],
+            recorded_knapsack_input_memories=[
+                1.0,
+                10.0,
+                10.0,
+                1.0,
+                1.0,
+            ],
+            recorded_knapsack_input_runtimes=[
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            ],
+        )
+
+        evaluator = KnapsackEvaluator(provider)
+
+        def get_peak_memory(edges, node_order=None):
+            graph = nx.DiGraph()
+            if node_order is not None:
+                graph.add_nodes_from(node_order)
+            graph.add_edges_from(edges)
+
+            result = evaluator._get_backward_memory_from_topologically_sorted_graph(
+                node_graph=graph,
+                node_memories=provider.all_node_memories,
+                saved_nodes_set={"src"},
+                peak_memory_after_forward_pass=1.0,
+            )
+
+            return max(memory for memory, _ in result)
+
+        # The backward-memory simulation should not depend on the insertion
+        # order of an equivalent NetworkX graph; FX node order is used as the
+        # tie-breaker.
+        edges_a = [
+            ("src", "a1"),
+            ("src", "b1"),
+            ("a1", "a2"),
+            ("b1", "b2"),
+        ]
+
+        edges_b = [
+            ("src", "b1"),
+            ("src", "a1"),
+            ("a1", "a2"),
+            ("b1", "b2"),
+        ]
+
+        peak_a = get_peak_memory(edges_a)
+        peak_b = get_peak_memory(edges_b)
+
+        self.assertEqual(peak_a, peak_b)
+        self.assertEqual(peak_a, 21.0)
+
+        # Keep node insertion order fixed while changing edge insertion order.
+        # The tie-breaker must be independent of adjacency insertion order too.
+        fixed_node_order = ["src", "a1", "a2", "b1", "b2"]
+        self.assertEqual(
+            get_peak_memory(edges_a, fixed_node_order),
+            get_peak_memory(edges_b, fixed_node_order),
+        )
 
 
 class TestActivationCheckpointingKnapsack(TestCase):
