@@ -67,6 +67,11 @@ on:
         required: false
         type: string
         default: ""
+      ignore-test-config-labels:
+        description: Ignore test-config/* PR labels when filtering the test matrix.
+        required: false
+        type: boolean
+        default: false
       s3-bucket:
         description: S3 bucket to download artifact
         required: false
@@ -195,6 +200,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
           selected-test-configs: ${{ inputs.selected-test-configs }}
+          ignore-test-config-labels: ${{ inputs.ignore-test-config-labels }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
 
       - name: Map EC2 runners to ARC runners
