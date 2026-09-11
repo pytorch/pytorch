@@ -1351,16 +1351,17 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # The oracle is pickle itself: every False case fails a by-reference
         # dump. save_global replaces the import/lookup failure with a
         # PicklingError; the C pickler raises a bare AttributeError for a
-        # <locals> name below 3.14 and PicklingError from 3.14 on.
-        locals_exc = (
-            pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
-        )
+        # <locals> name below 3.14 and PicklingError from 3.14 on, and from 3.14
+        # on lets the import's TypeError through for a non-str __module__.
+        new_pickle = sys.version_info >= (3, 14)
+        locals_exc = pickle.PicklingError if new_pickle else AttributeError
+        unhashable_exc = TypeError if new_pickle else pickle.PicklingError
         cases = {
             "locals": (local_fn, locals_exc),
             "wraps_wrapper": (wrapper, pickle.PicklingError),
             "bad_qualname": (renamed, pickle.PicklingError),
             "module_not_imported": (exec_fn, pickle.PicklingError),
-            "unhashable_module": (odd, pickle.PicklingError),
+            "unhashable_module": (odd, unhashable_exc),
         }
         for case, (fn, exc) in cases.items():
             with self.subTest(case=case):
