@@ -668,6 +668,38 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Assign symbolic shapes to C++ locals, with replacement aliases."""
         code = self.prefix
 
+        def emit_cg_input_bound_check(sym, ctx):
+            """Reject an input dim above the bound the max slab was frozen for.
+
+            Emitted right where each dynamic symbol is read from its input dim
+            at run_impl entry. Regional cuda graph freezes one max-sized slab
+            from each dynamic dim's compiled upper bound, so a larger input
+            would overrun it silently.
+            """
+            if not (
+                config.aot_inductor.cudagraph_mode == "regional"
+                and V.graph.aot_mode
+                and config.aot_inductor.cudagraph_runtime_input_bounds_check
+            ):
+                return
+            if not isinstance(sym, sympy.Symbol) or symbol_is_type(
+                sym, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT, SymT.FLOAT)
+            ):
+                return
+            upper = self._cudagraph_symbol_finite_upper(sym)
+            if upper is None:
+                return
+            code.writeline(f"if ({sym} > {upper}LL) {{")
+            code.writeline(
+                'throw std::runtime_error("AOTI cuda-graph input-bounds check: '
+                f'{ctx} (symbol {sym}) = " + std::to_string({sym}) + '
+                f'" exceeds the compiled maximum {upper} this model was built for; '
+                "a larger input would overrun the regional cuda-graph slab frozen "
+                "at that max. Re-lower with a higher declared max, or opt out via "
+                'cudagraph_runtime_input_bounds_check.");'
+            )
+            code.writeline("}")
+
         @functools.cache
         def sizeof(name):
             self.codegen_input_size_var_decl(code, name)
@@ -690,6 +722,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     return False
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
+                emit_cg_input_bound_check(sym_or_exp, f"input {base_name} dim {dim}")
                 if symbol_is_type(sym_or_exp, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                     self.unbacked_symbol_decls.add(str(sym_or_exp))
                 self.maybe_emit_replacement_aliases(sym_or_exp, bound_vars)
@@ -731,6 +764,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
                     code.writeline(f"int64_t {free_symbol} = {cexpr(expr)};")
                     bound_vars.add(free_symbol)
+                    emit_cg_input_bound_check(free_symbol, f"input {base_name} dim {dim}")
                     if symbol_is_type(
                         free_symbol, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
                     ):
@@ -749,6 +783,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 decl = "int64_t"
             code.writeline(f"{decl} {value} = {name};")
             bound_vars.add(value)
+            emit_cg_input_bound_check(value, f"scalar input {name}")
             if symbol_is_type(value, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                 self.unbacked_symbol_decls.add(str(value))
             self.maybe_emit_replacement_aliases(value, bound_vars)
@@ -1620,6 +1655,30 @@ class CppWrapperCpu(PythonWrapperCodegen):
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
+
+    def _cudagraph_symbol_finite_upper(self, sym: sympy.Symbol) -> int | None:
+        """The finite compiled upper bound (shape_env var_to_range) for a dynamic
+        symbol, or None if unbounded / non-integer."""
+        import math
+
+        from torch.utils._sympy.numbers import int_oo
+
+        sizevars = getattr(V.graph, "sizevars", None)
+        shape_env = getattr(sizevars, "shape_env", None)
+        if shape_env is None:
+            return None
+        vr = shape_env.var_to_range.get(sym)
+        if vr is None:
+            return None
+        upper = vr.upper
+        if upper in (sympy.oo, int_oo) or (
+            isinstance(upper, float) and math.isinf(upper)
+        ):
+            return None
+        try:
+            return int(upper)
+        except (TypeError, ValueError):
+            return None
 
     def _output_array_name(self) -> str:
         """Name of the C array `generate_return` writes results into.

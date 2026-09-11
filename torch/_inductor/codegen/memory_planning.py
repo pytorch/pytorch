@@ -576,6 +576,23 @@ class AllocationPool:
                 )
             )
 
+    def _cudagraph_iter_leaf_allocations(self):
+        """Yield every leaf Allocation packed in this pool, recursing the
+        TemporalSplit / SpatialSplit tree. Used by the single-max-slab backstop
+        in _codegen_create_cudagraph_cached to check the frozen slab covers each
+        packed buffer's (offset + size)."""
+        stack = [self.root]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, Allocation):
+                yield node
+            elif isinstance(node, TemporalSplit):
+                stack.extend(node.allocations)
+            elif isinstance(node, SpatialSplit):
+                stack.append(node.left)
+                stack.append(node.right)
+            # Empty (and any other node) has no packed buffer -> skip.
+
     def _codegen_create_cudagraph_cached(
         self, wrapper, code: IndentedBuffer, dtype, shape, stride
     ):
@@ -661,6 +678,60 @@ class AllocationPool:
             # shapes (the per-pool cache key below is a constant).
             shape = tuple(max_shape)
             stride = tuple(max_stride)
+
+            # Defensive backstop for the single-max-slab. The slab is a
+            # COMPILE-TIME constant, but each packed buffer's alloc_from_pool
+            # offset is emitted as a RUNTIME expression, so a buffer whose offset
+            # scales with a dynamic symbol can overrun the frozen slab. Verify the
+            # frozen slab covers the upper bound of every packed buffer's
+            # (offset + size) under the SAME var_to_range, and HARD-ERROR at
+            # compile time instead of silently emitting a slab a captured
+            # partition overruns (the RMSNorm OOB seen with a stale secondary-
+            # symbol range). The slab is sized from self.root.get_symbolic_size()
+            # (== Max(leaf extents) by construction), so this backstop fires on a
+            # pool-vs-leaf sizing DIVERGENCE; a stale symbol range under-bounds
+            # the slab AND the offsets equally and must be fixed by correcting
+            # that symbol's var_to_range. This whole path is cuda-graph-only
+            # (reached only under _cudagraph_slab_cache_enabled), so it never
+            # affects non-cuda-graph lowering.
+            slab_bytes = _const_upper_bound(self.root.get_symbolic_size())
+            worst_name = None
+            worst_extent = None
+            for leaf in self._cudagraph_iter_leaf_allocations():
+                if leaf.offset is None:
+                    continue
+                extent = _const_upper_bound(leaf.offset + leaf.get_symbolic_size())
+                if extent is None:
+                    continue
+                if worst_extent is None or extent > worst_extent:
+                    worst_extent = extent
+                    worst_name = leaf.node.get_name()
+            if (
+                slab_bytes is not None
+                and worst_extent is not None
+                and slab_bytes < worst_extent
+            ):
+                raise RuntimeError(
+                    "AOTI regional cuda-graph max-slab for pool "
+                    f"'{self.name}' is {slab_bytes} bytes but packed buffer "
+                    f"'{worst_name}' reaches offset+size={worst_extent} bytes "
+                    f"(deficit {worst_extent - slab_bytes} bytes): a captured "
+                    "partition would overrun the slab. The frozen slab must cover "
+                    "every packed buffer's runtime extent; this means the pool "
+                    "byte-size and the packed-buffer offsets were bounded "
+                    "inconsistently -- most often a dynamic-shape symbol whose "
+                    "var_to_range upper bound is smaller than the extent its "
+                    "offsets reach. Correct that symbol's upper bound (export "
+                    "Dim(max=...) / dynamic_shapes_strategy) or the pool sizing."
+                )
+            # No separate export-declared Dim(max=...) cross-check here: that max
+            # is baked into var_to_range at export (the same range this freeze
+            # reads), so it would be tautological with the freeze -- it could
+            # never fire. A dropped/stale declared range is instead caught at
+            # serving by the runtime input-bounds check
+            # (cudagraph_runtime_input_bounds_check in cpp_wrapper_cpu.py); an
+            # independent declared-source variant is a possible future follow-up
+            # only if override plumbing ever regresses.
         # Under single-max-slab the per-shape key is always a constant: the slab
         # is sized to the dynamic-shape upper bounds and shared across shapes, so
         # only the per-pool id (folded in below) distinguishes cache slots.

@@ -315,12 +315,13 @@ def profiled_ivalue_kinds(code, kernel_name):
         "scalar" if "_scalar_" in entry else "tensor"
         for entry in vector.group(1).split(",")
     ]
-def compile_whole_cudagraph(model, example_inputs, dynamic_shapes=None, **cfg):
-    """Compile and load `model` with whole-graph cuda graph enabled.
+def compile_with_cudagraph(model, example_inputs, dynamic_shapes=None, **cfg):
+    """Compile and load `model` with cuda graph enabled, whole-graph by default.
 
-    Module-level rather than a method because `copy_tests` only copies `test_*`
-    methods into the generated device classes, so a helper method would not
-    exist on them.
+    Pass `**{"aot_inductor.cudagraph_mode": "regional"}` for the partitioned
+    path. Module-level rather than a method because `copy_tests` only copies
+    `test_*` methods into the generated device classes, so a helper method would
+    not exist on them.
     """
     with config.patch({"aot_inductor.cudagraph_mode": "whole", **cfg}), torch.no_grad():
         package_path = AOTIRunnerUtil.compile(
@@ -6325,7 +6326,7 @@ class AOTInductorTestsTemplate:
 
         model = Model().to(self.device)
         example = torch.randn(8, 64, device=self.device)
-        compiled = compile_whole_cudagraph(
+        compiled = compile_with_cudagraph(
             model, (example,), {"x": {0: Dim("b", min=1, max=256)}}
         )
 
@@ -6352,7 +6353,7 @@ class AOTInductorTestsTemplate:
 
         model = Model().to(self.device)
         example = torch.randn(8, 32, device=self.device)
-        compiled = compile_whole_cudagraph(
+        compiled = compile_with_cudagraph(
             model,
             (example,),
             {"x": {0: Dim("b", min=1, max=256)}},
@@ -6380,13 +6381,129 @@ class AOTInductorTestsTemplate:
         model = Model().to(self.device)
         example = torch.randn(8, 64, device=self.device)
         with self.assertRaisesRegex(Exception, "RNG"):
-            compile_whole_cudagraph(model, (example,), None)
+            compile_with_cudagraph(model, (example,), None)
 
-    def test_cudagraph_mode_regional_rejected(self):
-        # "regional" is reserved for the follow-up stack; it must fail loudly
-        # instead of silently behaving like "off".
+    def test_cudagraph_regional_capture_and_replay(self):
+        # Regional splits the graph and captures only the eligible pieces. The
+        # embedding lookup is a partition boundary (index_select), so this model
+        # exercises the partitioned path -- several captures per forward with
+        # eager regions between them -- rather than one big capture.
         if self.device != "cuda":
-            raise unittest.SkipTest("AOTI whole-graph cuda graph requires CUDA")
+            raise unittest.SkipTest("AOTI regional cuda graph requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = torch.nn.Linear(32, 32)
+                self.linear2 = torch.nn.Linear(32, 32)
+                self.emb1 = torch.nn.Embedding(128, 32)
+                self.emb2 = torch.nn.Embedding(128, 32)
+
+            def forward(self, x, idx):
+                # A gather whose index is derived from earlier compute, so the
+                # graph is not a single straight-line region. In practice the
+                # clusterer still merges this into one capture; see the note on
+                # the assertion below.
+                h = self.linear1(x).relu()
+                sel = (h.argmax(dim=1) + idx) % 128
+                g = self.emb1(sel)
+                return self.linear2(h + g).relu().sum(dim=1)
+
+        model = Model().to(self.device)
+        x = torch.randn(8, 32, device=self.device)
+        idx = torch.randint(0, 128, (8,), device=self.device)
+        dim0 = Dim("b", min=1, max=256)
+
+        # Assert the model really was PARTITIONED and captured. Without this the
+        # test would still pass if regional silently fell back to a single
+        # capture, or to no capture at all -- numerics alone cannot tell.
+        with (
+            config.patch(
+                {
+                    "aot_inductor.cudagraph_mode": "regional",
+                    # These toy partitions are far below the production default
+                    # of 8 nodes, which would demote every one of them to eager.
+                    "aot_inductor.cudagraph_min_partition_size": 1,
+                }
+            ),
+            torch.no_grad(),
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
+                model,
+                (x, idx),
+                dynamic_shapes={"x": {0: dim0}, "idx": {0: dim0}},
+            )
+        # >= 1 is the load-bearing assertion: it separates "regional actually
+        # captured something" from "regional silently captured nothing", which is
+        # a state numerics alone cannot detect and which this check has already
+        # caught once (every partition being demoted by the size threshold).
+        #
+        # NOT asserted: more than one captured partition. The convex clusterer
+        # deliberately merges eligible regions and reorders eager ones out from
+        # between them, so small models collapse to a single capture. That means
+        # CROSS-PARTITION HANDOFF -- a buffer produced by one capture and read by
+        # a later one -- is not covered here, and needs a real model to exercise.
+        self.assertGreaterEqual(
+            code.count("cudagraph_mgr_->run_graph("),
+            1,
+            "regional mode captured nothing at all",
+        )
+
+        compiled = compile_with_cudagraph(
+            model,
+            (x, idx),
+            {"x": {0: dim0}, "idx": {0: dim0}},
+            **{
+                "aot_inductor.cudagraph_mode": "regional",
+                "aot_inductor.cudagraph_min_partition_size": 1,
+            },
+        )
+
+        with torch.no_grad():
+            for batch in (8, 8, 32, 8):
+                x = torch.randn(batch, 32, device=self.device)
+                idx = torch.randint(0, 128, (batch,), device=self.device)
+                self.assertEqual(compiled(x, idx), model(x, idx))
+
+    def test_cudagraph_regional_accepts_model_whole_rejects(self):
+        # The contrast that motivates having two modes: whole-graph FAILS this
+        # model's lowering because RNG cannot be captured, while regional lowers
+        # it by partitioning around the RNG. Numerics are not compared here --
+        # the point is that one mode rejects and the other does not.
+        if self.device != "cuda":
+            raise unittest.SkipTest("AOTI regional cuda graph requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                h = self.linear(x).relu()
+                return h + torch.rand_like(h)
+
+        model = Model().to(self.device)
+        example = torch.randn(8, 64, device=self.device)
+
+        with self.assertRaisesRegex(Exception, "RNG"):
+            compile_with_cudagraph(model, (example,))
+
+        compiled = compile_with_cudagraph(
+            model,
+            (example,),
+            **{
+                "aot_inductor.cudagraph_mode": "regional",
+                "aot_inductor.cudagraph_min_partition_size": 1,
+            },
+        )
+        with torch.no_grad():
+            self.assertEqual(compiled(example).shape, torch.Size([8, 64]))
+
+    def test_cudagraph_mode_invalid_rejected(self):
+        # An unrecognised mode must fail loudly rather than silently act as off.
+        if self.device != "cuda":
+            raise unittest.SkipTest("AOTI cuda graph requires CUDA")
 
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -6394,8 +6511,8 @@ class AOTInductorTestsTemplate:
 
         model = Model().to(self.device)
         example = torch.randn(8, 64, device=self.device)
-        with self.assertRaisesRegex(Exception, "not implemented yet"):
-            with config.patch({"aot_inductor.cudagraph_mode": "regional"}):
+        with self.assertRaisesRegex(Exception, "not a valid mode"):
+            with config.patch({"aot_inductor.cudagraph_mode": "bogus"}):
                 with torch.no_grad():
                     AOTIRunnerUtil.compile(model, (example,))
 
@@ -10606,6 +10723,14 @@ GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
         ("cuda", "xpu"), is_skip=True
     ),
     "test_cudagraph_whole_rejects_uncapturable_graph": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    # Same reason for regional: only the AOTI body of the two emitted entry
+    # points could be captured.
+    "test_cudagraph_regional_capture_and_replay": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cudagraph_regional_accepts_model_whole_rejects": fail_gpu(
         ("cuda", "xpu"), is_skip=True
     ),
 }
