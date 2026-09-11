@@ -12070,7 +12070,7 @@ class Scheduler:
             self.enter_context(node)
 
             # pyrefly: ignore [unbound-name]
-            if config.size_asserts:
+            if config.size_asserts or config.alignment_asserts_inputs:
                 V.graph.wrapper_code.codegen_deferred_input_asserts(
                     dep.name for dep in node.read_writes.reads
                 )
