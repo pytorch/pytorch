@@ -2,12 +2,20 @@
 
 import contextlib
 import copy
+import dataclasses
 import functools
+import importlib
 import inspect
+import io
 import multiprocessing as mp
 import os
 import pickle
+import platform
+import sys
 import tempfile
+import threading
+import types
+import typing
 import unittest
 from collections import namedtuple
 from collections.abc import Callable
@@ -24,10 +32,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
+from torch._dynamo.aot_compile import (
+    AOTCompiledFunction,
+    AOTCompiledModel,
+    ModelInput,
+    SerializableCallable,
+)
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
-from torch._dynamo.package import DynamoCache
+from torch._dynamo.graph_utils import _graph_device_types
+from torch._dynamo.guards import CheckFunctionManager
+from torch._dynamo.output_graph import get_builtins_dict
+from torch._dynamo.package import (
+    _current_cpu_codegen_target,
+    DynamoCache,
+    load_guards_state,
+    SystemInfo,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -37,6 +58,7 @@ from torch._guards import tracing, TracingContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
@@ -47,6 +69,20 @@ from torch.utils.checkpoint import checkpoint
 MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
 EPS = torch.tensor(1e-7)
+AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
+
+
+def _aot_pep695_generic(body="return x"):
+    # `def inner[T](x: T) -> T`, built via exec so this file parses below 3.12.
+    ns = {"__name__": __name__}
+    exec(
+        "def outer():\n"
+        "    def inner[T](x: T) -> T:\n"
+        f"        {body}\n"
+        "    return inner\n",
+        ns,
+    )
+    return ns["outer"]()
 
 
 def aot_eager_regional_inductor():
@@ -348,6 +384,102 @@ class SimpleLinearModule(torch.nn.Module):
         return self.linear(x)
 
 
+class ScaleModule(torch.nn.Module):
+    def forward(self, x):
+        return x * 2
+
+
+AOT_HERMETIC_WEIGHT = torch.eye(3)
+
+
+class HermeticModule(torch.nn.Module):
+    def forward(self, x):
+        return x @ AOT_HERMETIC_WEIGHT
+
+
+GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
+
+
+class GlobalConfigModule(torch.nn.Module):
+    def forward(self, x):
+        if GLOBAL_POOLING_CONFIG["pooling"] == "sum":
+            return x.sum(1)
+        return x.mean(1) * 10.0
+
+
+@contextmanager
+def _set_pooling(mode):
+    old = GLOBAL_POOLING_CONFIG["pooling"]
+    GLOBAL_POOLING_CONFIG["pooling"] = mode
+    try:
+        yield
+    finally:
+        GLOBAL_POOLING_CONFIG["pooling"] = old
+
+
+AOT_POOL_MODE = "sum"
+
+
+class GlobalRebindModule(torch.nn.Module):
+    def forward(self, x):
+        if AOT_POOL_MODE == "sum":
+            return x.sum(1)
+        return x.mean(1) * 10.0
+
+
+def global_rebind_fn(x):
+    if AOT_POOL_MODE == "sum":
+        return x.sum(1)
+    return x.mean(1) * 10.0
+
+
+@contextmanager
+def _set_pool_mode(mode):
+    global AOT_POOL_MODE
+    old = AOT_POOL_MODE
+    AOT_POOL_MODE = mode
+    try:
+        yield
+    finally:
+        AOT_POOL_MODE = old
+
+
+AOT_ABSENT_WEIGHT = torch.eye(3) * 3.0
+
+
+class AbsentGlobalModule(torch.nn.Module):
+    def forward(self, x):
+        return x @ AOT_ABSENT_WEIGHT
+
+
+class ParentWithChildModule(torch.nn.Module):
+    # Calling a CHILD module routes through nn.Module.__call__, whose hook-dict
+    # guards are rooted at Dynamo's synthetic __import_torch_dot_nn_... alias.
+    # That is the shape a reloaded artifact could not resolve.
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        # isinstance is a builtin: its BUILTIN_MATCH guard is rooted at
+        # G['__builtins_dict___N'], the other name only the tracing process has.
+        if not isinstance(x, torch.Tensor):
+            raise TypeError(type(x))
+        return self.lin(x)
+
+
+def keep_global_guards(guard_entries):
+    # Same policy the guard serializer enforces: drop only what cannot be
+    # serialized, and in particular keep the global guards that the default
+    # aot_compile filter drops wholesale.
+    unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+    return [
+        g.guard_type not in unsupported
+        and not any(d in unsupported for d in g.derived_guard_types)
+        for g in guard_entries
+    ]
+
+
 class RepeatInterleaveModule(torch.nn.Module):
     def forward(self, x):
         chunk = x.chunk(2, dim=-1)
@@ -545,6 +677,53 @@ def _subprocess_aot_compile_module():
                     )
 
 
+def _subprocess_save_child_module_artifact(path):
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = ParentWithChildModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(4, 4),), kwargs={}, contexts=[])]
+        )
+        model._save_aot_compiled_module(path)
+        torch.save(mod.state_dict(), path + ".state_dict")
+
+
+def _subprocess_load_then_compile(path):
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = ParentWithChildModule()
+        mod.load_state_dict(torch.load(path + ".state_dict"))
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        with open(path, "rb") as f:
+            model._load_aot_compiled_module(f.read())
+        model(torch.randn(4, 4))
+
+        # A fresh compile in the same process mints its __builtins_dict___N
+        # global from the process-global unique_id counter, still behind the
+        # loaded artifact's baked-in index, so it regenerates a name the load
+        # already seeded. install_global must retry past the taken name; without
+        # the retry this AssertionErrors in CleanupHook.create.
+        def later(x):
+            return x + 1
+
+        torch.compile(later, fullgraph=True, backend="eager")(torch.randn(3))
+
+
 class RedistributeModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -571,6 +750,42 @@ def wrap_forward_function(fn: Callable):
     return wrapped
 
 
+def _aot_wraps_deco(f):
+    @functools.wraps(f)
+    def wrapper(x):
+        return f(x) * 2
+
+    return wrapper
+
+
+def _aot_wraps_base(x):
+    return x + 1
+
+
+# functools.wraps gives the wrapper _aot_wraps_base's qualname: no "<locals>"
+# marker, yet module + qualname resolve to the base, not to the wrapper.
+_aot_wraps_helper = _aot_wraps_deco(_aot_wraps_base)
+
+
+class BottomlessReduce:
+    # Every save reduces to a fresh instance, so the pickler recurses without
+    # bound on every Python version (3.14's C pickler no longer overflows on a
+    # merely deep list).
+    def __reduce__(self):
+        return (BottomlessReduce, (BottomlessReduce(),))
+
+
+class WritesBackOnReduce:
+    # Reducing it writes onto the function it is stashed on, while that
+    # function's __dict__ is being walked.
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __reduce__(self):
+        self.fn.added = 1
+        raise TypeError("cannot pickle WritesBackOnReduce")
+
+
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
@@ -585,6 +800,67 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         torch._dynamo.utils.counters.clear()
         DynamoCache.clear()
         PrecompileContext.clear()
+
+    def test_aot_compile_rebuilds_a_wraps_wrapper_of_a_module_level_function(self):
+        # Pickling the wrapper by reference finds the base function instead
+        # ("not the same object"), so it is rebuilt from its code object, the
+        # same fqn-mismatch rule the guard pickler applies.
+        def outer():
+            h = _aot_wraps_helper
+
+            def fn(x):
+                return h(x) + 1
+
+            return fn
+
+        fn = outer()
+        x = torch.randn(3)
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager").aot_compile(
+            ((x,), {})
+        )
+        compiled.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(x), fn(x))
+
+    def test_aot_compile_rebuilt_wrapper_keeps_its_own_module_scope(self):
+        # functools.wraps copies __module__ from the wrappee, but the wrapper's
+        # code was compiled against the decorator's module: an escaped wrapper
+        # must reload with THAT scope, not the wrappee's (same-named globals
+        # would otherwise read the wrong value silently).
+        deco_mod = types.ModuleType("_aot_deco_mod_for_scope_test")
+        deco_mod.SCALE = 100
+        exec(
+            "import functools\n"
+            "def deco(f):\n"
+            "    @functools.wraps(f)\n"
+            "    def wrapper(x):\n"
+            "        return f(x) * SCALE\n"
+            "    return wrapper\n",
+            deco_mod.__dict__,
+        )
+        sys.modules[deco_mod.__name__] = deco_mod
+        self.addCleanup(sys.modules.pop, deco_mod.__name__, None)
+        helper = deco_mod.deco(_aot_wraps_base)
+        self.assertEqual(helper.__module__, __name__)
+
+        def outer():
+            def fn(x):
+                return x + 1, helper
+
+            return fn
+
+        fn = outer()
+        x = torch.randn(3)
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager").aot_compile(
+            ((x,), {})
+        )
+        compiled.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(x)[1](1), (1 + 1) * 100)
 
     def test_aot_compile_basic_fn(self):
         def fn(x, y):
@@ -607,6 +883,360 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_reloads_a_runtime_env_helper_faithfully(self):
+        # A nested helper the compiled function closes over travels in the
+        # runtime env and is rebuilt from its code object at load. Its cells,
+        # __defaults__, __kwdefaults__ and __dict__ have to survive: an EMPTY
+        # cell failed the old pickler and __kwdefaults__ and __dict__ were
+        # dropped; the None cell is asserted so the empty/None distinction stays
+        # pinned; see FunctionPicklerBase. (The
+        # compiled function itself cannot have an empty cell: capture reads all
+        # of its cells up front.)
+        def outer():
+            scale = None
+
+            def helper(x, y=3, *, k=2):
+                if x is None:
+                    return unset
+                if scale is None:
+                    x = x + 1
+                return x * k + y
+
+            helper.tag = 2.0
+            if helper is None:
+                unset = 1  # never runs, so the cell helper closes over stays empty
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) * 2
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend=backend).aot_compile(
+            (inputs, {})
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            self.assertEqual(expected, compiled_fn(*inputs))
+        (cell,) = compiled_fn._artifacts.runtime_env.closure
+        loaded = cell.cell_contents
+        cells = dict(zip(loaded.__code__.co_freevars, loaded.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        self.assertIsNone(cells["scale"].cell_contents)
+        self.assertEqual(loaded.__kwdefaults__, {"k": 2})
+        self.assertEqual(loaded.__defaults__, (3,))
+        self.assertEqual(loaded.tag, 2.0)
+
+    def test_aot_compile_prunes_a_helpers_unpicklable_attribute(self):
+        # A helper's __dict__ travels with it, but an entry that cannot pickle
+        # is dropped per-entry rather than failing the whole save -- the runtime
+        # never forces it, so the save succeeds, the reload runs, and the
+        # picklable sibling entry survives.
+        def outer():
+            def helper(x):
+                return x * 2
+
+            helper.lock = threading.Lock()
+            helper.tag = 2.0
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            compiled_fn.save_compiled_function(self.path())
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("helper.lock (lock) from the artifact", line)
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            self.assertEqual(loaded(*inputs), expected)
+        (cell,) = loaded._artifacts.runtime_env.closure
+        self.assertEqual(cell.cell_contents.__dict__, {"tag": 2.0})
+
+    def test_aot_compile_top_level_annotations_ride_unpruned(self):
+        # Known limitation, pinned so a change to it is noticed: the compiled
+        # function's OWN annotations travel on CompileArtifacts.signature, which
+        # serialize() dumps whole, so a <locals> class there still fails the
+        # save; the nested-helper prune does not reach it.
+        def outer():
+            class Cfg:
+                pass
+
+            def fn(x: Cfg):
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((AttributeError, pickle.PicklingError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        self.assertIn("Cfg", str(cm.exception))
+
+    def test_aot_compile_reloads_a_helpers_annotations(self):
+        # The shipping path: an annotated helper reached through
+        # runtime_env.closure keeps the annotations that pickle and drops the
+        # <locals> class one.
+        def outer():
+            class Cfg:
+                pass
+
+            def helper(x: Cfg, scale: int = 2) -> int:
+                return x * scale
+
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            self.assertEqual(loaded(*inputs), expected)
+        (cell,) = loaded._artifacts.runtime_env.closure
+        self.assertEqual(
+            cell.cell_contents.__annotations__, {"scale": int, "return": int}
+        )
+
+    def test_save_guidance_when_a_closure_cell_cannot_pickle(self):
+        # A closure cell of the compiled function itself, which the artifact
+        # carries unpruned (the nested `unused` only exists to make `lock` a free
+        # variable of fn), holds a threading.Lock. save preserves the
+        # original error (callers/tests match on "cannot pickle") and appends
+        # guidance pointing at external_data, rather than reconstructing the
+        # exception (a TypeError subclass may take a non-message constructor).
+        def outer():
+            lock = threading.Lock()
+
+            def fn(x):
+                def unused():
+                    return lock
+
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        msg = str(cm.exception)
+        # A real newline, not the escaped one a tuple repr would show: this
+        # exception has a single argument, so str() renders the message itself.
+        self.assertRegex(msg, r"cannot pickle[^\n]*\nSome value reached by the")
+        self.assertIn("external_data", msg)
+
+    def test_save_guidance_when_a_locals_class_default_cannot_pickle(self):
+        # A <locals> class instance in __defaults__ rides unpruned and pickle
+        # rejects it. The C pickler AOTCompilePickler subclasses raises
+        # AttributeError "Can't get local object" (3.13 and earlier) or
+        # PicklingError "Can't pickle local object" (3.14+); serialize() catches
+        # both, and the offender's class name is asserted, which is independent
+        # of either version's wording. It gets the external_data guidance
+        # appended.
+        def outer():
+            class Cfg:
+                def __init__(self):
+                    self.v = 1
+
+            def fn(x, cfg=Cfg()):
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((AttributeError, pickle.PicklingError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        msg = str(cm.exception)
+        self.assertIn("Cfg", msg)  # the offender, not pickle's per-version wording
+        self.assertIn("not picklable", msg)
+        self.assertIn("external_data", msg)
+
+    def test_save_guidance_keeps_the_original_exception_object(self):
+        # The guidance is appended to the SAME exception, not to a rebuilt one:
+        # a TypeError subclass from a user __reduce__ may not take a message.
+        class WeirdTypeError(TypeError):
+            def __init__(self, code, detail):
+                super().__init__(f"weird {code}", detail)
+
+        class Unpicklable:
+            def __reduce__(self):
+                raise WeirdTypeError(7, "extra")
+
+        def outer():
+            value = Unpicklable()
+
+            def fn(x):
+                def unused():
+                    return value
+
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises(WeirdTypeError) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        self.assertIs(type(cm.exception), WeirdTypeError)
+        self.assertIn("weird 7", str(cm.exception))
+        self.assertIn("external_data", str(cm.exception))
+        self.assertEqual(cm.exception.args[1], "extra")
+        # The head argument, not repr(args), is the prefix, so the tail is not
+        # embedded twice (str() of a 2-arg exception is still a tuple repr).
+        self.assertEqual(str(cm.exception).count("extra"), 1)
+        self.assertIn("weird 7\\nSome value", str(cm.exception))
+
+    def test_save_guidance_names_unmarked_modules_recorded_before_the_failure(self):
+        # An unmarked nn.Module is recorded rather than raised; when the dump
+        # then fails on a lock, the guidance names the module too, so the user
+        # does not fix the lock only to hit the module error on the next save.
+        def outer():
+            mod = torch.nn.Linear(1, 1)
+            zz_lock = threading.Lock()  # freevars are sorted: the module dumps first
+
+            def fn(x):
+                def unused():
+                    return mod, zz_lock
+
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        freevars = fn.__code__.co_freevars
+        self.assertLess(freevars.index("mod"), freevars.index("zz_lock"))
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        msg = str(cm.exception)
+        self.assertIn("cannot pickle", msg)
+        self.assertIn("unmarked nn.Modules", msg)
+        self.assertIn("Linear", msg)
+        self.assertIn("external_data", msg)
+
+    def test_save_guidance_when_a_default_overflows_the_pickler(self):
+        # A value in an unpruned slot that recurses without bound in the C
+        # pickler raises RecursionError; it gets the same guidance and the
+        # handler itself does not overflow.
+        def outer():
+            def fn(x, cfg=BottomlessReduce()):
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises(RecursionError) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        self.assertIn("external_data", str(cm.exception))
+
+    def test_save_fails_loudly_on_a_helpers_unpicklable_kwdefault(self):
+        # Overlaps two pins that predate this commit -- the pickler-level
+        # test_pickler_does_not_prune_an_unpicklable_kwdefault, and the
+        # "cannot pickle" plus external_data pair in the closure-cell test above
+        # -- and adds the one axis neither covers: the unprunable slot belongs to
+        # a nested HELPER reached through the runtime env rather than to fn
+        # itself (the helper is a local so fn closes over it), and the save still
+        # fails loudly with guidance instead of dropping it.
+        def outer():
+            def helper(x, *, lock=threading.Lock()):
+                return x * 2
+
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) + 1
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        msg = str(cm.exception)
+        self.assertIn("cannot pickle", msg)
+        self.assertIn("external_data", msg)
+
+    def test_aot_compile_prunes_a_lock_behind_functools_wraps_wrapped(self):
+        # functools.wraps writes __wrapped__ into the wrapper's __dict__ and
+        # copies the wrappee's __dict__ too, so a helper that merely decorates
+        # another function drags the wrapped one (and anything hanging off it)
+        # into the artifact. The lock is pruned from both, __wrapped__ itself is
+        # kept, and the save succeeds. With __dict__ carried verbatim the save
+        # fails on the lock.
+        def build():
+            def base(x):
+                return x * 3
+
+            base.lock = threading.Lock()
+
+            @functools.wraps(base)
+            def helper(x):
+                return x * 2
+
+            return helper
+
+        helper = build()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        # One warning per dropped entry, from the real dump only (the probe
+        # picklers reach both functions too) and named by the code object, since
+        # wraps gave helper base's __qualname__ (co_qualname is 3.11+; 3.10 gets
+        # the bare co_name).
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            compiled_fn.save_compiled_function(self.path())
+        self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
+        self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
+        self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
+        if sys.version_info >= (3, 11):
+            self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(*inputs), expected)
+        (cell,) = loaded._artifacts.runtime_env.closure
+        rebuilt = cell.cell_contents
+        self.assertFalse(hasattr(rebuilt.__wrapped__, "lock"))
+        self.assertEqual(set(rebuilt.__dict__), {"__wrapped__"})
 
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
@@ -969,6 +1599,585 @@ from user code:
 
     def test_aot_compile_module(self):
         _run_in_subprocess(_subprocess_aot_compile_module)
+
+    def test_aot_compile_module_dispatches_on_global_guard(self):
+        # The default guard_filter_fn drops all global guards, so a caller who
+        # needs one honored has to opt in. Keeping it only works because
+        # AOTCompiledModel.deserialize supplies the traced function's globals.
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                self.assertEqual(model(x), expected[mode])
+
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded = torch.compile(
+            GlobalConfigModule(),
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        reloaded._load_aot_compiled_module(data)
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                self.assertEqual(reloaded(x), expected[mode])
+
+    def test_aot_compile_module_no_match_error(self):
+        # Two inputs, so the message has to account for both rather than
+        # reporting only the first one's guard failure. Vary dtype rather than
+        # shape: aot_compile_module does not forward `dynamic`, so a second
+        # shape goes automatic-dynamic and would subsume the unmatched input.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float32),),
+                    kwargs={},
+                    contexts=[],
+                ),
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float64),),
+                    kwargs={},
+                    contexts=[],
+                ),
+            ]
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3, dtype=torch.float16))
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        self.assertIn("Tried 2 compiled input(s)", message)
+        self.assertIn("[0]", message)
+        self.assertIn("[1]", message)
+        # One line per input, not a multi-line GuardDebugInfo repr per input.
+        self.assertEqual(len(message.splitlines()), 4)
+        self.assertIn("Add a ModelInput", message)
+
+    def test_aot_compile_module_wrong_arity_raises_type_error(self):
+        # A call the signature cannot bind is a caller error, not a guard miss:
+        # it surfaces as the TypeError the plain module would raise, not as a
+        # no-match report telling the user to add a ModelInput.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        x = torch.randn(3, 3)
+        with self.assertRaisesRegex(TypeError, "too many positional arguments"):
+            model(x, x)
+        with self.assertRaisesRegex(TypeError, "missing a required argument: 'x'"):
+            model()
+
+    def test_no_match_message_survives_a_raising_guard(self):
+        # __call__ has already established that nothing matched; re-evaluating
+        # the guards to say WHY must not replace that answer with a secondary
+        # failure from one entry, which hides both the entry that raised and
+        # every other entry's reason.
+        class RaisingGuardManager:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def check(self, f_locals):
+                raise KeyError("G['SOME_GLOBAL']")
+
+            def check_verbose(self, f_locals):
+                raise KeyError("G['SOME_GLOBAL']")
+
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float32),),
+                    kwargs={},
+                    contexts=[],
+                ),
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float64),),
+                    kwargs={},
+                    contexts=[],
+                ),
+            ]
+        )
+        results = model.forward.compiled_results
+        results[0]._artifacts.guard_manager = RaisingGuardManager(
+            results[0]._artifacts.guard_manager
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3, dtype=torch.float16))
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        self.assertIn("KeyError", message)
+        self.assertIn("SOME_GLOBAL", message)
+        # The entry that raised must not swallow the one that can explain itself.
+        self.assertIn("dtype mismatch", message)
+        self.assertIn("load with an f_globals", message)
+        self.assertEqual(len(message.splitlines()), 4)
+
+    def test_aot_compile_module_disable_guard_check(self):
+        # disable_guard_check() is the escape hatch for an artifact whose guards
+        # fail on the serving machine; module dispatch has to honour it too, or
+        # a module artifact has no opt-out while a function artifact does.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        # requires_grad is guarded but does not change what the graph computes.
+        x = torch.randn(3, 3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
+            model(x)
+        model.forward.compiled_results[0].disable_guard_check()
+        self.assertEqual(model(x), x * 2)
+
+    def test_disable_guard_check_does_not_shadow_a_matching_result(self):
+        # An opted-out result accepts anything, so it has to be the last resort
+        # rather than a candidate in the ordinary scan: consulting it before
+        # every real guard check has been tried serves the first artifact for a
+        # call the second one was compiled for. Same shapes, same dtypes, no
+        # error, different numbers.
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        model.forward.compiled_results[0].disable_guard_check()
+        with _set_pooling("mean"):
+            self.assertEqual(model(x), expected["mean"])
+
+    def test_all_results_disabled_still_dispatches_by_guard(self):
+        # Disabling the check on EVERY result must still dispatch by guard, not
+        # fall through to compiled_results[0]: guard_check() evaluates guards
+        # regardless of the flag, so the scan can still pick the right graph,
+        # and only a genuine no-match falls back to an opted-out result.
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        for result in model.forward.compiled_results:
+            result.disable_guard_check()
+        with _set_pooling("mean"):
+            self.assertEqual(model(x), expected["mean"])
+
+    def test_aot_compile_module_scope_resolves_through_forward_hook(self):
+        # A registered forward hook makes get_traced_fn(model) return
+        # Module._wrapped_call_impl, whose globals are torch/nn/modules/module.py.
+        # The guard scope has to come from what was actually traced, model.forward.
+        #
+        # The hook is deliberately the identity: aot_compile_module traces
+        # model.forward directly and never runs hooks, so a hook with an effect
+        # would simply be dropped from the compiled result. This pins the guard
+        # SCOPE resolution on a hooked module, not hook support.
+        mod = GlobalConfigModule()
+        mod.register_forward_hook(lambda m, i, o: o)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling(m)])
+                for m in ("sum", "mean")
+            ]
+        )
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded_mod = GlobalConfigModule()
+        reloaded_mod.register_forward_hook(lambda m, i, o: o)
+        reloaded = torch.compile(
+            reloaded_mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        reloaded._load_aot_compiled_module(data)
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                self.assertEqual(reloaded(x), expected[mode])
+
+    def test_aot_compile_module_reload_is_hermetic(self):
+        # Pins, deliberately, that a module artifact's bytecode reads the
+        # globals serialized at capture: supplying a scope for guards must not
+        # rewire what the compiled bytecode reads. The consequence is a known
+        # limitation, not a goal: a same-shape rebind of a global tensor before
+        # the load passes the guards (they read the live scope) and the graph
+        # still serves the capture-time value. The rebind has to happen before
+        # the load so the test can tell the two scopes apart.
+        global AOT_HERMETIC_WEIGHT
+        model = torch.compile(HermeticModule(), fullgraph=True, backend="inductor")
+        x = torch.randn(3, 3)
+        expected = model._orig_mod(x)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = AOT_HERMETIC_WEIGHT
+        try:
+            AOT_HERMETIC_WEIGHT = AOT_HERMETIC_WEIGHT * 2
+            reloaded = torch.compile(
+                HermeticModule(), fullgraph=True, backend="inductor"
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), expected)
+        finally:
+            AOT_HERMETIC_WEIGHT = saved
+
+    def test_aot_compile_module_guards_track_rebound_global(self):
+        # The other half of hermeticity. Guards resolve against the loading
+        # process's scope dict itself, so a global rebound after the artifact is
+        # loaded redirects dispatch. A copy taken at load time would go on
+        # serving whichever graph matched then, with no error and a wrong answer.
+        global AOT_POOL_MODE
+        mod = GlobalRebindModule()
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pool_mode(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pool_mode(m)])
+                for m in ("sum", "mean")
+            ]
+        )
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = AOT_POOL_MODE
+        try:
+            AOT_POOL_MODE = "sum"
+            reloaded = torch.compile(
+                GlobalRebindModule(),
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), expected["sum"])
+            AOT_POOL_MODE = "mean"
+            self.assertEqual(reloaded(x), expected["mean"])
+        finally:
+            AOT_POOL_MODE = saved
+
+    def test_aot_compile_fn_guards_track_rebound_global(self):
+        # Function artifacts get their guard scope from load_compiled_function's
+        # f_globals. Same contract as the module test above: the live dict, not
+        # a copy, so a rebind after load changes the guard's answer.
+        global AOT_POOL_MODE
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pool_mode(mode):
+                expected[mode] = global_rebind_fn(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        saved = AOT_POOL_MODE
+        try:
+            AOT_POOL_MODE = "sum"
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f, f_globals=globals())
+            self.assertEqual(loaded(x), expected["sum"])
+            AOT_POOL_MODE = "mean"
+            with self.assertRaisesRegex(RuntimeError, "AOT_POOL_MODE"):
+                loaded(x)
+        finally:
+            AOT_POOL_MODE = saved
+
+    def test_aot_compile_fn_missing_global_hint_names_f_globals(self):
+        # Loaded without f_globals, a function artifact's guard scope is the
+        # live module dict rebuilt from the serialized bytecode; when a guarded
+        # global is then missing, the failure says how to supply it.
+        x = torch.randn(4, 8)
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        saved = globals().pop("AOT_POOL_MODE")
+        try:
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            with self.assertRaisesRegex(RuntimeError, "an f_globals carrying it"):
+                loaded(x)
+        finally:
+            globals()["AOT_POOL_MODE"] = saved
+
+    def test_aot_compile_module_absent_global_fails_guard(self):
+        # A guarded global the loading process does not have has to fail the
+        # guard. Falling back to the serialized scope would make the guard a
+        # no-op checked against capture-time state, which is the silent failure
+        # mode -- the loud one is recoverable on the serving machine.
+        mod = AbsentGlobalModule()
+        x = torch.randn(3, 3)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = globals().pop("AOT_ABSENT_WEIGHT")
+        try:
+            reloaded = torch.compile(
+                AbsentGlobalModule(),
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            with self.assertRaises(RuntimeError) as ctx:
+                reloaded(x)
+            self.assertIn("No AOT compiled graph matched", str(ctx.exception))
+            self.assertIn("AOT_ABSENT_WEIGHT", str(ctx.exception))
+            self.assertIn("load with an f_globals", str(ctx.exception))
+        finally:
+            globals()["AOT_ABSENT_WEIGHT"] = saved
+
+    def test_aot_compile_module_import_alias_guard_survives_reload(self):
+        # Dynamo mints __import_* aliases into the TRACING process's globals and
+        # roots guards at them. A process that only loads never traced, so the
+        # live module dict this artifact guards against has none of them -- and
+        # every call died on KeyError on G['__import_torch_dot_nn_dot_modules_
+        # dot_module'] before the aliases were seeded. The existing scope tests
+        # cannot see it: the capture in the same process already leaked those
+        # names into this module's globals, so they resolve. Pop them to get
+        # what a fresh process sees.
+        mod = ParentWithChildModule()
+        x = torch.randn(4, 4)
+        expected = mod(x)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        g = globals()
+        aliases = {k: g.pop(k) for k in [k for k in g if k.startswith("__import_")]}
+        self.assertTrue(aliases, "capture leaked no aliases; the test cannot bite")
+        preexisting = frozenset(g)
+        try:
+            fresh = ParentWithChildModule()
+            fresh.load_state_dict(mod.state_dict())
+            reloaded = torch.compile(
+                fresh,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), expected)
+        finally:
+            for k in [k for k in g if k not in preexisting]:
+                del g[k]
+            g.update(aliases)
+
+    def test_aot_compile_module_import_alias_guard_loads_across_processes(self):
+        # The real deployment shape: the artifact is captured by a process that
+        # never runs here, so the __import_* aliases its guards are rooted at
+        # have to be seeded into this module's globals by the load itself.
+        path = self.path()
+        _run_in_subprocess(
+            functools.partial(_subprocess_save_child_module_artifact, path)
+        )
+        mod = ParentWithChildModule()
+        mod.load_state_dict(torch.load(path + ".state_dict"))
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        # A sibling in-process capture may have already leaked __import_*/
+        # __builtins_dict__ aliases into this module's globals; pop them so the
+        # load genuinely has to seed them (otherwise the assertions below pass
+        # trivially against a pre-leaked name). Restore the originals and strip
+        # whatever the load adds in cleanup so sibling tests do not inherit them.
+        g = globals()
+        leaked = {
+            k: g.pop(k)
+            for k in [k for k in g if k.startswith(("__import_", "__builtins_dict__"))]
+        }
+        preexisting = frozenset(g)
+
+        def _restore_globals() -> None:
+            for k in [k for k in g if k not in preexisting]:
+                del g[k]
+            g.update(leaked)
+
+        self.addCleanup(_restore_globals)
+        self.assertNotIn("__import_torch_dot_nn_dot_modules_dot_module", g)
+        with open(path, "rb") as f:
+            model._load_aot_compiled_module(f.read())
+        (result,) = model.forward.compiled_results
+        import_sources = result._artifacts.runtime_env.import_sources
+        self.assertIn("__import_torch_dot_nn_dot_modules_dot_module", import_sources)
+        for alias, module_name in import_sources.items():
+            self.assertIs(globals()[alias], importlib.import_module(module_name))
+        guards_state = load_guards_state(result._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertTrue(builtins_key)
+        self.assertIs(globals()[builtins_key], get_builtins_dict(globals()))
+        x = torch.randn(4, 4)
+        self.assertEqual(model(x), mod(x))
+
+    def test_load_then_compile_survives_baked_in_global_collision(self):
+        # output_graph.install_global's retry loop: a fresh process loads a
+        # module artifact (seeding __builtins_dict___0), then a later compile in
+        # that process regenerates index 0 (unique_id is still behind) and
+        # collides. Only a fresh process reproduces it -- once any in-process
+        # compile has run, unique_id is ahead of the baked-in index and the
+        # names never clash, which is why nothing in-suite covers the retry.
+        path = self.path()
+        _run_in_subprocess(
+            functools.partial(_subprocess_save_child_module_artifact, path)
+        )
+        _run_in_subprocess(functools.partial(_subprocess_load_then_compile, path))
+
+    def test_load_seeds_exactly_the_recorded_import_aliases(self):
+        # Loading may add only the aliases the artifact recorded, and must not
+        # overwrite a name the loading process already has.
+        mod = ParentWithChildModule()
+        x = torch.randn(4, 4)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        (result,) = model.forward.compiled_results
+        import_sources = result._artifacts.runtime_env.import_sources
+        self.assertTrue(import_sources)
+        serialized_guards = result._artifacts.guards_state
+        torch._dynamo.reset()
+
+        scope = {
+            k: v
+            for k, v in globals().items()
+            if not k.startswith(("__import_", "__builtins_dict__"))
+        }
+        kept_alias = next(iter(import_sources))
+        sentinel = object()
+        scope[kept_alias] = sentinel
+        before = set(scope)
+        (serialized,) = pickle.loads(data)
+        AOTCompiledFunction.deserialize(serialized, guard_globals=scope)
+        builtins_key = load_guards_state(
+            serialized_guards
+        ).output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertEqual(
+            set(scope) - before, (set(import_sources) - {kept_alias}) | {builtins_key}
+        )
+        self.assertIs(scope[kept_alias], sentinel)
+        for alias, module_name in import_sources.items():
+            if alias != kept_alias:
+                self.assertIs(scope[alias], importlib.import_module(module_name))
+
+    def test_aot_compile_module_partial_forward_falls_back_loudly(self):
+        # A forward that is neither a function nor a bound method has no live
+        # scope to resolve guards against. The artifact still loads, against the
+        # reconstructed scope, but that has to be a warning: it is the one case
+        # where a guarded global does not track the loading process.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+
+        mod = ScaleModule()
+        mod.forward = functools.partial(ScaleModule.forward, mod)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            reloaded = AOTCompiledModel.deserialize(mod, data)
+        (line,) = logs.output
+        self.assertIn("ScaleModule.forward is functools.partial(", line)
+        self.assertIn("no live guard scope", line)
+        self.assertEqual(reloaded(x), x * 2)
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
@@ -1491,6 +2700,254 @@ from user code:
         self.assertEqual(expected[0], actual[0])
         self.assertEqual(expected[1], actual[1])
 
+    def test_check_compatibility_compares_artifact_against_current_machine(self):
+        # CompileArtifacts.check_compatibility must invoke the CACHED
+        # SystemInfo's method with the current machine as `other`, the way
+        # _DynamoCacheEntry.check_versions does. Reversed, the "artifact
+        # predates cpu_codegen_target" skip is evaluated against the current
+        # machine -- never None -- so every old artifact is rejected, and every
+        # mismatch message reports the two sides the wrong way round.
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_type, "cpu")
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
+
+        # An eager artifact holds no generated code, so there is no baked vector
+        # width to protect and the comparison must not run at all -- otherwise
+        # capture-here/serve-there, which is the whole point of the feature,
+        # rejects an artifact over a target it never used. Arm the capture-time
+        # flag so the exemption pinned here is the backend NAME's.
+        self.assertEqual(artifacts.backend_name, "eager")
+        self.assertFalse(artifacts.requires_native_backend_compatibility)
+        artifacts.requires_native_backend_compatibility = True
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        artifacts.check_compatibility()
+
+        # The rest is about the receiver order, which only a native backend
+        # (name and capture-time flag) reaches.
+        artifacts.backend_name = "inductor"
+        current_target = _current_cpu_codegen_target()
+        if current_target is None:
+            # No usable C++ compiler, so there is no current target to compare
+            # against and the skew arms below have nothing to assert. Skipping
+            # rather than failing is the point of the lazy probe.
+            self.skipTest("no CPU codegen target on this host")
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=None
+        )
+        artifacts.check_compatibility()
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            artifacts.check_compatibility()
+        message = str(ctx.exception)
+        self.assertIn(f"cached={stale}", message)
+        self.assertIn(f"current={current_target}", message)
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=None, torch_version="0.0.0-fake"
+        )
+        with self.assertRaisesRegex(RuntimeError, "0.0.0-fake"):
+            artifacts.check_compatibility()
+
+    def test_aot_compile_backend_declaring_no_native_code_skips_the_isa_gate(self):
+        # A user backend that emits no native code declares emits_native_code =
+        # False: the artifact records no CPU codegen target and loads on a host
+        # whose ISA differs (or that has no toolchain at all), while a backend
+        # without the declaration is fingerprinted like inductor.
+        from torch._dynamo.aot_compile_types import GraphModuleSerializableCallable
+
+        def python_backend(gm, example_inputs):
+            return GraphModuleSerializableCallable(gm)
+
+        python_backend.emits_native_code = False
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        target = ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None)
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target", return_value=target
+        ):
+            compiled = torch.compile(
+                fn, fullgraph=True, backend=python_backend
+            ).aot_compile(((x,), {}))
+        artifacts = compiled._artifacts
+        self.assertFalse(artifacts.requires_native_backend_compatibility)
+        self.assertIsNone(artifacts.system_info.cpu_codegen_target)
+        # A host that resolves no codegen target at all still loads it, from
+        # the in-memory artifact and from disk alike.
+        compiled.save_compiled_function(self.path())
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target", return_value=None
+        ):
+            artifacts.check_compatibility()
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(loaded(x), fn(x))
+
+        def undeclared_backend(gm, example_inputs):
+            return GraphModuleSerializableCallable(gm)
+
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target", return_value=target
+        ):
+            native = torch.compile(
+                fn, fullgraph=True, backend=undeclared_backend
+            ).aot_compile(((x,), {}))
+        self.assertTrue(native._artifacts.requires_native_backend_compatibility)
+        self.assertEqual(native._artifacts.system_info.cpu_codegen_target, target)
+
+    def test_check_compatibility_triton_and_gpu_exempt_off_artifact(self):
+        # The Triton/GPU checks must exempt off the ARTIFACT (self), not the
+        # host (other). An artifact built with Triton must be rejected on a
+        # Triton-less host -- it would otherwise fail later at kernel load --
+        # while an artifact built without Triton bakes in no Triton code and
+        # loads anywhere. Same for gpu_name: only an artifact that recorded a
+        # GPU pins the model.
+        def make(triton, gpu):
+            return SystemInfo(
+                python_version=platform.python_version(),
+                torch_version=torch.__version__,
+                toolkit_version="12.0",
+                triton_version=triton,
+                gpu_name=gpu,
+            )
+
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "Triton version"):
+                make((3, 5), "A100").check_compatibility(make((0, 0), "A100"), "cuda")
+            make((0, 0), "A100").check_compatibility(make((3, 5), "A100"), "cuda")
+            with self.assertRaisesRegex(RuntimeError, "different GPU"):
+                make((3, 5), "A100").check_compatibility(make((3, 5), "H100"), "cuda")
+            make((3, 5), None).check_compatibility(make((3, 5), "H100"), "cuda")
+            # check_codegen=False skips the toolkit/Triton/GPU-model checks (they
+            # describe generated code) but not device existence.
+            make((3, 5), "A100").check_compatibility(
+                make((3, 5), "H100"), "cuda", check_codegen=False
+            )
+        with patch.object(torch.cuda, "is_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "cuda is not available"):
+                make((0, 0), None).check_compatibility(
+                    make((0, 0), None), "cuda", check_codegen=False
+                )
+
+    def test_inductor_cpu_capture_records_cpu_codegen_target(self):
+        # Pins the recording side: a regression that records None silently
+        # disarms check_compatibility via its predates-the-field skip.
+        if _current_cpu_codegen_target() is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_types, frozenset(("cpu",)))
+        self.assertIsNotNone(artifacts.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            artifacts.check_compatibility()
+
+    def test_graph_device_types_ignores_placeholders_without_a_device(self):
+        # Under dynamic shapes the leading placeholder is a SymInt, which has no
+        # device. Reading only the first meta value reported "cpu" for this
+        # all-accelerator graph, which armed the toolchain probe and a hard
+        # load-time refusal over CPU code the artifact does not hold.
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.empty(2, device="cuda")
+            s0 = shape_env.create_unbacked_symint()
+        graph = torch.fx.Graph()
+        graph.placeholder("s0").meta["val"] = s0
+        x_node = graph.placeholder("x")
+        x_node.meta["val"] = x
+        graph.call_function(torch.ops.aten.add.Tensor, (x_node, 1)).meta["val"] = x
+        self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
+
+        graph = torch.fx.Graph()
+        graph.placeholder("n").meta["val"] = 4
+        self.assertEqual(_graph_device_types(graph), frozenset())
+        self.assertEqual(_graph_device_types(None), frozenset())
+
+    def test_graph_device_types_ignores_autocast_device_strings(self):
+        # An autocast device type is a plain string positional arg of
+        # _enter_autocast, not a device position, so it must not inject a
+        # device no tensor lives on. torch.autocast("cuda", enabled=False) in
+        # an otherwise CPU-only graph -- the recipe in autocast_mode's own
+        # docstring -- would otherwise make the artifact refuse to load on the
+        # very host that saved it. .to()/device= are still read.
+        with FakeTensorMode():
+            cpu = torch.empty(2)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = cpu
+        graph.call_function(torch.amp._enter_autocast, ("cuda", None, True, None))
+        graph.call_function(torch.ops.aten.add.Tensor, (x, 1)).meta["val"] = cpu
+        self.assertEqual(_graph_device_types(graph), frozenset(("cpu",)))
+
+        # A checkpointed accelerator module enters torch.amp.autocast("cpu")
+        # unconditionally; that "cpu" string must not arm the CPU codegen gate.
+        with FakeTensorMode():
+            cuda_meta = torch.empty(2, device="cuda")
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = cuda_meta
+        graph.call_function(torch.amp._enter_autocast, ("cpu", None, True, None))
+        self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
+
+        # Real device positions are still read: a .to() device arg and a
+        # device= kwarg both count.
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method("to", (x, "mps"))
+        graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": "cuda"})
+        self.assertEqual(_graph_device_types(graph), frozenset(("mps", "cuda")))
+
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_mixed_device_graph_arms_cpu_codegen_target(self):
+        # A mixed cpu+accelerator graph collapses device_type to the
+        # accelerator, but inductor still emits native CPU kernels for the cpu
+        # half, so the codegen target must be recorded and compared anyway.
+        if _current_cpu_codegen_target() is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x, y):
+            return x + 1, y + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor").aot_compile(
+            ((torch.randn(4), torch.randn(4, device=GPU_TYPE)), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_type, GPU_TYPE)
+        self.assertIn("cpu", artifacts.device_types)
+        self.assertIsNotNone(artifacts.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            artifacts.check_compatibility()
+
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_aot_compile(self):
         """Test cross-compilation using fake tensors and backward correctness"""
@@ -1808,6 +3265,644 @@ from user code:
                     )
         finally:
             c10d.destroy_process_group()
+
+
+class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
+    def test_pickler_carries_a_docstring(self):
+        # A native docstring lives in the code object, one assigned after
+        # definition does not; both travel in the pickle state. The old rebuild
+        # (types.FunctionType over the code object) kept the native one and
+        # dropped an assigned one; on this base a doc=None would drop both,
+        # since _apply_function_state assigns __doc__ unconditionally.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                """native"""
+                return x
+
+            def assigned(x):
+                return x
+
+            assigned.__doc__ = "assigned by a decorator"
+            return inner, assigned
+
+        fns = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fns)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(
+            [f.__doc__ for f in out], ["native", "assigned by a decorator"]
+        )
+
+    def test_pickler_prunes_an_unpicklable_docstring(self):
+        # Nothing on the load path forces __doc__, so an unpicklable one is
+        # dropped to None with a warning rather than failing the dump; carried
+        # verbatim the dump fails on the lock.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                """native docstring, so the pruned None has to override it"""
+                return inner if x is None else x  # closes over itself: reduced twice
+
+            inner.__doc__ = threading.Lock()
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("inner.__doc__ (lock) from the artifact", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertIsNone(out.__doc__)
+        self.assertEqual(out(5), 5)
+
+    def test_pickler_keeps_an_external_modules_method_by_reference(self):
+        # The receiver is external data, so it is the live object at load and
+        # pickle's default getattr(receiver, name) resolves the method on it.
+        # The shared bound-method reducer would instead carry __func__ (an
+        # nn.Module defines __getattr__) and rebuild it by value, which for a
+        # local subclass fails on the __class__ cell of its super() call.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def make():
+            class LocalMod(torch.nn.Linear):
+                def forward(self, x):
+                    return super().forward(x) + 1
+
+            return LocalMod(2, 2)
+
+        mod = make()
+        buf = io.BytesIO()
+        AOTCompilePickler({"mod": mod}, buf).dump(mod.forward)
+        out = AOTCompileUnpickler({"mod": mod}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.__func__, type(mod).forward)
+        self.assertIs(out.__self__, mod)
+
+    def test_pickler_does_not_prune_an_unpicklable_kwdefault(self):
+        # Unlike __doc__/annotations, __kwdefaults__ is never pruned: a function
+        # cannot be called without it, so an unpicklable kwdefault fails loudly.
+        from torch._dynamo.aot_compile import AOTCompilePickler
+
+        def outer():
+            def inner(*, k=threading.Lock()):
+                return k
+
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertRaisesRegex((TypeError, pickle.PicklingError), "cannot pickle"):
+            AOTCompilePickler({}, buf).dump(fn)
+
+    def test_pickler_breaks_a_dict_cycle_between_nested_functions(self):
+        # Nested functions whose __dict__ entries point at themselves and each
+        # other re-enter _dumps_cleanly mid-probe. Without the in-flight
+        # short-circuit the probe recurses until RecursionError, which it reads
+        # as "unpicklable", and the pair loses picklable entries (here `g` and
+        # `f.g` vanish); with it the cycle terminates, only the lock is pruned,
+        # and the rebuilt pair still refers to itself.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def f(x):
+                return x + 1
+
+            def g(x):
+                return x + 2
+
+            def top(x):
+                return x
+
+            f.f, f.g, g.g, g.f, g.lock = f, g, g, f, threading.Lock()
+            top.f, top.g = f, g
+            return top
+
+        top = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(top)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.g.f, out.f)
+        self.assertIs(out.f.g, out.g)
+        self.assertIs(out.f.f, out.f)
+        self.assertFalse(hasattr(out.g, "lock"))
+        self.assertEqual((out.f(1), out.g(1)), (2, 3))
+
+    def test_pickler_prunes_an_unmarked_module_from_a_nested_functions_dict(self):
+        # persistent_id records an nn.Module rather than raising, so a Module
+        # reached through a nested function's __dict__ would dump here and then
+        # poison serialize(); _dumps_cleanly prunes it instead -- unless the user
+        # marked it as external data, in which case it is kept by reference.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        mod = torch.nn.Linear(1, 1)
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.mod = mod
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        pickler = AOTCompilePickler({}, buf)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            pickler.dump(fn)
+        self.assertEqual(pickler.errors, {})
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("not marked as external data (Linear)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "mod"))
+        buf = io.BytesIO()
+        AOTCompilePickler({"mod": mod}, buf).dump(fn)
+        out = AOTCompileUnpickler({"mod": mod}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.mod, mod)
+
+    def test_pickler_rebuilds_a_nested_function_faithfully(self):
+        # The old rebuild passed __qualname__ where FunctionType wants __name__,
+        # raised on an EMPTY cell, and dropped __kwdefaults__ (a reloaded
+        # `def f(x, *, k=2)` failed with TypeError when called without k).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            scale = None
+
+            def inner(*, k=1):
+                return unset, scale
+
+            def scaled(x, *, k=2):
+                return x * k
+
+            inner.__name__ = "renamed"
+            inner.__qualname__ = "reassigned.qualname"  # differs from co_qualname
+            if inner is None:
+                unset = 1  # never runs, so the cell inner closes over stays empty
+            return inner, scaled
+
+        fn, scaled = outer()
+        cells = dict(zip(fn.__code__.co_freevars, fn.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump((fn, scaled))
+        out, out_scaled = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__name__, "renamed")
+        self.assertEqual(out.__qualname__, "reassigned.qualname")
+        self.assertEqual(out.__kwdefaults__, {"k": 1})
+        self.assertEqual(out_scaled(3), 6)
+        cells = dict(zip(out.__code__.co_freevars, out.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        self.assertIsNone(cells["scale"].cell_contents)
+
+    def test_pickler_carries_a_dict_entry(self):
+        # A helper's __dict__ travels with it; a rebuild from the code object
+        # alone starts with an empty one.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                return x
+
+            inner.tag = 2.0
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        dumps = [0]
+        real_dump = AOTCompilePickler.dump
+
+        def counting_dump(self, obj):
+            dumps[0] += 1
+            return real_dump(self, obj)
+
+        with patch.object(AOTCompilePickler, "dump", counting_dump):
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertEqual(dumps[0], 1)  # a literal entry is not probed
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.tag, 2.0)
+
+    def test_pickler_warns_once_for_a_function_reduced_twice(self):
+        # A function that closes over itself is reduced twice (the closure is a
+        # reduce ARGUMENT, so the second pass finds it not yet memoized); the
+        # real dump's per-function memo keeps the drop to one probe and one
+        # warning.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                return inner if x is None else x
+
+            inner.lock = threading.Lock()
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn(
+            "inner.lock (lock) from the artifact: it does not pickle (TypeError); pass it in external_data to keep it (function defined at",
+            line,
+        )
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "lock"))
+        self.assertEqual(out(5), 5)
+
+    def test_pickler_survives_a_reduce_that_writes_back_an_attribute(self):
+        # A probe runs user __reduce__ code; one that writes onto the function's
+        # __dict__ while it is being walked must not raise "dictionary changed
+        # size during iteration" out of the dump. The walk is over a snapshot,
+        # so the written entry is not carried either.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                return x
+
+            inner.hostile = WritesBackOnReduce(inner)
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING"):
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertEqual(fn.added, 1)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__dict__, {})
+        self.assertEqual(out(5), 5)
+
+    def test_pickler_never_reuses_a_probes_attribute_set(self):
+        # An attribute set computed inside a probe may be over-pruned, so only
+        # the real dump's sets are memoized. a is unpicklable through a
+        # kwdefault; probing a walks b, whose probe of c fails because c reaches
+        # the in-flight a, so b's PROBE set is empty. The real dump computes b's
+        # set afresh, after a is final: c re-probes clean (it drops only a), so
+        # b keeps c. Reusing the probe's set would lose b.c silently.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def a(*, k=threading.Lock()):
+                return k
+
+            def b():
+                return "b!"
+
+            def c():
+                return "c!"
+
+            a.b, b.c, c.a = b, c, a
+
+            def top(x):
+                return x
+
+            top.a, top.b = a, b  # a first: its probe is what over-prunes b
+            return top
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING"):
+            AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "a"))
+        self.assertEqual(out.b.c(), "c!")
+        self.assertFalse(hasattr(out.b.c, "a"))
+
+    def test_pickler_prunes_an_entry_that_overflows_the_probe(self):
+        # A recursion overflow inside the probe counts as unpicklable: the entry
+        # is dropped with a warning and the save succeeds. The guard pickler
+        # turns the same condition into a PackageError, since it has a bypass to
+        # fall back to; this pickler does not, so the divergence is deliberate.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.deep = BottomlessReduce()
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("helper.deep (BottomlessReduce)", line)
+        self.assertIn("it does not pickle (RecursionError)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "deep"))
+        self.assertEqual(out(5), 5)
+
+    def test_pickler_names_the_modules_inside_a_dropped_container(self):
+        # A picklable container holding unmarked Modules is dropped whole; the
+        # warning names the container's type and every Module inside it.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.mods = [torch.nn.Linear(1, 1), torch.nn.ReLU()]
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("helper.mods (list)", line)
+        self.assertIn("not marked as external data (Linear, ReLU)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "mods"))
+
+    def test_pickler_resolves_and_keeps_a_serializable_annotation(self):
+        # A <locals> function's annotations are resolved to real values and
+        # kept verbatim when they serialize, so the reloaded function carries
+        # the same annotations it was captured with.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x: list[int]) -> int:
+                return len(x)
+
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__annotations__, {"x": list[int], "return": int})
+        self.assertEqual(out([1, 2, 3]), 3)
+
+    def test_pickler_drops_an_unpicklable_annotation_and_keeps_the_rest(self):
+        # A <locals> class resolves fine on every version but pickle cannot
+        # reference it, so annotating with one used to fail the whole dump. It
+        # is now dropped per value, and a serializable sibling annotation on the
+        # same function survives, so the function still reloads and runs.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            class Cfg:
+                pass
+
+            def inner(x: Cfg, y: int) -> int:
+                return y
+
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("inner.__annotations__['x'] (type)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__annotations__, {"y": int, "return": int})
+        self.assertEqual(out(object(), 5), 5)
+
+    def test_pickler_survives_a_reduce_that_writes_back_an_annotation(self):
+        # A probe runs user __reduce__ code; one that writes onto the function's
+        # __annotations__ while they are being walked must not raise
+        # "dictionary changed size during iteration" out of the dump. The hazard
+        # is pre-3.14 only (the 3.14 read returns a copy); there this checks no
+        # more than that the write-back is harmless.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            class WritesBack:
+                def __reduce__(self):
+                    inner.__annotations__["added"] = int
+                    raise TypeError("cannot pickle WritesBack")
+
+            def inner(x: "WritesBack", y: int) -> int:
+                return y
+
+            inner.__annotations__["x"] = WritesBack()
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING"):
+            AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__annotations__, {"y": int, "return": int})
+
+    def test_pickler_keeps_picklable_type_params(self):
+        # __type_params__ is carried when its elements pickle: a module-level
+        # TypeVar pickles by reference, so a helper handed one reloads with the
+        # same object (a rebuild from the code object alone gives ()). Ungated:
+        # below 3.12 the slot lives in __dict__ and the reducer's write has to
+        # win over the carried dict; on 3.12+ it must not leak into __dict__.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                return x
+
+            inner.__type_params__ = (AOT_TEST_TYPEVAR,)
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.__type_params__[0], AOT_TEST_TYPEVAR)
+        if sys.version_info >= (3, 12):
+            self.assertNotIn("__type_params__", out.__dict__)
+        self.assertEqual(out(5), 5)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "PEP 695 type params are 3.12+")
+    def test_pickler_keeps_pep695_type_params_given_as_external_data(self):
+        # The realistic kept case: a PEP 695 TypeVar never pickles on its own,
+        # but handed over as external data it is written by reference (the
+        # probe pickler shares external_data), so the generic reloads with its
+        # type params and annotations intact.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        fn = _aot_pep695_generic()
+        (tv,) = fn.__type_params__
+        buf = io.BytesIO()
+        AOTCompilePickler({"T": tv}, buf).dump(fn)
+        out = AOTCompileUnpickler({"T": tv}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.__type_params__[0], tv)
+        self.assertEqual(out.__annotations__, {"x": tv, "return": tv})
+        self.assertEqual(out(5), 5)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "PEP 695 type params are 3.12+")
+    def test_pickler_drops_unpicklable_type_params(self):
+        # A PEP 695 function-scoped TypeVar pickles by name as typing.T and
+        # fails pickle's identity check against it, so carrying the tuple
+        # verbatim would abort the dump. The whole __type_params__ tuple is
+        # dropped instead and the function still reloads and runs. Defined via
+        # exec so this file still parses below 3.12.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        fn = _aot_pep695_generic()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "__type_params__" in l]
+        self.assertIn("inner.__type_params__ (TypeVar)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__type_params__, ())
+        self.assertEqual(out(5), 5)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "PEP 695 type params are 3.12+")
+    def test_pickler_warns_once_for_a_generic_reduced_twice(self):
+        # The type_params memo, like the one for the attributes: a generic that
+        # closes over itself is reduced twice, and the drop has to be probed and
+        # warned once. The self-reference is the only closure cell here -- PEP
+        # 695 compiles `T` into the hidden type-params scope, so it is not a
+        # freevar of the body -- which is what a `T` the body itself reads would
+        # change (a cell is never pruned, so that shape still fails the dump).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        fn = _aot_pep695_generic(body="return inner if x is None else x")
+        (cell,) = fn.__closure__
+        self.assertIs(cell.cell_contents, fn)
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "__type_params__" in l]
+        self.assertIn("inner.__type_params__ (TypeVar)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__type_params__, ())
+        self.assertEqual(out(5), 5)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 14), "PEP 649 FORWARDREF annotations are 3.14+"
+    )
+    def test_pickler_drops_an_unresolvable_nested_annotation(self):
+        # On 3.14 a TYPE_CHECKING-only name reads back as a ForwardRef even when
+        # nested (list[Bar] -> list[ForwardRef('Bar')]), which pickle cannot
+        # follow. Resolving raises, so the whole annotation set is dropped and
+        # the function still reloads and runs.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x: list[Bar]):  # noqa: F821
+                return x
+
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="DEBUG") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertTrue(any("dropping the annotations of" in l for l in logs.output))
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__annotations__, {})
+        self.assertEqual(out([1, 2]), [1, 2])
+
+    def test_pickler_does_not_persist_a_wrong_false_across_an_inflight_seed(self):
+        # An in-flight probe must not leave a wrong False in the shared cache.
+        # f is unpicklable via an UNPRUNED slot (a Lock kwdefault); f and g
+        # reference each other, and h carries g. Probing f seeds an optimistic
+        # in-flight state, g re-enters f mid-probe, keeps g.f, dumps f, hits the
+        # lock and raises -- which an earlier version cached as g being
+        # unpicklable, so an UNRELATED h silently lost its .g and died at call
+        # time. The in-flight result is no longer cached, so h keeps g.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            lock = threading.Lock()
+
+            def f(*, k=lock):
+                return k
+
+            def g():
+                return "g!"
+
+            def h():
+                return "h!"
+
+            f.g = g
+            g.f = f
+            h.g = g
+
+            def top(x):
+                return x
+
+            top.f = f  # inserted before h, so f probes (and taints) g first
+            top.h = h
+            return top
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertTrue(hasattr(out.h, "g"))
+        self.assertEqual(out.h.g(), "g!")
+
+    def test_pickler_probes_a_cyclic_cluster_in_bounded_time(self):
+        # Eight nested functions fully connected through __dict__, one of them
+        # unpicklable through a kwdefault. Parking the leaned verdicts and
+        # caching the outermost probe's keeps this to a few dozen probe dumps;
+        # re-deriving a leaned False on every re-entry is exponential (hundreds
+        # of thousands of dumps for this graph).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        dumps = [0]
+        real_dump = AOTCompilePickler.dump
+
+        def counting_dump(self, obj):
+            dumps[0] += 1
+            return real_dump(self, obj)
+
+        def outer():
+            fns = [(lambda x, i=i: x + i) for i in range(8)]
+            for f in fns:
+                for i, g in enumerate(fns):
+                    setattr(f, f"f{i}", g)
+            fns[0].__kwdefaults__ = {"k": threading.Lock()}
+
+            def top(x):
+                return x
+
+            for i, f in enumerate(fns):
+                setattr(top, f"f{i}", f)
+            return top
+
+        top = outer()
+        buf = io.BytesIO()
+        with patch.object(AOTCompilePickler, "dump", counting_dump):
+            AOTCompilePickler({}, buf).dump(top)
+        self.assertLess(dumps[0], 32)  # 16 today; quadratic on 8 nodes is 64
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "f0"))
+        self.assertFalse(hasattr(out.f1, "f0"))
+        self.assertIs(out.f1.f2, out.f2)
+        self.assertIs(out.f7.f1, out.f1)
+
+    def test_pickler_handles_mutually_referencing_annotations(self):
+        # Two <locals> functions annotated with each other form an annotation
+        # cycle: probing whether one dumps cleanly re-probes the other, which
+        # re-probes the first. A value whose probe is still in flight answers
+        # True (recorded as a lean), so the re-entrant probe short-circuits
+        # instead of recursing forever; pickle's own memo then serializes the
+        # actual cycle.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def a(x):
+                return x
+
+            def b(x):
+                return x
+
+            a.__annotations__ = {"x": b}
+            b.__annotations__ = {"x": a}
+            return a
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out(5), 5)
+        self.assertEqual(out.__annotations__["x"].__annotations__["x"], out)
 
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
