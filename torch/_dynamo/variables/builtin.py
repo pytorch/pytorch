@@ -74,6 +74,8 @@ from ..utils import (
     get_fake_value,
     is_tensor_getset_descriptor,
     istype,
+    no_keywords,
+    no_positional,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -1337,11 +1339,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                                 self_handler,
                                 e,
                             )
-                            unimplemented(
-                                gb_type="invalid call to builtin op handler",
-                                context=f"invalid args to {self_handler}: {args} {kwargs}",
-                                explanation=f"Encountered TypeError when trying to handle op {fn.__name__}",
-                                hints=[*graph_break_hints.DIFFICULT],
+                            raise_args_mismatch(
+                                tx,
+                                fn.__name__,
+                                expect=str(inspect.signature(self_handler)),
+                                actual=f"{args} {kwargs}",
                             )
                     else:
                         raise
@@ -2031,6 +2033,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return generic_str(tx, arg)
 
+    def call_bytes(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        no_positional(tx, "bytes", list(args))
+        no_keywords(tx, "bytes", kwargs)
+        return variables.ConstantVariable.create(b"")
+
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
             unimplemented(
@@ -2052,18 +2064,13 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
-            const_args = [a.as_python_constant() for a in args[1:]]
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
-                    *const_args,
+                    *[a.as_python_constant() for a in args[1:]],
                 )
-            except Exception as exc:
-                # A class body that fails CPython's own validation (e.g. an
-                # invalid enum member name) must surface as a traceable
-                # exception so a surrounding except can catch it, instead of
-                # escaping the compiled region.
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
             return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)
@@ -3574,7 +3581,12 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
         obj, attr = args
         if not attr.is_python_constant():
             raise_observed_exception(TypeError, tx)
-        result = obj.call_obj_hasattr(tx, attr.as_python_constant())
+        attr_name = attr.as_python_constant()
+        if not isinstance(attr_name, str):
+            raise_type_error(
+                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
+            )
+        result = obj.call_obj_hasattr(tx, attr_name)
         if result is None:
             unimplemented(
                 gb_type="hasattr() on unsupported type",
@@ -3615,6 +3627,11 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         if len(args) != 3 or kwargs:
             raise_observed_exception(TypeError, tx)
         obj, name_var, val = args
+        if not issubclass(name_var.python_type(), str):
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{name_var.python_type_name()}'",
+            )
         result = self._call_setattr(tx, obj, name_var, val)
         if result is not None:
             return result
