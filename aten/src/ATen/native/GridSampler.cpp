@@ -43,8 +43,8 @@ namespace {
   // forms the same bounds as compute_coordinates and clips the same way, so the
   // two answer alike wherever the merged helper is defined, and the CUDA twin
   // reaches the same voxel where it is not.
-  template <typename scalar_t, typename index_t>
-  static inline scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
+  template <typename scalar_t>
+  static inline scalar_t compute_coordinates_sized(scalar_t coord, int64_t size,
                                                    GridSamplerPadding padding_mode,
                                                    bool align_corners) {
     if (padding_mode == GridSamplerPadding::Border) {

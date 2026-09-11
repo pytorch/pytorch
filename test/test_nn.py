@@ -11887,6 +11887,37 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_3d.squeeze(2), out_2d, **tolerance)
 
     @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_3d_bicubic_far_coordinates(self, device, dtype, padding_mode):
+        # Far enough out that the fold count passes what an int holds, and odd, which is what
+        # separates a fold taken through an int from one taken with fmod. The 1/16 puts the
+        # sample off the image centre, where the two parities read different taps. Double
+        # only: float32 cannot separate neighbouring voxels at the folded position.
+        image = torch.randn(1, 2, 7, 8, device=device, dtype=dtype)
+        volume = image.unsqueeze(2).expand(1, 2, 5, 7, 8).contiguous()
+        far = torch.tensor([-5e9, -2e10, -1e11], device=device, dtype=dtype) + 0.0625
+        grid_2d = torch.stack([far, torch.full_like(far, 0.1)], -1).reshape(1, 1, 3, 2)
+        grid_3d = torch.cat(
+            [grid_2d, torch.full_like(grid_2d[..., :1], 0.1)], dim=-1).unsqueeze(1)
+        if padding_mode == 'reflection':
+            # a full reflection period is 4 in normalized coordinates; the 4-D reference
+            # stays in range, its CUDA helper converts the fold count to an int
+            grid_2d[..., 0].remainder_(4)
+        grid_2d.requires_grad_()
+        grid_3d.requires_grad_()
+        out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
+                               padding_mode=padding_mode, align_corners=False)
+        out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
+                               padding_mode=padding_mode, align_corners=False)
+        self.assertEqual(out_3d.squeeze(2), out_2d)
+        # the backward resolves the same taps
+        grad_2d = torch.autograd.grad(out_2d.sum(), grid_2d)[0]
+        grad_3d = torch.autograd.grad(out_3d.sum(), grid_3d)[0]
+        self.assertEqual(grad_3d.squeeze(1)[..., :2], grad_2d)
+
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
     @parametrize_test("wrt", ["input", "grid"])
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
