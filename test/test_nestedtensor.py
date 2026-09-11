@@ -6454,6 +6454,20 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 nt.values()[nt.offsets()[i] : (nt.offsets()[i] + nt.lengths()[i])],
             )
 
+    def test_narrow_gapped_unbind(self, device):
+        # Regression for #196708: batch_size=2 with a gap between selected
+        # segments must keep lengths so unbind does not include the gap.
+        dtype = torch.float64
+        t = torch.tensor(0.7, dtype=dtype, device=device)
+        x = torch.stack((t, 2 * t, 3 * t, 4 * t)).reshape(2, 2)
+        starts = torch.tensor([0, 1], dtype=torch.int64, device=device)
+        lengths = torch.tensor([2, 1], dtype=torch.int64, device=device)
+        nt = torch.nested.narrow(x, 1, starts, lengths, layout=torch.jagged)
+        parts = nt.unbind()
+        self.assertEqual(parts[0], torch.stack((t, 2 * t)))
+        self.assertEqual(parts[1], (4 * t).reshape(1))
+        self.assertEqual(parts[0].sum() + parts[1].sum(), 7 * t)
+
     def test_njt_cat(self, device):
         offsets = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
         values_1 = torch.randn(
