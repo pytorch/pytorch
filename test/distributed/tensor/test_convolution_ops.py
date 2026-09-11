@@ -16,8 +16,9 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import run_subtests
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -45,25 +46,26 @@ def _conv_fn(
 
 
 class DistConvolutionOpsTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         # hard code world size to 2
         return 2
 
     @with_comms
-    def test_downsampling_convolution(self):
+    def test_downsampling_convolution(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 3, 512, 1024)
         grad_output_list = torch.rand(ITER_TIME, 7, 256, 128, 256) * 1e-3
 
-        model = nn.Conv2d(3, 256, kernel_size=4, stride=4, padding=0).to(
-            self.device_type
-        )
+        model = nn.Conv2d(3, 256, kernel_size=4, stride=4, padding=0).to(device_type)
         nn.init.ones_(model.weight)
         nn.init.zeros_(model.bias)
-        model_gt = copy.deepcopy(model).to(self.device_type)
+        model_gt = copy.deepcopy(model).to(device_type)
 
         # training with dtensor
         model = distribute_module(
@@ -72,10 +74,10 @@ class DistConvolutionOpsTest(DTensorTestBase):
         optimizer = torch.optim.SGD(model.parameters(), lr=LR)
         for i in range(ITER_TIME):
             optimizer.zero_grad()
-            inp = input_list[i].to(self.device_type).requires_grad_()
+            inp = input_list[i].to(device_type).requires_grad_()
             inp_dtensor = distribute_tensor(inp, device_mesh, shard_spec)
             output = model(inp_dtensor)
-            grad_output = grad_output_list[i].to(self.device_type)
+            grad_output = grad_output_list[i].to(device_type)
             grad_output_dtensor = distribute_tensor(
                 grad_output, device_mesh, shard_spec
             )
@@ -86,9 +88,9 @@ class DistConvolutionOpsTest(DTensorTestBase):
         optimizer_gt = torch.optim.SGD(model_gt.parameters(), lr=LR)
         for i in range(ITER_TIME):
             optimizer_gt.zero_grad()
-            inp = input_list[i].to(self.device_type).requires_grad_()
+            inp = input_list[i].to(device_type).requires_grad_()
             output = model_gt(inp)
-            grad_output = grad_output_list[i].to(self.device_type)
+            grad_output = grad_output_list[i].to(device_type)
             output.backward(grad_output)
             optimizer_gt.step()
 
@@ -121,7 +123,8 @@ class DistConvolutionOpsTest(DTensorTestBase):
     # Temporarily disable it to unblock CI.
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_depthwise_convolution(self):
+    def test_depthwise_convolution(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
@@ -129,11 +132,11 @@ class DistConvolutionOpsTest(DTensorTestBase):
         grad_output_list = torch.rand(ITER_TIME, 7, 256, 128, 256) * 1e-3
 
         model = nn.Conv2d(256, 256, kernel_size=7, padding=3, groups=256).to(
-            self.device_type
+            device_type
         )
         nn.init.ones_(model.weight)
         nn.init.zeros_(model.bias)
-        model_gt = copy.deepcopy(model).to(self.device_type)
+        model_gt = copy.deepcopy(model).to(device_type)
 
         # training with dtensor
         model = distribute_module(
@@ -142,10 +145,10 @@ class DistConvolutionOpsTest(DTensorTestBase):
         optimizer = torch.optim.SGD(model.parameters(), lr=LR)
         for i in range(ITER_TIME):
             optimizer.zero_grad()
-            inp = input_list[i].to(self.device_type).requires_grad_()
+            inp = input_list[i].to(device_type).requires_grad_()
             inp_dtensor = distribute_tensor(inp, device_mesh, shard_spec)
             output = model(inp_dtensor)
-            grad_output = grad_output_list[i].to(self.device_type)
+            grad_output = grad_output_list[i].to(device_type)
             grad_output_dtensor = distribute_tensor(
                 grad_output, device_mesh, shard_spec
             )
@@ -156,9 +159,9 @@ class DistConvolutionOpsTest(DTensorTestBase):
         optimizer_gt = torch.optim.SGD(model_gt.parameters(), lr=LR)
         for i in range(ITER_TIME):
             optimizer_gt.zero_grad()
-            inp = input_list[i].to(self.device_type).requires_grad_()
+            inp = input_list[i].to(device_type).requires_grad_()
             output = model_gt(inp)
-            grad_output = grad_output_list[i].to(self.device_type)
+            grad_output = grad_output_list[i].to(device_type)
             output.backward(grad_output)
             optimizer_gt.step()
 
@@ -189,7 +192,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_conv_backward_none_grad_inp(self):
+    def test_conv_backward_none_grad_inp(self, device):
         device_mesh = self.build_device_mesh()
         conv = nn.Conv2d(64, 64, 3, padding=1).train()
         x = torch.randn(1, 64, 32, 32)
@@ -208,39 +211,44 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertTrue(x_dt.grad is None)
 
     def _run_single_arg_fwd(
-        self, model, arg, placements=None
+        self, model, arg, placements=None, *, device_type
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Given model and arg, runs fwd model local and distbuted given device_mesh"""
         device_mesh = self.build_device_mesh()
-        model_copy = copy.deepcopy(model).to(device=self.device_type)
+        model_copy = copy.deepcopy(model).to(device=device_type)
         dist_model = distribute_module(model, device_mesh, _conv_fn)
         arg_dt = DTensor.from_local(arg, device_mesh, placements)
-        out_dt = dist_model(arg_dt.to(device=self.device_type))
+        out_dt = dist_model(arg_dt.to(device=device_type))
         out = model_copy(arg_dt.full_tensor())
         return (out_dt.full_tensor(), out)
 
     @with_comms
-    def test_conv1d(self):
+    def test_conv1d(self, device):
+        device_type = torch.device(device).type
         model = nn.Conv1d(64, 64, 3, padding=1)
-        x = torch.randn(1, 64, 8, device=self.device_type)
-        out_dt, out = self._run_single_arg_fwd(model, x)
+        x = torch.randn(1, 64, 8, device=device_type)
+        out_dt, out = self._run_single_arg_fwd(model, x, device_type=device_type)
         self.assertEqual(out_dt, out)
 
     @with_comms
-    def test_conv3d(self):
+    def test_conv3d(self, device):
+        device_type = torch.device(device).type
         model = nn.Conv3d(64, 64, 3, padding=1)
-        x = torch.randn(1, 64, 8, 8, 8, device=self.device_type)
-        out_dt, out = self._run_single_arg_fwd(model, x, [Shard(0)])
+        x = torch.randn(1, 64, 8, 8, 8, device=device_type)
+        out_dt, out = self._run_single_arg_fwd(
+            model, x, [Shard(0)], device_type=device_type
+        )
         self.assertEqual(out_dt, out)
 
     @with_tf32_off
     @with_comms
-    def test_conv2d_no_bias_compile(self):
+    def test_conv2d_no_bias_compile(self, device):
         """Test Conv2d with bias=False in compile mode (Issue #167091)
 
         Regression test: Previously this would fail during torch.compile
         tracing with AssertionError when bias_spec was None.
         """
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
         def conv_fn(x, w):
@@ -249,8 +257,8 @@ class DistConvolutionOpsTest(DTensorTestBase):
         compiled_fn = torch.compile(conv_fn)
 
         # Create tensors
-        x = torch.randn(1, 4, 5, 5, device=self.device_type)
-        w = torch.randn(8, 4, 3, 3, device=self.device_type)
+        x = torch.randn(1, 4, 5, 5, device=device_type)
+        w = torch.randn(8, 4, 3, 3, device=device_type)
 
         # Distribute tensors
         x_dt = distribute_tensor(x, device_mesh, [Replicate()])
@@ -269,17 +277,18 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertEqual(result_compiled.to_local(), result_eager.to_local())
 
     @with_comms
-    def test_conv2d_no_bias_backward(self):
+    def test_conv2d_no_bias_backward(self, device):
         """Test Conv2d backward pass with bias=False (Issue #167091)
 
         Regression test: Previously backward pass would fail when
         grad_bias_spec was None.
         """
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
         # Create tensors with requires_grad
-        x = torch.randn(1, 4, 5, 5, device=self.device_type)
-        w = torch.randn(8, 4, 3, 3, device=self.device_type, requires_grad=True)
+        x = torch.randn(1, 4, 5, 5, device=device_type)
+        w = torch.randn(8, 4, 3, 3, device=device_type, requires_grad=True)
 
         # Distribute tensors
         x_dt = distribute_tensor(x, device_mesh, [Replicate()])
@@ -299,15 +308,16 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_tf32_off
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_conv2d_batch_shard_strided(self):
+    def test_conv2d_batch_shard_strided(self, device):
         """Batch-dim sharding with stride != 1 should not hit _is_supported."""
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
-        model = nn.Conv2d(3, 8, kernel_size=7, stride=2, padding=3).to(self.device_type)
-        model_ref = copy.deepcopy(model).to(self.device_type)
+        model = nn.Conv2d(3, 8, kernel_size=7, stride=2, padding=3).to(device_type)
+        model_ref = copy.deepcopy(model).to(device_type)
         model = distribute_module(model, device_mesh, _conv_fn)
 
-        x = torch.randn(4, 3, 16, 16, device=self.device_type, requires_grad=True)
+        x = torch.randn(4, 3, 16, 16, device=device_type, requires_grad=True)
         x_ref = x.detach().clone().requires_grad_(True)
         x_dt = distribute_tensor(x, device_mesh, [Shard(0)])
 
@@ -330,14 +340,16 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
     @with_tf32_off
     @with_comms
-    def test_convolution_last_dim_shard(self):
+    def test_convolution_last_dim_shard(self, device):
+        device_type = torch.device(device).type
         run_subtests(
             self,
             {"conv_dim": [1, 2, 3]},
             self._test_convolution_last_dim_shard,
+            device_type=device_type,
         )
 
-    def _test_convolution_last_dim_shard(self, conv_dim):
+    def _test_convolution_last_dim_shard(self, conv_dim, *, device_type):
         device_mesh = self.build_device_mesh()
         conv_cls = (nn.Conv1d, nn.Conv2d, nn.Conv3d)[conv_dim - 1]
         spatial_shape = (8,) * (conv_dim - 1) + (16,)
@@ -347,13 +359,11 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
         model = conv_cls(
             3, 8, kernel_size=kernel_size, stride=stride, padding=padding
-        ).to(self.device_type)
-        model_ref = copy.deepcopy(model).to(self.device_type)
+        ).to(device_type)
+        model_ref = copy.deepcopy(model).to(device_type)
         model = distribute_module(model, device_mesh, _conv_fn)
 
-        x = torch.randn(
-            4, 3, *spatial_shape, device=self.device_type, requires_grad=True
-        )
+        x = torch.randn(4, 3, *spatial_shape, device=device_type, requires_grad=True)
         placements = (Shard(x.ndim - 1),)
         x_ref = x.detach().clone().requires_grad_(True)
         x_dt = distribute_tensor(x, device_mesh, placements)
@@ -374,24 +384,23 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
 
     @with_comms
-    def test_conv2d_module_no_bias(self):
+    def test_conv2d_module_no_bias(self, device):
         """Test nn.Conv2d module with bias=False (Issue #167091)
 
         Regression test: Ensures nn.Conv2d with bias=False works with DTensor.
         """
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
         # Create model with bias=False
-        model = nn.Conv2d(4, 8, kernel_size=3, padding=1, bias=False).to(
-            self.device_type
-        )
+        model = nn.Conv2d(4, 8, kernel_size=3, padding=1, bias=False).to(device_type)
         nn.init.ones_(model.weight)
 
         # Distribute model
         model_dt = distribute_module(model, device_mesh, _conv_fn)
 
         # Create input
-        x = torch.randn(1, 4, 5, 5, device=self.device_type)
+        x = torch.randn(1, 4, 5, 5, device=device_type)
         x_dt = distribute_tensor(x, device_mesh, [Replicate()])
 
         # Forward pass - this should not crash
@@ -406,14 +415,15 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_tf32_off
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_conv1d_batch_shard(self):
+    def test_conv1d_batch_shard(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
-        model = nn.Conv1d(3, 8, kernel_size=3, padding=1).to(self.device_type)
-        model_ref = copy.deepcopy(model).to(self.device_type)
+        model = nn.Conv1d(3, 8, kernel_size=3, padding=1).to(device_type)
+        model_ref = copy.deepcopy(model).to(device_type)
         model = distribute_module(model, device_mesh, _conv_fn)
 
-        x = torch.randn(4, 3, 16, device=self.device_type, requires_grad=True)
+        x = torch.randn(4, 3, 16, device=device_type, requires_grad=True)
         x_ref = x.detach().clone().requires_grad_(True)
         x_dt = distribute_tensor(x, device_mesh, [Shard(0)])
 
@@ -439,14 +449,15 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_tf32_off
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_conv3d_batch_shard(self):
+    def test_conv3d_batch_shard(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
 
-        model = nn.Conv3d(3, 8, kernel_size=3, padding=1).to(self.device_type)
-        model_ref = copy.deepcopy(model).to(self.device_type)
+        model = nn.Conv3d(3, 8, kernel_size=3, padding=1).to(device_type)
+        model_ref = copy.deepcopy(model).to(device_type)
         model = distribute_module(model, device_mesh, _conv_fn)
 
-        x = torch.randn(4, 3, 8, 8, 8, device=self.device_type, requires_grad=True)
+        x = torch.randn(4, 3, 8, 8, 8, device=device_type, requires_grad=True)
         x_ref = x.detach().clone().requires_grad_(True)
         x_dt = distribute_tensor(x, device_mesh, [Shard(0)])
 
@@ -470,22 +481,33 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
 
 
+local_tensor_skips = [
+    # Send / recv ops are not supported
+    "test_conv_backward_none_grad_inp",
+    "test_depthwise_convolution",
+    "test_downsampling_convolution",
+    "test_conv2d_batch_shard_strided",
+    # New tests for Issue #167091 - use send/recv via tp_convolution
+    "test_conv2d_no_bias_compile",
+    "test_conv2d_no_bias_backward",
+    "test_conv2d_module_no_bias",
+    "test_conv1d_batch_shard",
+    "test_conv3d_batch_shard",
+]
 DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistConvolutionOpsTest,
-    # Send / recv ops are not supported
-    skipped_tests=[
-        "test_conv_backward_none_grad_inp",
-        "test_depthwise_convolution",
-        "test_downsampling_convolution",
-        "test_conv2d_batch_shard_strided",
-        # New tests for Issue #167091 - use send/recv via tp_convolution
-        "test_conv2d_no_bias_compile",
-        "test_conv2d_no_bias_backward",
-        "test_conv2d_module_no_bias",
-        "test_conv1d_batch_shard",
-        "test_conv3d_batch_shard",
-    ],
+    skipped_tests=local_tensor_skips,
 )
+instantiate_device_type_tests(
+    DistConvolutionOpsTest, globals(), except_for=["cpu"], allow_xpu=True
+)
+instantiate_device_type_tests(
+    DistConvolutionOpsTestWithLocalTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
