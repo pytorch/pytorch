@@ -44,7 +44,7 @@ from typing_extensions import (
 )
 
 
-# Re-executing this file (retrying a failed import, or `reload`) would corrupt the C++ global state the first run set up.
+# Re-executing this file (retrying a failed import, or `reload`) would corrupt the C++ global state the first run set up. Test
 if getattr(sys, "_torch_import_started", False):
     raise ImportError(
         "`torch` can only be initialized once per process, so this module cannot "
