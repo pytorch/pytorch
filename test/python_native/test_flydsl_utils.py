@@ -1,6 +1,8 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import contextlib
 import os
+import threading
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -98,6 +100,142 @@ class TestFlyDSLArchResolution(TestCase):
         self.assertEqual(self._resolve(flydsl_arch="gfx950"), "gfx950")
 
 
+class TestFlyDSLCompileArchPin(TestCase):
+    """FLYDSL_GPU_ARCH as FlyDSL's own compiler reads it.
+
+    FlyDSL resolves its compile target separately and answers gfx942 whenever
+    rocm_agent_enumerator is unavailable, so a dispatch gated on gfx950 gets a
+    CDNA3 code object the HIP loader refuses. Everything below is the handoff
+    that keeps the two answers the same.
+    """
+
+    @contextlib.contextmanager
+    def _environment(self, current=None):
+        """Both variables _resolve_rocm_arch reads, under the test's control.
+
+        Only FLYDSL_GPU_ARCH is what these cases are about, but the resolver
+        falls back to HSA_OVERRIDE_GFX_VERSION before it ever asks the device.
+        Leaving a host-exported value in place lets the machine, rather than
+        the mock, decide the arch.
+        """
+        with patch.dict(os.environ, {}):
+            os.environ.pop("HSA_OVERRIDE_GFX_VERSION", None)
+            if current is None:
+                os.environ.pop("FLYDSL_GPU_ARCH", None)
+            else:
+                os.environ["FLYDSL_GPU_ARCH"] = current
+            yield
+
+    def test_pins_the_arch_the_dispatcher_gated_on(self):
+        with self._environment():
+            with flydsl_utils._pinned_compile_arch("gfx950"):
+                self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx950")
+            self.assertNotIn("FLYDSL_GPU_ARCH", os.environ)
+
+    def test_a_previous_value_is_restored(self):
+        with self._environment(current="gfx942"):
+            with flydsl_utils._pinned_compile_arch("gfx950"):
+                self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx950")
+            self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx942")
+
+    def test_a_suffixed_override_is_normalized(self):
+        # _resolve_rocm_arch strips the target features, FlyDSL uses the
+        # variable verbatim as the chip name, so it has to see the stripped one.
+        with self._environment(current="gfx950:sramecc+"):
+            with flydsl_utils._pinned_compile_arch("gfx950"):
+                self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx950")
+            self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx950:sramecc+")
+
+    def test_a_matching_value_is_left_in_place(self):
+        with self._environment(current="gfx950"):
+            with flydsl_utils._pinned_compile_arch("gfx950"):
+                self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx950")
+            self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx950")
+
+    def test_an_unresolved_arch_changes_nothing(self):
+        with self._environment(current="gfx942"):
+            with flydsl_utils._pinned_compile_arch(None):
+                self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx942")
+            self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx942")
+
+    def test_a_failed_compile_still_restores(self):
+        with self._environment():
+            with self.assertRaises(RuntimeError):
+                with flydsl_utils._pinned_compile_arch("gfx950"):
+                    raise RuntimeError("compile failed")
+            self.assertNotIn("FLYDSL_GPU_ARCH", os.environ)
+
+    def test_a_pin_survives_another_compile_finishing(self):
+        # flydsl_jit_cache compiles different specializations concurrently, so
+        # two pins overlap. Serialized, the second compile still reads its own
+        # arch after the first one has restored the variable.
+        first_pinned = threading.Event()
+        second_pinned = threading.Event()
+        first_released = threading.Event()
+        observed = []
+
+        def second_compile():
+            first_pinned.wait(timeout=30)
+            with flydsl_utils._pinned_compile_arch("gfx950"):
+                second_pinned.set()
+                first_released.wait(timeout=30)
+                observed.append(os.environ.get("FLYDSL_GPU_ARCH"))
+
+        with self._environment():
+            thread = threading.Thread(target=second_compile)
+            thread.start()
+            try:
+                with flydsl_utils._pinned_compile_arch("gfx950"):
+                    first_pinned.set()
+                    entered_while_held = second_pinned.wait(timeout=0.5)
+                first_released.set()
+            finally:
+                thread.join(timeout=30)
+
+        self.assertFalse(entered_while_held)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(observed, ["gfx950"])
+
+    def test_arch_resolution_waits_out_another_devices_pin(self):
+        # _resolve_rocm_arch is functools.cache'd, so its one environment read
+        # must not land inside another device's pin or it caches that arch for
+        # the life of the process.
+        flydsl_utils._resolve_rocm_arch.cache_clear()
+        flydsl_utils._get_flydsl_device_arch.cache_clear()
+        self.addCleanup(flydsl_utils._resolve_rocm_arch.cache_clear)
+        self.addCleanup(flydsl_utils._get_flydsl_device_arch.cache_clear)
+
+        pinned = threading.Event()
+        resolved = []
+
+        def resolve_other_device():
+            pinned.wait(timeout=30)
+            resolved.append(flydsl_utils._resolve_rocm_arch(1))
+
+        with (
+            self._environment(),
+            patch.object(torch.cuda, "is_available", return_value=True),
+            patch.object(
+                torch.cuda,
+                "get_device_properties",
+                return_value=SimpleNamespace(gcnArchName="gfx942"),
+            ),
+        ):
+            thread = threading.Thread(target=resolve_other_device)
+            thread.start()
+            try:
+                with flydsl_utils._pinned_compile_arch("gfx950"):
+                    pinned.set()
+                    thread.join(timeout=0.5)
+                    blocked_by_the_pin = thread.is_alive()
+            finally:
+                thread.join(timeout=30)
+
+        self.assertTrue(blocked_by_the_pin)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(resolved, ["gfx942"])
+
+
 class TestFlyDSLSharedPredicates(TestCase):
     def setUp(self):
         super().setUp()
@@ -152,12 +290,24 @@ class TestFlyDSLVersionGate(TestCase):
     Every case has to clear the cache twice: ``_version_is_ok`` is
     ``functools.cache``d, so a stale verdict would leak into the next case and
     a real verdict from this machine's install would leak into the first.
+
+    ``check_native_version_skip`` is stubbed for the same reason. It answers
+    from ``TORCH_NATIVE_SKIP_VERSION_CHECK`` and is itself ``@cache``d, so a
+    developer machine that exports the override makes ``_version_is_ok``
+    return True before it ever looks at the version, and every case below that
+    expects a rejection fails. The two cases that are about the override patch
+    it themselves; an inner patch wins over this one.
     """
 
     def setUp(self):
         super().setUp()
         flydsl_utils._version_is_ok.cache_clear()
         self.addCleanup(flydsl_utils._version_is_ok.cache_clear)
+        skip_check = patch.object(
+            flydsl_utils, "check_native_version_skip", return_value=False
+        )
+        skip_check.start()
+        self.addCleanup(skip_check.stop)
 
     def _with_version(self, version):
         return patch.object(
