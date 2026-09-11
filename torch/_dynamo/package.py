@@ -1029,13 +1029,10 @@ class CompilePackage:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
             for code in dynamo.codes:
                 if code.bypassed:
-                    # Nothing on a bypassed entry is installable, and the fresh
-                    # compile install() leaves the frame to would otherwise
-                    # append its guarded code to the stale ones and re-register
-                    # the backend id the save found missing, so every
-                    # reload/save cycle re-poisoned the entry and grew it. Start
-                    # it clean: the fresh compile's record is the whole entry
-                    # and the next save can write an installable one.
+                    # install() skips a bypassed entry entirely, so its guarded
+                    # codes and backend ids are dead; clear them so the fresh
+                    # compile's record replaces them and the next save can write
+                    # an installable entry.
                     code.guarded_codes.clear()
                     code.backend_ids.clear()
         else:

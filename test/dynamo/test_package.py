@@ -219,7 +219,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
         # The bypassed compile's backend id is referenced by no entry, so the
         # written cache entry carries exactly the surviving compile's backend.
-        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+        compiles = torch._dynamo.utils.counters["frames"]["total"]
         info = PrecompileContext.save_to_dynamo_cache()
         (entry,) = info["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
@@ -234,11 +234,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
             self.assertEqual(compiled(x), fn(x))
         # Deliberate: re-triggers the bypass in the loading process against an
         # entry that already holds one installed guarded code. The installed
-        # variant served the first call; only this one traced a new frame.
+        # variant served the first call; only this one compiled (counted by
+        # actual compiles, since FRAME_COUNTER also advances for an installed
+        # entry and is zeroed by reset()).
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x, cfg), fn(x, cfg))
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
-        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames + 1)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles + 1)
 
     @torch._dynamo.config.patch(
         caching_precompile=True, strict_precompile=False, prepare_freezing=True
