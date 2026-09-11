@@ -720,6 +720,12 @@ class ExceptionVariable(VariableTracker):
                     se.track_attribute_mutation_new(self)
                 se.store_instance_dict_attr(self, attr, args[1])
             return variables.ConstantVariable.create(None)
+        elif name == "__delattr__":
+            attr = args[0].as_python_constant()
+            getset = self.lookup_tp_getset_member(attr)
+            if getset is not None:
+                getset.setter(self, tx, None)
+                return variables.ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
     def tp_getattro_impl(
