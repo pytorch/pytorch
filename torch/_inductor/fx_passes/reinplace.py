@@ -745,10 +745,27 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, trigger
+        old_tensors_to_clone, kwargs, node_name, trigger, tensor_alias_groups=None
     ):
         tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[int | None]()
+
+        repeated_args = OrderedSet[int]()
+        repeated_arg_names = OrderedSet[str]()
+        if trigger == ReInplaceTrigger.TRITON_OPS:
+            if tensor_alias_groups is None:
+                # Fall back to current FX identities for graphs created before
+                # tensor_alias_groups was added.
+                seen_args = OrderedSet[int]()
+                for arg in old_tensors_to_clone:
+                    identity = id(kwargs[arg])
+                    if identity in seen_args:
+                        repeated_args.add(identity)
+                    seen_args.add(identity)
+            else:
+                for group in tensor_alias_groups:
+                    if len(group) > 1:
+                        repeated_arg_names.update(group)
 
         # Those used to count possibly_missed_reinplacing_opportunities
         missed_nodes = []
@@ -768,7 +785,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
             mutated_arg = kwargs[arg]
 
-            # Let's say we have:
+            # For auto-functionalization or originally distinct Triton groups,
+            # let's say we have:
             # - op(x, y) that mutates both x and y
             # - new_x, new_y = functional_op(x, y) is the functional variant
             # If we are presented with functional_op(x, x), we must not reinplace
@@ -778,8 +796,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # >>> op(x, y)
             # This also applies if we have views: functional_op(x, x[0])
             # should not reinplace into op(x, x[0]).
-            should_attempt_reinplace = not tensor_with_same_storage_already_reinplaced(
-                mutated_arg
+            # Triton arguments in the same original identity group are excluded
+            # below so their outputs remain identical.
+            should_attempt_reinplace = (
+                arg not in repeated_arg_names
+                and id(mutated_arg) not in repeated_args
+                and not tensor_with_same_storage_already_reinplaced(mutated_arg)
             )
             if should_attempt_reinplace and can_inplace(node, mutated_arg):
                 # In general, we probably do not need those optimizations.
@@ -1028,6 +1050,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs["kwargs"],
                 kernel_name,
                 ReInplaceTrigger.TRITON_OPS,
+                node.kwargs.get("tensor_alias_groups"),
             )
 
             kwargs = dict(node.kwargs)
