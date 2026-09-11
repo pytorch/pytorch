@@ -1977,6 +1977,17 @@ class triton:
         == "1"
     )
 
+    # Benchmark one-pass against one structural OUTER plan at first use. This
+    # takes precedence over direct selection if both experimental flags are set;
+    # unsupported AOT/C++ wrappers then keep the ordinary one-pass reduction.
+    autotune_experimental_large_output_outer_reductions = (
+        os.environ.get(
+            "TORCHINDUCTOR_AUTOTUNE_EXPERIMENTAL_LARGE_OUTPUT_OUTER_REDUCTIONS",
+            "0",
+        )
+        == "1"
+    )
+
     # torchTLX enablement. None (the default) means TLX is never considered
     # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
     # "force" uses only TLX templates plus forced epilogue fusion. Also a
