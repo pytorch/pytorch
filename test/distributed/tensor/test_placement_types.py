@@ -7,6 +7,7 @@ import sympy
 import torch
 from torch._subclasses import FakeTensorMode
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._collective_utils import pad_tensor, unpad_tensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._ops.utils import is_tensor_shardable
 from torch.distributed.tensor.placement_types import (
@@ -17,6 +18,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
@@ -29,6 +31,66 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 # Basic functionality test for Placement types.
 class PlacementTypesTestCase(TestCase):
+    def test_zero_pad_and_unpad_eager_identity(self):
+        tensor = torch.randn(2, 8)
+
+        self.assertIs(pad_tensor(tensor, 0, 0), tensor)
+        self.assertIs(unpad_tensor(tensor, 0, 0), tensor)
+
+    def test_zero_pad_and_unpad_are_recorded_by_make_fx(self):
+        def pad_and_unpad(tensor):
+            return unpad_tensor(pad_tensor(tensor, 0, 0), 0, 0)
+
+        graph = make_fx(pad_and_unpad)(torch.randn(2, 8)).graph
+        call_targets = [
+            node.target for node in graph.nodes if node.op == "call_function"
+        ]
+
+        self.assertEqual(
+            call_targets,
+            [
+                torch.ops.aten.constant_pad_nd.default,
+                torch.ops.aten.slice.Tensor,
+            ],
+        )
+
+    def test_zero_pad_and_unpad_match_positive_size_torch_compile_graphs(self):
+        def capture_ops(fn):
+            graphs = []
+
+            def backend(graph_module, example_inputs):
+                graphs.append(graph_module)
+                return graph_module.forward
+
+            torch.compile(fn, backend=backend, fullgraph=True)(torch.randn(2, 8))
+            self.assertEqual(len(graphs), 1)
+            return [
+                (node.op, node.target)
+                for node in graphs[0].graph.nodes
+                if node.op not in ("placeholder", "output")
+            ]
+
+        def zero_pad(tensor):
+            return pad_tensor(tensor, 0, 0)
+
+        def positive_pad(tensor):
+            return pad_tensor(tensor, 0, 1)
+
+        def zero_unpad(tensor):
+            return unpad_tensor(tensor, 0, 0)
+
+        def positive_unpad(tensor):
+            return unpad_tensor(tensor, 0, 1)
+
+        pad_ops = capture_ops(zero_pad)
+        unpad_ops = capture_ops(zero_unpad)
+        self.assertEqual(pad_ops, capture_ops(positive_pad))
+        self.assertEqual(unpad_ops, capture_ops(positive_unpad))
+        self.assertEqual(len(pad_ops), 1)
+        self.assertEqual(pad_ops[0][0], "call_function")
+        self.assertEqual(pad_ops[0][1].__name__, "pad")
+        self.assertEqual(unpad_ops, [("call_method", "narrow")])
+
     def test_type_identification(self):
         shard = Shard(3)
         strided_shard = _StridedShard(dim=3, split_factor=7)

@@ -377,6 +377,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
 
 inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
+    aten._scaled_addmm.default: InplaceableOp(aten._scaled_addmm_.default, 0),
     aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
     _generalized_scatter: InplaceableOp(

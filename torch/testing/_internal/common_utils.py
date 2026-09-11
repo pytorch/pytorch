@@ -1917,7 +1917,23 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 TEST_CUDA_CUDSS = TEST_CUDA and torch.version.cuda is not None
 TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and torch.version.cuda is not None
 
-TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and torch.version.cuda is not None
+def _cuda_python_bindings_usable() -> bool:
+    if not _check_module_exists("cuda.bindings"):
+        return False
+    if torch.version.cuda is not None:
+        return True
+    if torch.version.hip is not None:
+        # NVIDIA's cuda-bindings installs and imports fine on a ROCm box but
+        # fails at the first call. hip-python's interop package (PyPI:
+        # hip-python-interop) provides a HIP-backed cuda.bindings and marks
+        # itself with HIP_PYTHON = True; only that flavor is usable here.
+        import cuda.bindings.runtime  # type: ignore[import]
+
+        return bool(getattr(cuda.bindings.runtime, "HIP_PYTHON", False))
+    return False
+
+
+TEST_CUDA_PYTHON_BINDINGS = _cuda_python_bindings_usable()
 TEST_NVMATH = _check_module_exists("nvmath.bindings") and torch.version.cuda is not None
 skipIfNoNvmath = unittest.skipIf(not TEST_NVMATH, "nvmath-python not available")
 
@@ -2577,10 +2593,9 @@ def skipIfHpu_BUGGY(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def getRocmVersion() -> tuple[int, int]:
+def getRocmVersion() -> tuple[int, ...]:
     from torch.testing._internal.common_cuda import _get_torch_rocm_version
-    rocm_version = _get_torch_rocm_version()
-    return (rocm_version[0], rocm_version[1])
+    return _get_torch_rocm_version()
 
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
