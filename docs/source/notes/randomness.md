@@ -44,6 +44,17 @@ It is also possible to obtain identical results from an operation that uses
 random numbers by setting {meth}`torch.manual_seed()` to the same value between
 subsequent calls.
 
+Seeding a CUDA generator makes device-side sampling reproducible on the same GPU
+model, not across GPU models. For tensors larger than one launch wave, that is
+more than `256 * multiProcessorCount * (maxThreadsPerMultiProcessor // 256)`
+elements (for example 40,960 on a T4, 218,112 on an L40, 233,472 on an H100 PCIe),
+the mapping of tensor elements to Philox counters follows the launch grid, which
+is capped by the device's number of SMs. The same seed therefore produces
+different values on GPUs with a different number of SMs, including MIG partitions
+of one card, while tensors below that size are identical on every GPU. To
+reproduce sampled tensors across devices, sample on the CPU and copy the result
+to the device.
+
 ### Python
 
 For custom operators, you might need to set python seed as well:
