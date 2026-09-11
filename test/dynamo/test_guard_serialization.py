@@ -363,11 +363,9 @@ class GetattrProxy:
 
 
 class RaisingProbes:
-    # Any attribute probe of the instance (isinstance reads __class__, so that
-    # one is served) raises something other than AttributeError.
+    # Any attribute probe of the instance raises something other than
+    # AttributeError; the reducer must not read the instance outside its try.
     def __getattribute__(self, name):
-        if name == "__class__":
-            return object.__getattribute__(self, name)
         raise RuntimeError(f"probed {name}")
 
 
@@ -748,7 +746,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
 
-    def test_reducer_handles_an_empty_cell_reached_directly(self):
+    def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
         # raised ValueError out of the pickler for an empty cell. Pickler-level
         # because a guard cannot root at a raw cell through a capture:
@@ -759,10 +757,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
 
-    def test_reduce_handles_an_empty_closure_cell(self):
-        # Reading an EMPTY cell raised ValueError out of the reducer. It has to
-        # come back empty: a cell holding a sentinel reads as an assigned
-        # variable. See FunctionPicklerBase._reduce_cell.
+    def test_rebuilt_function_keeps_an_empty_closure_cell(self):
+        # A by-value rebuild of an fqn-mismatched wrapper carries its cells
+        # through FunctionPicklerBase._reduce_cell, so an EMPTY cell has to come
+        # back empty: a cell holding a sentinel reads as an assigned variable.
         wrapped = EMPTY_CELL_WRAPPED
         empty = [i for i, c in enumerate(wrapped.__closure__) if _cell_is_empty(c)]
         self.assertEqual(len(empty), 1)
@@ -794,6 +792,22 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler.dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
+
+    def test_rebuilt_locals_function_keeps_its_name(self):
+        # The old <locals> rebuild passed __qualname__ where FunctionType wants
+        # __name__, so a reloaded local function reported "outer.<locals>.f" as
+        # its __name__.
+        def outer():
+            def f(x):
+                return x
+
+            return f
+
+        fn = outer()
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual((out.__name__, out.__qualname__), ("f", fn.__qualname__))
 
     def test_reduce_restores_a_non_str_module(self):
         # Dynamo cannot trace a function whose __module__ is not a str (its
