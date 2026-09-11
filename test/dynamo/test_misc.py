@@ -7486,6 +7486,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         del x
         self.assertTrue(p_ref() is None)
 
+    @skipIfWindows(msg="Tensor lifetime checks are unreliable on Windows")
+    def test_release_input_memory_hop_dunder_dict(self):
+        # Accessing a nested function's __dict__ inside a HOP body used to
+        # create a reference cycle through the speculated SideEffects table,
+        # keeping the frame's input tensors alive until a full gc.collect().
+        def fn(pred, x):
+            def branch():
+                def inner():
+                    return x + 1
+
+                inner.attr = 1
+                return inner()
+
+            return torch.cond(pred, branch, branch)
+
+        x = torch.randn(4)
+        x_ref = weakref.ref(x)
+        pred = torch.tensor(True)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(pred, x)
+        self.assertEqual(out, x + 1)
+        del x, out
+        self.assertIsNone(x_ref())
+
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):
             perm = [0, 3, 5]
@@ -16826,6 +16849,27 @@ fn
         self.assertTrue(res, torch.ones(1))
         self.assertEqual(foo.x, 1)
 
+    def test_dataclass_replace_sourceless_instance(self):
+        # slots=True matches the originally reported repro; the bug isn't
+        # specific to it, any dataclass reproduces it.
+        @dataclasses.dataclass(slots=True)
+        class Foo:
+            a: torch.Tensor
+            b: int
+
+        # `f` is built during tracing, so it has no source of its own. `Foo`
+        # does, and dataclasses.replace goes through `f.__class__(**changes)`,
+        # which is only traceable if `__class__` keeps the class provenance.
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x):
+            f = Foo(a=x, b=1)
+            return dataclasses.replace(f, a=x * 2)
+
+        x = torch.randn(3)
+        f2 = run(x)
+        self.assertEqual(f2.a, x * 2)
+        self.assertEqual(f2.b, 1)
+
     def test_frozenset_of_non_literals(self):
         class Foo:
             pass
@@ -17508,6 +17552,13 @@ fn
         res = fn(x)
         expected = hex(255) + oct(8) + bin(3) + ascii("hello") + format(42, "x")
         self.assertEqual(res, x + len(expected))
+
+    def test_builtin_bytes_zero_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return bytes()
+
+        self.assertEqual(fn(), b"")
 
     def test_guard_string_escaped(self):
         d = {frozenset({0}): {frozenset({0}): 1}}
