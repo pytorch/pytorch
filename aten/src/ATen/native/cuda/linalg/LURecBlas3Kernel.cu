@@ -985,6 +985,8 @@ ldl_diagonal_panel_fused_kernel(
     __syncthreads();
     // }
 
+    // Finish iteration
+    curr_step += pivot_rank;
   }
 }
 
