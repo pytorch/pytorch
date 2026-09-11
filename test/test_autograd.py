@@ -11805,6 +11805,21 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(CustomError, "unpack"):
                 out.backward()
 
+    def test_saved_tensor_hooks_pack_error_then_data_access(self):
+        # register_hooks sets hooks_ before running pack_hook, so a raising
+        # pack_hook leaves the SavedVariable with hooks but no packed data.
+        a = torch.randn(5, requires_grad=True)
+        y = a * a
+
+        def bad_pack(t):
+            raise ValueError("boom")
+
+        with self.assertRaisesRegex(ValueError, "boom"):
+            y.grad_fn._raw_saved_self.register_hooks(bad_pack, lambda x: x)
+
+        with self.assertRaisesRegex(RuntimeError, "pack hook raised"):
+            y.grad_fn._raw_saved_self.data
+
     def test_saved_tensor_hooks_custom_function_intermediates(self):
         class Func(torch.autograd.Function):
             @staticmethod

@@ -403,6 +403,16 @@ TORCH_API Tensor apply_view_meta_sequence(
     const Tensor& base,
     const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence);
 
+// Marks a regenerated view as one output of a multi-output view op, so autograd
+// still rejects mutating it in place. See [Note: multi-output view replay].
+// Registered once by torch/csrc/autograd, which is where CreationMeta lives;
+// deliberately not a VariableHooksInterface method, both because out-of-tree
+// implementations of that interface would have to be updated in lockstep and
+// because a forwarding proxy that missed it would silently drop the
+// restriction rather than fail to build.
+using MultiOutputViewMarker = void (*)(const Tensor&);
+TORCH_API void setMultiOutputViewMarker(MultiOutputViewMarker fn);
+
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(
     const std::vector<Tensor>& outs,
