@@ -304,8 +304,8 @@ _tunable_scaled_gemm(
           const at::ScalarType out_dtype,
           Tensor& out,
           const std::optional<Tensor>& alpha) {
-#ifdef USE_ROCM
   bool dispatched = false;
+#ifdef USE_ROCM
   (void)alpha;
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
       if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
@@ -513,7 +513,7 @@ _scaled_gemm(
               use_fast_accum,
               out_dtype_,
               out,
-          alpha)) {
+              device_alpha)) {
         return out;
       }
   }
