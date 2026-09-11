@@ -464,6 +464,29 @@ for generator_prefix in ("torch.default_generator", "torch._C.Generator"):
 # In graph functions (including constant folding) that are C bindings
 torch_c_binding_in_graph_functions = dict.fromkeys(
     [
+        "cmath.acos",
+        "cmath.acosh",
+        "cmath.asin",
+        "cmath.asinh",
+        "cmath.atan",
+        "cmath.atanh",
+        "cmath.cos",
+        "cmath.cosh",
+        "cmath.exp",
+        "cmath.isclose",
+        "cmath.isfinite",
+        "cmath.isinf",
+        "cmath.isnan",
+        "cmath.log",
+        "cmath.log10",
+        "cmath.phase",
+        "cmath.polar",
+        "cmath.rect",
+        "cmath.sin",
+        "cmath.sinh",
+        "cmath.sqrt",
+        "cmath.tan",
+        "cmath.tanh",
         "math.acos",
         "math.acosh",
         "math.asin",
@@ -530,7 +553,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._batch_norm_impl_index",
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
-        "torch._C._accelerator__utils_getDeviceIndex",
         "torch._C._accelerator_getStream",
         "torch._C._accelerator_getAllocatorSettings",
         "torch._C._accelerator_setAllocatorSettings",
@@ -686,6 +708,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._dispatch_tls_set_dispatch_key_excluded",
         "torch._C._dispatch_tls_set_dispatch_key_included",
         "torch._C._dist_autograd_init",
+        "torch._C._dynamo.utils.get_current_stream",
         "torch._C._dump_local_tls_set",
         "torch._C._dump_upgraders_map",
         "torch._C._enable_mobile_interface_call_export",
@@ -1739,6 +1762,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_flash_attention",
         "torch._scaled_dot_product_flash_attention_for_cpu",
         "torch._scaled_dot_product_cudnn_attention",
+        "torch._scaled_addmm",
+        "torch._scaled_addmm_",
         "torch._scaled_mm",
         "torch._scaled_mm_v2",
         "torch._scaled_grouped_mm",
@@ -2408,6 +2433,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
+
+if sys.version_info >= (3, 12):
+    torch_c_binding_in_graph_functions["math.sumprod"] = TorchInGraphFunctionVariable
 
 if sys.version_info >= (3, 13):
     torch_c_binding_in_graph_functions["math.fma"] = TorchInGraphFunctionVariable
