@@ -15,6 +15,7 @@ import functorch.dim
 import torch
 from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_WINDOWS,
     run_tests,
@@ -83,8 +84,130 @@ def gpu_time(lmb, name, r=100):
     return elapsed / r
 
 
+def _attn(
+    batch_size=1,
+    sequence_length=4,
+    hidden_size=6,
+    num_attention_heads=3,
+    linear=Linear,
+    device=None,
+    time=False,
+):
+    def maybe_to(x):
+        return x if device is None else x.to(device)
+
+    attention_probs_dropout_prob = 0.0
+    A = maybe_to(
+        BertSelfAttentionA(
+            hidden_size,
+            num_attention_heads,
+            attention_probs_dropout_prob,
+            linear=linear,
+        )
+    )
+    B = maybe_to(
+        BertSelfAttentionB(
+            hidden_size, num_attention_heads, attention_probs_dropout_prob
+        )
+    )
+
+    A.load_state_dict(B.state_dict())
+    hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
+    b_out = B(hidden_state)
+    a_out = A(hidden_state)
+    torch.testing.assert_close(
+        a_out, b_out
+    )  # why does a simple matmul not do the right thing?
+
+    if time:
+        gpu_time(lambda: B(hidden_state), "positional", r=3)
+        gpu_time(lambda: A(hidden_state), "first_class", r=3)
+
+    for approach in ("relative_key", "relative_key_query"):
+        A = maybe_to(
+            BertSelfAttentionA(
+                hidden_size,
+                num_attention_heads,
+                attention_probs_dropout_prob,
+                approach,
+                sequence_length,
+                linear=linear,
+            )
+        )
+        B = maybe_to(
+            BertSelfAttentionB(
+                hidden_size,
+                num_attention_heads,
+                attention_probs_dropout_prob,
+                approach,
+                sequence_length,
+            )
+        )
+        A.load_state_dict(B.state_dict())
+
+        hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
+        b_out = B(hidden_state)
+        a_out = A(hidden_state)
+        torch.testing.assert_close(a_out, b_out)
+
+        if time:
+            gpu_time(lambda: B(hidden_state), "positional", r=3)
+            gpu_time(lambda: A(hidden_state), "first_class", r=3)
+
+    A = maybe_to(
+        BertSelfAttentionA(
+            hidden_size,
+            num_attention_heads,
+            attention_probs_dropout_prob,
+            None,
+            None,
+            linear=linear,
+        )
+    )
+    B = maybe_to(
+        BertSelfAttentionB(
+            hidden_size,
+            num_attention_heads,
+            attention_probs_dropout_prob,
+            None,
+            None,
+        )
+    )
+    A.load_state_dict(B.state_dict())
+
+    hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
+    past_key_value = (
+        maybe_to(
+            torch.rand(
+                batch_size,
+                num_attention_heads,
+                sequence_length,
+                hidden_size // num_attention_heads,
+            )
+        ),
+        maybe_to(
+            torch.rand(
+                batch_size,
+                num_attention_heads,
+                sequence_length,
+                hidden_size // num_attention_heads,
+            )
+        ),
+    )
+
+    b_out = B(hidden_state, past_key_value=past_key_value)
+    a_out = A(hidden_state, past_key_value=past_key_value)
+    torch.testing.assert_close(a_out, b_out)
+
+    if time:
+        gpu_time(lambda: B(hidden_state), "positional", r=3)
+        gpu_time(lambda: A(hidden_state), "first_class", r=3)
+
+
 @skipIfTorchDynamo("Bad interaction")
 class TestMin(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         gc.disable()
@@ -146,130 +269,8 @@ class TestMin(TestCase):
 
         A.index([i], [D]).order(k, d)
 
-    def attn(
-        self,
-        batch_size=1,
-        sequence_length=4,
-        hidden_size=6,
-        num_attention_heads=3,
-        linear=Linear,
-        device=None,
-        time=False,
-    ):
-        def maybe_to(x):
-            return x if device is None else x.to(device)
-
-        attention_probs_dropout_prob = 0.0
-        A = maybe_to(
-            BertSelfAttentionA(
-                hidden_size,
-                num_attention_heads,
-                attention_probs_dropout_prob,
-                linear=linear,
-            )
-        )
-        B = maybe_to(
-            BertSelfAttentionB(
-                hidden_size, num_attention_heads, attention_probs_dropout_prob
-            )
-        )
-
-        A.load_state_dict(B.state_dict())
-        hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
-        b_out = B(hidden_state)
-        a_out = A(hidden_state)
-        torch.testing.assert_close(
-            a_out, b_out
-        )  # why does a simple matmul not do the right thing?
-
-        if time:
-            gpu_time(lambda: B(hidden_state), "positional", r=3)
-            gpu_time(lambda: A(hidden_state), "first_class", r=3)
-
-        for approach in ("relative_key", "relative_key_query"):
-            A = maybe_to(
-                BertSelfAttentionA(
-                    hidden_size,
-                    num_attention_heads,
-                    attention_probs_dropout_prob,
-                    approach,
-                    sequence_length,
-                    linear=linear,
-                )
-            )
-            B = maybe_to(
-                BertSelfAttentionB(
-                    hidden_size,
-                    num_attention_heads,
-                    attention_probs_dropout_prob,
-                    approach,
-                    sequence_length,
-                )
-            )
-            A.load_state_dict(B.state_dict())
-
-            hidden_state = maybe_to(
-                torch.rand(batch_size, sequence_length, hidden_size)
-            )
-            b_out = B(hidden_state)
-            a_out = A(hidden_state)
-            torch.testing.assert_close(a_out, b_out)
-
-            if time:
-                gpu_time(lambda: B(hidden_state), "positional", r=3)
-                gpu_time(lambda: A(hidden_state), "first_class", r=3)
-
-        A = maybe_to(
-            BertSelfAttentionA(
-                hidden_size,
-                num_attention_heads,
-                attention_probs_dropout_prob,
-                None,
-                None,
-                linear=linear,
-            )
-        )
-        B = maybe_to(
-            BertSelfAttentionB(
-                hidden_size,
-                num_attention_heads,
-                attention_probs_dropout_prob,
-                None,
-                None,
-            )
-        )
-        A.load_state_dict(B.state_dict())
-
-        hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
-        past_key_value = (
-            maybe_to(
-                torch.rand(
-                    batch_size,
-                    num_attention_heads,
-                    sequence_length,
-                    hidden_size // num_attention_heads,
-                )
-            ),
-            maybe_to(
-                torch.rand(
-                    batch_size,
-                    num_attention_heads,
-                    sequence_length,
-                    hidden_size // num_attention_heads,
-                )
-            ),
-        )
-
-        b_out = B(hidden_state, past_key_value=past_key_value)
-        a_out = A(hidden_state, past_key_value=past_key_value)
-        torch.testing.assert_close(a_out, b_out)
-
-        if time:
-            gpu_time(lambda: B(hidden_state), "positional", r=3)
-            gpu_time(lambda: A(hidden_state), "first_class", r=3)
-
     def test_attn(self):
-        self.attn()
+        _attn()
 
     def test_inplace(self):
         # some embeddings table
@@ -291,23 +292,6 @@ class TestMin(TestCase):
         # check that we still match names correctly
         for _ in range(10):
             f()
-
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
-        "https://github.com/pytorch/pytorch/issues/86710",
-    )
-    @skipIf(not TEST_CUDA, "no CUDA")
-    def test_attn_cuda(self):
-        # size from the BERT paper, 90% pretraining of sequence length 128
-        self.attn(
-            batch_size=256,
-            hidden_size=768,
-            sequence_length=128,
-            num_attention_heads=12,
-            device="cuda",
-            time=measure_perf,
-            linear=torch.nn.Linear,
-        )
 
     def test_stack(self):
         i, j, d = dims()
@@ -688,10 +672,76 @@ class TestMin(TestCase):
         x.split(l, 0)
 
 
-skip_functorch_only = ["test_time_mm_fuse", "test_attn_cuda"]
+@skipIfTorchDynamo("Bad interaction")
+class TestMinCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        gc.disable()
+        gc.collect()
+        self.interesting = set()
+        for o in gc.get_objects():
+            if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
+                self.interesting.add(id(o))
+        if "cuda" in self._testMethodName:
+            self.mem_allocated = torch.cuda.memory_allocated()
+
+    def tearDown(self):
+        interesting = []
+        for o in gc.get_objects():
+            if (
+                isinstance(o, (torch.Tensor, Dim, Tensor, DimList))
+                and id(o) not in self.interesting
+            ):
+                interesting.append(o)
+
+        extra_memory = 0
+        if "cuda" in self._testMethodName:
+            extra_memory += torch.cuda.memory_allocated() - self.mem_allocated
+
+        if extra_memory != 0 or len(interesting) != 0:
+            import refcycle
+
+            refcycle.garbage().export_image("garbage.pdf")
+        gc.collect()
+        self.assertEqual(
+            extra_memory,
+            0,
+            lambda msg: f"{msg}\nextra cuda memory left allocated: {extra_memory}",
+        )
+        self.assertEqual(
+            len(interesting),
+            0,
+            (
+                lambda msg: f"{msg}\nextra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
+                f"{[type(t) for t in interesting]}"
+            ),
+        )
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/86710",
+    )
+    @skipIf(not TEST_CUDA, "no CUDA")
+    def test_attn_cuda(self):
+        _attn(
+            batch_size=256,
+            hidden_size=768,
+            sequence_length=128,
+            num_attention_heads=12,
+            device="cuda",
+            time=measure_perf,
+            linear=torch.nn.Linear,
+        )
+
+
+skip_functorch_only = ["test_time_mm_fuse"]
 
 
 class TestMinFunctorchOnly(TestMin):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         functorch.dim.POINTWISE_OPTIMIZE = False
