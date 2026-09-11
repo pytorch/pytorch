@@ -565,6 +565,16 @@ class ComputedLazyConstantTests(TestCase):
             (lambda t, a, b: (t.sin(), a - b), [(t, 5, 2), (t, 9, 3)]),
             (lambda t, a, b: (t.sin(), a * b), [(t, 5, 2), (t, 9, 3)]),
             (lambda t, a, b: (t.sin(), a + b), [(t, "x", "y"), (t, "p", "q")]),
+            (lambda t, a, b: (t.sin(), a & b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a | b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a ^ b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a == b), [(t, 1, 1), (t, 1, 2)]),
+            (lambda t, a, b: (t.sin(), a != b), [(t, 1, 1), (t, 1, 2)]),
+            (lambda t, a, b: (t.sin(), a < b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a <= b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a > b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a >= b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a < b), [(t, "x", "y"), (t, "p", "q")]),
         ]
         for i, (fn, arg_sets) in enumerate(cases):
             with self.subTest(case=i):
@@ -580,6 +590,15 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=1)
 
+    def test_unused_computed_inplace_bitwise_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            a &= b
+            return t.sin(), a
+
+        self._check(fn, [(t, 6, 3), (t, 12, 10)], expected_frames=1)
+
     def test_unused_division_recompiles(self):
         t = torch.ones(2)
 
@@ -587,6 +606,29 @@ class ComputedLazyConstantTests(TestCase):
             return t.sin(), a / b
 
         self._check(fn, [(t, 4, 2), (t, 9, 3)], expected_frames=2)
+
+    def test_unused_comparison_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + 1 == b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 5, 0)], expected_frames=1)
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_bitwise_symbolic_operand_realizes(self):
+        t = torch.ones(3)
+        cases = [
+            ("and", lambda t, a, b: t * (a & b)),
+            ("or", lambda t, a, b: t * (a | b)),
+            ("xor", lambda t, a, b: t * (a ^ b)),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager")
+                for a, b in ((6, 3), (12, 10)):
+                    self.assertTrue(same(fn(t, a, b), opt_fn(t, a, b)))
 
     def test_operand_type_change_recompiles(self):
         t = torch.ones(2)
