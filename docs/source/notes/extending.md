@@ -171,8 +171,9 @@ gradient matmul and accumulates it into ``out``::
 If ``other_op`` produces its contribution first, ``x_buffer`` can expose that
 partial sum. If this custom backward runs first, ``x_buffer`` is ``None`` and it
 returns a separate tensor instead. The gradient for ``weight`` always follows the
-normal return path. Buffer availability depends on backward execution order, so
-the ``None`` fallback is required.
+normal return path. Buffer availability follows backward execution order: a buffer
+is exposed only after another producer has contributed to that input. The fallback
+above allows the function to work under either ordering.
 
 The buffer may only be used synchronously while that custom ``backward`` method is
 running. Do not retain it: later producers may replace the engine's buffer, making a
