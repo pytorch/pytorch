@@ -1,40 +1,17 @@
-"""CuTeDSL override registrations for ``aten::sum`` / ``aten::prod`` (inner-tree).
+"""Register CUDA inner-tree overrides for ``aten::sum`` and ``aten::prod``.
 
-CuTeDSL port of the Triton-style inner-tree reduction kernel that
-otherwise lives in ``aten/src/ATen/native/cuda/ReduceSumProdKernel.cu``
-(``try_inner_tree_reduction`` + the inner-tree kernels). This override
-runs only when ``PYTORCH_SUM_INNER_TREE`` is set to a truthy value, which
-is the feature-rollout gate for these operators -- it is *not* gated by the
-global ``TORCH_DISABLE_NATIVE_JIT`` kill switch alone (that is handled by
-``cutedsl_utils`` at registration time).
+``PYTORCH_SUM_INNER_TREE`` controls rollout; ``cutedsl_utils`` applies the global
+native-JIT kill switch during registration. Direct and ``out=`` overloads are
+registered separately because structured delegation occurs below the dispatcher.
 
-We register four ATen dispatcher entries on ``CUDA``:
+Eligibility mirrors the former ``try_inner_tree_reduction``: TensorIterator must
+coalesce the input to one contiguous reduced dimension and at most one outer
+dimension. Unsupported geometry, dtype conversion, and integer or complex inputs
+fall through to ATen.
 
-* ``sum.dim_IntList`` / ``sum.IntList_out`` -- ``x.sum(dim=...)`` + ``.out``.
-* ``prod.dim_int`` / ``prod.int_out`` -- ``x.prod(dim=...)`` + ``.out``.
-
-sum/prod share the identical inner-tree geometry and eligibility; only the
-combiner (``+`` vs ``*``) and its identity (``0`` vs ``1``) differ, threaded
-through the kernel in ``inner_tree_kernel.py``.
-
-``sum.dim_IntList`` is ``structured_delegate: sum.IntList_out``, so its
-delegation to the ``.out`` kernel happens *below* the dispatcher; overriding
-``.out`` alone would not intercept ``x.sum(dim=1)``. Both are separate
-dispatcher entries and are registered explicitly (the same reason
-``scatter_add_`` is registered separately from ``scatter_add.out``).
-
-Eligibility mirrors ``try_inner_tree_reduction`` (ReduceSumProdKernel.cu):
-build the reduction ``TensorIterator`` over ``(out, self)`` and accept only
-the coalesced geometry the kernels know how to run -- a single contiguous
-reduced (fastest) dimension whose non-reduced dims collapse to at most one
-outer-strided dimension. Anything else (multi-dim reduction, non-contiguous
-reduced dim, dtype-casting sum, integer/complex dtypes, non-collapsing outer
-layout) falls through to aten.
-
-Dispatch note: this CuTeDSL override is the only inner-tree path -- the ATen
-CUDA backend has no inner-tree kernel of its own. When the rollout config is
-disabled, no dispatcher override is installed. When enabled, accepted calls
-run the CuTeDSL kernel and rejected calls fall through to unchanged ATen.
+Accepted calls canonicalize to ``(M, N)``. The ordered adapter uses the shared
+fixed-DAG kernel for compact inputs and unit-stride outputs, and the legacy
+CuTeDSL reference for other accepted layouts.
 """
 
 from __future__ import annotations
@@ -213,15 +190,15 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
 
 
 def _sum_into():
-    from .inner_tree_kernel import inner_tree_sum_into
+    from .ordered import sum_into
 
-    return inner_tree_sum_into
+    return sum_into
 
 
 def _prod_into():
-    from .inner_tree_kernel import inner_tree_prod_into
+    from .ordered import prod_into
 
-    return inner_tree_prod_into
+    return prod_into
 
 
 def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
