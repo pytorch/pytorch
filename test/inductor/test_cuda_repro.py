@@ -4363,6 +4363,26 @@ class TopkRegressionTests(TestCase):
         self.assertGreaterEqual(code.count("async_compile.triton("), 2)
 
     @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("tiling", ["prefer_nd_tiling", "tile_reductions"])
+    def test_topk_fusible_ir_tiling_configs(self, device, tiling):
+        # Ranked results only support the persistent [rows, k] tile. Other
+        # tiling preferences must neither error nor change that layout, even
+        # with a mixed-stride producer that would tile a pointwise kernel.
+        def f(x, y):
+            values, indices = torch.topk(x + y.t(), 3)
+            return values + 1, indices
+
+        x = torch.randn(256, 64, device=device)
+        y = torch.randn(64, 256, device=device)
+        with config.patch({f"triton.{tiling}": True}):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(actual, f(x, y))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+        FileCheck().check("topk_with_index").check_not("YBLOCK").check_not(
+            "R1_BLOCK"
+        ).run(code)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("width", [33, 512])
     @parametrize("largest", [True, False])
