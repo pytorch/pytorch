@@ -2760,6 +2760,31 @@ from user code:
         with self.assertRaisesRegex(RuntimeError, "0.0.0-fake"):
             artifacts.check_compatibility()
 
+    def test_aot_compile_samples_the_codegen_target_under_the_wrappers_config(self):
+        # torch.compile(options={"cpp.simdlen": ...}) patches inductor config
+        # only while the backend runs; aot_compile re-applies it while sampling
+        # the fingerprint so the recorded simdlen is the one the kernels were
+        # tiled for, and the ambient config is untouched afterwards.
+        def fake_target():
+            simdlen = torch._inductor.config.cpp.simdlen
+            return ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), simdlen, None)
+
+        def fn(x):
+            return x + 1
+
+        self.assertIsNone(torch._inductor.config.cpp.simdlen)
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            side_effect=fake_target,
+        ):
+            compiled = torch.compile(
+                fn, fullgraph=True, backend="inductor", options={"cpp.simdlen": 256}
+            ).aot_compile(((torch.randn(3, 3),), {}))
+        target = compiled._artifacts.system_info.cpu_codegen_target
+        self.assertIsNotNone(target)
+        self.assertEqual(target[4], 256)
+        self.assertIsNone(torch._inductor.config.cpp.simdlen)
+
     def test_aot_compile_backend_declaring_no_native_code_skips_the_isa_gate(self):
         # A user backend that emits no native code declares emits_native_code =
         # False: the artifact records no CPU codegen target and loads on a host

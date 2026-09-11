@@ -861,35 +861,50 @@ def aot_compile_fullgraph(
             source_info.add_code(traced_code)
 
         backend_name = getattr(backend, "compiler_name", "unknown")
+        # The codegen probe runs the C++ toolchain; only pay for it when the
+        # artifact can hold native CPU code. torch.compile(options={...}) builds a
+        # _TorchCompileInductorWrapper that patches inductor config (e.g.
+        # cpp.simdlen) only for the duration of backend(); that scope has exited
+        # by now, so re-apply the wrapper's config while sampling. Otherwise the
+        # fingerprint records the ambient ISA rather than the one the kernels were
+        # actually tiled for, and the load-time gate rejects the matching host and
+        # accepts a wider one.
+        codegen_config_ctx: AbstractContextManager[Any] = nullcontext()
+        if isinstance(backend, torch._TorchCompileInductorWrapper):
+            codegen_config_ctx = torch._inductor.config.patch(backend.config)
         # A user backend that bakes no native code can say so (on the callable
         # torch.compile wrapped); the eager family is exempt by name.
         user_backend = getattr(backend, "compiler_fn", backend)
         native_backend = getattr(
             user_backend, "emits_native_code", True
         ) is not False and emits_native_code(backend_name)
-        # The codegen probe runs the C++ toolchain; only pay for it when the
-        # artifact can hold native CPU code.
-        system_info = SystemInfo.current(
-            cpu_codegen=(native_backend and "cpu" in device_types)
-        )
-        artifacts = CompileArtifacts(
-            signature=convert_frame._get_signature(fn),
-            guard_manager=check_fn.guard_manager,
-            guards_state=check_fn.guards_state,
-            backend_id=backend_input.backend_id,
-            compiled_fn=compiled_fn,
-            original_code=fn.__code__,
-            runtime_env=graph_capture_output.get_runtime_env(),
-            source_info=source_info,
-            device_type=device_type,
-            backend_name=backend_name,
-            system_info=system_info,
-            requires_native_backend_compatibility=native_backend,
-            device_types=device_types,
-        )
-        aot_compiled_fn = AOTCompiledFunction(
-            _artifacts=artifacts, _extra_globals=fn.__globals__
-        )
+        with codegen_config_ctx:
+            system_info = SystemInfo.current(
+                cpu_codegen=(native_backend and "cpu" in device_types)
+            )
+            # Build the artifact under the same config the fingerprint was
+            # sampled under: AOTCompiledFunction.__post_init__ runs
+            # check_compatibility(), whose SystemInfo.current() must see the same
+            # inductor config (e.g. cpp.simdlen) or the artifact rejects its own
+            # build.
+            artifacts = CompileArtifacts(
+                signature=convert_frame._get_signature(fn),
+                guard_manager=check_fn.guard_manager,
+                guards_state=check_fn.guards_state,
+                backend_id=backend_input.backend_id,
+                compiled_fn=compiled_fn,
+                original_code=fn.__code__,
+                runtime_env=graph_capture_output.get_runtime_env(),
+                source_info=source_info,
+                device_type=device_type,
+                backend_name=backend_name,
+                system_info=system_info,
+                requires_native_backend_compatibility=native_backend,
+                device_types=device_types,
+            )
+            aot_compiled_fn = AOTCompiledFunction(
+                _artifacts=artifacts, _extra_globals=fn.__globals__
+            )
 
     return aot_compiled_fn
 
