@@ -857,6 +857,31 @@ def _cpu_codegen_target_problem(
     return None
 
 
+# Registered backends that generate no native code, so an artifact of theirs
+# has no baked vector width to protect and must not be gated on one. This is a
+# blacklist on purpose: anything unrecognised -- including a user's own
+# callable, whose compiler_name is just its __name__ -- is assumed to emit
+# code, because a false rejection at load is recoverable and silently running a
+# kernel built for another ISA is not.
+_NO_NATIVE_CODE_BACKENDS = frozenset(
+    {
+        "aot_eager",
+        "aot_eager_decomp_partition",
+        "aot_eager_decomp_partition_crossref",
+        "aot_eager_decomp_partition_with_mode",
+        "aot_eager_default_partitioner",
+        "eager",
+        "eager_debug",
+        "eager_noexcept",
+        "pre_dispatch_eager",
+    }
+)
+
+
+def emits_native_code(backend_name: str) -> bool:
+    return backend_name not in _NO_NATIVE_CODE_BACKENDS
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
@@ -902,7 +927,11 @@ class SystemInfo:
         )
 
     def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
+        self,
+        other: "SystemInfo",
+        device_type: str = "cpu",
+        *,
+        check_codegen: bool = True,
     ) -> None:
         """
         Check if this SystemInfo is compatible with another SystemInfo.
@@ -921,7 +950,11 @@ class SystemInfo:
         # this field (for a release build, every artifact already on disk), or it
         # was captured with vectorization disabled (cpp.simdlen=1, or any width
         # no valid ISA has) -- so there is nothing to compare.
-        if device_type == "cpu" and self.cpu_codegen_target is not None:
+        if (
+            check_codegen
+            and device_type == "cpu"
+            and self.cpu_codegen_target is not None
+        ):
             problem = _cpu_codegen_target_problem(
                 self.cpu_codegen_target, other.cpu_codegen_target
             )
@@ -932,8 +965,16 @@ class SystemInfo:
                     f"current={other.cpu_codegen_target}. {problem}"
                 )
         if device_type in self.CHECK_GPUS:
+            # Device EXISTENCE is not a native-code question: an artifact
+            # holding cuda tensors cannot run without cuda whatever backend
+            # produced it, so this check stays outside check_codegen. Only the
+            # toolkit/Triton/GPU-model checks below describe generated code and
+            # are skipped for a backend that emits none.
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
+
+            if not check_codegen:
+                return
 
             if self.toolkit_version != other.toolkit_version:
                 raise RuntimeError(
@@ -968,6 +1009,7 @@ class _DynamoCacheEntry:
     system_info: SystemInfo = dataclasses.field(
         default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
     )
+    requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
 
@@ -977,13 +1019,17 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
+        check_codegen = self.requires_native_backend_compatibility
         current_system_info = SystemInfo.current(
             cpu_codegen=(
-                self.device_type == "cpu"
+                check_codegen
+                and self.device_type == "cpu"
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        self.system_info.check_compatibility(
+            current_system_info, self.device_type, check_codegen=check_codegen
+        )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -1130,6 +1176,8 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        *,
+        requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
@@ -1142,6 +1190,11 @@ class CompilePackage:
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
         self._device_type = "cpu"
+        # An eager backend bakes no vector width, so it neither pays the C++
+        # toolchain probe at save nor is rejected on ISA skew at load.
+        self._requires_native_backend_compatibility = (
+            requires_native_backend_compatibility
+        )
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -1542,7 +1595,15 @@ class CompilePackage:
             device_type=self._device_type,
             # The codegen probe runs the C++ toolchain; only pay for it when the
             # artifact can hold native CPU code.
-            system_info=SystemInfo.current(cpu_codegen=(self._device_type == "cpu")),
+            system_info=SystemInfo.current(
+                cpu_codegen=(
+                    self._requires_native_backend_compatibility
+                    and self._device_type == "cpu"
+                )
+            ),
+            requires_native_backend_compatibility=(
+                self._requires_native_backend_compatibility
+            ),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )

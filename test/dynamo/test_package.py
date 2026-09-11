@@ -246,6 +246,69 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertNotEqual(narrow_target[2], wide_target[2])
         self.assertNotEqual(narrow_target, wide_target)
 
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    @parametrize("fullgraph", (False, True))
+    def test_eager_backend_entry_is_exempt_from_the_codegen_target(self, fullgraph):
+        # fullgraph=False takes _optimize, fullgraph=True optimize_assert; both
+        # thread native_backend and must agree.
+        def fn(x):
+            return x + 1
+
+        def custom_backend(gm, example_inputs):
+            return gm
+
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            side_effect=AssertionError("toolchain probe ran for an eager backend"),
+        ) as probe:
+            torch.compile(fn, backend="eager", fullgraph=fullgraph)(torch.randn(3))
+            (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        # side_effect fails at the call site, but Dynamo swallows exceptions on
+        # the compile path, so assert not-called outside the patch too.
+        probe.assert_not_called()
+        self.assertFalse(entry.requires_native_backend_compatibility)
+        self.assertIsNone(entry.system_info.cpu_codegen_target)
+
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        # A user's own callable may emit anything, so it counts as native and
+        # the probe runs; patch it so the assertion needs no host toolchain.
+        sentinel = ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None)
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            return_value=sentinel,
+        ):
+            torch.compile(fn, backend=custom_backend, fullgraph=fullgraph)(
+                torch.randn(3)
+            )
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertTrue(entry.requires_native_backend_compatibility)
+        self.assertEqual(entry.system_info.cpu_codegen_target, sentinel)
+
+    def test_loaded_eager_package_stays_exempt_on_resave(self):
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn, requires_native_backend_compatibility=False)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(3))
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            side_effect=AssertionError("toolchain probe ran for an eager backend"),
+        ) as probe:
+            entry = package.cache_entry()
+            self.assertFalse(entry.requires_native_backend_compatibility)
+            self.assertIsNone(entry.system_info.cpu_codegen_target)
+            # Reload under an eager session (native_backend=False, as eval_frame
+            # passes it): an eager artifact reloaded to be served again stays
+            # exempt, so the resave never runs the toolchain probe.
+            reloaded = CompilePackage(
+                fn, entry, requires_native_backend_compatibility=False
+            )
+            resaved = reloaded.cache_entry()
+        probe.assert_not_called()
+        self.assertFalse(resaved.requires_native_backend_compatibility)
+        self.assertIsNone(resaved.system_info.cpu_codegen_target)
+
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
             return x + 1

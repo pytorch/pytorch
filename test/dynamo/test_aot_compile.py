@@ -2717,9 +2717,16 @@ from user code:
             with self.assertRaisesRegex(RuntimeError, "different GPU"):
                 make((3, 5), "A100").check_compatibility(make((3, 5), "H100"), "cuda")
             make((3, 5), None).check_compatibility(make((3, 5), "H100"), "cuda")
+            # check_codegen=False skips the toolkit/Triton/GPU-model checks (they
+            # describe generated code) but not device existence.
+            make((3, 5), "A100").check_compatibility(
+                make((3, 5), "H100"), "cuda", check_codegen=False
+            )
         with patch.object(torch.cuda, "is_available", return_value=False):
             with self.assertRaisesRegex(RuntimeError, "cuda is not available"):
-                make((0, 0), None).check_compatibility(make((0, 0), None), "cuda")
+                make((0, 0), None).check_compatibility(
+                    make((0, 0), None), "cuda", check_codegen=False
+                )
 
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
         # Under dynamic shapes the leading placeholder is a SymInt, which has no
