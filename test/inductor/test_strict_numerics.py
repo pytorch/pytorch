@@ -200,6 +200,44 @@ class StrictNumericsCompileTest(TestCase):
         self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
         self.assertIn("div_rn", "\n".join(codes))
 
+    @parametrize("case", ("tail", "mixed", "scalar", "broadcast", "nan"))
+    def test_erfcx_branch_selection(self, device, case):
+        dtype = torch.float32
+        values = torch.tensor(
+            [60.0, 80.0, 1e8, -8.0, -30.0, float("inf"), -float("inf"), float("nan")],
+            dtype=dtype,
+            device=device,
+        )
+        if case in ("mixed", "broadcast"):
+            edges = torch.tensor(
+                [-26.7, -6.1, -0.0, 0.0, 50.0, 5e7], dtype=dtype, device=device
+            )
+            values = torch.cat(
+                (
+                    values,
+                    edges,
+                    torch.nextafter(edges, torch.full_like(edges, -float("inf"))),
+                    torch.nextafter(edges, torch.full_like(edges, float("inf"))),
+                )
+            )
+
+        def fn(x, y=None):
+            result = torch.special.erfcx(x)
+            return result if y is None else result + y
+
+        if case == "scalar":
+            args = (values[0],)
+        elif case == "broadcast":
+            args = (values[:, None], torch.zeros((1, 17), dtype=dtype, device=device))
+        else:
+            if case == "nan":
+                values.fill_(float("nan"))
+            args = (values.repeat(129),)
+        with config.patch(force_disable_caches=True):
+            compiled = torch.compile(fn, fullgraph=True, options={"numerics": "strict"})
+            result = compiled(*args)
+        self.assertEqual(result.view(torch.int32), fn(*args).view(torch.int32))
+
     @parametrize("dtype", tuple(NAN_PAYLOADS), name_fn=lambda d: str(d).split(".")[-1])
     @parametrize("op", (torch.minimum, torch.maximum), name_fn=lambda f: f.__name__)
     def test_min_max_nan_payload(self, device, dtype, op):
@@ -827,7 +865,6 @@ POINTWISE_XFAIL = frozenset(
         ("special_bessel_y1", "float32"),
         ("special_entr", "bfloat16"),
         ("special_entr", "float16"),
-        ("special_erfcx", "float32"),
         ("special_log_ndtr", "float32"),
         ("special_modified_bessel_i0", "float32"),
         ("special_modified_bessel_i1", "float32"),
@@ -897,7 +934,6 @@ BACKWARD_XFAIL = frozenset(
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
         ("special_bessel_y1", "float32"),
-        ("special_erfcx", "float32"),
         ("special_log_ndtr", "float32"),
         ("special_modified_bessel_i0", "float32"),
         ("special_modified_bessel_i1", "float32"),
