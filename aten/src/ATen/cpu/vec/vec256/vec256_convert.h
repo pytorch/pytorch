@@ -243,6 +243,30 @@ struct VecConvert<
   }
 };
 
+// Without this, double -> uint8_t falls through to the generic static_cast loop
+// in vec_convert.h. That cast is undefined for anything not representable in
+// uint8_t, and the vectorizer lets the resulting poison escape the offending
+// lane: ordinary in-range values came out wrong (254.5 -> 0xff, -0.84 -> 0x80)
+// and the same input could produce different bytes at different positions.
+template <>
+struct VecConvert<uint8_t, 1, double, 1> {
+  static inline VectorizedN<uint8_t, 1> apply(
+      const VectorizedN<double, 1>& src) {
+    // Byte 0 of each truncated lane, as the float -> uint8_t routine above
+    // does. cvttpd_epi32 answers INT32_MIN for NaN and for anything out of
+    // range, and byte 0 of that is zero, so those agree with it too.
+    const __m128i i32 = _mm256_cvttpd_epi32(src[0]);
+    const __m128i low_byte_of_each_i32 = _mm_setr_epi8(
+        0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    // Lanes past the source are zeroed, matching the VectorizedN::loadu(buf,
+    // count) that the generic fallback ends with.
+    return Vectorized<uint8_t>(_mm256_inserti128_si256(
+        _mm256_setzero_si256(),
+        _mm_shuffle_epi8(i32, low_byte_of_each_i32),
+        0));
+  }
+};
+
 template <typename src_t>
 struct VecConvert<
     float,
