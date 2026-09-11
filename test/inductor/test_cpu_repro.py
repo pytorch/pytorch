@@ -49,7 +49,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_mkl,
     skipIfNoLapack,
-    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_CUDA,
@@ -1328,7 +1327,6 @@ class CPUReproTests(TestCase):
 
         self.assertEqual(actual, expected)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179957")
     @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
