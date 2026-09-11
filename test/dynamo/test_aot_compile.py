@@ -376,6 +376,11 @@ class SimpleLinearModule(torch.nn.Module):
         return self.linear(x)
 
 
+class ScaleModule(torch.nn.Module):
+    def forward(self, x):
+        return x * 2
+
+
 GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
 
 
@@ -1559,6 +1564,50 @@ from user code:
             with _set_pooling(mode):
                 self.assertEqual(reloaded(x), expected[mode])
 
+    def test_aot_compile_module_scope_resolves_through_forward_hook(self):
+        # A registered forward hook makes get_traced_fn(model) return
+        # Module._wrapped_call_impl, whose globals are torch/nn/modules/module.py.
+        # The guard scope has to come from what was actually traced, model.forward.
+        #
+        # The hook is deliberately the identity: aot_compile_module traces
+        # model.forward directly and never runs hooks, so a hook with an effect
+        # would simply be dropped from the compiled result. This pins the guard
+        # SCOPE resolution on a hooked module, not hook support.
+        mod = GlobalConfigModule()
+        mod.register_forward_hook(lambda m, i, o: o)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling(m)])
+                for m in ("sum", "mean")
+            ]
+        )
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded_mod = GlobalConfigModule()
+        reloaded_mod.register_forward_hook(lambda m, i, o: o)
+        reloaded = torch.compile(
+            reloaded_mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        reloaded._load_aot_compiled_module(data)
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                self.assertEqual(reloaded(x), expected[mode])
+
     def test_aot_compile_fn_guards_track_rebound_global(self):
         # Function artifacts get their guard scope from load_compiled_function's
         # f_globals. Same contract as the module test above: the live dict, not
@@ -1657,6 +1706,26 @@ from user code:
         for alias, module_name in import_sources.items():
             if alias != kept_alias:
                 self.assertIs(scope[alias], importlib.import_module(module_name))
+
+    def test_aot_compile_module_partial_forward_falls_back_loudly(self):
+        # A forward that is neither a function nor a bound method has no live
+        # scope to resolve guards against. The artifact still loads, against the
+        # reconstructed scope, but that has to be a warning: it is the one case
+        # where a guarded global does not track the loading process.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+
+        mod = ScaleModule()
+        mod.forward = functools.partial(ScaleModule.forward, mod)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            reloaded = AOTCompiledModel.deserialize(mod, data)
+        (line,) = logs.output
+        self.assertIn("ScaleModule.forward is functools.partial(", line)
+        self.assertIn("no live guard scope", line)
+        self.assertEqual(reloaded(x), x * 2)
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
