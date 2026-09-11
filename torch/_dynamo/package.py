@@ -111,6 +111,33 @@ class SerializedCode:
         )
 
 
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers for objects pickle cannot rebuild by reference: code objects,
+    python modules, and bound methods.
+
+    GuardsStatePickler is the one subclass today. AOTCompilePickler keeps its
+    own copies of these reducers until it is moved onto this base separately;
+    once both share it, a fix to how an object is rebuilt cannot be missed in
+    one pickler.
+    """
+
+    # The reducers stay classmethods: pickle reduces a bound classmethod to
+    # getattr(owner, name), so an artifact names the subclass and resolves the
+    # reducer through its MRO. A staticmethod would pickle by __qualname__ and
+    # change the artifact.
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
     """
