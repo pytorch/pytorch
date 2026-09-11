@@ -21,7 +21,6 @@ from inspect import currentframe
 from itertools import count
 from operator import attrgetter
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
 import torch._inductor.async_compile
@@ -109,6 +108,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExpr
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
@@ -932,9 +932,12 @@ def maybe_disable_graph_partition(
     cpp_wrapper: bool, aot_mode: bool
 ) -> AbstractContextManager[None, None]:
     """
-    graph partition does not support cpp_wrapper and aot_mode yet.
+    graph partition does not support cpp_wrapper and aot_mode yet, except under
+    AOTI regional cuda graph, which is built on top of it.
     """
-    if cpp_wrapper or aot_mode:
+    if config.aot_inductor.cudagraph_mode == "regional" and aot_mode:
+        return config.patch(graph_partition=True)
+    elif cpp_wrapper or aot_mode:
         return config.patch(graph_partition=False)
     else:
         return contextlib.nullcontext()
@@ -2439,6 +2442,22 @@ def compile_fx_aot(
 
     config_patches = maybe_aoti_standalone_config(config_patches)
 
+    # Regional cuda graph relies on memory planning to place captured-partition
+    # boundary buffers in an address-stable slab; without it a capture would
+    # replay against reallocated addresses. Auto-enable so the two stay in sync.
+    # (Whole-graph mode does not need this: its intermediates are allocated
+    # inside the capture and live in the graph pool.)
+    cudagraph_mode = config_patches.get(
+        "aot_inductor.cudagraph_mode", config.aot_inductor.cudagraph_mode
+    )
+    memory_planning = config_patches.get("memory_planning", config.memory_planning)
+    if cudagraph_mode == "regional" and not memory_planning:
+        log.warning(
+            "Enabling config.memory_planning because "
+            'config.aot_inductor.cudagraph_mode="regional" requires it.'
+        )
+        config_patches["memory_planning"] = True
+
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
     saved_compile_context = torch._guards.CompileContext(saved_compile_id)
@@ -2607,9 +2626,18 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
     return {
         "triton.autotune_at_compile_time": autotune_at_compile_time,
         "triton.autotune_cublasLt": not autotune_at_compile_time,
+        # Regional cuda graph drives Inductor's partitioner, whose
+        # should_partition only does real work when triton.cudagraphs is on, so
+        # it must stay on for AOT compilation in that mode.
         "triton.cudagraphs": (
-            config.triton.cudagraphs
-            and not V.aot_compilation
+            (
+                config.triton.cudagraphs
+                or config.aot_inductor.cudagraph_mode == "regional"
+            )
+            and (
+                not V.aot_compilation
+                or config.aot_inductor.cudagraph_mode == "regional"
+            )
             and not config.graph_partition
         ),
         "triton.store_cubin": True,

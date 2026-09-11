@@ -259,6 +259,43 @@ AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
   return AOTI_RUNTIME_SUCCESS;
 })
 
+AOTIRuntimeError AOTInductorModelContainerRunPinned(
+    AOTInductorModelContainerHandle container_handle,
+    size_t model_idx,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
+    size_t num_inputs,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) AOTI_RUNTIME_TRY({
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
+  AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
+
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  AOTINoGradGuard guard;
+  container->run_pinned(
+      model_idx, input_handles, output_handles, stream, proxy_executor_handle);
+  return AOTI_RUNTIME_SUCCESS;
+})
+
+AOTIRuntimeError AOTInductorModelContainerGetNumModels(
+    AOTInductorModelContainerHandle container_handle,
+    size_t* ret_num_models) AOTI_RUNTIME_TRY({
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  *ret_num_models = container->num_models();
+  return AOTI_RUNTIME_SUCCESS;
+})
+
 AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
     AOTInductorModelContainerHandle container_handle,
     size_t* num_constants) AOTI_RUNTIME_TRY({

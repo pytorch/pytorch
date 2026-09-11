@@ -19,9 +19,9 @@ import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
 from typing import Any, Generic, Literal, overload, TYPE_CHECKING, TypeAlias, TypeVar
-from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import ParamSpec
 
 from .ir import ComputedBuffer, Pointwise
 
@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
-
 import torch
 import torch._inductor.async_compile
 import torch.utils._pytree as pytree
@@ -52,7 +51,7 @@ from torch.utils._sympy.functions import FloorDiv, Identity
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
-from . import comms, config, config_comms, dependencies, ir, metrics
+from . import comms, config, config_comms, cudagraph_capture, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import (
@@ -11576,6 +11575,7 @@ class Scheduler:
         from .optimize_indexing import remove_redundant_argreduce_indices
 
         with dynamo_timed("Scheduler.codegen"):
+            self._check_cudagraph_mode()
             loop_bodies = OrderedSet(
                 snode._body
                 for node in self.nodes
@@ -11589,6 +11589,35 @@ class Scheduler:
                 if torch._inductor.config.graph_partition
                 else self._codegen(self.nodes)
             )
+
+    def _check_cudagraph_mode(self) -> None:
+        """Validate config.aot_inductor.cudagraph_mode against this graph.
+
+        Runs before codegen so an unsupported mode or an uncapturable node is
+        reported once, naming every offender, rather than surfacing later as an
+        illegal memory access at serving time.
+        """
+        mode = config.aot_inductor.cudagraph_mode
+        if mode == "off":
+            return
+        if mode not in ("whole", "regional"):
+            raise RuntimeError(
+                f"config.aot_inductor.cudagraph_mode={mode!r} is not a valid mode; "
+                'expected "off", "whole" or "regional".'
+            )
+        if not (
+            V.graph.aot_mode and V.graph.cpp_wrapper and is_gpu(V.graph.device_type)
+        ):
+            raise RuntimeError(
+                f'config.aot_inductor.cudagraph_mode="{mode}" requires an '
+                "AOTInductor GPU compile, but this graph has "
+                f"aot_mode={V.graph.aot_mode}, cpp_wrapper={V.graph.cpp_wrapper}, "
+                f"device_type={V.graph.device_type!r}."
+            )
+        if mode == "whole":
+            cudagraph_capture.check_whole_graph_capturable(self.nodes)
+        # "regional" needs no whole-graph scan: it partitions AROUND the
+        # uncapturable nodes instead of rejecting the model for having them.
 
     def _codegen_partition_wrapper(
         self,

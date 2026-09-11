@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 
@@ -313,6 +314,67 @@ class AOTInductorModelContainer {
     }
 
     model->run_single_threaded(
+        input_handles, output_handles, stream, proxy_executor);
+  }
+
+  // Thread-aware variant of run(): executes on the model instance pinned at
+  // model_idx instead of pulling one from the available-models queue, so that
+  // instance's captured cuda graphs and private graph pool stay warm across
+  // requests. Callers map
+  // each worker thread to a fixed instance (e.g. worker_index % num_models()).
+  // Concurrent calls with the same model_idx are serialized by a per-instance
+  // mutex, so their EXECUTION cannot interleave. That mutex does not cover
+  // output consumption: it is released when run_single_threaded() returns,
+  // while under cuda graph the outputs are still non-owning views that the
+  // next call on this instance overwrites. Callers must copy outputs out
+  // before another request reaches the same model_idx. See OUTPUT CONTRACT in
+  // aoti_runtime/cudagraph_runtime.h.
+  void run_pinned(
+      size_t model_idx,
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    if (model_idx >= models_.size()) {
+      throw std::runtime_error(
+          "run_pinned: model_idx " + std::to_string(model_idx) +
+          " out of range (num_models=" + std::to_string(models_.size()) + ")");
+    }
+
+    // Constant folding is normally already done at container construction, since
+    // loaders typically fold eagerly. Handle a still-INITIALIZED buffer under an
+    // exclusive lock for safety; the steady-state serving path sees FOLDED and
+    // falls straight through to execution.
+    auto& const_folded = active().fold_state;
+    if (const_folded == ConstantState::INITIALIZED) {
+      std::unique_lock constants_folding_lk(model_exec_mutex_);
+      if (active().fold_state == ConstantState::INITIALIZED) {
+        auto* fold_model = models_[model_idx].get();
+        auto folded_const_map = fold_model->run_const_fold(
+            stream, proxy_executor, /* initialization = */ true);
+        update_constant_buffer(
+            std::move(folded_const_map),
+            /* use_inactive = */ false,
+            /* validate_full_update = */ false);
+        active().fold_state = ConstantState::FOLDED;
+      }
+    } else if (const_folded != ConstantState::FOLDED) {
+      throw std::runtime_error(
+          "Unknown constant state: " + toStringConstantState(const_folded));
+    }
+
+    // Execution holds the shared lock for the same reason run() does: a weight
+    // update takes model_exec_mutex_ exclusively, so holding it shared here is
+    // what guarantees the constants are not re-pointed mid-run. Without it a
+    // swap_constant_buffer() could land in the middle of this execution.
+    std::shared_lock model_lk(model_exec_mutex_);
+    std::lock_guard<std::mutex> instance_lk(run_mutex_for(model_idx));
+    models_[model_idx]->run_single_threaded(
         input_handles, output_handles, stream, proxy_executor);
   }
 
@@ -886,6 +948,16 @@ class AOTInductorModelContainer {
       model->update_constants_map(
           active().map, /* remap_constants_array = */ false);
       model->update_constants_array(active().array);
+#ifdef USE_CUDA
+      // Captured cuda graphs baked the addresses of the buffer we just swapped
+      // away from, so replaying them would silently serve stale weights. Safe
+      // to clear here because we hold model_exec_mutex_ exclusively, so no
+      // replay is in flight. (In-place updates via update_constant_buffer keep
+      // the same storage and so keep captures valid; the exception is a
+      // user_managed update of the ACTIVE buffer, which re-points it without
+      // holding this lock -- do not combine that with cuda graph.)
+      model->reset_cuda_graph_captures();
+#endif
     }
   }
 
@@ -976,6 +1048,21 @@ class AOTInductorModelContainer {
     auto* result = available_models_.back();
     available_models_.pop_back();
     return result;
+  }
+
+  // Per-instance mutexes for run_pinned(). Lazily sized to num_models on first
+  // use so both constructors stay untouched. Each pinned instance runs under
+  // its own mutex, so concurrent run_pinned() calls that map to the same
+  // instance (more worker threads than instances) serialize instead of racing
+  // on one model's single-threaded run state.
+  std::once_flag model_run_mutexes_init_flag_;
+  std::unique_ptr<std::mutex[]> model_run_mutexes_;
+
+  std::mutex& run_mutex_for(size_t model_idx) {
+    std::call_once(model_run_mutexes_init_flag_, [this]() {
+      model_run_mutexes_ = std::make_unique<std::mutex[]>(models_.size());
+    });
+    return model_run_mutexes_[model_idx];
   }
 
   // This mutex is used to protect execution of model.
