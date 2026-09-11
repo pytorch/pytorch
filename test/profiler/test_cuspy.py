@@ -38,6 +38,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUPTI_V13_3,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -116,6 +117,8 @@ def _fresh_event_node_recorder(test):
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
 class TestCuspyRecords(TestCase):
     """Pure Cuspy + metadata unit tests (no CUDA)."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
@@ -2602,6 +2605,8 @@ class TestCuspyRecords(TestCase):
 class TestCuspyCUDA(TestCase):
     """Collection through Cuspy directly (not via torch.profiler.profile)."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
         from torch.profiler._cuspy import core as cuspy_core
@@ -3322,9 +3327,11 @@ def _graph_node_created_key():
 # whole class has to be gated -- a method-level gate would still let setUp error out where
 # the stubs were not generated (see TEST_CUPTI in common_cuda).
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-class TestCuspyCallbackRegistry(TestCase):
+class TestCuspyCallbackRegistryCUDA(TestCase):
     """Cuspy's shared *subscriber-callback* registry -- a separate axis from activity
     records: handlers fire synchronously on the application thread inside the CUDA call."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         from torch.profiler._cuspy import core as cuspy_core
@@ -3505,6 +3512,8 @@ class TestWindowFinalizer(TestCase):
     """Cover-and-finalize loop of WindowFinalizerMixin -- pure Python, no CUDA/CUPTI.
     A fake user supplies a settable native clock and a synthetic record buffer."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     class _Fake(WindowFinalizerMixin):
         def __init__(self) -> None:
             self._clock = 0
@@ -3589,9 +3598,11 @@ class TestWindowFinalizer(TestCase):
 
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not TEST_CUDA, "CUDA is required")
-class TestCuspyProfiler(TestCase):
+class TestCuspyProfilerCUDA(TestCase):
     """Cuspy driven through ``torch.profiler.profile`` (trace shape, op/kernel
     parity, record_shapes, sync/async export, multithread thread-assignment, ...)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
@@ -4480,6 +4491,8 @@ class TestCuspyNative(TestCase):
     """Cuspy's native buffer-pool / v2-record-layout callbacks driven directly
     via ctypes -- pure C++, no CUDA/cupti-python."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cuspy_buffer_pool_reuse(self):
         # Cuspy's buffer pool is pure C++ (no CUDA/cupti-python), so
@@ -4710,6 +4723,8 @@ class TestCuspyClock(TestCase):
     kineto's axis. Drives the production _SynchronizedClock directly (its calibrate() reads
     the native clock through an injected callable), so no CUDA / live CUPTI session is needed;
     a lambda returning CLOCK_REALTIME stands in for cuptiGetTimestamp."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def _realtime():

@@ -7,7 +7,11 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # These tests drive the real libcupti through _PyLibCupti, so they import its symbols;
@@ -21,6 +25,8 @@ if TEST_CUPTI:
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
 class TestPyLibCupti(TestCase):
     """Wrapper surface that needs only a loaded libcupti, no CUDA context."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_get_version(self):
         self.assertGreaterEqual(pylibcupti().get_version(), 130300)
@@ -65,6 +71,8 @@ class TestPyLibCupti(TestCase):
 class TestPyLibCuptiCUDA(TestCase):
     """Wrapper surface driven against a live CUDA context: subscription-scoped
     activity collection, the global HW-trace toggle, and cuptiFinalize."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_v2_subscribe_timestamp_roundtrip(self):
         torch.cuda.init()

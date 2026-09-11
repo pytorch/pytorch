@@ -7,7 +7,11 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI, TEST_CUPTI_V13_3
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _capture_relu_graph() -> "torch.cuda.CUDAGraph":
@@ -33,6 +37,8 @@ def _capture_relu_graph() -> "torch.cuda.CUDAGraph":
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuspyNodeTimerCUDA(TestCase):
     """NodeTimerObserver collection through Cuspy (not via profile)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_node_timer_collects_kernel_spans(self):
@@ -273,6 +279,8 @@ class TestNodeTimerBucketName(TestCase):
     """``_bucket_name`` normalizes whatever a graph annotation resolver returns; no CUDA
     or libcupti at runtime, but importing it pulls in ``records`` -> the build-generated
     ``_cupti_stubs``, which is what TEST_CUPTI gates on."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_shapes(self):
         from torch.profiler._cuspy.observers.node_timer import _bucket_name
