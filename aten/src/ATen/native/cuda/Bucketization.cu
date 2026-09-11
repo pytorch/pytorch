@@ -5,7 +5,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <ATen/native/Resize.h>
-#include <c10/cuda/CUDAMathCompat.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -29,7 +28,7 @@ __device__ int64_t lower_bound(const input_t *data_ss, int64_t start, int64_t en
   // i.e. the second row of a 3x3 tensors starts at element 3 but sorter's second row only contains 0, 1, or 2
   const int64_t orig_start = start;
   while (start < end) {
-    const int64_t mid = c10::cuda::compat::midpoint(start, end);
+    const int64_t mid = start + ((end - start) >> 1);
     const input_t mid_val = data_sort ? data_ss[orig_start + data_sort[mid]] : data_ss[mid];
     if (!(mid_val >= val)) {
       start = mid + 1;
@@ -47,7 +46,7 @@ __device__ int64_t upper_bound(const input_t *data_ss, int64_t start, int64_t en
   // i.e. the second row of a 3x3 tensors starts at element 3 but sorter's second row only contains 0, 1, or 2
   const int64_t orig_start = start;
   while (start < end) {
-    const int64_t mid = c10::cuda::compat::midpoint(start, end);
+    const int64_t mid = start + ((end - start) >> 1);
     const input_t mid_val = data_sort ? data_ss[orig_start + data_sort[mid]] : data_ss[mid];
     if (!(mid_val > val)) {
       start = mid + 1;
