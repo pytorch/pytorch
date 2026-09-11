@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 from typing import Any
 
+import contextlib
 import sympy
 
 import torch
@@ -12,36 +13,34 @@ from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import assert_close
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 class TestVarianceReductionHeuristic(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
 
-    def _skip_if_not_cuda(self):
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA-specific variance heuristic")
-
     def _dtypes(self):
         dtypes = [torch.float16]
-        if torch.cuda.is_bf16_supported():
+        caps = torch.accelerator.get_device_capability()
+        if torch.bfloat16 in caps.get("supported_dtypes", set()):
             dtypes.append(torch.bfloat16)
         return dtypes
 
-    def test_var_mean_uses_two_step_for_non_split_reductions(self):
-        self._skip_if_not_cuda()
-
+    def test_var_mean_uses_two_step_for_non_split_reductions(self, device):
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
 
         for dtype in self._dtypes():
-            x = torch.randn([4, 4096], device=GPU_TYPE, dtype=dtype)
+            x = torch.randn([4, 4096], device=device, dtype=dtype)
             expected = fn(x)
             result, (source_code,) = run_and_get_code(
                 torch.compile(fn, fullgraph=True), x
@@ -51,13 +50,11 @@ class TestVarianceReductionHeuristic(TestCase):
             self.assertIn("tl.sum", source_code)
             self.assertNotIn("welford_reduce", source_code)
 
-    def test_var_mean_keeps_welford_for_float32_reductions(self):
-        self._skip_if_not_cuda()
-
+    def test_var_mean_keeps_welford_for_float32_reductions(self, device):
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
 
-        x = torch.randn([4, 4096], device=GPU_TYPE, dtype=torch.float32)
+        x = torch.randn([4, 4096], device=device, dtype=torch.float32)
         expected = fn(x)
         result, (source_code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
 
@@ -65,14 +62,12 @@ class TestVarianceReductionHeuristic(TestCase):
         self.assertIn("welford_", source_code)
 
     @config.patch("triton.force_cooperative_reductions", True)
-    def test_var_mean_keeps_welford_for_small_reductions(self):
-        self._skip_if_not_cuda()
-
+    def test_var_mean_keeps_welford_for_small_reductions(self, device):
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
 
         for dtype in self._dtypes():
-            x = torch.randn([4, 512], device=GPU_TYPE, dtype=dtype)
+            x = torch.randn([4, 512], device=device, dtype=dtype)
             expected = fn(x)
             result, (source_code,) = run_and_get_code(
                 torch.compile(fn, fullgraph=True), x
@@ -88,14 +83,12 @@ class TestVarianceReductionHeuristic(TestCase):
             "triton.use_two_step_variance_threshold": 2_000_000,
         }
     )
-    def test_var_mean_keeps_welford_for_split_reductions(self):
-        self._skip_if_not_cuda()
-
+    def test_var_mean_keeps_welford_for_split_reductions(self, device):
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
 
         for dtype in self._dtypes():
-            x = torch.randn([2, 1024 * 1024], device=GPU_TYPE, dtype=dtype)
+            x = torch.randn([2, 1024 * 1024], device=device, dtype=dtype)
             expected = fn(x)
             result, (source_code,) = run_and_get_code(
                 torch.compile(fn, fullgraph=True), x
@@ -129,20 +122,28 @@ class _TestingHeuristics(InductorChoices):
         }
 
 
-@config.patch(
-    {
-        "triton.cooperative_reductions": True,
-        "triton.force_cooperative_reductions": True,
-    }
-)
-@instantiate_parametrized_tests
 class CooperativeReductionTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(
+            config.patch(
+                {
+                    "triton.cooperative_reductions": True,
+                    "triton.force_cooperative_reductions": True,
+                }
+            )
+        )
         torch._inductor.metrics.generated_kernel_count = 0
         torch._dynamo.reset()
 
-    def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1):
+    def tearDown(self):
+        self._stack.close()
+        super().tearDown()
+
+    def run_and_check(self, device, fn, args, dtype=None, *, expect_kernel_count=1):
         # Cooperative reductions accumulate in a different order than eager, so a
         # single fixed tolerance is too tight for large-magnitude reductions
         # (e.g. sum over ~1M elements). Scale rtol with the input dtype's
@@ -241,7 +242,7 @@ class CooperativeReductionTests(TestCase):
             self.assertIn("cooperative_reduction_grid", source_code)
         else:
             self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
-        if GPU_TYPE == "cuda":
+        if device == "cuda" or device == "privateuseone":
             self.assertIn("'launch_cooperative_grid': True", source_code)
         if "async_compile.multi_kernel" not in source_code:
             self.assertEqual(
@@ -265,15 +266,15 @@ class CooperativeReductionTests(TestCase):
         ],
     )
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
-    def test_reduction_fns(self, name, dtype):
+    def test_reduction_fns(self, device, name, dtype):
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
 
         reduction_fn = getattr(torch, name)
-        args = [torch.randn(1, 1024**2, device=GPU_TYPE, dtype=dtype) for _ in range(2)]
-        self.run_and_check(fn, args, dtype)
+        args = [torch.randn(1, 1024**2, device=device, dtype=dtype) for _ in range(2)]
+        self.run_and_check(device, fn, args, dtype)
 
-    def test_bool_reduction_fns(self):
+    def test_bool_reduction_fns(self, device):
         def fn(x, y):
             return [
                 torch.any(x == y),
@@ -284,8 +285,8 @@ class CooperativeReductionTests(TestCase):
                 torch.all(x > y),
             ]
 
-        args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
-        source_code = self.run_and_check(fn, args)
+        args = [torch.randn(1024, device=device) for _ in range(2)]
+        source_code = self.run_and_check(device, fn, args)
         if "async_compile.multi_kernel" in source_code:
             return
         before, after = source_code.split("triton_helpers.x_grid_barrier")
@@ -294,21 +295,21 @@ class CooperativeReductionTests(TestCase):
 
     @parametrize("bs", [1, 2, 5, 15])
     @parametrize("count", [1024**2 + 1, 1024**2 - 1, 1024])
-    def test_non_power_of_2(self, bs, count):
+    def test_non_power_of_2(self, device, bs, count):
         def fn(x):
             return x.mean(), x.std() + x.min()
 
-        args = [torch.randn([bs, count], device=GPU_TYPE)]
-        self.run_and_check(fn, args)
+        args = [torch.randn([bs, count], device=device)]
+        self.run_and_check(device, fn, args)
 
-    def test_chained_reductions(self):
+    def test_chained_reductions(self, device):
         def fn(x):
             for _ in range(8):
                 x = x + torch.softmax(x, 1)
             return x
 
-        args = [torch.randn(4, 100000, device=GPU_TYPE)]
-        source_code = self.run_and_check(fn, args)
+        args = [torch.randn(4, 100000, device=device)]
+        source_code = self.run_and_check(device, fn, args)
         if "async_compile.multi_kernel" in source_code:
             return
 
@@ -318,38 +319,83 @@ class CooperativeReductionTests(TestCase):
         self.assertEqual(
             source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
         )
-        self.assertEqual(source_code.count(f"empty_strided_{GPU_TYPE}"), 5)
+        self.assertEqual(source_code.count(f"empty_strided_{device}"), 5)
 
-    def test_reduce_split(self):
+    def test_reduce_split(self, device):
         def fn(a, b):
             a1 = torch.linalg.vector_norm(a)
             b1 = torch.sum(b, dim=0)
             return a1, b1
 
         inps = [
-            torch.rand(2048, 512, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(2048, 512, device=device),
+            torch.rand(20, 20, device=device),
         ]
-        self.run_and_check(fn, inps, expect_kernel_count=2)
+        self.run_and_check(device, fn, inps, expect_kernel_count=2)
 
 
-@config.patch("triton.persistent_reductions", not config.triton.persistent_reductions)
 class NoPersistCooperativeReductionTests(CooperativeReductionTests):
-    pass
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+        cls._stack.enter_context(
+            config.patch(
+                {
+                    "triton.persistent_reductions", not config.triton.persistent_reductions,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+        super().tearDownClass()
 
 
-@config.patch("triton.multi_kernel", int(not config.triton.multi_kernel))
 class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
-    pass
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+        cls._stack.enter_context(
+            config.patch(
+                {
+                    "triton.multi_kernel", int(not config.triton.multi_kernel),
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+        super().tearDownClass()
 
 
-@config.patch(
-    {
-        "triton.cooperative_reductions": True,
-    }
-)
-@instantiate_parametrized_tests
 class TestFixedConfigs(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+        cls._stack.enter_context(
+            config.patch(
+                {
+                    "triton.cooperative_reductions": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+        super().tearDownClass()
+
     def _check(self, fn, args, *, persistent=False, cooperative=True, cfg):
         expected = fn(*args)
         heuristic = _TestingHeuristics(
@@ -380,11 +426,11 @@ class TestFixedConfigs(TestCase):
             (True, True, {"XBLOCK": 2, "RSPLIT": 17}),
         ],
     )
-    def test_fixed_configs(self, persistent, cooperative, cfg):
+    def test_fixed_configs(self, device, persistent, cooperative, cfg):
         def fn(x):
             return torch.softmax(x + 1, dim=-1) + x
 
-        args = [torch.randn(8, 8000, device=GPU_TYPE)]
+        args = [torch.randn(8, 8000, device=device)]
         self._check(fn, args, persistent=persistent, cooperative=cooperative, cfg=cfg)
 
     @parametrize(
@@ -402,18 +448,18 @@ class TestFixedConfigs(TestCase):
             (True, 3, 8192, 40),
         ],
     )
-    def test_welford_non_power_of_2_rsplit(self, persistent, x, r, rsplit):
+    def test_welford_non_power_of_2_rsplit(self, device, persistent, x, r, rsplit):
         def fn(x):
             return torch.var_mean(x, dim=-1)
 
         cfg = {"XBLOCK": 64, "RSPLIT": rsplit, "num_warps": 8}
         if not persistent:
             cfg["R0_BLOCK"] = 64
-        args = [torch.randn(x, r, device=GPU_TYPE)]
+        args = [torch.randn(x, r, device=device)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
     @parametrize("persistent", [True, False])
-    def test_min_max_non_power_of_2_rsplit(self, persistent):
+    def test_min_max_non_power_of_2_rsplit(self, device, persistent):
         def fn(x):
             return (
                 torch.amin(x, dim=-1),
@@ -429,8 +475,8 @@ class TestFixedConfigs(TestCase):
         args = [
             torch.stack(
                 [
-                    torch.arange(10, 4096, device=GPU_TYPE),
-                    -torch.arange(10, 4096, device=GPU_TYPE),
+                    torch.arange(10, 4096, device=device),
+                    -torch.arange(10, 4096, device=device),
                 ]
             )
         ]
@@ -440,12 +486,12 @@ class TestFixedConfigs(TestCase):
                 [
                     torch.tensor(
                         [0.0] * 150 + [float("inf")] * 150,
-                        device=GPU_TYPE,
+                        device=device,
                         dtype=torch.float32,
                     ),
                     torch.tensor(
                         [0.0] * 150 + [-float("inf")] * 150,
-                        device=GPU_TYPE,
+                        device=device,
                         dtype=torch.float32,
                     ),
                 ]
@@ -455,7 +501,7 @@ class TestFixedConfigs(TestCase):
 
     @parametrize("persistent", [False, True])
     @parametrize("rsplit", [32, 33])
-    def test_fixed_config_with_larger_xblock_than_xnumel(self, persistent, rsplit):
+    def test_fixed_config_with_larger_xblock_than_xnumel(self, device, persistent, rsplit):
         def fn(x, y):
             return [
                 torch.any(x == y),
@@ -468,12 +514,28 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 128, "RSPLIT": rsplit, "num_warps": 16, "num_stages": 1}
         if not persistent:
             cfg["R0_BLOCK"] = 64
-        args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
+        args = [torch.randn(1024, device=device) for _ in range(2)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
+
+instantiate_device_type_tests(
+    TestVarianceReductionHeuristic, globals(), except_for="cpu"
+)
+instantiate_device_type_tests(
+    CooperativeReductionTests, globals(), allow_xpu=True, except_for="cpu"
+)
+instantiate_device_type_tests(
+    NoPersistCooperativeReductionTests, globals(), allow_xpu=True, except_for="cpu"
+)
+instantiate_device_type_tests(
+    MultiKernelCooperativeReductionTests, globals(), allow_xpu=True, except_for="cpu"
+)
+instantiate_device_type_tests(
+    TestFixedConfigs, globals(), allow_xpu=True, except_for="cpu"
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_GPU:
+    if HAS_TRITON:
         run_tests(needs="filelock")
