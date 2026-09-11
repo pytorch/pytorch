@@ -196,9 +196,13 @@ class FunctionPicklerBase(pickle.Pickler):
         # decorator's module, almost always already imported. A scope that only
         # existed in sys.modules at save (exec-created, transformers_modules.*)
         # comes back empty: safe on the guard-serialization path, which reads
-        # attributes off the rebuilt function without calling it; the AOT
-        # pickler does call it, so there an empty scope surfaces as a NameError
-        # at first call, not a load error.
+        # attributes off the rebuilt function without calling it; a pickler
+        # whose functions are CALLED after load (AOTCompilePickler, once it is
+        # on this base) sees an empty scope as a NameError at first call, not a
+        # load error. A scope of "__main__" imports the LOADING process's
+        # __main__, the same module pickle itself resolves a by-reference
+        # __main__ function against; right in-process, and cross-process only
+        # as right as the two scripts agree.
         f_globals: dict[str, Any]
         # Not every __name__ is importable: a <locals>/exec function can carry
         # None or "" (bare globals with no __name__), and a relative name
@@ -267,8 +271,12 @@ class FunctionPicklerBase(pickle.Pickler):
         a module absent from sys.modules; pickling those by reference fails at
         dump (PicklingError, or a bare AttributeError from the C pickler for a
         <locals> name), so the caller rebuilds them from the code object (or
-        prunes them)."""
-        if "<locals>" in fn.__qualname__:
+        prunes them). Conservative on purpose: pickle would import a module that
+        is not in sys.modules yet, this reports False for it (guards.py explains
+        why on its caller), and a "<locals>" qualname component is refused like
+        pickle refuses it. GuardsStatePickler handles <locals> on its own branch
+        before asking; AOTCompilePickler dispatches on this alone."""
+        if "<locals>" in fn.__qualname__.split("."):
             return False
         # __module__ need not be a str (a decorator can set anything); an
         # unhashable one must not TypeError out of the reducer.
@@ -313,10 +321,15 @@ class FunctionPicklerBase(pickle.Pickler):
             type(self)._set_cell_contents,
         )
 
-    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+    def _reduce_bound_method(
+        self, method: types.MethodType, *, receiver_is_live: bool = False
+    ) -> tuple[Any, ...] | None:
         # pickle rebuilds a bound method by getattr() on self at load, which is
         # wrong when that does not resolve back to the same bound method; those
-        # carry the function and self explicitly.
+        # carry the function and self explicitly. `receiver_is_live` says the
+        # receiver is the SAME object at load (a persistent_id reference), so
+        # only the probe below decides: the per-instance and __getattr__ gates
+        # exist for a receiver that is rebuilt, possibly as a different type.
         receiver = method.__self__
         cls = type(receiver)
         func = method.__func__
@@ -338,7 +351,7 @@ class FunctionPicklerBase(pickle.Pickler):
         # restored with the class. issubclass(cls, ...) rather than isinstance
         # so a raising __getattribute__ cannot escape before the try below.
         explicit = (type(self)._unpickle_bound_method, (func, receiver))
-        is_type = issubclass(cls, type)
+        is_type = issubclass(cls, type) or receiver_is_live
         try:
             if not is_type and hasattr(cls, "__getattr__"):
                 return explicit
