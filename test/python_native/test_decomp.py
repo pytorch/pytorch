@@ -14,7 +14,12 @@ import uuid
 import torch
 import torch._native.registry as registry_module
 from torch._native.registry import native_decomp_table, register_op_override
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 # Common predicates/impls used across several tests.
@@ -37,6 +42,8 @@ def _make_fill_impl(value):
 
 @skipIfTorchDynamo("Decomp tests don't need dynamo compilation")
 class TestNativeDecompTable(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for native_decomp_table() and register/deregister syncing."""
 
     def setUp(self):
