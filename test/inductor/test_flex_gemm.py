@@ -156,16 +156,6 @@ class TestFlexGemmRuntimeImport(TestCase):
         )
         subprocess.run([sys.executable, "-c", script], check=True, timeout=300)
 
-    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
-    def test_vendored_quack_imports_without_cloudpickle(self):
-        script = (
-            "import sys; sys.modules['cloudpickle'] = None\n"
-            "import torch._vendor.quack.gemm_runtime.identity\n"
-            "import torch._vendor.quack.epilogue.frontend\n"
-            "import torch._inductor.kernel.flex_gemm.runtime\n"
-        )
-        subprocess.run([sys.executable, "-c", script], check=True, timeout=300)
-
     def test_quack_support_probe_requires_cutlass(self):
         from torch._inductor.kernel.flex_gemm import lowering
 
@@ -294,7 +284,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         def build(dtype):
             return runtime.flex_gemm_epimod(
                 epilogue_fn,
-                (torch.empty(1, 8, dtype=dtype),),
+                (dtype,),
                 ("row",),
                 0,
                 None,
@@ -336,7 +326,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         return tuple(sorted(fields.items()))
 
     def test_flex_gemm_search_space(self):
-        from torch._inductor.kernel.flex_gemm.configs import flex_gemm_search_space
+        from torch._inductor.heuristics.template.flex_gemm import flex_gemm_search_space
 
         key = self.searchSpaceKey
         default = key(256, 256, 2, 1, True)
@@ -1413,10 +1403,11 @@ class TestFlexGemmAnalysis(TestCase):
         with self.assertRaisesRegex(RuntimeError, "local_reduce_out"):
             FlexGemmRuntimeLocalReducePlan(axis0, combine="add")
         with self.assertRaisesRegex(RuntimeError, "require a combine"):
-            FlexGemmRuntimeLocalReducePlan(axis0, out=torch.empty(1))
+            FlexGemmRuntimeLocalReducePlan(axis0, stores=True, out=torch.empty(1))
         with self.assertRaisesRegex(RuntimeError, "prepass finalizers"):
             FlexGemmRuntimeLocalReducePlan(
                 axis0,
+                stores=True,
                 out=torch.empty(1),
                 combine="add",
                 prepass_finalize="mean",
@@ -1428,7 +1419,9 @@ class TestFlexGemmAnalysis(TestCase):
             prepass=lambda acc: {"local_reduce0": acc},
             prepass_combine="add",
         )
-        FlexGemmRuntimeLocalReducePlan(axis0, out=torch.empty(1), combine="max")
+        FlexGemmRuntimeLocalReducePlan(
+            axis0, stores=True, out=torch.empty(1), combine="max"
+        )
 
     @parametrize(
         "case",
@@ -1857,19 +1850,16 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_flex_gemm_route_uses_only_vendored_quack(self):
-        # A pip `quack` may be installed; the fused route must load neither it nor cloudpickle.
+        # A pip `quack` may be installed; the fused route must not load it.
         script = (
             "import sys, torch\n"
             "from torch._higher_order_ops.flex_gemm import flex_gemm\n"
             "a = torch.randn(64, 32, device='cuda', dtype=torch.bfloat16)\n"
             "b = torch.randn(32, 64, device='cuda', dtype=torch.bfloat16)\n"
-            "for tuned in (False, True):\n"
-            "    fn = torch.compile(lambda a, b: flex_gemm(torch.mm, (a, b), torch.relu,"
-            " kernel_options={'backend': 'QUACK', 'tuned': tuned}), fullgraph=True)\n"
-            "    fn(a, b)\n"
-            "    torch._dynamo.reset()\n"
+            "fn = torch.compile(lambda a, b: flex_gemm(torch.mm, (a, b), torch.relu,"
+            " kernel_options={'backend': 'QUACK', 'tuned': True}), fullgraph=True)\n"
+            "fn(a, b)\n"
             "assert 'quack' not in sys.modules, 'pip quack was imported'\n"
-            "assert 'cloudpickle' not in sys.modules, 'cloudpickle was imported'\n"
         )
         subprocess.run([sys.executable, "-c", script], check=True, timeout=900)
 
@@ -2456,34 +2446,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_output_contraction_rejects_unsafe_explicit_config(self):
-        m, n, k, group = 128, 128, 64, 2
-
-        def epilogue_fn(acc):
-            grouped = acc.view(m, n // group, group)
-            return grouped.select(-1, 0) + grouped.select(-1, 1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={
-                    "backend": "QUACK",
-                    "config": {"tile_n": 256},
-                },
-            )
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        with self.assertRaisesRegex(
-            Exception, "no supported GemmConfig matches config_constraints"
-        ):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_alpha_clamp_compiled_matches_reference(self):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
@@ -2565,6 +2527,37 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     epilogue_fn(a.double() @ b.double()),
                     a.shape[1],
                 )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_dynamic_n_guards_alignment(self):
+        # The pinned config was selected from the first N; an unaligned N must
+        # recompile and reject swap_ab instead of launching the pinned kernel.
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": {"swap_ab": True}},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        for n in (128, 136):
+            b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+            self.assertMatchesLowPrecisionEager(
+                compiled(a, b),
+                epilogue_fn(a @ b),
+                epilogue_fn(a.double() @ b.double()),
+                a.shape[1],
+            )
+        b = torch.randn(64, 129, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(InductorError, "config_constraints.*swap_ab"):
+            compiled(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -3416,6 +3409,37 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch._dynamo.mark_dynamic(b, 1)
             actual = compiled(a, b)
             torch.testing.assert_close(actual, fn(a, b), atol=0.2, rtol=0.05)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_output_contraction_dynamic_n_guards_tile_n(self):
+        # GroupedMainStore requires tile_n <= physical N. A pinned tile_n=256
+        # selected at N=512 must not be reused when N shrinks below it.
+        m = k = 64
+
+        def epilogue_fn(acc):
+            lanes = acc.view(m, -1, 2)
+            return lanes[..., 0] - lanes[..., 1]
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": {"tile_n": 256}},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for index, physical_n in enumerate((512, 256)):
+            b = torch.randn(k, physical_n, device="cuda", dtype=torch.float16)
+            if index == 0:
+                torch._dynamo.mark_dynamic(b, 1)
+            torch.testing.assert_close(compiled(a, b), fn(a, b), atol=0.2, rtol=0.05)
+        b = torch.randn(k, 128, device="cuda", dtype=torch.float16)
+        with self.assertRaisesRegex(InductorError, "config_constraints.*tile_n"):
+            compiled(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

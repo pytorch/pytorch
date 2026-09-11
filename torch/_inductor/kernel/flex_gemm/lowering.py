@@ -13,6 +13,8 @@ import importlib.util
 import logging
 from typing import Any, TYPE_CHECKING
 
+import sympy
+
 import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.flex_gemm import (
@@ -27,12 +29,16 @@ from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
+from ...heuristics.template.flex_gemm import flex_gemm_search_space
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
 from ...utils import _IntLike, ceildiv, is_bf16x9_matmul
 from ..gemm_epilogue_utils import statically_known_shape_equal
-from .configs import flex_gemm_search_space
-from .constraints import aux_output_shape_error, LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR
+from .constraints import (
+    aux_output_shape_error,
+    FlexGemmOutputContraction,
+    LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
+)
 from .debug import (
     format_flex_gemm_analysis,
     format_flex_gemm_analysis_details,
@@ -45,6 +51,8 @@ from .debug import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from .template import FlexGemmEpilogueConfig
 
 
 log = logging.getLogger(__name__)
@@ -322,34 +330,76 @@ def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
 
 
 def flex_gemm_quack_configs(
-    template: Any, template_kwargs: dict[str, Any], config: Any
+    template_config: FlexGemmEpilogueConfig,
+    gemm_input_nodes: list[IRNode],
+    epilogue_input_nodes: list[IRNode],
 ) -> tuple[tuple[tuple[str, Any], ...], ...]:
-    """Ask QuACK which GemmConfigs this generated call may pin, default first."""
-    from torch._inductor.codecache import PyCodeCache
-    from torch._inductor.codegen.cutedsl.cutedsl_kernel import MAIN_SUFFIX
-    from torch._inductor.kernel.flex_gemm.runtime import select_flex_gemm_configs
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    """Ask QuACK which GemmConfigs this call may pin, default first.
 
-    probe: list[Any] = []
-    error = template.maybe_append_choice(probe, config=config, **template_kwargs)
-    if error is not None:
-        raise error
-    bmreq = probe[0].bmreq
-    module = PyCodeCache.load_by_key_path(
-        bmreq.module_cache_key, bmreq.module_path, set_sys_modules=False
+    Legality is decided by the EpiOps, so the runtime's EpiMod is built here
+    from metadata with a stub epilogue and pruned against the GEMM shape hints;
+    ``guard_flex_gemm_config_shapes`` guards the shape-dependent rules.
+    """
+    from torch._inductor.kernel.flex_gemm.runtime import (
+        flex_gemm_epimod,
+        flex_gemm_preferred_config,
+        flex_gemm_problem,
+        quack_epilogue_dtype,
+        selection_callback,
     )
-    main = getattr(module, f"{bmreq.kernel_name}_{MAIN_SUFFIX}")
-    with FakeTensorMode():
-        inputs = [meta.to_tensor() for meta in bmreq.input_tensor_meta]
-        output = bmreq.output_tensor_meta.to_tensor()
-    with select_flex_gemm_configs() as legal_configs:
-        main(*inputs, output, *bmreq.extra_args, stream=None)
-    if not legal_configs:
-        raise AssertionError("FlexGEMM config probe did not reach gemm_epilogue")
+    from torch._inductor.virtualized import V
+    from torch._vendor.quack.gemm_runtime.autotune import legal_mod_configs
+
+    output_contraction = template_config.output_contraction
+    local_reduce = template_config.local_reduce
+    epimod = flex_gemm_epimod(
+        selection_callback,
+        tuple(quack_epilogue_dtype(node.get_dtype()) for node in epilogue_input_nodes),
+        template_config.epilogue_arg_kinds,
+        len(template_config.aux_out_indices),
+        None if local_reduce is None else local_reduce.selection_plan(),
+        output_contraction,
+    )
+    sizevars = V.graph.sizevars
+    mat1 = gemm_input_nodes[template_config.gemm_op.mat1_index]
+    mat2 = gemm_input_nodes[template_config.gemm_op.mat2_index]
+    device = mat1.get_device_or_error()
+    problem = flex_gemm_problem(
+        device,
+        sizevars.optimization_hint(mat1.get_size()[-2]),
+        sizevars.optimization_hint(mat2.get_size()[-1]),
+        None if output_contraction is None else output_contraction.concat_layout,
+        blockscaled=template_config.blockscaled is not None,
+    )
+    legal = legal_mod_configs(
+        epimod, device, problem, preferred_config=flex_gemm_preferred_config(problem)
+    )
     return tuple(
         tuple(sorted(dataclasses.asdict(quack_config).items()))
-        for quack_config in legal_configs
+        for quack_config in legal
     )
+
+
+def guard_flex_gemm_config_shapes(
+    quack_configs: tuple[tuple[tuple[str, Any], ...], ...],
+    n: _IntLike,
+    output_contraction: FlexGemmOutputContraction | None,
+) -> None:
+    """Guard the problem-size rules QuACK applied to the pinned configs.
+
+    Selection pruned on concrete shape hints; these are the pruning
+    conditions that depend on physical N, so a dynamic graph recompiles instead
+    of launching a config QuACK would have rejected (``swap_ab`` needs
+    ``N % 8 == 0``; ``GroupedMainStore.supports_problem`` needs ``tile_n <= N``).
+    """
+    from torch._inductor.virtualized import V
+
+    sizevars = V.graph.sizevars
+    configs = [dict(quack_config) for quack_config in quack_configs]
+    if any(fields["swap_ab"] for fields in configs):
+        sizevars.check(sympy.Eq(sympy.Mod(n, 8), 0))
+    if output_contraction is not None:
+        sizevars.check_leq(max(fields["tile_n"] for fields in configs), n)
 
 
 def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
@@ -388,7 +438,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                          |        `--> derive layout + allocate aux
                          |
                          +--> grouped/reduction geometry
-                         |        `--> flex_gemm_candidate_configs()
+                         |        `--> flex_gemm_quack_configs()
                          |
                          `--> materialize_flex_gemm_epilogue()
                                   `--> CuTeDSL epilogue + callbacks
@@ -697,7 +747,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         mutated_inputs=mutated_input_nodes or None,
     )
     legal_configs = flex_gemm_quack_configs(
-        flex_gemm_epilogue_template, template_kwargs, template_config
+        template_config, gemm_input_nodes, epilogue_input_nodes
     )
     if config_constraints:
         legal_configs = tuple(
@@ -715,6 +765,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             )
     quack_configs = (
         flex_gemm_search_space(legal_configs) if tuned else legal_configs[:1]
+    )
+    guard_flex_gemm_config_shapes(
+        quack_configs,
+        gemm_input_nodes[op_spec.mat2_index].get_size()[-1],
+        output_contraction,
     )
     log_flex_gemm_artifact(
         "config_candidates",

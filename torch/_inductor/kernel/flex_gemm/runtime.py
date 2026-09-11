@@ -2,12 +2,9 @@
 from __future__ import annotations
 
 import contextlib
-import contextvars
 import dataclasses
-import inspect
 import logging
 import os
-import threading
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -22,7 +19,6 @@ from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorage
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import ceildiv
 from torch._prims_common import is_expandable_to
-from torch._subclasses.fake_tensor import is_fake
 
 
 if TYPE_CHECKING:
@@ -37,89 +33,80 @@ def inductor_quack_cache_dir() -> str:
     return os.path.join(cache_dir(), "quack")
 
 
-_CONFIG_SELECTION: contextvars.ContextVar[list[Any] | None] = contextvars.ContextVar(
-    "flex_gemm_config_selection", default=None
-)
-
-
-@contextlib.contextmanager
-def select_flex_gemm_configs():
-    """Collect QuACK's legal GemmConfigs without launching the generated call."""
-    configs: list[Any] = []
-    token = _CONFIG_SELECTION.set(configs)
-    try:
-        yield configs
-    finally:
-        _CONFIG_SELECTION.reset(token)
-
-
-_PRECOMPILE_LOCK = threading.Lock()
-
-
-def precompile_flex_gemm_kernel(run: Callable[[], None]) -> None:
-    """Compile the QuACK kernel ``run`` needs now instead of at first call.
-
-    ``run`` invokes the generated kernel on real tensors; the cold ``jit_cache``
-    miss compiles in-process. CuTeDSL compilation is serialized because
-    Inductor precompiles choices from several threads.
-    """
-    with _PRECOMPILE_LOCK:
-        run()
-
-
-def flex_gemm_candidate_configs(
-    epimod: Any,
-    a: torch.Tensor,
-    b: torch.Tensor,
-    sfa: torch.Tensor | None,
-    output_buffers: dict[str, torch.Tensor],
-    operands: dict[str, Any],
+def flex_gemm_problem(
+    device: torch.device,
+    m: int,
+    n: int,
     concat_layout: Any,
-) -> list[Any]:
-    """Return QuACK's legal configs for this call, its untuned default first.
+    *,
+    blockscaled: bool = False,
+) -> Any:
+    """Describe a FlexGEMM call (physical GEMM M and N) for QuACK config pruning."""
+    from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn, ModProblem
 
-    Mirrors ``EpiMod.__call__``'s selection: the per-arch default leads when it
-    is legal, followed by every other candidate the EpiMod's ops accept.
-    """
+    return ModProblem(
+        device=device,
+        m=m,
+        n=n,
+        b_kn=mod_b_kn(device, concat_layout),
+        blockscaled=blockscaled,
+        concat=bool(concat_layout),
+    )
+
+
+def flex_gemm_preferred_config(problem: Any) -> Any:
+    """QuACK's untuned default for ``problem``; leads the legal list when legal."""
     from torch._vendor.quack.cute_dsl_utils import get_device_capacity
     from torch._vendor.quack.gemm_config import (
         blockscaled_default_config,
         default_config,
     )
-    from torch._vendor.quack.gemm_runtime.autotune import (
-        _legal_mod_configs,
-        mod_selection_args,
-    )
 
-    device = a.device
-    capacity = get_device_capacity(device)[0]
-    b_kn = capacity >= 9 and not concat_layout
-    named_args = mod_selection_args(
-        operands,
-        {name: output_buffers[name] for name in epimod.outputs},
-        A=a,
-        B=b if b_kn else b.mT,
-        b_kn=b_kn,
-        SFA=sfa,
-        concat_layout=concat_layout,
-    )
-    preferred = (
-        blockscaled_default_config(a.shape[-2], b.shape[-1], device_capacity=capacity)
-        if sfa is not None
-        else default_config(device)
-    )
-    return _legal_mod_configs(epimod, device, named_args, preferred_config=preferred)
+    if problem.blockscaled:
+        capacity = get_device_capacity(problem.device)[0]
+        return blockscaled_default_config(
+            problem.m, problem.n, device_capacity=capacity
+        )
+    return default_config(problem.device)
+
+
+def check_flex_gemm_config(epimod: Any, quack_config: Any, problem: Any) -> None:
+    """Fail closed if a pinned GemmConfig is illegal for the runtime problem.
+
+    Inductor pins the config it selected at lowering time from concrete shape
+    hints; QuACK's ``config=`` path skips its own pruning, so problem-size rules
+    such as ``GroupedMainStore.supports_problem`` are re-applied here.
+    """
+    from torch._vendor.quack.autotuner import AutotuneConfig
+    from torch._vendor.quack.gemm_runtime.autotune import prune_mod_configs
+
+    try:
+        prune_mod_configs(epimod, None, [AutotuneConfig(config=quack_config)], problem)
+    except ValueError as e:
+        raise RuntimeError(
+            f"pinned FlexGEMM GemmConfig {quack_config!r} is not legal for "
+            f"m={problem.m}, n={problem.n}: {e}"
+        ) from e
 
 
 # NOTE [Byte-backed epilogue tensor storage]
 # PyTorch bool tensors are byte-addressed while CuTeDSL models cutlass.Boolean as
 # a 1-bit logical type; Float4E2M1FN similarly exposes two values per byte. Pass
 # both through QuACK as their physical uint8 carrier.
+def quack_epilogue_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Return the physical dtype QuACK sees for a logical epilogue tensor."""
+    return torch.uint8 if dtype in (torch.bool, torch.float4_e2m1fn_x2) else dtype
+
+
 def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
     """Adapt logical epilogue tensors to QuACK's physical tensor ABI."""
-    if arg.dtype in (torch.bool, torch.float4_e2m1fn_x2):
-        return arg.view(torch.uint8)
-    return arg
+    physical = quack_epilogue_dtype(arg.dtype)
+    return arg if physical is arg.dtype else arg.view(physical)
+
+
+def selection_callback(acc, *operands):
+    """Stand in for generated callbacks in config-selection EpiMods."""
+    raise AssertionError("config-selection EpiMods are never launched")
 
 
 def quack_blockscaled_scale_view(
@@ -160,20 +147,24 @@ class FlexGemmRuntimeLocalReducePlan:
     """QuACK EpiOp configuration for one analyzed grouped local reduction."""
 
     geometry: FlexGemmLocalReduceGeometry
+    stores: bool = False
     out: torch.Tensor | None = None
     feeds_main: bool = False
     combine: str | None = None
     finalize: Callable[..., Any] | str | None = None
     finalize_operands: tuple[str, ...] = ()
     store_finalize: Callable[..., Any] | str | None = None
+    binary_store_finalize: bool = False
     prepass: Callable[..., Any] | None = None
     prepass_combine: str | None = None
     prepass_finalize: Callable[..., Any] | str | None = None
     output_layout: FlexGemmOutputStorageLayout | None = None
 
     def __post_init__(self) -> None:
-        if self.out is None and not self.feeds_main:
+        if not self.stores and not self.feeds_main:
             raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if self.out is not None and not self.stores:
+            raise RuntimeError("local-reduce out buffers require stores=True")
         if self.combine is None:
             raise RuntimeError("FlexGEMM EpiMod local reductions require a combine")
         if self.output_layout is not None and not isinstance(
@@ -216,7 +207,8 @@ class FlexGemmRuntimeLocalReducePlan:
             self.prepass_combine,
             self.prepass_finalize,
             self.output_layout,
-            self.out is not None,
+            self.stores,
+            self.binary_store_finalize,
         )
 
 
@@ -225,14 +217,17 @@ _EPIMOD_CACHE: dict[tuple[Any, ...], Any] = {}
 
 def flex_gemm_epimod(
     epilogue_fn: Any,
-    epilogue_args: tuple[torch.Tensor, ...],
+    epilogue_arg_dtypes: tuple[torch.dtype, ...],
     epilogue_arg_kinds: tuple[str, ...],
     aux_output_count: int,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
     output_contraction: FlexGemmOutputContraction | None,
 ):
-    """Build and cache a QuACK TensorSSA EpiMod from generated FlexGEMM metadata."""
-    epilogue_arg_dtypes = tuple(arg.dtype for arg in epilogue_args)
+    """Build and cache a QuACK TensorSSA EpiMod from FlexGEMM metadata.
+
+    The EpiOp set fixes which GemmConfigs are legal, so lowering builds the same
+    EpiMod with ``selection_callback`` as the epilogue to select configs.
+    """
     key = (
         epilogue_fn,
         epilogue_arg_kinds,
@@ -254,11 +249,11 @@ def flex_gemm_epimod(
         "tile": epi_ops.TileLoad,
     }
     ops: dict[str, Any] = {}
-    for index, (arg, kind) in enumerate(
-        zip(epilogue_args, epilogue_arg_kinds, strict=True)
+    for index, (arg_dtype, kind) in enumerate(
+        zip(epilogue_arg_dtypes, epilogue_arg_kinds, strict=True)
     ):
         name = f"operand{index}"
-        dtype = cute_dsl_utils.torch2cute_dtype_map[arg.dtype]
+        dtype = cute_dsl_utils.torch2cute_dtype_map[arg_dtype]
         ops[name] = (
             epi_ops.Scalar(name, dtype=dtype)
             if kind == "scalar"
@@ -269,18 +264,17 @@ def flex_gemm_epimod(
             GroupedMainStore,
         )
 
-        outputs = (GroupedMainStore("main", output_contraction.group),)
+        outputs: tuple[Any, ...] = (GroupedMainStore("main", output_contraction.group),)
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
     sinks: dict[str, Any] = {}
     prepass = None
-    prepass_outs = ()
+    prepass_outs: tuple[str, ...] = ()
     if local_reduce is not None:
         from torch._inductor.kernel.flex_gemm.quack_ops import grouped_reduce
 
         finalize = local_reduce.finalize
         store_finalize = local_reduce.store_finalize or finalize
-        prepass_finalize = local_reduce.prepass_finalize
         output_layout = (
             None
             if local_reduce.output_layout is None
@@ -294,18 +288,12 @@ def flex_gemm_epimod(
                     axis=local_reduce.axis,
                     group=local_reduce.group,
                     combine=local_reduce.prepass_combine,
-                    finalize=prepass_finalize,
+                    finalize=local_reduce.prepass_finalize,
                 )
             )
             prepass_outs = (LOCAL_REDUCE_FEED_MAIN_ARG_NAME,)
-            if local_reduce.out is not None:
-                finalize_arity = (
-                    len(inspect.signature(store_finalize).parameters)
-                    - len(local_reduce.finalize_operands)
-                    if callable(store_finalize)
-                    else 1
-                )
-                if finalize_arity == 2:
+            if local_reduce.stores:
+                if local_reduce.binary_store_finalize:
                     if output_layout is not None:
                         raise RuntimeError(
                             "local-reduce output layouts do not support binary finalizers"
@@ -384,14 +372,15 @@ def gemm_epilogue(
     epilogue_arg_kinds: tuple[str, ...] = (),
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
     output_contraction: FlexGemmOutputContraction | None = None,
-    config: tuple[tuple[str, Any], ...] | None = None,
+    config: tuple[tuple[str, Any], ...],
     stream: int | None = None,
 ) -> torch.Tensor:
     """Run a dense or block-scaled FlexGEMM call through the vendored QuACK EpiMod.
 
-    ``config`` pins the exact GemmConfig Inductor selected; ``None`` is only
-    used by the lowering-time legal-config probe, which returns before launch.
+    ``config`` pins the exact GemmConfig Inductor selected at lowering time.
     """
+    from torch._vendor.quack.gemm_config import GemmConfig
+
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
             raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
@@ -412,7 +401,7 @@ def gemm_epilogue(
     quack_epilogue_args = tuple(quack_epilogue_arg(arg) for arg in epilogue_args)
     epimod = flex_gemm_epimod(
         epilogue_fn,
-        quack_epilogue_args,
+        tuple(arg.dtype for arg in quack_epilogue_args),
         epilogue_arg_kinds,
         len(aux_outs),
         local_reduce,
@@ -435,6 +424,8 @@ def gemm_epilogue(
         # QuACK's host_validate checks the compressed buffer against the GEMM
         # problem; only the caller-owned carrier view is built here.
         local_reduce_out = local_reduce.out
+        if local_reduce.stores and local_reduce_out is None:
+            raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
         if local_reduce_out is not None and local_reduce.output_layout is not None:
             grouped_dim = a.shape[-2] if local_reduce.axis == 0 else b.shape[-1]
             if grouped_dim % local_reduce.group:
@@ -454,7 +445,7 @@ def gemm_epilogue(
             )
         if local_reduce.prepass is not None:
             operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = None
-            if local_reduce.out is not None:
+            if local_reduce.stores:
                 operands[LOCAL_REDUCE_STORE_ARG_NAME] = local_reduce_out
         else:
             operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = local_reduce_out
@@ -479,28 +470,18 @@ def gemm_epilogue(
     concat_layout = (
         None if output_contraction is None else output_contraction.concat_layout
     )
-    legal_configs = _CONFIG_SELECTION.get()
-    if legal_configs is not None:
-        if not is_fake(a):
-            raise AssertionError("FlexGEMM config probe reached a real GEMM call")
-        legal_configs.extend(
-            flex_gemm_candidate_configs(
-                epimod,
-                a,
-                b,
-                SFA,
-                output_buffers,
-                operands,
-                concat_layout,
-            )
-        )
-        return output_buffers[main_name]
-    if config is not None:
-        from torch._vendor.quack.gemm_config import GemmConfig
-
-        quack_config = GemmConfig(**dict(config))
-    else:
-        quack_config = None
+    quack_config = GemmConfig(**dict(config))
+    check_flex_gemm_config(
+        epimod,
+        quack_config,
+        flex_gemm_problem(
+            a.device,
+            a.shape[-2],
+            b.shape[-1],
+            concat_layout,
+            blockscaled=SFA is not None,
+        ),
+    )
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
         if stream is not None

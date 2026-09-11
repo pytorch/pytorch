@@ -535,8 +535,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // This copy is needed when we run a multi-gpu version of reduce (multiple
     // inputs per rank).
-    for (const auto i : c10::irange(inputs.size())) {
-      inputs[i].copy_(output);
+    for (const auto& input : inputs) {
+      input.copy_(output);
     }
   }
 
