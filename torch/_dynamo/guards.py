@@ -111,6 +111,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._functools import cache_method
 from torch.utils._indented_buffer import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
@@ -4195,12 +4196,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
-        # above _keep. Required, because omitting it silently prunes every
-        # container per value.
+        # above _keep. Required, because omitting it would carry no plain
+        # tuple verbatim.
         self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
-        self._missing_cache: dict[str, _Missing] = {}
         self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
 
@@ -4358,33 +4358,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Identity match; an interned value that collides is kept, harmlessly."""
         return id(value) in self.guard_tree_values
 
+    @cache_method
     def _missing(self, reason: str) -> _Missing:
-        """One sentinel per reason; a snapshot prunes a whole module dict."""
-        if reason not in self._missing_cache:
-            self._missing_cache[reason] = _Missing(reason)
-        return self._missing_cache[reason]
-
-    @staticmethod
-    def _is_literal(value: object) -> bool:
-        # An always-picklable constant is carried whether or not a guard reads
-        # it: pruning it buys nothing and would make the rebuilt state depend on
-        # whether some unrelated guard happened to register the interned value.
-        # These are the singletons and scalars dynamo treats as constants; NOT
-        # every common_constant_type (torch.finfo/iinfo do not pickle).
-        if value is None or value is Ellipsis or value is NotImplemented:
-            return True
-        return type(value) in (
-            bool,
-            int,
-            float,
-            complex,
-            str,
-            bytes,
-            torch.dtype,
-            torch.device,
-            torch.layout,
-            torch.memory_format,
-        )
+        """One sentinel per reason; a pruned container shares them."""
+        return _Missing(reason)
 
     def _prune(self, value: object, reason: str) -> object:
         if self._is_literal(value) or self._keep(value):
@@ -4395,13 +4372,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Whether a function container (__defaults__/__dict__/...) is carried whole
         rather than pruned per value; the rule and its reasons are in the Note
         [Reconstructing a function a guard is rooted at] above."""
-        if not self._keep(container):
-            return False
-        if type(container) is dict:
-            return False
+        # The tuple case is decided on the recording alone. A recorded tuple is
+        # also in guard_tree_values today (EQUALS_MATCH registers the value it
+        # reads), but the failure mode of that second invariant breaking would
+        # be the silent forever-miss this rule exists to prevent.
         if type(container) is tuple:
             return id(container) in self.value_guarded_containers
-        return True
+        if type(container) is dict:
+            return False
+        return self._keep(container)
 
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
         """Built once per module dict, so every function rebuilt against that
@@ -4413,14 +4392,20 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in f_globals.items()
             }
             # FunctionType binds builtins from the scope's __builtins__ at
-            # creation, so that entry can never be a sentinel: a pruned one
-            # becomes the real module (pickled by reference), a kept one (the
-            # builtins dict some guard read through) stays verbatim as the
-            # keep contract says. The key set is the module dict's at save time,
-            # names Dynamo installed into it included; a guard on the dict's
-            # shape compares against the live dict at run time and is only as
-            # portable as those names (see the commit message).
-            if isinstance(snapshot.get("__builtins__"), _Missing):
+            # creation, so that entry, when the dict has one, is always the real
+            # module (pickled by reference), exempt from the keep contract: for
+            # an imported module it is builtins.__dict__, the very dict any
+            # compile that guards a builtin registers, so keeping it "as read"
+            # would carry all of builtins (~6 KB) in a cross-module snapshot (a
+            # snapshot of the traced module's own dict carries that dict anyway
+            # under __builtins_dict___N). A dict without the key stays without
+            # it, since FunctionType falls back to the loading frame's builtins
+            # and a guard on the dict's shape must see the same keys. The key
+            # set is the module dict's at save time, names Dynamo installed into
+            # it included; a guard on the dict's shape compares against the live
+            # dict at run time and is only as portable as those names (see the
+            # commit message).
+            if "__builtins__" in snapshot:
                 snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
@@ -4656,19 +4641,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
-            if "<locals>" in obj.__qualname__:
+            if "<locals>" in obj.__qualname__.split("."):
                 # Rebuilt whether or not a guard is rooted at it, as before this
                 # change: it can never be found by name, and unlike a wraps
                 # wrapper it has no module-level neighbourhood to drag along.
                 return self._reduce_function_by_value(obj)
-            resolved: Any = None
-            # __module__ need not be a str (a decorator can set anything); an
-            # unhashable one must not TypeError out of the reducer.
-            if isinstance(obj.__module__, str) and obj.__module__ in sys.modules:
-                resolved = sys.modules[obj.__module__]
-                for name in obj.__qualname__.split("."):
-                    resolved = getattr(resolved, name, None)
-            if resolved is not obj:
+            if not self._fqn_resolves(obj):
                 # See Note [Reconstructing a function a guard is rooted at].
                 # A module absent from sys.modules (an exec-created function, or
                 # __module__ is None) is an fqn mismatch too: pickling by
