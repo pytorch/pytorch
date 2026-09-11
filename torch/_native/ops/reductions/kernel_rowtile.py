@@ -7,11 +7,11 @@ from cutlass import Int32
 
 import torch
 
+from ...cutedsl import launch as _L
 from ...cutedsl.dtypes import torch2cute
-from .._cutedsl import launch as _L
-from .._cutedsl.plan_cache import cached_plan
-from .._cutedsl.traits import WARP
+from ...cutedsl.plan_cache import cached_plan
 from . import tile
+from .traits import WARP
 
 
 _compile = _L.compile_kernel
@@ -120,7 +120,7 @@ def reduce_row_tile(
         return (
             [
                 _L.fake_compact(
-                    dt, (_L.sym(), _L.sym(op.vec)), order=(1, 0), align=align
+                    dt, (_L.sym(), _L.sym(op.vec)), stride_order=(1, 0), align=align
                 )
             ],
             [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
