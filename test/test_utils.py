@@ -966,6 +966,77 @@ class TestDeviceUtils(TestCase):
 instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
+class TestTorchPathResolution(TestCase):
+    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
+    def test_torch_parent_follows_the_extension_module(self):
+        spec = importlib.util.find_spec("torch._C")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.origin)
+        expected = os.path.dirname(os.path.dirname(spec.origin))
+        self.assertEqual(torch._utils_internal.torch_parent, expected)
+
+    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
+    def test_installed_torch_dir_prefers_the_editable_loader_paths(self):
+        installed_torch_dir = torch._utils_internal._installed_torch_dir
+        spec = importlib.util.find_spec("torch._C")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.origin)
+        spec_dir = os.path.dirname(spec.origin)
+        with tempfile.TemporaryDirectory() as root:
+            checkout = os.path.join(root, "src", "torch")
+            installed = os.path.join(root, "site-packages", "torch")
+            # A checkout has a tracked torch/lib too, so lib/ alone cannot
+            # tell the trees apart; the checkout is excluded by identity.
+            os.makedirs(os.path.join(checkout, "lib"))
+            os.makedirs(os.path.join(installed, "lib"))
+            loader = types.SimpleNamespace(paths=[checkout, installed])
+            with mock.patch.object(torch, "__loader__", loader):
+                self.assertEqual(installed_torch_dir(checkout), installed)
+            if not IS_WINDOWS:
+                os.symlink(os.path.join(root, "src"), os.path.join(root, "alias"))
+                aliased = os.path.join(root, "alias", "torch")
+                loader = types.SimpleNamespace(paths=[aliased, installed])
+                with mock.patch.object(torch, "__loader__", loader):
+                    self.assertEqual(installed_torch_dir(checkout), installed)
+            # Only an entry holding lib/ is an install tree; otherwise the
+            # extension module's spec decides, as it does without any paths.
+            loader = types.SimpleNamespace(paths=[checkout, os.path.join(root, "x")])
+            with mock.patch.object(torch, "__loader__", loader):
+                self.assertEqual(installed_torch_dir(checkout), spec_dir)
+            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()):
+                self.assertEqual(installed_torch_dir(checkout), spec_dir)
+
+    def test_stale_checkout_artifacts(self):
+        with tempfile.TemporaryDirectory() as root:
+            checkout = os.path.join(root, "torch")
+            for d in ("csrc", "lib/libshm", "bin", "include"):
+                os.makedirs(os.path.join(checkout, d))
+            os.makedirs(os.path.join(root, "torch.egg-info"))
+            ext = "_C.cpython-310-x86_64-linux-gnu.so"
+            deps = os.path.join("lib", "libtorch_global_deps.so")
+            c10 = os.path.join("lib", "libc10.so.1")
+            for f in (ext, deps, c10):
+                open(os.path.join(checkout, f), "w").close()
+            found = torch._utils_internal._stale_checkout_artifacts(checkout)
+            names = [ext, "bin", "include", c10, deps]
+            expected = [os.path.join(checkout, f) for f in names]
+            self.assertEqual(found, expected + [os.path.join(root, "torch.egg-info")])
+            clean = os.path.join(root, "clean", "torch")
+            os.makedirs(os.path.join(clean, "lib", "libshm"))
+            self.assertEqual(torch._utils_internal._stale_checkout_artifacts(clean), [])
+
+    @unittest.skipIf(IS_WINDOWS, "_load_global_deps is a no-op on Windows")
+    def test_load_global_deps_reports_missing_library(self):
+        real_exists = os.path.exists
+
+        def exists(path):
+            return "libtorch_global_deps" not in path and real_exists(path)
+
+        with unittest.mock.patch("os.path.exists", side_effect=exists):
+            with self.assertRaisesRegex(OSError, "libtorch_global_deps"):
+                torch._load_global_deps()
+
+
 class TestCppExtensionUtils(TestCase):
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
