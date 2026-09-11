@@ -44,6 +44,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
     is_iterable_of_tensors,
     noncontiguous_like,
     parametrize,
@@ -441,6 +443,8 @@ complex_ordered_op_db = tuple(
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
 class TestOperators(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -2410,30 +2414,6 @@ class TestOperators(TestCase):
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
-    def test_vmapvmapjvp_linalg_solve(self):
-        ops = [op for op in op_db if op.name == "linalg.solve"]
-        if len(ops) == 0:
-            raise AssertionError("Expected at least one linalg.solve op")
-
-        # this specializes a lot of code from the get_fallback_and_vmap_exhaustive test. If we need this more
-        # generally, this could go for a refactor
-
-        B0 = 2
-        B1 = 3
-
-        # we want to check the case where A will be seen as contiguous by jvp but during the vmap calls will become
-        # non-contiguous because vmap will expand. This will happen during both levels of vmap
-        A = torch.randn(4, 4)
-        k = torch.randn(4, 5, B1, B0)
-        fn, args = get_jvp_variant_primals_tangents(
-            torch.linalg.solve, SampleInput(A, args=(k,))
-        )
-
-        in_dims_all = (None, -1, None, -1)
-        batched_out = vmap(vmap(fn, in_dims=in_dims_all), in_dims=in_dims_all)(*args)
-        loop_out = loop2(fn, in_dims_all, in_dims_all, 0, 0, B0, B1, *args)
-        self.assertEqual(loop_out, batched_out)
-
     @ops(
         filter(lambda op: op.name in aliasing_ops, op_db + additional_op_db),
         allowed_dtypes=(torch.float,),
@@ -2501,44 +2481,6 @@ class TestOperators(TestCase):
                 else:
                     if grad_op != "vjp":
                         raise AssertionError(f"Expected 'vjp', got {grad_op!r}")
-                    vjp(f, torch.randn_like(without_grad))
-
-    @parametrize("grad_op", ["jvp", "vjp"])
-    def test_view_then_inplace_special(self, grad_op):
-        # some things in __getitem__ use at::index, which doesn't alias, so this tests a subset of them that do alias
-        ops = [
-            lambda x: x[0],
-            lambda x: x[0, 0, 0],
-            lambda x: x[:1],
-            lambda x: x[:, :1],
-            lambda x: x[:, :1, :],
-        ]
-
-        for op in ops:
-
-            def f(x):
-                op(captured).copy_(x)
-                return x
-
-            captured = torch.randn(4, 3, 3)
-            without_grad = op(captured)
-            if grad_op == "jvp":
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "During a grad .* attempted to call in-place operation",
-                ):
-                    jvp(
-                        f,
-                        (torch.randn_like(without_grad),),
-                        (torch.randn_like(without_grad),),
-                    )
-            else:
-                if grad_op != "vjp":
-                    raise AssertionError(f"Expected 'vjp', got {grad_op!r}")
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "During a grad .* attempted to call in-place operation",
-                ):
                     vjp(f, torch.randn_like(without_grad))
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
@@ -2921,6 +2863,76 @@ class TestOperators(TestCase):
                 **sample_input.kwargs,
             )
 
+
+@unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
+@unMarkDynamoStrictTest
+class TestOperatorsGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_vmapvmapjvp_linalg_solve(self):
+        ops = [op for op in op_db if op.name == "linalg.solve"]
+        if len(ops) == 0:
+            raise AssertionError("Expected at least one linalg.solve op")
+
+        # this specializes a lot of code from the get_fallback_and_vmap_exhaustive test. If we need this more
+        # generally, this could go for a refactor
+
+        B0 = 2
+        B1 = 3
+
+        # we want to check the case where A will be seen as contiguous by jvp but during the vmap calls will become
+        # non-contiguous because vmap will expand. This will happen during both levels of vmap
+        A = torch.randn(4, 4)
+        k = torch.randn(4, 5, B1, B0)
+        fn, args = get_jvp_variant_primals_tangents(
+            torch.linalg.solve, SampleInput(A, args=(k,))
+        )
+
+        in_dims_all = (None, -1, None, -1)
+        batched_out = vmap(vmap(fn, in_dims=in_dims_all), in_dims=in_dims_all)(*args)
+        loop_out = loop2(fn, in_dims_all, in_dims_all, 0, 0, B0, B1, *args)
+        self.assertEqual(loop_out, batched_out)
+
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace_special(self, grad_op):
+        # some things in __getitem__ use at::index, which doesn't alias, so this tests a subset of them that do alias
+        ops = [
+            lambda x: x[0],
+            lambda x: x[0, 0, 0],
+            lambda x: x[:1],
+            lambda x: x[:, :1],
+            lambda x: x[:, :1, :],
+        ]
+
+        for op in ops:
+
+            def f(x):
+                op(captured).copy_(x)
+                return x
+
+            captured = torch.randn(4, 3, 3)
+            without_grad = op(captured)
+            if grad_op == "jvp":
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "During a grad .* attempted to call in-place operation",
+                ):
+                    jvp(
+                        f,
+                        (torch.randn_like(without_grad),),
+                        (torch.randn_like(without_grad),),
+                    )
+            else:
+                if grad_op != "vjp":
+                    raise AssertionError(f"Expected 'vjp', got {grad_op!r}")
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "During a grad .* attempted to call in-place operation",
+                ):
+                    vjp(f, torch.randn_like(without_grad))
+
+
+instantiate_parametrized_tests(TestOperatorsGeneric)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
