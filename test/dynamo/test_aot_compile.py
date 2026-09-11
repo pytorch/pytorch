@@ -1672,6 +1672,81 @@ from user code:
         with self.assertRaisesRegex(TypeError, "missing a required argument: 'x'"):
             model()
 
+    def test_aot_compile_module_disable_guard_check(self):
+        # disable_guard_check() is the escape hatch for an artifact whose guards
+        # fail on the serving machine; module dispatch has to honour it too, or
+        # a module artifact has no opt-out while a function artifact does.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        # requires_grad is guarded but does not change what the graph computes.
+        x = torch.randn(3, 3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
+            model(x)
+        model.forward.compiled_results[0].disable_guard_check()
+        self.assertEqual(model(x), x * 2)
+
+    def test_disable_guard_check_does_not_shadow_a_matching_result(self):
+        # An opted-out result accepts anything, so it has to be the last resort
+        # rather than a candidate in the ordinary scan: consulting it before
+        # every real guard check has been tried serves the first artifact for a
+        # call the second one was compiled for. Same shapes, same dtypes, no
+        # error, different numbers.
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        model.forward.compiled_results[0].disable_guard_check()
+        with _set_pooling("mean"):
+            self.assertEqual(model(x), expected["mean"])
+
+    def test_all_results_disabled_still_dispatches_by_guard(self):
+        # Disabling the check on EVERY result must still dispatch by guard, not
+        # fall through to compiled_results[0]: guard_check() evaluates guards
+        # regardless of the flag, so the scan can still pick the right graph,
+        # and only a genuine no-match falls back to an opted-out result.
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        for result in model.forward.compiled_results:
+            result.disable_guard_check()
+        with _set_pooling("mean"):
+            self.assertEqual(model(x), expected["mean"])
+
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
         # Module._wrapped_call_impl, whose globals are torch/nn/modules/module.py.
