@@ -3402,9 +3402,10 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         if min(batch, m, n, k) <= 0:
             return
 
-        # Each logical batch is addressed through a rank-2 TMA descriptor.  In
-        # particular, every matrix-leading stride and every per-batch base must
-        # retain the 16-byte alignment required by TMA.
+        # Ordinary operands use rank-3 TMA descriptors; stride-zero broadcast
+        # operands use one shared rank-2 descriptor.  In either case every
+        # matrix-leading stride and batch base must retain TMA's 16-byte
+        # alignment.
         if not can_use_tma(mat1, mat2):
             return
 
@@ -3428,6 +3429,8 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             "NUM_SMS": get_num_sms(),
             "A_ROW_MAJOR": a_row_major,
             "B_ROW_MAJOR": b_row_major,
+            "A_BROADCAST_BATCH": int(mat1.get_stride()[0]) == 0,
+            "B_BROADCAST_BATCH": int(mat2.get_stride()[0]) == 0,
             "tma_store": False,
         }
         for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
