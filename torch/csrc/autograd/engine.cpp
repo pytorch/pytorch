@@ -423,6 +423,12 @@ variable_list get_current_input_grad_buffers(Node* node) {
       current_node && current_node.get() == node,
       "input_grad_buffers can only be accessed from the currently executing "
       "autograd.Function backward()");
+  // Final callbacks run while the GraphTask mutex is held. During reentrant
+  // backward, current_node can still refer to the suspended outer node, so
+  // reject post-processing before acquiring that mutex below.
+  TORCH_CHECK(
+      !graph_task->future_completed_.load(),
+      "input_grad_buffers cannot be accessed during backward post-processing");
   TORCH_CHECK(
       graph_task->exec_info_.empty(),
       "input_grad_buffers is only supported by backward() without the inputs "

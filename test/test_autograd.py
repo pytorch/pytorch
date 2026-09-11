@@ -18759,6 +18759,64 @@ class TestInputGradBuffers(TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(x.grad, torch.full_like(x, 10))
 
+    @onlyCPU
+    def test_access_from_reentrant_final_callback_errors(self, device):
+        script = """
+import torch
+from torch.autograd import Function
+
+callback = None
+
+class Inner(Function):
+    @staticmethod
+    def forward(ctx, value):
+        return value.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        torch.autograd.graph.queue_callback(callback)
+        return grad_output
+
+class Outer(Function):
+    @staticmethod
+    def forward(ctx, value):
+        return value.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        global callback
+
+        def check_access():
+            try:
+                ctx.input_grad_buffers
+            except RuntimeError as error:
+                if "post-processing" not in str(error):
+                    raise
+            else:
+                raise RuntimeError("input_grad_buffers access unexpectedly succeeded")
+
+        callback = check_access
+        with torch.enable_grad():
+            inner_input = torch.ones((), requires_grad=True)
+            inner_output = Inner.apply(inner_input)
+        inner_output.backward()
+        return grad_output
+
+x = torch.ones((), requires_grad=True)
+Outer.apply(x).backward()
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("input_grad_buffers access during post-processing deadlocked")
+        except subprocess.CalledProcessError as error:
+            self.fail(error.output.decode("utf-8"))
+
     @onlyCUDA
     def test_lookup_does_not_deadlock_with_python_dispatch(self, device):
         script = """
