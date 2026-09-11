@@ -4243,6 +4243,9 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         import torch.utils._pytree as pytree
 
+        if self.is_pytree_constant_class and self.source:
+            return super().as_python_constant()
+
         if not istype(
             self.value, (pytree.TreeSpec, pytree.LeafSpec, pytree.ConstantNode)
         ):

@@ -135,6 +135,7 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._custom_class_base import CustomClassBase
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._library.dispatchless import _DispatchlessCustomOp
     from torch.utils._pytree import TreeSpec
 
 
@@ -142,6 +143,84 @@ V = TypeVar("V")
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+
+
+class DispatchlessCustomOpVariable(VariableTracker):
+    def __init__(self, value: "_DispatchlessCustomOp", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def as_python_constant(self) -> "_DispatchlessCustomOp":
+        return self.value
+
+    def python_type(self) -> type:
+        return type(self.value)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from torch._dynamo.utils import _make_inlined, get_fake_value
+        from torch._higher_order_ops.flat_apply import (
+            func_to_graphable,
+            is_graphable_type,
+            to_graphable,
+        )
+        from torch._library.dispatchless import flat_dispatchless_call
+
+        from .builder import SourcelessBuilder, wrap_fx_proxy
+
+        flat_args_vt, input_spec_vt = unpack_iterable(
+            tx,
+            _make_inlined(tx, _pytree.tree_flatten)(
+                VariableTracker.build(tx, (args, kwargs))
+            ),
+        )
+        flat_args = unpack_iterable(tx, flat_args_vt)
+        for arg in flat_args:
+            if not is_graphable_type(arg.python_type()):
+                unimplemented(
+                    gb_type="Unsupported dispatchless custom operator input",
+                    context=f"Input type: {arg.python_type()}",
+                    explanation="Dispatchless custom operators require graphable pytree leaves.",
+                    hints=["Register container types with torch.utils._pytree."],
+                )
+        input_spec = input_spec_vt.as_python_constant()
+        fn = self.value.__wrapped__
+        proxy_args = tuple(arg.as_proxy() for arg in flat_args)
+        fake_args = _pytree.tree_map_only(
+            torch.fx.Proxy, lambda proxy: get_fake_value(proxy.node, tx), proxy_args
+        )
+        if tx.fake_mode is None:
+            raise AssertionError("Dispatchless tracing requires a fake tensor mode")
+        with tx.fake_mode:
+            fake_args, fake_kwargs = _pytree.tree_unflatten(fake_args, input_spec)
+            flat_outputs, output_spec = to_graphable(fn(*fake_args, **fake_kwargs))
+
+        _, func_spec = func_to_graphable(fn)
+        func_proxy = tx.output.register_static_attr_and_return_proxy(
+            "dispatchless_callable", func_spec
+        )
+        input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+            "dispatchless_input_spec", input_spec
+        )
+        output_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+            "dispatchless_output_spec", output_spec
+        )
+        proxy = tx.output.create_proxy(
+            "call_function",
+            flat_dispatchless_call,
+            (func_proxy, input_spec_proxy, output_spec_proxy, *proxy_args),
+            {},
+        )
+        flat_output_vt = wrap_fx_proxy(tx, proxy, example_value=flat_outputs)
+        return SourcelessBuilder.create(tx, _pytree.tree_unflatten).call_function(
+            tx,
+            [flat_output_vt, VariableTracker.build(tx, output_spec)],
+            {},
+        )
 
 
 def _is_supported_out_tensor_layout(
