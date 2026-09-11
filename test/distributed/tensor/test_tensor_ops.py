@@ -18,8 +18,10 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -39,6 +41,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DistTensorOpsTest(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
 
     def test_aten_contiguous(self):
@@ -1550,6 +1553,8 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
 
 class DistBucketizeTest(LocalDTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     def test_bucketize_partial_input(self):
         # Bucketize is non-linear, so Partial("sum")/Partial("avg") inputs
@@ -1639,6 +1644,8 @@ class DistBucketizeTest(LocalDTensorTestBase):
 
 
 class DistToCopyTest(LocalDTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     def test_to_copy_partial_reduces_for_nonlinear_cast(self):
         # (reduce_op, target_dtype, expect_partial)
@@ -1670,6 +1677,7 @@ class DistToCopyTest(LocalDTensorTestBase):
 
 
 class DistArgMaxArgMinTest(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
     _ops = [torch.argmax, torch.argmin]
     sample = [
@@ -1759,6 +1767,8 @@ def _modified_cat_op_fake(a, b):
 
 
 class DistTensorCppPyTree(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_cpp_cat(self):
         from torch.distributed.tensor.debug import (
             _clear_fast_path_sharding_prop_cache,
@@ -1905,6 +1915,8 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
 
 
 class TestNewEmptyStridedUneven(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     def test_backward_no_allgather(self):
         """Backward on unevenly-sharded DTensor should not allgather (issue #107661)."""
@@ -2027,6 +2039,15 @@ class TestNewEmptyStridedUneven(DTensorTestBase):
             dt.grad._local_tensor,
             torch.full_like(dt.grad._local_tensor, 2.0),
         )
+
+
+instantiate_device_type_tests(DistBucketizeTest, globals())
+instantiate_device_type_tests(DistToCopyTest, globals())
+instantiate_device_type_tests(
+    DistArgMaxArgMinTest, globals(), except_for="cpu"
+)
+instantiate_device_type_tests(DistTensorCppPyTree, globals(), except_for="cpu")
+instantiate_device_type_tests(TestNewEmptyStridedUneven, globals())
 
 
 if __name__ == "__main__":
