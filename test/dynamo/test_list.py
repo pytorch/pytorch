@@ -8,7 +8,10 @@ import sys
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 lst = []
@@ -33,6 +36,8 @@ class CmpKeyForListSort:
 
 
 class TupleTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Tuple methods
     # + count
     # + index
@@ -537,6 +542,8 @@ class ListTests(TupleTests):
 
 
 class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # list/tuple/deque share BaseListVariable.list_index, but CPython's
     # ValueError text does not: on <=3.13 list and deque repr the missing
     # value while tuple ignores it; 3.14 dropped the repr everywhere
