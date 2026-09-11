@@ -7,11 +7,11 @@ from cutlass import Int32
 
 import torch
 
+from ...cutedsl import launch as _L
 from ...cutedsl.dtypes import torch2cute
-from .._cutedsl import launch as _L
-from .._cutedsl.plan_cache import cached_plan
-from .._cutedsl.traits import WARP
+from ...cutedsl.plan_cache import cached_plan
 from . import tile
+from .traits import WARP
 
 
 _compile = _L.compile_kernel
@@ -64,7 +64,7 @@ def tma_ok(N: int, itemsize: int, M: int, device=None) -> bool:
         return False
     if device is not None:
         # This runs before every plan lookup; memoize the ~1.3us device query.
-        from .._cutedsl import hw_caps as _hw
+        from ...cutedsl import hw_caps as _hw
 
         if _hw.caps(device).cc[0] < 9:
             return False  # TMA is sm_90+
@@ -174,7 +174,7 @@ def reduce_row_tile(
         # TMA bakes N; runtime folds share a vector class. None omits unused column args.
         inner = N if use_tma else _L.sym(op.vec)
         return (
-            [_L.fake_compact(dt, (_L.sym(), inner), order=(1, 0), align=align)],
+            [_L.fake_compact(dt, (_L.sym(), inner), stride_order=(1, 0), align=align)],
             [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
             nchunks,
             nwaves,
