@@ -2623,6 +2623,7 @@ class TestRefsOpsInfo(TestCase):
         "_refs.nn.functional.l1_loss",
         "_refs.nn.functional.smooth_l1_loss",
         "_refs.nn.functional.log_softmax",
+        "_refs.nn.functional.nll_loss",
         "_refs.nn.functional.poisson_nll_loss",
         "_refs.nn.functional.softmax",
         "_refs.nn.functional.softmin",
@@ -2714,6 +2715,23 @@ class TestRefsOpsInfo(TestCase):
                 torch._decomp.decomposition_table.values(),
                 lambda msg: f"{msg}\nDid not find {op} in torch._decomp.decomposition_table.values()",
             )
+
+    def test_nll_loss_empty_input_autograd(self, device):
+        for shape in ((0, 3), (0, 3, 5, 7), (2, 3, 0, 7)):
+            target = torch.empty(
+                (shape[0], *shape[2:]),
+                device=device,
+                dtype=torch.long,
+            )
+            for reduction in ("none", "mean", "sum"):
+                input = torch.empty(shape, device=device, requires_grad=True)
+                result = torch._refs.nn.functional.nll_loss(
+                    input, target, reduction=reduction
+                )
+
+                self.assertTrue(result.requires_grad)
+                result.sum().backward()
+                self.assertEqual(input.grad, torch.empty_like(input))
 
 
 fake_skips = (
