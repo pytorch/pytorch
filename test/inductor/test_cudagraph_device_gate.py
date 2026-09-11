@@ -12,6 +12,7 @@ from torch._inductor.cudagraph_utils import (
     _graph_capture_compatible_device_type,
     check_multiple_devices_or_any_cpu_nodes,
 )
+from torch._inductor.output_code import _cudagraph_capture_runtime_ready
 from torch._inductor.test_case import run_tests, TestCase
 
 
@@ -57,6 +58,28 @@ class TestGraphCaptureCompatibleDeviceType(TestCase):
                 self.assertTrue(_graph_capture_compatible_device_type("npu"))
         finally:
             device_interfaces.pop("npu", None)
+
+
+class TestCudagraphCaptureRuntimeReady(TestCase):
+    def test_cuda_only_uses_builtin(self):
+        self.assertTrue(_cudagraph_capture_runtime_ready({"cuda"}))
+
+    def test_npu_without_runtime_override(self):
+        self.assertFalse(_cudagraph_capture_runtime_ready({"npu"}))
+
+    def test_npu_with_replaced_cudagraphify(self):
+        from torch._inductor import compile_fx
+
+        orig = compile_fx.cudagraphify
+
+        def npugraphify(*args, **kwargs):
+            return orig(*args, **kwargs)
+
+        try:
+            compile_fx.cudagraphify = npugraphify
+            self.assertTrue(_cudagraph_capture_runtime_ready({"npu"}))
+        finally:
+            compile_fx.cudagraphify = orig
 
 
 class TestCudagraphDeviceGate(TestCase):
