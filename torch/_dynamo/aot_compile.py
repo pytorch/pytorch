@@ -169,7 +169,13 @@ class AOTCompilePickler(FunctionPicklerBase):
             log.debug("pruning unpicklable %r from a nested function: %s", value, exc)
             result = False
         else:
-            result = True
+            # persistent_id records nn.Module instances rather than raising, so
+            # such a value dumps here but would poison the real serialize();
+            # treat it as unpicklable so it is pruned now instead of failing the
+            # whole dump later.
+            result = not probe.errors
+            if not result:
+                log.debug("pruning unmarked nn.Module %r from a nested function", value)
         finally:
             state.inflight.discard(vid)
         leaned = state.leaned
