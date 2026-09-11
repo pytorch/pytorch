@@ -1315,20 +1315,23 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         odd = types.FunctionType(global_func.__code__, globals(), "global_func")
         odd.__module__ = ["not", "a", "module"]  # unhashable: must not TypeError
         # The oracle is pickle itself: every False case fails a by-reference
-        # dump (the C pickler raises a bare AttributeError for a <locals> name).
+        # dump. save_global replaces the import/lookup failure with a
+        # PicklingError; the C pickler raises a bare AttributeError for a
+        # <locals> name below 3.14 and PicklingError from 3.14 on.
+        locals_exc = (
+            pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
+        )
         cases = {
-            "locals": local_fn,
-            "wraps_wrapper": wrapper,
-            "bad_qualname": renamed,
-            "module_not_imported": exec_fn,
-            "unhashable_module": odd,
+            "locals": (local_fn, locals_exc),
+            "wraps_wrapper": (wrapper, pickle.PicklingError),
+            "bad_qualname": (renamed, pickle.PicklingError),
+            "module_not_imported": (exec_fn, pickle.PicklingError),
+            "unhashable_module": (odd, pickle.PicklingError),
         }
-        for case, fn in cases.items():
+        for case, (fn, exc) in cases.items():
             with self.subTest(case=case):
                 self.assertFalse(resolves(fn))
-                with self.assertRaises(
-                    (pickle.PicklingError, AttributeError, TypeError)
-                ):
+                with self.assertRaises(exc):
                     pickle.dumps(fn)
 
     def test_pruned_shared_closure_cell_stays_shared(self):
