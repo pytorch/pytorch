@@ -838,11 +838,45 @@ auto abs(const scalar_t& v) {
   }
 }
 
+template <typename real_t, int BS>
+__device__ __forceinline__
+std::tuple<int, int> block_max(
+  real_t my_max, int my_idx,
+  real_t* sdata, int* sidx, int tid
+) {
+  warp_argmax(my_max, my_idx);
+  int warp_id = tid / 32;
+  int lane = tid % 32;
+
+  if (lane == 0) {
+    sdata[warp_id] = my_max;
+    sidx[warp_id] = my_idx;
+  }
+  __syncthreads();
+
+  constexpr auto NWARPS = BS / 32;
+  if (tid < 32) {
+    auto v = (tid < NWARPS) ? sdata[tid] : static_cast<real_t>(-1);
+    auto i = (tid < NWARPS) ? sidx[tid] : -1;
+    warp_argmax(v, i);
+    if (tid == 0) {
+      sdata[0] = v;
+      sidx[0] = i;
+    }
+  }
+  __syncthreads();
+
+  return std::make_tuple(sdata[0], sidx[0]);
+}
+
 template <typename scalar_t, int BS>
 __device__ __forceinline__
-int find_pivot_row(
+std::tuple<int, int> find_pivot_row(
   scalar_t* __restrict__ dA, int lda, int n,
-  int row_offset, int col_offset
+  int row_offset, int col_offset,
+  // index to exclude -- relevant when deciding for a 2x2 pivot,
+  // when the off-diagonal post permutation elements are to be considered
+  int exclude_idx = -1
 ) {
   using real_t = c10::scalar_value_type<scalar_t>::type;
 
@@ -856,12 +890,13 @@ int find_pivot_row(
   auto my_max = static_cast<real_t>(-1);
   auto my_idx = -1;
   for (int i = row_offset + tid; i < n; i += BS) {
-    auto v = ldl::abs(A[LinOff(i, col_offset, lda)]);
-    AGGREGATE_ARGMAX(my_max, my_idx, v, i);
+    if (i != exclude_idx) {
+      auto v = ldl::abs(A[LinOff(i, col_offset, lda)]);
+      AGGREGATE_ARGMAX(my_max, my_idx, v, i);
+    }
   }
 
-  auto pivot_row = block_argmax<real_t, BS>(my_max, my_idx, sdata, sidx, tid);
-  return pivot_row;
+  return ldl::block_max<real_t, BS>(my_max, my_idx, sdata, sidx, tid);
 }
 
 } // namespace ::ldl
@@ -876,6 +911,64 @@ ldl_diagonal_panel_fused_kernel(
 ) {
   using real_t = c10::scalar_value_type<scalar_t>::type;
   const real_t ALPHA = (1 + std::sqrt(17)) / 8;
+  const auto tid = threadIdx.x;
+
+  // The processed block will factor nb or nb-1 rows/cols
+  while (curr_step < nb - 1) {
+    int piv;
+    int pivot_rank = 1;
+
+    // Bunch-Kaufman pivoting.
+    // p192 of
+    // Golub, G. H., & Van Loan, C. F. (2013).
+    // Matrix computations (4th ed.). Johns Hopkins University Press. {
+    const auto diag_abs = ldl::abs(dLD[LinOff(curr_step, curr_step, lda)]);
+    // off-diagonal max. Argmax index is global!
+    const auto [lambda, ilambda] = ldl::find_pivot_row<scalar_t, BS>(
+      dLD, lda, n, curr_step, curr_step,
+      /*exclude_idx=*/curr_step
+    );
+
+    if (diag_abs >= ALPHA * lambda) {
+      // No permutation, 1x1 pivot
+      piv = curr_step;
+    } else {
+      // Checking whether ilambda diagonal pivot is "stable"
+      const auto [sigma, _] = ldl::find_pivot_row<scalar_t, BS>(
+        dLD, lda, n, curr_step, ilambda,
+        /*exclude_idx=*/ilambda
+      );
+      if (sigma * diag_abs >= ALPHA * diag_abs * diag_abs) {
+        // No permutation, 1x1 pivot
+        piv = curr_step;
+      } else if (ldl::abs(dLD[LinOff(ilambda, ilambda, lda)]) >= ALPHA * sigma) {
+        // New 1x1 pivot
+        piv = ilambda;
+      } {
+        // New 2x2 pivot
+        piv = ilambda;
+        pivot_rank = 2;
+      }
+    }
+    // }
+
+    // Update info/piv vector
+    if (tid == 0) {
+      // Update info vector
+      if (ldl::abs(dLD[LinOff(piv, piv, lda)]) == static_cast<real_t>(0) && *dinfo == 0) {
+        *dinfo = piv + 1;
+      }
+
+      // Update pivot vector
+      if (pivot_rank == 1) {
+        dipiv[curr_step] = piv + 1;
+      } else {
+        dipiv[curr_step + 0] = -(piv + 1);
+        dipiv[curr_step + 1] = -(piv + 1);
+      }
+    }
+
+  }
 }
 
 template <typename scalar_t>
