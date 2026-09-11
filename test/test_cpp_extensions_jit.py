@@ -9,9 +9,11 @@ import shutil
 import string
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch.backends.cudnn
@@ -525,6 +527,81 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         self.assertEqual(module.tanh_add.__doc__.split("\n")[2], "Tanh and then sum :D")
+
+    def test_inline_jit_generated_bindings_are_no_gil(self):
+        function_variants = (
+            "add_one",
+            ["add_one"],
+            {"add_one": "Add one"},
+            [],
+            {},
+        )
+
+        for index, functions in enumerate(function_variants):
+            with (
+                self.subTest(functions=functions),
+                tempfile.TemporaryDirectory() as build_directory,
+            ):
+                with (
+                    mock.patch.object(
+                        torch.utils.cpp_extension,
+                        "remove_extension_h_precompiler_headers",
+                    ),
+                    mock.patch.object(
+                        torch.utils.cpp_extension,
+                        "_jit_compile",
+                    ),
+                ):
+                    torch.utils.cpp_extension.load_inline(
+                        name=f"inline_jit_extension_no_gil_{index}",
+                        cpp_sources="int add_one(int value) { return value + 1; }",
+                        functions=functions,
+                        build_directory=build_directory,
+                    )
+
+                with open(os.path.join(build_directory, "main.cpp")) as source_file:
+                    generated_source = source_file.read()
+
+                self.assertIn(
+                    "PYBIND11_MODULE(TORCH_EXTENSION_NAME, m, "
+                    "pybind11::mod_gil_not_used()) {",
+                    generated_source,
+                )
+                self.assertNotIn(
+                    "PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {",
+                    generated_source,
+                )
+
+    @unittest.skipUnless(
+        sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+        "requires free-threaded Python",
+    )
+    def test_inline_jit_generated_bindings_keep_gil_disabled(self):
+        script = """
+import sys
+import tempfile
+
+import torch.utils.cpp_extension
+
+assert not sys._is_gil_enabled()
+with tempfile.TemporaryDirectory() as build_directory:
+    module = torch.utils.cpp_extension.load_inline(
+        name="inline_jit_extension_no_gil_runtime",
+        cpp_sources="int add_one(int value) { return value + 1; }",
+        functions="add_one",
+        build_directory=build_directory,
+        verbose=True,
+    )
+    assert module.add_one(1) == 2
+    assert not sys._is_gil_enabled()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_inline_jit_compile_extension_multiple_sources_and_no_functions(self):
         cpp_source1 = """
