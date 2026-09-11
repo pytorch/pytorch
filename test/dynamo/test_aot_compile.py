@@ -381,6 +381,14 @@ class ScaleModule(torch.nn.Module):
         return x * 2
 
 
+AOT_HERMETIC_WEIGHT = torch.eye(3)
+
+
+class HermeticModule(torch.nn.Module):
+    def forward(self, x):
+        return x @ AOT_HERMETIC_WEIGHT
+
+
 GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
 
 
@@ -402,6 +410,13 @@ def _set_pooling(mode):
 
 
 AOT_POOL_MODE = "sum"
+
+
+class GlobalRebindModule(torch.nn.Module):
+    def forward(self, x):
+        if AOT_POOL_MODE == "sum":
+            return x.sum(1)
+        return x.mean(1) * 10.0
 
 
 def global_rebind_fn(x):
@@ -1607,6 +1622,78 @@ from user code:
         for mode in ("sum", "mean"):
             with _set_pooling(mode):
                 self.assertEqual(reloaded(x), expected[mode])
+
+    def test_aot_compile_module_reload_is_hermetic(self):
+        # Pins, deliberately, that a module artifact's bytecode reads the
+        # globals serialized at capture: supplying a scope for guards must not
+        # rewire what the compiled bytecode reads. The consequence is a known
+        # limitation, not a goal: a same-shape rebind of a global tensor before
+        # the load passes the guards (they read the live scope) and the graph
+        # still serves the capture-time value. The rebind has to happen before
+        # the load so the test can tell the two scopes apart.
+        global AOT_HERMETIC_WEIGHT
+        model = torch.compile(HermeticModule(), fullgraph=True, backend="inductor")
+        x = torch.randn(3, 3)
+        expected = model._orig_mod(x)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = AOT_HERMETIC_WEIGHT
+        try:
+            AOT_HERMETIC_WEIGHT = AOT_HERMETIC_WEIGHT * 2
+            reloaded = torch.compile(
+                HermeticModule(), fullgraph=True, backend="inductor"
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), expected)
+        finally:
+            AOT_HERMETIC_WEIGHT = saved
+
+    def test_aot_compile_module_guards_track_rebound_global(self):
+        # The other half of hermeticity. Guards resolve against the loading
+        # process's scope dict itself, so a global rebound after the artifact is
+        # loaded redirects dispatch. A copy taken at load time would go on
+        # serving whichever graph matched then, with no error and a wrong answer.
+        global AOT_POOL_MODE
+        mod = GlobalRebindModule()
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pool_mode(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pool_mode(m)])
+                for m in ("sum", "mean")
+            ]
+        )
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = AOT_POOL_MODE
+        try:
+            AOT_POOL_MODE = "sum"
+            reloaded = torch.compile(
+                GlobalRebindModule(),
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), expected["sum"])
+            AOT_POOL_MODE = "mean"
+            self.assertEqual(reloaded(x), expected["mean"])
+        finally:
+            AOT_POOL_MODE = saved
 
     def test_aot_compile_fn_guards_track_rebound_global(self):
         # Function artifacts get their guard scope from load_compiled_function's
