@@ -6475,7 +6475,9 @@ class TestRandomnessDevice(TestCase):
 
 
 @markDynamoStrictTest
-class TestTransformFailure(TestCase):
+class TestTransformFailureDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfTorchDynamo()
     @parametrize(
         "transform",
@@ -6820,8 +6822,10 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestRandomnessDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
 )
+instantiate_device_type_tests(
+    TestTransformFailureDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
+)
 
-instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
 
