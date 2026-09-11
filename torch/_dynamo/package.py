@@ -1009,6 +1009,9 @@ class _DynamoCacheEntry:
     system_info: SystemInfo = dataclasses.field(
         default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
     )
+    # device_type keeps the collapsed accelerator-wins value for BC; a mixed
+    # cpu+accelerator capture still holds native CPU code, so keep the full set.
+    device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
@@ -1019,17 +1022,22 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
+        device_types = self.device_types or frozenset((self.device_type,))
         check_codegen = self.requires_native_backend_compatibility
         current_system_info = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
-                and self.device_type == "cpu"
+                and "cpu" in device_types
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(
-            current_system_info, self.device_type, check_codegen=check_codegen
-        )
+        # cpu first, so a codegen-target refusal is not masked by a GPU error.
+        for device_type in sorted(device_types):
+            self.system_info.check_compatibility(
+                current_system_info,
+                device_type,
+                check_codegen=check_codegen,
+            )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -1188,8 +1196,8 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        # Empty means no graph named a device; cache_entry records that as cpu.
+        self._device_types: set[str] = set()
         # An eager backend bakes no vector width, so it neither pays the C++
         # toolchain probe at save nor is rejected on ISA skew at load.
         self._requires_native_backend_compatibility = (
@@ -1259,6 +1267,8 @@ class CompilePackage:
                         function_names=list(code.function_names),
                         import_sources=dict(code.import_sources),
                     )
+            # Restored so a re-save keeps checking what the capture targeted.
+            self._device_types = set(dynamo.device_types or (dynamo.device_type,))
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -1370,8 +1380,7 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        devices = _graph_device_types(graph)
-        self._device_type = next((d for d in sorted(devices) if d != "cpu"), "cpu")
+        self._device_types.update(_graph_device_types(graph))
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
@@ -1589,16 +1598,22 @@ class CompilePackage:
         self.validate()
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
+        device_types = frozenset(self._device_types or ("cpu",))
+        device_type = next(
+            (device for device in sorted(device_types) if device != "cpu"),
+            "cpu",
+        )
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=device_type,
+            device_types=device_types,
             # The codegen probe runs the C++ toolchain; only pay for it when the
             # artifact can hold native CPU code.
             system_info=SystemInfo.current(
                 cpu_codegen=(
                     self._requires_native_backend_compatibility
-                    and self._device_type == "cpu"
+                    and "cpu" in device_types
                 )
             ),
             requires_native_backend_compatibility=(

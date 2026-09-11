@@ -144,6 +144,39 @@ class TestPackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         PrecompileContext.clear()
 
+    def test_mixed_device_capture_records_cpu_codegen_target(self):
+        # A mixed cpu+accelerator capture still holds native CPU code, so the
+        # codegen target must be recorded and compared even though the
+        # collapsed device_type reads as the accelerator. The graph is
+        # fabricated (never run), so no accelerator is needed.
+        if _current_cpu_codegen_target() is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn)
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        node.meta["val"] = torch.empty(2)
+        graph.call_function(
+            torch.ops.aten.ones.default, ((2,),), {"device": torch.device("cuda")}
+        )
+        package.update_device_type(graph)
+        self.assertEqual(package._device_types, {"cpu", "cuda"})
+
+        entry = package.cache_entry()
+        self.assertEqual(entry.device_type, "cuda")
+        self.assertEqual(entry.device_types, frozenset(("cpu", "cuda")))
+        self.assertIsNotNone(entry.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", 128, ("INVALID",), None, "INVALID")
+        entry.system_info = dataclasses.replace(
+            entry.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            entry.check_versions()
+
     # Named codegen targets: (machine, isa, bit width, build macros, simdlen, march).
     _CODEGEN_TARGETS = {
         "avx2": ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None),

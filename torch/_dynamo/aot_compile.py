@@ -68,6 +68,9 @@ class CompileArtifacts:
     system_info: SystemInfo = dataclasses.field(
         default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
     )
+    # device_type keeps the collapsed accelerator-wins value for BC; a mixed
+    # cpu+accelerator graph still emits native CPU code, so keep the full set.
+    device_types: frozenset[str] = frozenset()
     # False for a backend that bakes no native code (the eager family, or a user
     # backend declaring `emits_native_code = False`), so the ISA gate is skipped.
     # Defaults True so an artifact saved before the field existed keeps loading.
@@ -80,6 +83,7 @@ class CompileArtifacts:
         # cached info as receiver they skip only when the artifact itself
         # recorded no Triton/GPU, requiring a match otherwise -- the correct
         # direction for a compatibility check.
+        device_types = self.device_types or frozenset((self.device_type,))
         check_codegen = (
             self.requires_native_backend_compatibility
             and emits_native_code(self.backend_name)
@@ -87,13 +91,14 @@ class CompileArtifacts:
         current = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
-                and self.device_type == "cpu"
+                and "cpu" in device_types
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(
-            current, self.device_type, check_codegen=check_codegen
-        )
+        for device_type in sorted(device_types):
+            self.system_info.check_compatibility(
+                current, device_type, check_codegen=check_codegen
+            )
 
 
 @dataclasses.dataclass
@@ -880,6 +885,7 @@ def aot_compile_fullgraph(
             backend_name=backend_name,
             system_info=system_info,
             requires_native_backend_compatibility=native_backend,
+            device_types=device_types,
         )
         aot_compiled_fn = AOTCompiledFunction(
             _artifacts=artifacts, _extra_globals=fn.__globals__
