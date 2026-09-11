@@ -13,15 +13,53 @@ _CAUSAL_DOCUMENT_MASK_PROGRAM = (
     ("and", 6, 9),
 )
 
-# FlyDSL 0.3 lacks stable grouped scheduling, fence-free barriers, and native exp2.
-_SCHED_MFMA, _SCHED_VMEM_READ, _SCHED_LDS_READ, _SCHED_EXP = (0x008, 0x020, 0x100, 0x400)
+# FlyDSL 0.3 lacks stable grouped scheduling and fence-free barriers.
+_SCHED_GROUP_MASKS = {
+    "mfma": 0x008,
+    "vmem_read": 0x020,
+    "lds_read": 0x100,
+    "transcendental": 0x400,
+}
 
 
-def make_global_view(tensor, offset, shape, stride):
+def make_global_view(tensor, coord, shape, stride):
+    view = fx.make_view(fx.get_iter(tensor), fx.make_layout(shape, stride))
+    if coord is not None:
+        # Slice the global pointer before creating the 32-bit buffer descriptor.
+        # Callers widen batch/head coordinates to i64; local strides stay static.
+        view = fx.slice(view, coord)
+    num_records_bytes = (
+        fx.get_scalar(fx.cosize(view.layout)) * view.element_type.width + 7
+    ) // 8
+    if not 0 <= num_records_bytes <= 0xFFFFFFFF:
+        raise ValueError("FlyDSL buffer view must fit in a 32-bit byte range")
+    return fx.rocdl.make_buffer_tensor(view, num_records_bytes=num_records_bytes)
+
+
+def make_metadata_view(tensor, offset, local_size):
+    # These compact worklists are intentionally rebased inside their 32-bit
+    # descriptors; large Q/K/V tensors use make_global_view instead.
     iterator = fx.get_iter(fx.rocdl.make_buffer_tensor(tensor))
-    if offset is not None:
-        iterator = fx.add_offset(iterator, offset)
-    return fx.make_view(iterator, fx.make_layout(shape, stride))
+    return fx.make_view(
+        fx.add_offset(iterator, fx.Int32(offset)),
+        fx.make_layout(local_size, 1),
+    )
+
+
+def make_qk_shared_layout(rows, columns):
+    layout = fx.make_layout(
+        ((32, rows // 32), (32, columns // 32)),
+        ((32, 32 * columns), (1, 32 * 32)),
+    )
+    # Swizzle eight-element packs without changing their 16-byte alignment.
+    return fx.make_composed_layout(fx.static(fx.SwizzleType.get(2, 3, 5)), layout)
+
+
+def make_value_shared_layout(rows, columns):
+    return fx.make_layout(
+        ((8, rows // 8), (32, columns // 32)),
+        ((32, 8 * columns), (1, 8 * 32)),
+    )
 
 
 def make_shared_view(pointer, shape, stride):
@@ -85,7 +123,9 @@ def evaluate_mask_program(
                 elif op == "floordiv":
                     values.append(lhs // rhs)
                 elif op == "remainder":
-                    values.append(lhs % rhs)
+                    remainder = lhs % rhs
+                    needs_adjustment = (remainder != 0) & ((remainder < 0) != (rhs < 0))
+                    values.append(needs_adjustment.select(remainder + rhs, remainder))
                 elif op == "ge":
                     values.append(lhs >= rhs)
                 elif op == "gt":
@@ -107,8 +147,8 @@ def evaluate_mask_program(
     return values[mask_program_output]
 
 
-def _schedule_group(mask: int, count: int, group: int):
-    fx.rocdl.sched_group_barrier(mask, count, group)
+def _schedule_group(kind: str, count: int, group: int):
+    fx.rocdl.sched_group_barrier(_SCHED_GROUP_MASKS[kind], count, group)
 
 
 def schedule_fence():
@@ -121,7 +161,7 @@ def scheduled_workgroup_barrier():
 
 
 def fast_exp2(value):
-    return fx.Float32(fx.rocdl.exp2(fx.Float32.ir_type, value.ir_value()))
+    return fx.math.exp2(fx.Float32(value), fastmath=fx.FastMathFlags.afn)
 
 
 def schedule_score_pipeline(*, mfma_count: int, dsrd_count: int, vmem_count: int):
@@ -148,27 +188,27 @@ def schedule_pack0_pipeline(*, vmem_count: int, exp_count: int, dsrd_count: int)
     dsrd_per_slot = dsrd_count // slots
     for _ in fx.range_constexpr(slots):
         if const_expr(vmem_per_slot):
-            _schedule_group(_SCHED_VMEM_READ, vmem_per_slot, 1)
-        _schedule_group(_SCHED_LDS_READ, dsrd_per_slot, 1)
-        _schedule_group(_SCHED_EXP, exp_per_slot, 1)
+            _schedule_group("vmem_read", vmem_per_slot, 1)
+        _schedule_group("lds_read", dsrd_per_slot, 1)
+        _schedule_group("transcendental", exp_per_slot, 1)
 
 
 def schedule_pack1_pipeline(*, mfma_count: int, exp_count: int, dsrd_count: int):
     exp_per_mfma = exp_count // mfma_count
     dsrd_per_operand = dsrd_count // 2
     for mfma_index in fx.range_constexpr(mfma_count):
-        _schedule_group(_SCHED_MFMA, 1, 2)
+        _schedule_group("mfma", 1, 2)
         if const_expr(mfma_index < 2):
-            _schedule_group(_SCHED_LDS_READ, dsrd_per_operand, 2)
-        _schedule_group(_SCHED_EXP, exp_per_mfma, 2)
+            _schedule_group("lds_read", dsrd_per_operand, 2)
+        _schedule_group("transcendental", exp_per_mfma, 2)
 
 
 def schedule_update_tail(*, mfma_count: int, dsrd_count: int):
     dsrd_per_operand = dsrd_count // 2
     for mfma_index in fx.range_constexpr(mfma_count):
         if const_expr(mfma_index < 2):
-            _schedule_group(_SCHED_LDS_READ, dsrd_per_operand, 3)
-        _schedule_group(_SCHED_MFMA, 1, 3)
+            _schedule_group("lds_read", dsrd_per_operand, 3)
+        _schedule_group("mfma", 1, 3)
     schedule_fence()
 
 
@@ -202,13 +242,26 @@ def make_mask_evaluator(program, output, strides, buffers, load_i32, batch, head
     return evaluate
 
 
-def make_mfma32_ops(window_mask, vector_width):
+def make_mfma32_ops(lane, vector_width):
     g128 = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
     dma128 = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
     tr16 = fx.make_copy_atom(fx.rocdl.cdna4.LDSReadTrans(16, 64), fx.BFloat16)
     o64 = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
-    lds_pointer_type = fx.PointerType.get(fx.BFloat16.ir_type, 2, 16)
-    atom = fx.make_mma_atom(fx.rocdl.MFMA(32, 32, 16, fx.BFloat16))
+    mma_atom = fx.make_mma_atom(fx.rocdl.MFMA(32, 32, 16, fx.BFloat16))
+    tiled_mma = fx.make_tiled_mma(
+        mma_atom,
+        fx.make_layout((1, 1, 1), (1, 1, 1)),
+    )
+    thread_mma = tiled_mma.get_slice(lane)
+    accumulator_coordinates = thread_mma.partition_C(
+        fx.make_view(0, fx.make_layout((32, 32), (1, 0)))
+    )
+    row_coordinates = thread_mma.partition_C(
+        fx.make_view(0, fx.make_layout((32, 32), (0, 1)))
+    )
+    b_coordinates = thread_mma.partition_B(
+        fx.make_view(0, fx.make_layout((32, 16), (16, 1)))
+    )
 
     def gload_f32(view, index):
         return fx.Float32(fx.get_iter(view)[index])
@@ -218,45 +271,29 @@ def make_mfma32_ops(window_mask, vector_width):
 
     def load_global_pack(view, row, column):
         fragment = fx.make_rmem_tensor(vector_width, fx.BFloat16)
-        source = fx.logical_divide(fx.slice(view, (row, None)), fx.make_layout(vector_width, 1))
-        fx.copy(g128, fx.slice(source, (None, column // fx.Int32(vector_width))), fragment)
+        source = fx.logical_divide(
+            fx.slice(view, (row, None)), fx.make_layout(vector_width, 1)
+        )
+        fx.copy(
+            g128, fx.slice(source, (None, column // fx.Int32(vector_width))), fragment
+        )
         return fragment.load()
 
-    def make_fragment(value, size, dtype):
-        fragment = fx.make_rmem_tensor(size, dtype)
+    def make_b_fragment(value):
+        fragment = fx.make_fragment_like(b_coordinates, fx.BFloat16)
         fragment.store(fx.Vector(value).ir_value())
         return fragment
-
-    def mfma(a_value, b_value, c_value):
-        a_fragment = make_fragment(a_value, 8, fx.BFloat16)
-        b_fragment = make_fragment(b_value, 8, fx.BFloat16)
-        c_fragment = make_fragment(c_value, 16, fx.Float32)
-        fx.gemm(atom, c_fragment, a_fragment, b_fragment, c_fragment)
-        return c_fragment.load()
-
-    def b_operand_column(row_group, column):
-        if const_expr(window_mask):
-            return column
-        group = fx.Int32(row_group)
-        return column ^ ((group & fx.Int32(1)) << fx.Int32(4) | (group & fx.Int32(2)) << fx.Int32(2))
-
-    def dma_destination(base, element_offset):
-        pointer = fx.inttoptr(
-            lds_pointer_type,
-            fx.Int32(fx.ptrtoint(fx.add_offset(base, fx.make_int_tuple(element_offset)))),
-        )
-        return fx.make_view(pointer, fx.make_layout(1, 1))
 
     return (
         dma128,
         tr16,
         o64,
-        atom,
+        tiled_mma,
+        thread_mma,
+        accumulator_coordinates,
+        row_coordinates,
         gload_f32,
         gload_i32,
         load_global_pack,
-        make_fragment,
-        mfma,
-        b_operand_column,
-        dma_destination,
+        make_b_fragment,
     )

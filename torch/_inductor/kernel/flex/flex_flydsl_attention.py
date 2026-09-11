@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
 
-import operator
 from collections.abc import Callable, Sequence
 from typing import Any
 
 import sympy
 
 import torch
+from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
@@ -14,15 +14,18 @@ from ...codegen.flydsl.flydsl_utils import (
     _flydsl_runtime_unavailable_reason,
     runtime_available,
 )
-from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
-from ...lowering import empty_strided
+from ...ir import FixedLayout, Pointwise, ShapeAsConstantBuffer, Subgraph, TensorBox
+from ...lowering import empty_strided, full
 from ...select_algorithm import autotune_select_algorithm
-from ...virtualized import V
+from ...virtualized import ops, V
 from .common import (
+    construct_strides,
     create_indices_fake,
     create_num_blocks_fake_generator,
+    freeze_irnodes,
     infer_dense_strides,
     load_flex_template,
+    maybe_realize,
 )
 from .flex_flash_attention import is_trivial_mask_graph, is_trivial_score_graph
 from .flex_flydsl_mask import lower_flydsl_mask_graph
@@ -35,52 +38,10 @@ flex_flydsl_backward_template = FlyDSLTemplate(
 _MAX_BUFFER_BYTES = 1 << 32
 _BWD_Q_CHUNK_SIZE = 64
 _BWD_KV_CHUNK_SIZE = 64
-_ADD_TARGETS = (
-    operator.add,
-    torch.ops.aten.add.Tensor,
-    torch.ops.aten.add.Scalar,
-)
-_GE_TARGETS = (operator.ge, torch.ops.aten.ge.Tensor, torch.ops.aten.ge.Scalar)
-_LE_TARGETS = (operator.le, torch.ops.aten.le.Tensor, torch.ops.aten.le.Scalar)
 
 
-def is_causal_mask_graph(graph_module, q_offset: int = 0) -> bool:
-    nodes = list(graph_module.graph.nodes)
-    placeholders = [node for node in nodes if node.op == "placeholder"]
-    outputs = [node for node in nodes if node.op == "output"]
-    if len(placeholders) != 4 or len(outputs) != 1:
-        return False
-    result = outputs[0].args[0]
-    if not hasattr(result, "target") or len(result.args) != 2:
-        return False
-    lhs, rhs = result.args
-    query = placeholders[2]
-
-    def is_offset_query(value) -> bool:
-        if q_offset == 0 and value is query:
-            return True
-        if (
-            not hasattr(value, "target")
-            or value.target not in _ADD_TARGETS
-            or len(value.args) < 2
-        ):
-            return False
-        add_lhs, add_rhs = value.args[:2]
-        return (
-            add_lhs is query
-            and isinstance(add_rhs, (int, float))
-            and add_rhs == q_offset
-        ) or (
-            add_rhs is query
-            and isinstance(add_lhs, (int, float))
-            and add_lhs == q_offset
-        )
-
-    return (
-        result.target in _GE_TARGETS and is_offset_query(lhs) and rhs is placeholders[3]
-    ) or (
-        result.target in _LE_TARGETS and lhs is placeholders[3] and is_offset_query(rhs)
-    )
+def _contiguous_strides(shape):
+    return construct_strides(shape, range(len(shape) - 1, -1, -1))
 
 
 def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] | None:
@@ -91,32 +52,38 @@ def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] 
         return None
     if len(sizes) != 4 or len(strides) != 4:
         return None
-    contiguous = [
-        sizes[1] * sizes[2] * sizes[3],
-        sizes[2] * sizes[3],
-        sizes[3],
-        1,
-    ]
-    if strides == contiguous:
+    if strides == _contiguous_strides(sizes):
         return tuple(strides)
     if allow_strided and strides[-1] == 1 and all(stride > 0 for stride in strides):
         return tuple(strides)
     return None
 
 
-def _fits_u32_buffer(node) -> bool:
+def _fits_u32_head_slice(node) -> bool:
     try:
         sizes = [V.graph.sizevars.guard_int(value) for value in node.get_size()]
         strides = [V.graph.sizevars.guard_int(value) for value in node.get_stride()]
         element_size = torch._utils._element_size(node.get_dtype())
     except (AttributeError, TypeError, ValueError):
         return False
-    if len(sizes) != len(strides) or any(stride < 0 for stride in strides):
+    if len(sizes) != 4 or len(strides) != 4 or any(stride < 0 for stride in strides):
         return False
     storage_elements = 1 + sum(
-        (size - 1) * stride for size, stride in zip(sizes, strides)
+        (size - 1) * stride for size, stride in zip(sizes[-2:], strides[-2:])
     )
     return storage_elements * element_size < _MAX_BUFFER_BYTES
+
+
+def _is_contiguous_shape_stride(
+    shape: tuple[int, ...], stride: tuple[int, ...]
+) -> bool:
+    if len(shape) != len(stride):
+        return False
+    expected = _contiguous_strides(tuple(max(size, 1) for size in shape))
+    return all(
+        size == 1 or actual == contiguous
+        for size, actual, contiguous in zip(shape, stride, expected)
+    )
 
 
 def _is_gfx950_device(device) -> bool:
@@ -148,10 +115,10 @@ def _check_flydsl_common_compatibility(
         return "requires query, key, and value to have the same dtype"
     if not is_trivial_score_graph(subgraph.graph_module):
         return "supports identity score_mod only"
-    if score_mod_other_buffers or (
-        mask_mod_other_buffers and not allow_mask_mod_buffers
-    ):
-        return "does not support captured score_mod or mask_mod buffers"
+    if score_mod_other_buffers:
+        return "does not support captured score_mod buffers"
+    if mask_mod_other_buffers and not allow_mask_mod_buffers:
+        return "does not support captured mask_mod buffers"
 
     tensors = (query, key, value, *extra_tensors)
     if not all(
@@ -163,8 +130,8 @@ def _check_flydsl_common_compatibility(
         if not allow_strided_bhsd:
             layout = "contiguous 4D BHSD tensors"
         return f"requires {layout}"
-    if not all(_fits_u32_buffer(node) for node in tensors if node is not None):
-        return "requires every tensor buffer to be smaller than 4 GiB"
+    if not all(_fits_u32_head_slice(node) for node in tensors if node is not None):
+        return "requires every per-head tensor slice to be smaller than 4 GiB"
     return ""
 
 
@@ -224,9 +191,8 @@ def _get_flydsl_flex_attention_backward_config(
         return None, "FlyDSL flex bwd does not support captured score_mod buffers"
 
     trivial_mask = is_trivial_mask_graph(mask_graph.graph_module)
-    causal_mask = is_causal_mask_graph(mask_graph.graph_module)
     mask_program = None
-    if not trivial_mask and not causal_mask:
+    if not trivial_mask:
         mask_program, mask_reason = lower_flydsl_mask_graph(
             mask_graph.graph_module,
             mask_mod_other_buffers,
@@ -322,8 +288,36 @@ def _get_flydsl_flex_attention_backward_config(
         full_index_shape = [
             V.graph.sizevars.guard_int(item) for item in full_kv_indices.get_size()
         ]
+        metadata_nodes = (
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        )
+        metadata_shapes = tuple(
+            tuple(V.graph.sizevars.guard_int(item) for item in node.get_size())
+            for node in metadata_nodes
+        )
+        metadata_dtypes = tuple(node.get_dtype() for node in metadata_nodes)
+        metadata_devices = tuple(node.get_device() for node in metadata_nodes)
     except (AttributeError, TypeError, ValueError):
         return None, "FlyDSL flex bwd requires static BlockMask shapes"
+    if any(dtype != torch.int32 for dtype in metadata_dtypes):
+        return None, "FlyDSL flex bwd requires int32 BlockMask metadata"
+    if any(device != query.get_device() for device in metadata_devices):
+        return None, "FlyDSL flex bwd requires BlockMask metadata on the query device"
+    try:
+        metadata_strides = tuple(
+            tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
+            for node in metadata_nodes
+        )
+    except (AttributeError, NotImplementedError, TypeError, ValueError):
+        return None, "FlyDSL flex bwd requires statically known BlockMask metadata strides"
+    if not all(
+        _is_contiguous_shape_stride(shape, stride)
+        for shape, stride in zip(metadata_shapes, metadata_strides)
+    ):
+        return None, "FlyDSL flex bwd requires contiguous BlockMask metadata"
     expected_rows = sq // 128
     if len(count_shape) != 3 or count_shape[2] != expected_rows:
         return None, "FlyDSL flex bwd requires one BlockMask row per 128 Q rows"
@@ -374,7 +368,6 @@ def _get_flydsl_flex_attention_backward_config(
             "BLOCK_MASK_HEADS": mask_heads,
             "MAX_PARTIAL_BLOCKS": max_partial_blocks,
             "MAX_FULL_BLOCKS": max_full_blocks,
-            "CAUSAL_PARTIAL_BLOCKS": causal_mask,
             "MASK_PROGRAM": (() if mask_program is None else mask_program.instructions),
             "MASK_PROGRAM_OUTPUT": (0 if mask_program is None else mask_program.output),
             "MASK_BUFFER_COUNT": (
@@ -397,54 +390,24 @@ def _get_flydsl_flex_attention_backward_config(
     )
 
 
-def _can_use_flydsl_flex_attention_backward(
-    fw_subgraph: Subgraph,
-    mask_graph: Subgraph,
-    query: TensorBox,
-    score_mod_other_buffers: Sequence[TensorBox] | None = None,
-    **kwargs: Any,
-) -> tuple[bool, str]:
-    config, reason = _get_flydsl_flex_attention_backward_config(
-        fw_subgraph,
-        mask_graph,
-        query,
-        score_mod_other_buffers,
-        **kwargs,
+def _create_dense_metadata(query, key):
+    seq_q = V.graph.sizevars.guard_int(query.get_size()[2])
+    seq_kv = V.graph.sizevars.guard_int(key.get_size()[2])
+    num_q_blocks = (seq_q + 127) // 128
+    num_kv_blocks = (seq_kv + 127) // 128
+    shape = [1, 1, num_q_blocks]
+    device = query.get_device()
+    return (
+        full(shape, 0, dtype=torch.int32, device=device),
+        full([*shape, 1], 0, dtype=torch.int32, device=device),
+        full(shape, num_kv_blocks, dtype=torch.int32, device=device),
+        Pointwise.create(
+            device=device,
+            dtype=torch.int32,
+            ranges=[*shape, num_kv_blocks],
+            inner_fn=lambda index: ops.index_expr(index[-1], torch.int32),
+        ),
     )
-    return config is not None, reason
-
-
-def _use_flydsl_flex_attention_backward(
-    fw_subgraph: Subgraph,
-    mask_graph: Subgraph,
-    backend: str,
-    query: TensorBox,
-    score_mod_other_buffers: Sequence[TensorBox] | None = None,
-    **kwargs: Any,
-) -> bool:
-    """Determine if we should use FlyDSL flex attention backward.
-
-    FlyDSL is experimental and must be explicitly requested via BACKEND='FLYDSL'.
-    Mirrors ``_use_flex_flash_attention_backward``: raises when the backend is
-    requested but cannot be satisfied.
-    """
-    if backend != "FLYDSL":
-        return False
-
-    can_use, reason = _can_use_flydsl_flex_attention_backward(
-        fw_subgraph,
-        mask_graph,
-        query,
-        score_mod_other_buffers,
-        **kwargs,
-    )
-
-    if not can_use:
-        raise RuntimeError(
-            f"BACKEND='FLYDSL' but FlyDSL flex backward cannot be used: {reason}"
-        )
-
-    return True
 
 
 def create_flydsl_flex_attention_backward_kernel(
@@ -472,6 +435,49 @@ def create_flydsl_flex_attention_backward_kernel(
         raise RuntimeError(_flydsl_unavailable_message())
     if fw_subgraph is None or mask_graph is None:
         raise AssertionError("FlyDSL backward requires the original mod graphs")
+
+    if (
+        sparse_q_block_size == _LARGE_SPARSE_BLOCK_SIZE
+        and sparse_kv_block_size == _LARGE_SPARSE_BLOCK_SIZE
+        and is_trivial_mask_graph(mask_graph.graph_module)
+    ):
+        (
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ) = _create_dense_metadata(query, key)
+        sparse_q_block_size = sparse_kv_block_size = 128
+
+    (
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+    ) = maybe_realize(
+        [
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ]
+    )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers or [])
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers or [])
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
 
     config, reason = _get_flydsl_flex_attention_backward_config(
         fw_subgraph,

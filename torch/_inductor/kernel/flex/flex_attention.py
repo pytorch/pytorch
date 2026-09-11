@@ -55,7 +55,6 @@ from .flex_flash_attention import (
     is_trivial_score_graph,
 )
 from .flex_flydsl_attention import (
-    _use_flydsl_flex_attention_backward,
     create_flydsl_flex_attention_backward_kernel,
 )
 
@@ -852,26 +851,7 @@ def flex_attention_backward(*args, **kwargs):
     else:
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
-    if _use_flydsl_flex_attention_backward(
-        fw_graph,
-        mask_graph,
-        backend=backend,
-        query=query,
-        score_mod_other_buffers=score_mod_other_buffers,
-        key=key,
-        value=value,
-        out=out,
-        grad_out=grad_out,
-        grad_logsumexp=grad_logsumexp,
-        mask_mod_other_buffers=mask_mod_other_buffers,
-        kv_num_blocks=kv_num_blocks,
-        kv_indices=kv_indices,
-        full_kv_num_blocks=full_kv_num_blocks,
-        full_kv_indices=full_kv_indices,
-        scale=scale,
-        sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
-        sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
-    ):
+    if backend == "FLYDSL":
         return create_flydsl_flex_attention_backward_kernel(
             query,
             key,
