@@ -82,6 +82,8 @@ class _ProbeState:
     # id(function) -> its kept __doc__ (None when pruned), for the same warn-once
     # reason.
     docs: dict[int, Any] = dataclasses.field(default_factory=dict)
+    # id(function) -> its kept annotations, for the same warn-once reason.
+    annotations: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
     # Whether a probe short-circuited on an in-flight id; such a verdict is
     # not cached as final but parked (as unpicklable) for the rest of the
     # probe tree.
@@ -141,19 +143,22 @@ class AOTCompilePickler(FunctionPicklerBase):
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so what a call needs
             # (defaults, keyword defaults, closure) is carried verbatim, while
-            # __dict__ entries and __doc__ are pruned per value: the runtime
-            # assigns those back and never forces a pruned one, so a value this
-            # pickler cannot serialize (a __dict__ entry like the __wrapped__
-            # functools.wraps stashes, which can drag an unrelated lock/Module
-            # in) is dropped rather than left to fail the whole dump.
-            # Annotations and type params follow in later commits.
+            # annotations, __dict__ entries and __doc__ are pruned per value: the
+            # runtime assigns those back and never forces a pruned one, so a
+            # value this pickler cannot serialize (a <locals> annotation class,
+            # or a __dict__ entry like the __wrapped__ functools.wraps stashes,
+            # which can drag an unrelated lock/Module in) is dropped rather than
+            # left to fail the whole dump. Known limitation: the top-level
+            # function's own annotations ride on CompileArtifacts.signature,
+            # which serialize() dumps unpruned, so this only protects the nested
+            # functions reached here. Type params follow in a later commit.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
                 attributes=self._pickleable_attributes(obj),
-                annotations={},
+                annotations=self._pickleable_annotations(obj),
                 doc=self._pickleable_doc(obj),
                 type_params=None,
                 globals_snapshot=None,
@@ -230,6 +235,56 @@ class AOTCompilePickler(FunctionPicklerBase):
         if not self._probing:
             state.docs[id(obj)] = doc
         return doc
+
+    def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
+        # The runtime must SERIALIZE these, so on 3.14 ask for evaluated VALUEs
+        # rather than the FORWARDREF proxies the guard pickler reads: a proxy
+        # must not be carried (it holds its owner and may drag the owner's
+        # globals along). Evaluating runs the function's __annotate__ and
+        # caches the result on it, the same thing inspect.signature does; when
+        # it raises -- a TYPE_CHECKING-only name is the common case -- the whole
+        # set is dropped, since __annotate__ is one function returning the whole
+        # dict (a FORWARDREF retry that keeps the proxy-free values would
+        # salvage the siblings; not done). That drop is a debug line where a
+        # per-value drop below warns: a set that does not evaluate was never
+        # readable at runtime in this process either (typing.get_type_hints
+        # raises the same), so nothing the body does can depend on it, while a
+        # value that resolved but does not pickle is a live object the body may
+        # read. Below 3.14 the read hands back the live __annotations__ dict
+        # (materializing an empty one on a function that has none); its items
+        # are snapshotted, since a probe runs user __reduce__ code that may
+        # write back onto the function, and the kept values go into a fresh
+        # dict. A value can still be unpicklable -- a <locals> class resolves
+        # fine yet pickle cannot reference it -- so probe each and keep only the
+        # ones that dump, warning per drop like a __dict__ entry. The key is
+        # dropped rather than kept with a sentinel as the guard pickler does:
+        # this function is CALLED after load, and a sentinel where the body
+        # expects a type is a wrong object, while a missing key is the KeyError
+        # the warning predicts. Memoized for the real dump like the attributes.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.annotations:
+            return state.annotations[id(obj)]
+        annotations: dict[str, Any] = {}
+        try:
+            annotations = self._read_raw_annotations(obj, evaluate=True)
+        except Exception as e:
+            code = obj.__code__
+            log.debug(
+                "dropping the annotations of %s (%s:%d): %s",
+                getattr(code, "co_qualname", code.co_name),
+                code.co_filename,
+                code.co_firstlineno,
+                e,
+            )
+        kept = {}
+        for name, value in list(annotations.items()):
+            if self._dumps_cleanly(value):
+                kept[name] = value
+            else:
+                self._warn_dropped(obj, f"__annotations__[{name!r}]", value)
+        if not self._probing:
+            state.annotations[id(obj)] = kept
+        return kept
 
     def _dumps_cleanly(self, value: Any) -> bool:
         # "does it pickle?" has no cheaper predicate than trying. A throwaway
