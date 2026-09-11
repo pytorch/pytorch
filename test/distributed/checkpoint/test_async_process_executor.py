@@ -247,12 +247,14 @@ class TestProcessGroupInitInfo(DTensorTestBase):
         with patch.dict(
             os.environ, {"DCP_USE_PREFIX_STORE": "1", "MASTER_ADDR": "localhost"}
         ):
+            os.environ.pop("MASTER_PORT", None)
             with self.assertRaises(CheckpointException):
                 pg_init_info = _ProcessGroupInitInfo()
         # Missing addr
         with patch.dict(
             os.environ, {"DCP_USE_PREFIX_STORE": "1", "MASTER_PORT": "12345"}
         ):
+            os.environ.pop("MASTER_ADDR", None)
             with self.assertRaises(CheckpointException):
                 pg_init_info = _ProcessGroupInitInfo()
         # Invalid port
