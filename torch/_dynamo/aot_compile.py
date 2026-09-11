@@ -32,6 +32,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_EXTERNAL_DATA_HINT = (
+    "Mark the value(s) as external data by using `external_data={'key': ...}`."
+)
+
 
 def bind_locals(
     signature: inspect.Signature, *args: Any, **kwargs: Any
@@ -527,6 +531,9 @@ class AOTCompiledFunction:
             bytecode=SerializedCode.from_code_object(state["runtime_env"].bytecode),
         )
         compiled_fn = state["compiled_fn"]
+        # The backend pickles itself here, deliberately outside the handler
+        # below: external_data cannot fix an unpicklable graph module, so that
+        # failure must not be dressed up with guidance pointing at it.
         state["compiled_fn"] = (
             type(compiled_fn).deserialize_compile_artifacts,
             type(compiled_fn).serialize_compile_artifacts(compiled_fn),
@@ -534,11 +541,50 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
         buf = io.BytesIO()
         pickler = AOTCompilePickler(external_data or {}, buf)
-        pickler.dump(state)
+        try:
+            pickler.dump(state)
+        except (pickle.PicklingError, TypeError, AttributeError, RecursionError) as e:
+            # Preserve the original exception object -- callers and tests match
+            # on it (e.g. "cannot pickle '_thread.lock' object") -- and append
+            # guidance. Mutate args and re-raise rather than type(e)(msg): a
+            # TypeError subclass from a user __reduce__ may take a non-message
+            # constructor, so reconstructing would swap the real error for a
+            # constructor failure. (A subclass whose __str__ ignores args still
+            # renders without the guidance; add_note() would cover it but is
+            # 3.11+.) The args tail is kept for a consumer that reads it.
+            # AttributeError is caught too: the C _pickle accelerator raises a
+            # bare AttributeError "Can't get local object" for a <locals> class
+            # in a default/kwdefault (3.14+ raises PicklingError), so it needs
+            # the same guidance. RecursionError as well: a deep-but-finite value
+            # in an unpruned slot overflows the C pickler, and external_data is
+            # its fix too. Unmarked modules recorded before the failure are
+            # reported here rather than on the next attempt.
+            # str(e) is repr(args) for a 2+-argument exception, which would nest
+            # the tuple repr and escape the newline; the head argument is the
+            # message. str(e) of the result is still a tuple repr in that case,
+            # which is the price of keeping the tail.
+            message = str(e.args[0]) if e.args else ""
+            if _EXTERNAL_DATA_HINT in message:
+                raise  # a re-raised singleton already carries the guidance
+            prefix = f"{message}\n" if message else ""
+            modules = ""
+            if pickler.errors:
+                # Class names, not reprs: nn.Module.__repr__ renders the whole
+                # child tree and runs user code inside this handler.
+                names = ", ".join(type(m).__name__ for m in pickler.errors.values())
+                modules = f" It also reached unmarked nn.Modules ({names})."
+            e.args = (
+                prefix + "Some value reached by the artifact is not picklable (a "
+                "closure cell, a default/kwdefault, or the top-level function's "
+                "own signature annotations, which ride unpruned, are the common "
+                f"sources).{modules} {_EXTERNAL_DATA_HINT}",
+                *e.args[1:],
+            )
+            raise
         if pickler.errors:
             raise RuntimeError(
                 f"Failed to serialize the following objects: {list(pickler.errors.values())}\n"
-                "Please mark these as external data by using `external_data={'key': ...}`"
+                f"{_EXTERNAL_DATA_HINT}"
             )
         return AOTCompileSaveResult(serialized_data=buf.getvalue())
 
@@ -753,6 +799,9 @@ class AOTCompiledModel:
         return self.compiled_results[0](self.model, *args, **kwargs)
 
     def serialize(self) -> bytes:
+        # Nothing threads external_data down this path (_save_aot_compiled_module
+        # has no parameter for it either), so the guidance a failed save appends
+        # is only actionable by saving the offending function on its own.
         data: list[bytes] = []
         for result in self.compiled_results:
             data.append(AOTCompiledFunction.serialize(result).serialized_data)
