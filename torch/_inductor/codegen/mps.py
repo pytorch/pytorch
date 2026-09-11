@@ -611,7 +611,16 @@ class MetalKernel(SIMDKernel):
         else:
             self.stores.writeline(DeferredLine(name, line))
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
+        if result_range is not None:
+            raise NotImplementedError("MPS reductions require scalar results")
         var = self.args.output(name)
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))

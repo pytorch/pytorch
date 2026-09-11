@@ -2548,7 +2548,9 @@ class CppKernel(Kernel):
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
 
-    def store_reduction(self, name, index, value):
+    def store_reduction(self, name, index, value, *, result_range=None):
+        if result_range is not None:
+            raise NotImplementedError("C++ reductions require scalar results")
         index = self.rename_indexing(index)
         var = self.args.output(name)
         self.reduction_suffix.writeline(
@@ -3505,7 +3507,9 @@ class CppVecKernel(CppKernel):
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
 
-    def store_reduction(self, name, index, value):
+    def store_reduction(self, name, index, value, *, result_range=None):
+        if result_range is not None:
+            raise NotImplementedError("C++ reductions require scalar results")
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
