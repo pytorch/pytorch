@@ -549,6 +549,63 @@ class TestInnerTreeOrder(TestCase):
                 )
                 self.assertEqual(tree, serial, atol=1e-4, rtol=1e-4)
 
+    def test_staging_is_actually_used_in_the_mid_band(self):
+        # Bit-neutral hashes cannot prove staging ran. Check its gate and both exclusions.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        for n in (1024, 2048, 4096, 8192):
+            with self.subTest(n=n, staged=True):
+                self.assertGreater(rt.itree_plan(n, 4096, 4).stage_e, 0)
+        # A ragged row cannot declare cp.async's statically 16-byte-aligned source.
+        self.assertEqual(rt.itree_plan(4097, 4096, 4).stage_e, 0)
+        # Multi-batch is outside single-batch tiling; derive N from the plan.
+        multi = next(
+            n
+            for n in range(9216, 65536, 1024)
+            if (p := rt.itree_plan(n, 4096, 4)) is not None
+            and p.shape == "looped"
+            and len(p.batches) > 1
+        )
+        self.assertEqual(rt.itree_plan(multi, 4096, 4).stage_e, 0)
+
+    def test_staged_fold_pads_a_short_row_bitwise(self):
+        # span > N exercises identity padding through cp.async tail redirection and refill.
+        # Compare bits because reading live data for padding can still look plausible.
+        import cutlass
+
+        from torch._native.ops.reductions import (
+            inner_tree_kernel as ref,
+            kernel_rowtile as rt,
+            traits as T,
+        )
+
+        staged = [
+            n
+            for n in (1024, 1056, 1088, 1536, 2048, 3072, 4096, 6144, 8192)
+            if (p := rt.itree_plan(n, 256, 4)) is not None and p.stage_e > 0
+        ]
+        self.assertTrue(staged, "no staged shape in the sweep -- the gate has moved")
+        for n in staged:
+            plan = rt.itree_plan(n, 256, 4)
+            with self.subTest(
+                n=n, span=plan.tms[0].vec * plan.tms[0].loads * plan.wpr * 32
+            ):
+                x = torch.randn(256, n, device="cuda")
+                (got,) = rt.reduce_row_tile(
+                    T.SumOps(acc=cutlass.Float32),
+                    f"stage_pad{n}",
+                    x,
+                    [torch.float32],
+                    order="inner_tree",
+                )
+                want = torch.empty(256, device="cuda")
+                ref.inner_tree_sum_into(want, x)
+                torch.cuda.synchronize()
+                self.assertTrue(
+                    torch.equal(got.view(torch.int32), want.view(torch.int32)),
+                    f"N={n}: staged fold diverged from the reference bit pattern",
+                )
+
 
 instantiate_parametrized_tests(TestInnerTreeOrder)
 
