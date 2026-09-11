@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
@@ -177,7 +178,9 @@ static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
-  lib.exec_binary_kernel(iter, "lerp_alpha", weight);
+  // Narrowing the weight to a low-precision dtype would overflow for weights outside its
+  // range and lose accuracy inside it, so hand it over at opmath precision.
+  lib.exec_binary_kernel(iter, "lerp_alpha", weight, at::toOpMathType(iter.common_dtype()));
 }
 
 static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
@@ -236,8 +239,10 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
     return;
   }
 
-  // Scalar weight broadcast path
-  if (ndim == 1 && iter.strides(3)[0] == 0) {
+  // Scalar weight broadcast path. The kernel indexes self/end/out linearly, so all three have
+  // to be dense: `self` or `end` may itself be broadcast down to a zero stride.
+  if (ndim == 1 && iter.strides(3)[0] == 0 && iter.strides(0)[0] == iter.element_size(0) &&
+      iter.strides(1)[0] == iter.element_size(1) && iter.strides(2)[0] == iter.element_size(2)) {
     auto pso = lib.getPipelineStateForFunc("lerp_tensor_scalar_weight_" + type_str);
     dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
       auto computeEncoder = getCurrentMPSStream()->commandEncoder();

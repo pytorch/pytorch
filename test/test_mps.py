@@ -3734,6 +3734,18 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(torch.lerp(cpu_x, cpu_x + 2, cpu_w), torch.lerp(x, x + 2, w))
             self.assertEqual(cpu_x.clone().lerp_(cpu_x + 2, cpu_w), x.clone().lerp_(x + 2, w))
 
+    def test_lerp_broadcast_scalar_weight(self):
+        # the scalar-weight fast path indexes self/end linearly, so neither may be broadcast
+        cpu_x, cpu_y, cpu_w = torch.randn(()), torch.randn(5), torch.randn(())
+        x, y, w = cpu_x.to("mps"), cpu_y.to("mps"), cpu_w.to("mps")
+        self.assertEqual(torch.lerp(cpu_x, cpu_y, cpu_w), torch.lerp(x, y, w))
+        self.assertEqual(torch.lerp(cpu_y, cpu_x, cpu_w), torch.lerp(y, x, w))
+
+    def test_lerp_lowp_scalar_weight(self):
+        # the weight is applied at opmath precision: 70000 is not representable in fp16
+        cpu_x = torch.zeros(4, dtype=torch.float16)
+        self.assertEqual(torch.lerp(cpu_x, cpu_x + 0.1, 70000), torch.lerp(cpu_x.to("mps"), cpu_x.to("mps") + 0.1, 70000))
+
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
         size = 16

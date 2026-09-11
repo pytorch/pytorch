@@ -19,9 +19,14 @@ struct add_alpha_functor {
 };
 
 struct lerp_alpha_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a + c10::metal::mul(alpha, b - a));
+  // Computed at opmath precision, matching CPU/CUDA: a low-precision `alpha`
+  // both loses accuracy here and cannot represent the weights `lerp.Scalar`
+  // accepts (e.g. 70000).
+  template <typename T, typename A>
+  inline T operator()(const T a, const T b, const A alpha) {
+    using op_t = c10::metal::opmath_t<T>;
+    return static_cast<T>(
+        op_t(a) + c10::metal::mul(static_cast<op_t>(alpha), op_t(b) - op_t(a)));
   }
 };
 
@@ -713,14 +718,14 @@ REGISTER_BINARY_ALPHA_OP(add_alpha, bool, bool, bool);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float, float, float);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, half, half);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, float, half);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, short, short, short);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, float, bfloat);
 
 // Complex binary functions
 REGISTER_BINARY_OP(polar, float, float2);
