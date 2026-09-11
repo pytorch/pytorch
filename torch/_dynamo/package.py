@@ -265,6 +265,29 @@ class FunctionPicklerBase(pickle.Pickler):
             fn.__type_params__ = type_params
 
     @staticmethod
+    def _is_literal(value: object) -> bool:
+        # An always-picklable constant: the singletons and scalars dynamo treats
+        # as constants, NOT every common_constant_type (torch.finfo/iinfo do not
+        # pickle). The guard pickler carries these whether or not a guard reads
+        # them: pruning buys nothing and, since _keep matches by id, would make
+        # the rebuilt state depend on whether some unrelated guard happened to
+        # register the interned value. The AOT pickler skips probing them.
+        if value is None or value is Ellipsis or value is NotImplemented:
+            return True
+        return type(value) in (
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+        )
+
+    @staticmethod
     def _fqn_resolves(fn: types.FunctionType) -> bool:
         """Whether pickling fn by reference (import __module__, walk __qualname__)
         lands back on fn. False for a <locals> function, a functools.wraps

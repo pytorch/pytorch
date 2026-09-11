@@ -60,14 +60,50 @@ class CompileArtifacts:
         current_system.check_compatibility(self.system_info, self.device_type)
 
 
+@dataclasses.dataclass
+class _ProbeState:
+    """Shared by an AOTCompilePickler and the throwaway probe picklers its
+    _dumps_cleanly spawns, so the whole probe tree sees one memo."""
+
+    # id(value) -> picklable; without the memo a probe tree is exponential.
+    cache: dict[int, bool] = dataclasses.field(default_factory=dict)
+    inflight: set[int] = dataclasses.field(default_factory=set)
+    # id(value) -> the unmarked nn.Modules the probe reached inside it, so the
+    # warning can name the actual reason and the offending modules.
+    unmarked_modules: dict[int, list[Any]] = dataclasses.field(default_factory=dict)
+    # id(value) -> the exception type that failed its probe, so the warning
+    # tells a value that does not pickle from a reducer bug (an AttributeError
+    # out of this file's own machinery, a RecursionError).
+    failures: dict[int, str] = dataclasses.field(default_factory=dict)
+    # id(function) -> its picklable __dict__ entries; a function that closes
+    # over itself is reduced twice, and the second pass must not re-probe or
+    # re-warn.
+    attributes: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    # Whether a probe short-circuited on an in-flight id; such a verdict is
+    # not cached as final but parked (as unpicklable) for the rest of the
+    # probe tree.
+    leaned: bool = False
+    parked: set[int] = dataclasses.field(default_factory=set)
+
+
 class AOTCompilePickler(FunctionPicklerBase):
-    def __init__(self, external_data: dict[str, object], buf: io.BytesIO) -> None:
+    def __init__(
+        self,
+        external_data: dict[str, object],
+        buf: io.BytesIO,
+        *,
+        probe_state: _ProbeState | None = None,
+    ) -> None:
         super().__init__(buf)
         self.external_data = external_data
         self.id_map: dict[int, str] = {
             id(value): key for key, value in external_data.items()
         }
         self.errors = {}
+        # A probe pickler shares its parent's state; only the real dump reports
+        # what it drops, since a probe's verdict may not be final.
+        self._probing = probe_state is not None
+        self._probe_state = probe_state or _ProbeState()
 
     def persistent_id(self, obj: object) -> int | str | None:
         if id(obj) in self.id_map:
@@ -100,18 +136,19 @@ class AOTCompilePickler(FunctionPicklerBase):
             if reduced is not None:
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
-            # The runtime env has to RUN this function, so it carries what a
-            # call needs -- defaults, keyword defaults, closure and __doc__ --
-            # with none of them pruned: a keyword default that will not pickle
-            # fails the save rather than vanishing (the old reduce dropped
-            # __kwdefaults__ outright). __dict__, annotations and type params
-            # follow in later commits, each pruned per value.
+            # The runtime env has to RUN this function, so unlike the guard
+            # pickler nothing it holds is pruned -- except __dict__ entries that
+            # will not pickle. The runtime assigns those back and never forces
+            # the pruned ones, so a value this pickler cannot serialize (a
+            # __dict__ entry like the __wrapped__ functools.wraps stashes, which
+            # can drag an unrelated lock/Module in) is dropped rather than left
+            # to fail the whole dump.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
-                attributes={},
+                attributes=self._pickleable_attributes(obj),
                 annotations={},
                 doc=obj.__doc__,
                 type_params=None,
@@ -119,6 +156,155 @@ class AOTCompilePickler(FunctionPicklerBase):
             )
 
         return NotImplemented
+
+    def _warn_dropped(self, obj: Any, slot: str, value: Any) -> None:
+        # The body may read a pruned attribute (`with helper.lock:`), so the
+        # drop is a warning that names the fix, not a silent debug line; the
+        # user can hand the object over as external data and it is kept. It
+        # names the exception type too: a reducer bug then reads as one in a
+        # bug report instead of as the user's value not pickling. The
+        # function is named by its code object: functools.wraps overwrites
+        # __qualname__ with the wrappee's, which would make the two drops of a
+        # wrapper and its wrappee indistinguishable.
+        if self._probing:
+            return
+        code = obj.__code__
+        modules = self._probe_state.unmarked_modules.get(id(value))
+        if modules is not None:
+            names = ", ".join(type(m).__name__ for m in modules)
+            reason = f"it holds nn.Module(s) not marked as external data ({names})"
+        else:
+            failure = self._probe_state.failures.get(id(value))
+            reason = (
+                f"it does not pickle ({failure})" if failure else "it does not pickle"
+            )
+        # co_qualname is 3.11+; the bare co_name on 3.10 cannot tell a wraps
+        # wrapper from its wrappee, but __qualname__ could not either.
+        log.warning(
+            "dropping %s.%s (%s) from the artifact: %s; pass it in external_data to keep it (function defined at %s:%d)",
+            getattr(code, "co_qualname", code.co_name),
+            slot,
+            type(value).__name__,
+            reason,
+            code.co_filename,
+            code.co_firstlineno,
+        )
+
+    def _pickleable_attributes(self, obj: Any) -> dict[str, Any]:
+        # Memoized for the REAL dump only, where every verdict consulted is
+        # final, so a function reduced twice (it closes over itself) is neither
+        # re-probed nor re-warned. A probe's answer may lean on an in-flight
+        # value and must not be reused. A snapshot of the items: a probe runs
+        # user __reduce__ code that may write back onto the function.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.attributes:
+            return state.attributes[id(obj)]
+        attributes = {}
+        for name, value in list(obj.__dict__.items()):
+            if self._dumps_cleanly(value):
+                attributes[name] = value
+            else:
+                self._warn_dropped(obj, name, value)
+        if not self._probing:
+            state.attributes[id(obj)] = attributes
+        return attributes
+
+    def _dumps_cleanly(self, value: Any) -> bool:
+        # "does it pickle?" has no cheaper predicate than trying. A throwaway
+        # pickler of this exact class keeps external_data/persistent_id behaviour
+        # identical to the real dump. The cache stops a value from being probed
+        # twice, not from being dumped again inside an ancestor's probe, so the
+        # total work is the reachable bytes times the nesting depth, and user
+        # __reduce__ code runs once per probe that reaches it; a tensor stashed
+        # on a function is serialized into the throwaway buffer too (a transient
+        # copy of its storage, and its hook warning fires once more). A
+        # recursion overflow counts as unpicklable (the value is pruned) rather
+        # than re-raising: a deep-but-finite value in an optional slot must not
+        # fail a save that has nothing wrong with it; the guard pickler makes
+        # the opposite call for the same condition, since it has a bypass to
+        # fall back to and this pickler does not.
+        if self._is_literal(value):
+            return True
+        state = self._probe_state
+        vid = id(value)
+        cached = state.cache.get(vid)
+        if cached is not None:
+            return cached
+        if vid in state.parked:
+            return False
+        if vid in state.inflight:
+            # Re-entered mid-probe (a value whose attributes reach back to
+            # itself). Say picklable to break the cycle -- pickle's memo handles
+            # the reference -- and record the lean so a verdict computed on top
+            # of it is not cached as final.
+            state.leaned = True
+            return True
+        # Every probed value is reachable from the object being dumped, which
+        # the REAL pickler's memo keeps alive until dump() returns, so an id is
+        # not reused within one dump; the cache lives as long as this pickler,
+        # one per serialize(). (A function a user __reduce__ manufactures inside
+        # a probe is not held that way; a later object at its address would
+        # inherit its verdict.)
+        probe = type(self)(self.external_data, io.BytesIO(), probe_state=state)
+        state.inflight.add(vid)
+        leaned_before = state.leaned
+        state.leaned = False
+        try:
+            probe.dump(value)
+        except Exception as exc:
+            # No %r of the value: a repr can raise or be huge.
+            log.debug(
+                "pruning an unpicklable %s from a nested function: %s",
+                type(value).__name__,
+                exc,
+            )
+            state.failures[vid] = type(exc).__name__
+            result = False
+        else:
+            # persistent_id records an unmarked nn.Module rather than raising, so
+            # such a value dumps here but would fail the real serialize(); treat
+            # it as unpicklable so it is pruned now instead of failing the whole
+            # dump later.
+            result = not probe.errors
+            if not result:
+                state.unmarked_modules[vid] = list(probe.errors.values())
+                log.debug(
+                    "pruning unmarked nn.Module(s) %s from a nested function",
+                    list(probe.errors.values()),
+                )
+        finally:
+            state.inflight.discard(vid)
+            # The lean travels back through this shared flag because the nested
+            # probe is reached through pickle's own dump stack (probe.dump ->
+            # reducer_override -> _pickleable_attributes -> _dumps_cleanly), so
+            # no return value of the child can reach this frame; restore it here
+            # so an aborting dump cannot leave the child's value behind.
+            leaned = state.leaned
+            state.leaned = leaned_before or leaned
+        # A False that leaned on an in-flight True may be a false negative, so
+        # it is not cached as final. It is parked for the rest of this probe
+        # tree -- re-deriving it is exponential on a cyclic cluster -- and
+        # dropped when the tree finishes, so the real dump never consults it.
+        # Consulting a park is not a lean: it can make a probe over-prune, and
+        # over-pruning CAN flip a probe's verdict False -> True, and the real
+        # dump may read that True straight from the cache. It cannot hurt: the
+        # real dump never reuses a probe's ATTRIBUTE SET (the memo above is
+        # gated on not _probing), so every prunable edge below such a value is
+        # re-decided by an outermost probe of its own, and the non-prunable
+        # slots (defaults, kwdefaults, closure) are traversed identically in
+        # every probe, so a failure there would have failed the earlier probe
+        # too. A True, or a False that leaned on nothing, is final. So is the
+        # OUTERMOST probe's verdict, leaned or not: the only in-flight id it can
+        # lean on is its own, and that lean is exact because pickle's memo
+        # resolves the back-reference; the caller acts on it irrevocably.
+        if result or not leaned or not state.inflight:
+            state.cache[vid] = result
+        else:
+            state.parked.add(vid)
+        if not state.inflight:
+            state.parked.clear()
+            state.leaned = False
+        return result
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
