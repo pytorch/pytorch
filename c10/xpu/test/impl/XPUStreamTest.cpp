@@ -155,8 +155,8 @@ TEST(XPUStreamTest, StreamPoolRoundRobinTest) {
 
   std::unordered_set<sycl::queue> queue_set{};
   bool hasDuplicates = false;
-  for (const auto i : c10::irange(streams.size())) {
-    auto& queue = streams[i].queue();
+  for (auto& stream : streams) {
+    auto& queue = stream.queue();
     auto result_pair = queue_set.insert(queue);
     if (!result_pair.second) { // already existed
       hasDuplicates = true;
