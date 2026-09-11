@@ -1298,26 +1298,38 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # exact object back, which is what pickle's by-reference path does.
         resolves = GuardsStatePickler._fqn_resolves
         self.assertTrue(resolves(global_func))
+        self.assertTrue(resolves(PlainMethods.add))  # a dotted qualname walk
 
         def local_fn(x):
             return x
 
-        self.assertFalse(resolves(local_fn))
         wrapper = functools.wraps(global_func)(lambda x: global_func(x))
         self.assertEqual(
             (wrapper.__module__, wrapper.__qualname__), (__name__, "global_func")
         )
-        self.assertFalse(resolves(wrapper))  # the walk lands on global_func
         renamed = types.FunctionType(global_func.__code__, globals(), "global_func")
         renamed.__qualname__ = "no_such_name"
-        self.assertFalse(resolves(renamed))
         exec_fn = types.FunctionType(
             global_func.__code__, {"__name__": "_not_in_sys_modules"}, "global_func"
         )
-        self.assertFalse(resolves(exec_fn))
         odd = types.FunctionType(global_func.__code__, globals(), "global_func")
         odd.__module__ = ["not", "a", "module"]  # unhashable: must not TypeError
-        self.assertFalse(resolves(odd))
+        # The oracle is pickle itself: every False case fails a by-reference
+        # dump (the C pickler raises a bare AttributeError for a <locals> name).
+        cases = {
+            "locals": local_fn,
+            "wraps_wrapper": wrapper,
+            "bad_qualname": renamed,
+            "module_not_imported": exec_fn,
+            "unhashable_module": odd,
+        }
+        for case, fn in cases.items():
+            with self.subTest(case=case):
+                self.assertFalse(resolves(fn))
+                with self.assertRaises(
+                    (pickle.PicklingError, AttributeError, TypeError)
+                ):
+                    pickle.dumps(fn)
 
     def test_pruned_shared_closure_cell_stays_shared(self):
         # An unguarded shared cell prunes to a single _Missing cell, and the two
@@ -1711,7 +1723,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(mod): mod}, {}, {}, {}, buf).dump({"m": mod.forward})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(type(out.__self__), torch.nn.Module)
-        self.assertTrue(out.__func__.__qualname__.endswith("Local.forward"))
+        # The code object's name, not __qualname__: at this commit the <locals>
+        # rebuild passes __qualname__ as the function's NAME, and on 3.10
+        # FunctionType then reports the bare co_name as __qualname__.
+        self.assertEqual(out.__func__.__code__.co_name, "forward")
         self.assertEqual(out(torch.ones(1)), torch.ones(1) + 1)
 
 

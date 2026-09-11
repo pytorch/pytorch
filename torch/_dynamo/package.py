@@ -265,8 +265,12 @@ class FunctionPicklerBase(pickle.Pickler):
         a module absent from sys.modules; pickling those by reference fails at
         dump (PicklingError, or a bare AttributeError from the C pickler for a
         <locals> name), so the caller rebuilds them from the code object (or
-        prunes them)."""
-        if "<locals>" in fn.__qualname__:
+        prunes them). Conservative on purpose: pickle would import a module that
+        is not in sys.modules yet, this reports False for it (guards.py explains
+        why on its caller), and a "<locals>" qualname component is refused like
+        pickle refuses it. GuardsStatePickler handles <locals> on its own branch
+        before asking; AOTCompilePickler dispatches on this alone."""
+        if "<locals>" in fn.__qualname__.split("."):
             return False
         # __module__ need not be a str (a decorator can set anything); an
         # unhashable one must not TypeError out of the reducer.
