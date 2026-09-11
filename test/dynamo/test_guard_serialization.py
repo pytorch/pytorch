@@ -2104,6 +2104,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             GLOBAL_LAMBDA.scale_flag = 2.0
 
+    def test_guard_rooted_at_fqn_mismatched_bound_method(self):
+        # The undecorated forward bound directly: the method carries its
+        # function explicitly (_reduce_bound_method), and that function is an
+        # fqn mismatch rebuilt by value.
+        mod = DecoratedAttributeForwardModule()
+        inner = type(mod).forward.__wrapped__
+        bound = types.MethodType(inner, mod)
+
+        def fn(f, x):
+            if f.scale_flag == 2.0:
+                x = x + 1
+            return f(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, bound, x)
+        self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
+        old_value = inner.scale_flag
+        inner.scale_flag = 3.0
+        try:
+            self._test_check_fn(ref, loaded, {"f": bound, "x": x}, False)
+        finally:
+            inner.scale_flag = old_value
+
     def test_guard_rooted_at_bound_method_under_a_name_self_lacks(self):
         # See TestGuardsStatePickler.test_bound_method_under_a_name_self_lacks.
         bound = types.MethodType(global_add, Inputs(1, 2))
