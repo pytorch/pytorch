@@ -550,3 +550,48 @@ TEST(BasicTest, TestForBlobStridesOverflow) {
       at::for_blob(storage.data(), {2,}).strides({huge,}).options(c10::TensorOptions(kInt)).make_tensor());
 #endif
 }
+
+namespace {
+struct TestBackendMeta : public c10::BackendMeta {
+  explicit TestBackendMeta(int tag) : tag_(tag) {}
+  int tag_;
+};
+} // namespace
+
+TEST(BasicTest, TestForBlobBackendMeta) {
+  std::array<int32_t, 6> storage;
+  std::iota(storage.begin(), storage.end(), 1);
+
+  // Without the setter, no backend meta is attached.
+  auto plain = at::for_blob(storage.data(), {3,}).options(c10::TensorOptions(kInt)).make_tensor();
+  ASSERT_EQ(plain.unsafeGetTensorImpl()->get_backend_meta(), nullptr);
+
+  // With the setter, the meta is folded in at construction.
+  auto meta = c10::make_intrusive<TestBackendMeta>(29);
+  auto t = at::for_blob(storage.data(), {3,}).options(c10::TensorOptions(kInt)).backend_meta(meta).make_tensor();
+  ASSERT_EQ(t.unsafeGetTensorImpl()->get_backend_meta(), meta.get());
+  ASSERT_EQ(static_cast<TestBackendMeta*>(t.unsafeGetTensorImpl()->get_backend_meta())->tag_, 29);
+}
+
+TEST(BasicTest, TestFromBlobBackendMeta) {
+  std::array<int32_t, 6> storage;
+  std::iota(storage.begin(), storage.end(), 1);
+
+  // Existing from_blob calls (no backend_meta arg) attach no meta -- the new
+  // trailing parameter is optional and backward compatible.
+  auto plain = at::from_blob(storage.data(), {3,}, c10::TensorOptions(kInt));
+  ASSERT_EQ(plain.unsafeGetTensorImpl()->get_backend_meta(), nullptr);
+
+  // Passing the optional backend_meta attaches it through from_blob.
+  auto meta = c10::make_intrusive<TestBackendMeta>(29);
+  auto t = at::from_blob(
+      storage.data(),
+      {3,},
+      /*strides=*/{1,},
+      /*deleter=*/[](void*) {},
+      c10::TensorOptions(kInt),
+      /*target_device=*/std::nullopt,
+      meta);
+  ASSERT_EQ(t.unsafeGetTensorImpl()->get_backend_meta(), meta.get());
+  ASSERT_EQ(static_cast<TestBackendMeta*>(t.unsafeGetTensorImpl()->get_backend_meta())->tag_, 29);
+}
