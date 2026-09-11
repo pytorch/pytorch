@@ -48,6 +48,7 @@ guard
 autoload
 operators
 amp
+compiler
 profiler
 distributed
 ci
