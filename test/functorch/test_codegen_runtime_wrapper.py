@@ -20,10 +20,17 @@ from common_utils import capture_codegen_source
 import torch
 import torch._dynamo
 import torch._functorch.config as functorch_config
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class TestCodegenRuntimeWrapper(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
