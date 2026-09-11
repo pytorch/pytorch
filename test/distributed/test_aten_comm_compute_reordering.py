@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
+import functools
 import unittest
+from collections import defaultdict
 from unittest.mock import patch
 
 import torch
@@ -29,7 +31,6 @@ from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
-import functools
 
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import skipIfRocm
@@ -1461,30 +1462,26 @@ def apply_manual_reordering_and_get_graph(
         ManualOverlapScheduler,
     )
 
+    # Assign nn_module_stack by op type and occurrence order rather than node
+    # name, which is unstable across retrace and upstream changes.  The
+    # convention encoded here is: the first two occurrences of each collective
+    # / wait op belong to module_1, the next two to module_2.
+    _COLLECTIVE_TARGETS = frozenset(
+        {
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            torch.ops._c10d_functional.wait_tensor.default,
+        }
+    )
+    target_counts: defaultdict[object, int] = defaultdict(int)
     for node in list(gm.graph.nodes):
-        # Handle all-gather, reduce-scatter, and all-reduce nodes for module_1
-        if node.name in (
-            "all_gather_into_tensor",
-            "all_gather_into_tensor_1",
-            "reduce_scatter_tensor",
-            "reduce_scatter_tensor_1",
-            "all_reduce",
-            "all_reduce_1",
-            "wait_tensor",
-            "wait_tensor_1",
-        ):
+        if node.target not in _COLLECTIVE_TARGETS:
+            continue
+        idx = target_counts[node.target]
+        target_counts[node.target] += 1
+        if idx < 2:
             node.meta["nn_module_stack"] = {"test": ["module_1", ""]}
-        # Handle all-gather, reduce-scatter, and all-reduce nodes for module_2
-        if node.name in (
-            "all_gather_into_tensor_2",
-            "all_gather_into_tensor_3",
-            "reduce_scatter_tensor_2",
-            "reduce_scatter_tensor_3",
-            "all_reduce_2",
-            "all_reduce_3",
-            "wait_tensor_2",
-            "wait_tensor_3",
-        ):
+        else:
             node.meta["nn_module_stack"] = {"test": ["module_2", ""]}
 
     overlapped_gm = ManualOverlapScheduler(
