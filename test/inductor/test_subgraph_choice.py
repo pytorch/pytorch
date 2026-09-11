@@ -14,7 +14,7 @@ from torch._inductor.kernel.decompose_k import (
     lower_blackwell_decompose_k_partial,
 )
 from torch._inductor.lowering import lowerings, register_lowering
-from torch._inductor.select_algorithm import TritonTemplate, autotune_select_algorithm
+from torch._inductor.select_algorithm import autotune_select_algorithm, TritonTemplate
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import SM100OrLater
