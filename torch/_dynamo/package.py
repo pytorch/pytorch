@@ -179,8 +179,8 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_module(
         cls,
-        module: Any,
         scope: Any,
+        module: Any,
         code: types.CodeType,
         qualname: str,
         name: str,
@@ -239,8 +239,9 @@ class FunctionPicklerBase(pickle.Pickler):
         cls, fn: types.FunctionType, state: tuple[Any, ...]
     ) -> None:
         # Every write here must stay idempotent: for a function that is an item
-        # of its own globals snapshot (or closes over itself) save_reduce emits
-        # the state step on both passes, so this runs twice on the same object.
+        # of its own globals snapshot (or closes over itself) the pure-Python
+        # pickler applies the state on both save_reduce passes; the C pickler
+        # drops the outer pass after the memo fetch, so it runs once there.
         defaults, kwdefaults, attributes, doc, annotations, type_params = state
         fn.__defaults__ = defaults
         fn.__kwdefaults__ = kwdefaults
@@ -264,9 +265,10 @@ class FunctionPicklerBase(pickle.Pickler):
         """Whether pickling fn by reference (import __module__, walk __qualname__)
         lands back on fn. False for a <locals> function, a functools.wraps
         wrapper (it carries the wrappee's names), an exec-created function, or
-        a module absent from sys.modules; pickling those by reference raises
-        PicklingError at dump, so the caller rebuilds them from the code object
-        (or prunes them)."""
+        a module absent from sys.modules; pickling those by reference fails at
+        dump (PicklingError, or a bare AttributeError from the C pickler for a
+        <locals> name), so the caller rebuilds them from the code object (or
+        prunes them)."""
         if "<locals>" in fn.__qualname__:
             return False
         # __module__ need not be a str (a decorator can set anything); an
@@ -323,17 +325,21 @@ class FunctionPicklerBase(pickle.Pickler):
         # method.__func__ may be a functools.partial with no __name__. Fall
         # through to the explicit reduce rather than raising out of the reducer.
         name = getattr(func, "__name__", None)
-        # A name served PER-INSTANCE resolves only after self is restored, which
-        # is after pickle rebuilds the method, so getattr() at load would miss
-        # it: carry func+self explicitly. That covers a class defining
-        # __getattr__ (nn.Module included: any name may be served dynamically,
-        # and probing the instance would run that user code, so this gate comes
-        # first and such a receiver is not read at all, not even for __dict__),
-        # an instance __dict__ monkeypatch (m.forward = MethodType(f, m)), and a
-        # __slots__ member descriptor. A type receiver (classmethod) is exempt:
-        # its namespace is restored with the class.
+        # A name served PER-INSTANCE (an instance __dict__ monkeypatch such as
+        # m.forward = MethodType(f, m), or a __slots__ member) is carried as
+        # func+self explicitly: getattr() at load hands back whatever the dict
+        # or slot holds, a raw function or a method bound elsewhere, never a
+        # method over this pair, and in the self-cycle case the slot is not even
+        # restored yet. A class defining __getattr__ (nn.Module included) takes
+        # the pair too, without probing: the probe would run that user code, and
+        # a subclass may rebuild such a receiver as a DIFFERENT type at load
+        # (GuardsStatePickler._unpickle_module turns a non-referenceable module
+        # into a bare torch.nn.Module), on which getattr() would not resolve
+        # the method. A type receiver (classmethod) is exempt: its namespace is
+        # restored with the class. issubclass(cls, ...) rather than isinstance
+        # so a raising __getattribute__ cannot escape before the try below.
         explicit = (type(self)._unpickle_bound_method, (func, receiver))
-        is_type = isinstance(receiver, type)
+        is_type = issubclass(cls, type)
         try:
             if not is_type and hasattr(cls, "__getattr__"):
                 return explicit
@@ -386,10 +392,12 @@ class FunctionPicklerBase(pickle.Pickler):
         # no guard reads so an unpicklable local class in an annotation -- or a
         # __doc__ reassigned to an unpicklable object -- cannot fail the whole
         # dump (a failure there silently bypasses the package).
+        # Both unpicklers take (scope, module, code, qualname, name, closure):
+        # the scope is the module NAME to import or the snapshot dict itself.
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
             unpickle = type(self)._unpickle_fn_from_module
-            args = (fn.__module__, fn.__globals__.get("__name__"), *args[1:])
+            args = (fn.__globals__.get("__name__"), *args)
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
             args = (globals_snapshot, *args)
@@ -1096,7 +1104,7 @@ class CompilePackage:
         self._device_type = _graph_device_type(graph)
 
     def bypass_current_compile(self) -> None:
-        """Drop what the current compile registered on its entry.
+        """Drop the backend ids the current compile registered on its entry.
 
         Only this compile is lost: its guarded code is never recorded
         (convert_frame consults output.package, which bypass_package clears,
