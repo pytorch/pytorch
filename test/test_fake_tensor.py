@@ -3303,7 +3303,8 @@ class TestFakeTensorConverter(TestCase):
             x = torch.empty(2, 2, device="cpu")
         with FakeTensorMode():
             y = torch.empty(2, 2, device="cpu")
-        self.assertRaises(Exception, lambda: x, y)
+        # The lambda receives `y` as a positional arg, triggering TypeError
+        self.assertRaises(TypeError, lambda: x, y)
 
     @skipIfCppFakeTensor("no Python FakeTensor reference-cycle support")
     @xfailIfTorchDynamo

@@ -292,13 +292,13 @@ class ModelReport:
         """
         # if we haven't prepped model for calibration, then we shouldn't generate report yet
         if not self._prepared_flag:
-            raise Exception(  # noqa: TRY002
+            raise RuntimeError(
                 "Cannot generate report without preparing model for calibration"
             )
 
         # if we already removed the observers, we cannot generate report
         if self._removed_observers:
-            raise Exception(  # noqa: TRY002
+            raise RuntimeError(
                 "Cannot generate report on model you already removed observers from"
             )
 
@@ -452,7 +452,7 @@ class ModelReport:
         """
         # check if user has generated reports at least once
         if len(self._generated_reports) == 0:
-            raise Exception(  # noqa: TRY002
+            raise RuntimeError(
                 "Unable to generate visualizers without first generating reports"
             )
 
@@ -552,13 +552,13 @@ class ModelReport:
         """
         # if we haven't prepped model for calibration, then we shouldn't generate mapping yet
         if not self._prepared_flag:
-            raise Exception(  # noqa: TRY002
+            raise RuntimeError(
                 "Cannot generate report without preparing model for calibration"
             )
 
         # if we already removed the observers, we cannot mapping
         if self._removed_observers:
-            raise Exception(  # noqa: TRY002
+            raise RuntimeError(
                 "Cannot generate report on model you already removed observers from"
             )
 

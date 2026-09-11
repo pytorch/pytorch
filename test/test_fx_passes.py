@@ -486,7 +486,7 @@ class TestFXGraphPasses(JitTestCase):
         for node_names in partition:
             partitions.append(dict.fromkeys([nodes_by_name[name] for name in node_names]))
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(AssertionError):
             fuse_by_partitions(gm, partitions)
 
     def test_fuser_pass_deep_model(self):
