@@ -209,14 +209,15 @@ class FunctionPicklerBase(pickle.Pickler):
         # (".rel") or a module whose body raises fails import with something
         # other than ImportError. None of those should fail the load, so require
         # a non-empty str and swallow any import failure into the empty scope.
+        f_globals = {}
+        why: Any = f"scope {scope!r} is not an importable name"
         if isinstance(scope, str) and scope:
             try:
                 f_globals = importlib.import_module(scope).__dict__
             except Exception as e:
-                logger.debug("rebuilding %s with an empty scope: %s", qualname, e)
-                f_globals = {}
-        else:
-            f_globals = {}
+                why = e
+        if not f_globals:
+            logger.debug("rebuilding %s with an empty scope: %s", qualname, why)
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
