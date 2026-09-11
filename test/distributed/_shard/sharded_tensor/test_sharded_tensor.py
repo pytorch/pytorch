@@ -2312,7 +2312,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             )
             rank_to_metadata[rank] = shard_metadata
             if rank == self.rank:
-                local_tensor = torch.rand(shard_metadata.shard_sizes).cuda(device)
+                local_tensor = torch.rand(shard_metadata.shard_sizes).to(device)
                 local_shard_metadata = shard_metadata
 
         # TODO: figure out what the API should behave when some rank have no shard
