@@ -3489,7 +3489,7 @@ kernel void svd_jacobi(
     }
     float inv = sigma > eps ? (1 / sigma) : 0.0f;
     threadgroup T* colsrc = Atg + src * m;
-    if (params.transposed == 0u) {
+    if (!params.transposed) {
       for (uint32_t i = simd_lane; i < m; i += kSimd) {
         U_b[j * params.u_ld + i] = inv * colsrc[i];
       }
@@ -3525,8 +3525,8 @@ kernel void svd_jacobi(
   // so the projections are simd_sum reductions needing no barriers); the rare
   // degenerate path. Reuses Atg as scratch.
   if (params.compute_uv && simd_group == 0) {
-    device T* out = (params.transposed == 0u) ? U_b : V_b;
-    const uint32_t ld = (params.transposed == 0u) ? params.u_ld : params.v_ld;
+    device T* out = params.transposed ? V_b : U_b;
+    const uint32_t ld = params.transposed ? params.v_ld : params.u_ld;
     // U_b is column-major (elem i of col c at out[c*ld + i]); the transposed
     // run emits V_b row-major (out[i*ld + c]), so index columns accordingly.
     const uint32_t col_off = (params.transposed == 0u) ? ld : 1u;
@@ -3639,7 +3639,7 @@ kernel void eigh_jacobi(
   const uint32_t batch_idx = tg_pos.x;
   const uint32_t kSimd = c10::metal::simdgroup_size;
   const uint32_t num_sg = group_size / kSimd;
-  const bool compute_v = params.compute_v != 0u;
+  const bool compute_v = params.compute_v;
 
   device T* A_b = A + batch_idx * n * n;
   device T* Q_b = Q + batch_idx * n * n;
@@ -3647,7 +3647,7 @@ kernel void eigh_jacobi(
   // Stage A into Atg, symmetrizing from the selected UPLO triangle (input may
   // be non-Hermitian otherwise); two-sided Jacobi needs an exactly Hermitian
   // matrix.
-  const bool upper = params.upper != 0u;
+  const bool upper = params.upper;
   for (uint32_t i = tid; i < n * n; i += group_size) {
     uint32_t row = i % n, col = i / n;
     if (row == col) {

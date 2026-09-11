@@ -28,7 +28,9 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    instantiate_parametrized_tests,
     IS_LINUX,
+    parametrize,
     run_tests,
     TEST_WITH_TORCHINDUCTOR,
     TestCase,
@@ -951,6 +953,64 @@ def find_buffer_assignments(code):
     pattern = r"buf(\d+) = empty_strided_"
     matches = re.finditer(pattern, code)
     return tuple(f"buf{match.group(1)}" for match in matches)
+
+
+@instantiate_parametrized_tests
+class CollectiveReinplaceTestCPU(TestCase):
+    def setUp(self):
+        super().setUp()
+        dummy_init_pg()
+
+    def tearDown(self):
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        torch._dynamo.reset()
+        super().tearDown()
+
+    @fresh_cache()
+    @parametrize("collective", ("single", "coalesced"))
+    @parametrize("collective_first", (False, True))
+    def test_scatter_collective_result_does_not_alias_input(
+        self, collective, collective_first
+    ):
+        def reduce(tensor):
+            if collective == "single":
+                reduced = torch.ops._c10d_functional.all_reduce.default(
+                    tensor, "sum", "0"
+                )
+                return torch.ops._c10d_functional.wait_tensor.default(reduced)
+
+            reduced = torch.ops._c10d_functional.all_reduce_coalesced.default(
+                [tensor], "sum", "0"
+            )
+            return torch.ops._c10d_functional.wait_tensors.default(reduced)[0]
+
+        def fn(x, diag):
+            if collective_first:
+                reduced = reduce(x)
+                updated = torch.diagonal_scatter(reduced, diag)
+            else:
+                updated = torch.diagonal_scatter(x, diag)
+                updated = reduce(updated)
+            x.copy_(updated)
+            return updated
+
+        def run(callable_):
+            x = torch.arange(16.0).reshape(4, 4)
+            diag = torch.full((4,), -1.0)
+            out = callable_(x, diag)
+            x_after_call = x.clone()
+            out_after_call = out.clone()
+            self.assertNotEqual(
+                out.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+            )
+            out.add_(100)
+            self.assertEqual(x, x_after_call)
+            return x_after_call, out_after_call
+
+        eager = run(fn)
+        compiled = run(torch.compile(fn, fullgraph=True))
+        self.assertEqual(compiled, eager)
 
 
 class CompileTestCPU(TestCase):

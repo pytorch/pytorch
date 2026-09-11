@@ -55,7 +55,6 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
-from ..runtime.hints import DeviceProperties, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
@@ -92,7 +91,12 @@ from .common import (
 )
 from .cpp_utils import cexpr
 from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
-from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
+from .triton_utils import (
+    config_of,
+    should_unwrap_unspec_arg,
+    signature_to_meta,
+    triton_meta_device_props,
+)
 
 
 if TYPE_CHECKING:
@@ -102,6 +106,7 @@ if TYPE_CHECKING:
 
     from ..graph import GraphLowering
     from ..ir import ExternKernel
+    from ..runtime.hints import TritonMeta
     from ..scheduler import BaseSchedulerNode
     from .wrapper_fxir import FxConverter
 
@@ -3852,7 +3857,7 @@ class PythonWrapperCodegen(CodeGen):
             use_fp64_for_python_float=False,
         )
         device = V.graph.get_current_device_or_throw()
-        device_props = DeviceProperties.create(device)
+        device_props = triton_meta_device_props(device)
         triton_meta: TritonMeta = {
             "signature": triton_signature,
             "device": device_props,

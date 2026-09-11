@@ -7,8 +7,10 @@ future.
 """
 
 from torch.optim import lr_scheduler as lr_scheduler, swa_utils as swa_utils
-from torch.optim._adafactor import Adafactor as Adafactor
+from torch.optim._adafactor_mixed import Adafactor as Adafactor
 from torch.optim._muon import Muon as Muon
+from torch.optim._scheduler_fixes import install as _install_scheduler_fixes
+from torch.optim._state_copy import install as _install_state_copy
 from torch.optim._stateless import (
     swap_in_optimizer_params_and_state as swap_in_optimizer_params_and_state,
 )
@@ -31,6 +33,8 @@ from torch.optim.sparse_adam import SparseAdam as SparseAdam
 from torch.optim import functional as functional  # usort: skip
 
 
+_install_state_copy()
+_install_scheduler_fixes()
 Adafactor.__module__ = "torch.optim"
 Muon.__module__ = "torch.optim"
 swap_in_optimizer_params_and_state.__module__ = "torch.optim"

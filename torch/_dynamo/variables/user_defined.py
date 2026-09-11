@@ -3377,14 +3377,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self.source:
             cls_source: Source | None = AttrSource(self.source, "__class__")
         else:
-            # An instance built during tracing has no source of its own, but its
-            # class can still be sourced (see cls_source in __init__). Keeping
-            # that provenance is what makes constructing from `obj.__class__`
-            # (e.g. dataclasses.replace) traceable.
             cls_source = self.cls_source
         return VariableTracker.build(tx, self.python_type(), cls_source)
 
-    # Overrides the base __class__ getset to add the cls_source fallback above.
     tp_getset = {"__class__": GetSet(_class_vt, readonly_setter)}
 
     def generic_getattr(
