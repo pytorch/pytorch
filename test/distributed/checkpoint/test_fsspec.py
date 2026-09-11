@@ -414,9 +414,46 @@ class TestFileSystem(TestCase):
         reader = FsspecReader(checkpoint_dir, max_gap=262144)
         self.assertEqual(reader.max_gap, 262144)
 
-        # Default is None
+        # Default is "auto"
         reader_default = FsspecReader(checkpoint_dir)
-        self.assertIsNone(reader_default.max_gap)
+        self.assertEqual(reader_default.max_gap, "auto")
+
+        # Explicit None
+        reader_none = FsspecReader(checkpoint_dir, max_gap=None)
+        self.assertIsNone(reader_none.max_gap)
+
+    def test_fsspec_reader_calls_cat_ranges_with_auto(self):
+        checkpoint_dir = "memory://test_auto_max_gap"
+        state_dict = {"t1": torch.randn(10)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        captured_gaps = []
+        orig_cat_ranges = fsspec.implementations.memory.MemoryFileSystem.cat_ranges
+
+        def mock_cat_ranges(self, paths, starts, ends, max_gap=None, on_error="return"):
+            captured_gaps.append(max_gap)
+            return orig_cat_ranges(self, paths, starts, ends, on_error=on_error)
+
+        with patch.object(
+            fsspec.implementations.memory.MemoryFileSystem,
+            "cat_ranges",
+            mock_cat_ranges,
+        ):
+            reader = FsspecReader(checkpoint_dir)  # default max_gap="auto"
+            load_dict = {"t1": torch.zeros(10)}
+            dcp.load(
+                state_dict=load_dict,
+                storage_reader=reader,
+                planner=dcp.DefaultLoadPlanner(),
+                no_dist=True,
+            )
+            self.assertEqual(captured_gaps, ["auto"])
+            self.assertTrue(torch.allclose(state_dict["t1"], load_dict["t1"]))
 
 
 if __name__ == "__main__":

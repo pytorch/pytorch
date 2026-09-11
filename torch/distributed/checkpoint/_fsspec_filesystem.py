@@ -165,7 +165,7 @@ class FsspecReader(FileSystemReader):
         path: str | os.PathLike,
         max_batch_size: int = 64,
         cpu_workers: int | None = None,
-        max_gap: int | None = None,
+        max_gap: int | str | None = "auto",
         **kwargs,
     ) -> None:
         super().__init__(path)
