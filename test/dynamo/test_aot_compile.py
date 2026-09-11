@@ -1895,8 +1895,10 @@ from user code:
 class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
     def test_pickler_carries_a_docstring(self):
         # A native docstring lives in the code object, one assigned after
-        # definition does not; both travel in the pickle state, so neither is
-        # lost on reload (a rebuild that passed doc=None lost both).
+        # definition does not; both travel in the pickle state. The old rebuild
+        # (types.FunctionType over the code object) kept the native one and
+        # dropped an assigned one; on this base a doc=None would drop both,
+        # since _apply_function_state assigns __doc__ unconditionally.
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
@@ -1953,9 +1955,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         fn = outer()
         buf = io.BytesIO()
-        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
+        with self.assertRaisesRegex((TypeError, pickle.PicklingError), "cannot pickle"):
             AOTCompilePickler({}, buf).dump(fn)
-        self.assertIn("cannot pickle", str(cm.exception))
 
     def test_pickler_rebuilds_a_nested_function_faithfully(self):
         # The old rebuild passed __qualname__ where FunctionType wants __name__,
@@ -1973,6 +1974,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
                 return x * k
 
             inner.__name__ = "renamed"
+            inner.__qualname__ = "reassigned.qualname"  # differs from co_qualname
             if inner is None:
                 unset = 1  # never runs, so the cell inner closes over stays empty
             return inner, scaled
@@ -1985,7 +1987,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         AOTCompilePickler({}, buf).dump((fn, scaled))
         out, out_scaled = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.__name__, "renamed")
-        self.assertEqual(out.__qualname__, fn.__qualname__)
+        self.assertEqual(out.__qualname__, "reassigned.qualname")
         self.assertEqual(out.__kwdefaults__, {"k": 1})
         self.assertEqual(out_scaled(3), 6)
         cells = dict(zip(out.__code__.co_freevars, out.__closure__))
