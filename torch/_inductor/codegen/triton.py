@@ -1507,7 +1507,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.use_eager_division_rounding()
+            and config.eager_numerics.division_rounding
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -1604,9 +1604,20 @@ class TritonOverrides(OpOverrides):
             )
 
     @staticmethod
+    def _strict_nan_payload(a):
+        # Limit this payload rule to NVIDIA CUDA. CPU eager canonicalizes min/max
+        # NaNs, and TritonOverrides is shared across backends.
+        return (
+            config.numerics == "strict"
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and getattr(a, "dtype", None) in _STRICT_FLOAT
+        )
+
+    @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
-        if config.numerics == "strict" and getattr(a, "dtype", None) in _STRICT_FLOAT:
+        if TritonOverrides._strict_nan_payload(a):
             # Eager min returns the NaN operand unchanged (first operand wins when both
             # are NaN), preserving its payload; Triton's PropagateNan canonicalizes NaN to
             # 0x7fffffff. Select the NaN operand explicitly and fall back to a plain min
@@ -1620,7 +1631,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
-        if config.numerics == "strict" and getattr(a, "dtype", None) in _STRICT_FLOAT:
+        if TritonOverrides._strict_nan_payload(a):
             # See minimum: match eager's NaN-payload propagation (first operand wins).
             return (
                 f"tl.where({a} != {a}, {a}, "
@@ -7208,9 +7219,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": not config.should_emulate_precision_casts(),
+            "enable_fp_fusion": not config.emulate_precision_casts,
             "launch_pdl": cls._enable_pdl_codegen(),
-            "disable_ftz": config.should_disable_ftz(),
+            "disable_ftz": config.eager_numerics.disable_ftz,
         }
 
     @classmethod
