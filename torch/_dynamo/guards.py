@@ -4479,7 +4479,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # would not round back to this object -- it fails to resolve, or
                 # resolves to a different one -- so rebuild a guarded function by
                 # value and prune an unguarded one, rather than fall through and
-                # mis-serialize.
+                # fail the dump with pickle's PicklingError (a bypass).
                 if id(obj) not in self.guard_tree_values:
                     return _Missing, ("fqn mismatch",)
                 return self._reduce_function_by_value(obj)
