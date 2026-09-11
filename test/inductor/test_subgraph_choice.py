@@ -38,6 +38,8 @@ def decomposeK(a, b, kPartitions):
 BLACKWELL_K_SPLIT = 8
 
 
+# This test-only op exposes the internal partial-BMM lowering so tests can
+# force a specific Triton schedule without depending on whole-plan autotuning.
 @torch.library.custom_op(
     "inductor_test::blackwell_decompose_k_partial", mutates_args={}
 )
