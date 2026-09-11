@@ -17,7 +17,7 @@ from torch.nn.utils._expanded_weights.expanded_weights_utils import (
     unpack_expanded_weight_or_tensor,
 )
 from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
-from torch.testing._internal.common_cuda import TEST_CUDA, tf32_off
+from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
@@ -36,6 +36,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_ACCELERATOR,
+    TEST_MPS,
     TestCase,
 )
 from torch.utils._pytree import tree_map_only
@@ -962,7 +964,7 @@ class TestExpandedWeightModule(TestCase):
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
         self.test_cpu = kwargs.get("test_cpu", True)
-        self.test_cuda = kwargs.get("test_cuda", True)
+        self.test_accelerator = kwargs.get("test_accelerator", True)
         super().__init__(*args, **kwargs)
 
     @property
@@ -1046,12 +1048,16 @@ for test_param in supported_tests:
                 )
             ),
         )
-    if TEST_CUDA and test.test_cuda:
+    if TEST_ACCELERATOR and not TEST_MPS and test.test_accelerator:
         # since this checks derivatives, only use double for precision
         setattr(
             TestExpandedWeightModule,
-            test_name + "_cuda_double",
-            decorator(lambda self, test=test: test.test_context_manager(self, "cuda")),
+            test_name + "_accelerator_double",
+            decorator(
+                lambda self, test=test: test.test_context_manager(
+                    self, torch.accelerator.current_accelerator()
+                )
+            ),
         )
 
 # ------------- HELPER FUNCTIONS -----------------
