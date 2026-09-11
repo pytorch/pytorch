@@ -559,7 +559,7 @@ def foreach_all_gather_copy_out(
 def foreach_reduce(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
-    reduce_scatter_group: dist.ProcessGroup | None,
+    reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
     orig_dtype: torch.dtype | None,
@@ -658,7 +658,7 @@ def foreach_reduce(
             device=device,
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        if reduce_scatter_group is not None and world_size > 1:
+        if world_size > 1:
             reduce_scatter_comm(
                 output_tensor=reduce_output,
                 input_tensor=reduce_scatter_input,

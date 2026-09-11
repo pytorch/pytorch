@@ -13,7 +13,7 @@ _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
 
 @dataclass(frozen=True)
 class MixedPrecisionPolicy:
-    r"""
+    """
     This configures FSDP's mixed precision. Unlike autocast, this applies mixed
     precision at the module level, not op level, which means low-precision
     activations are saved for backward and high-to-low-precision casts are
@@ -60,10 +60,6 @@ class MixedPrecisionPolicy:
             ``None`` uses the default ``reduce_dtype``. Parameters with
             different effective reduction dtypes use separate collectives.
             (Default: ``None``)
-
-    .. warning::
-        ``param_dtype_fn`` and ``reduce_dtype_fn`` must return consistent
-        results across ranks.
     """
 
     param_dtype: torch.dtype | None = None
@@ -76,11 +72,6 @@ class MixedPrecisionPolicy:
     reduce_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
         default=None, kw_only=True
     )
-
-    def _without_dtype_fns(self) -> "MixedPrecisionPolicy":
-        if self.param_dtype_fn is None and self.reduce_dtype_fn is None:
-            return self
-        return replace(self, param_dtype_fn=None, reduce_dtype_fn=None)
 
     def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
         if self.param_dtype_fn is None and self.reduce_dtype_fn is None:
