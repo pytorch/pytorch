@@ -859,10 +859,10 @@ class TestLinalgDevice(TestCase):
     @dtypes(*integral_types())
     def test_addr_integral(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError,
-                                    'argument beta must not be a floating point number.'):
+                                    r"argument beta must not be a floating point number.|cannot safely convert <class 'float'> to torch\.[a-z0-9_]+"):
             self._test_addr_vs_numpy(device, dtype, beta=2., alpha=1)
         with self.assertRaisesRegex(RuntimeError,
-                                    'argument alpha must not be a floating point number.'):
+                                    r"argument alpha must not be a floating point number.|cannot safely convert <class 'float'> to torch\.[a-z0-9_]+"):
             self._test_addr_vs_numpy(device, dtype, beta=2, alpha=1.)
         with self.assertRaisesRegex(RuntimeError,
                                     'Boolean beta only supported for Boolean results.'):
@@ -6268,8 +6268,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
                     m1 = torch.randn(n, k + 1, device=device).to(dtype)
                     m2 = torch.randn(k, m, device=device).to(dtype)
-                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
-                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
+                    shape_pattern = f"{n}x{k + 1}.*{k}x{m}"
+                    error_pattern = f"{shape_pattern}|same reduction dim|shapes cannot be multiplied"
+                    self.assertRaisesRegex(RuntimeError, error_pattern, lambda: torch.addmm(M, m1, m2))
+                    self.assertRaisesRegex(RuntimeError, error_pattern, lambda: torch.mm(m1, m2))
 
     @dtypes(torch.float)
     def test_baddbmm_nan_input_with_zero_beta(self, device, dtype):
@@ -8430,12 +8432,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @dtypes(*floating_and_complex_types())
     def test_geqrf(self, device, dtype):
 
-        def run_test(shape):
+        @torch._dynamo.disable
+        def numpy_geqrf_expected(A):
             # numpy.linalg.qr with mode = 'raw' computes the same operation as torch.geqrf
             # so this test compares against that function
-            A = make_tensor(shape, dtype=dtype, device=device)
-
-            # numpy.linalg.qr doesn't work with batched input
             m, n = A.shape[-2:]
             tau_size = "n" if m > n else "m"
             np_dtype = A.cpu().numpy().dtype
@@ -8444,8 +8444,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 lambda x: np.linalg.qr(x, mode='raw'),
                 otypes=ot,
                 signature=f'(m,n)->(n,m),({tau_size})')
+            return numpy_geqrf_batched(A.cpu())
 
-            expected = numpy_geqrf_batched(A.cpu())
+        def run_test(shape):
+            A = make_tensor(shape, dtype=dtype, device=device)
+
+            expected = numpy_geqrf_expected(A)
             actual = torch.geqrf(A)
 
             # numpy.linalg.qr returns transposed result
