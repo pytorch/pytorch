@@ -730,8 +730,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "data",
           [](const torch::autograd::SavedVariable& s) -> py::object {
             if (s.has_hooks()) {
-              // has_hooks() guarantees retrieve_unpack_hook_data() returns a
-              // value (or throws) rather than std::nullopt.
+              // has_hooks() guarantees a value here (or a throw).
               auto opt = s.retrieve_unpack_hook_data();
               py::gil_scoped_acquire gil;
               const auto& [_unpack_fn, data_obj] = *opt;

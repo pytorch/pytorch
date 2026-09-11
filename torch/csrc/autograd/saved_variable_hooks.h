@@ -14,8 +14,7 @@ struct TORCH_API SavedVariableHooks {
     TORCH_CHECK(
         false, "Compiled Autograd only supports python saved tensor hooks ");
   }
-  // Unlike retrieve_unpack_hook_data(), this does not require pack data to
-  // be available, since the unpack hook itself does not depend on it.
+  // Unlike retrieve_unpack_hook_data(), doesn't require pack data to exist.
   virtual std::optional<c10::SafePyObject> retrieve_unpack_hook() const {
     return std::nullopt;
   }

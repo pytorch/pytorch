@@ -22,9 +22,7 @@ struct PySavedVariableHooks : public SavedVariableHooks {
   void call_pack_hook(const at::Tensor& tensor) override;
   at::Tensor call_unpack_hook() override;
   ~PySavedVariableHooks() override {
-    // Each SafePyObject's own destructor routes through
-    // PyInterpreter::decref, which acquires the GIL; batch that into one
-    // acquisition here instead of three independent ones.
+    // Batch the three SafePyObject decrefs under one GIL acquisition.
     py::gil_scoped_acquire gil;
     pack_hook_.reset();
     unpack_hook_.reset();
