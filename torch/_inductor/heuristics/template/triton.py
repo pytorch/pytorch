@@ -3405,9 +3405,10 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         if min(batch, m, n, k) <= 0:
             return
 
-        # Each logical batch is addressed through a rank-2 TMA descriptor.  In
-        # particular, every matrix-leading stride and every per-batch base must
-        # retain the 16-byte alignment required by TMA.
+        # Ordinary operands use rank-3 TMA descriptors; stride-zero broadcast
+        # operands use one shared rank-2 descriptor.  In either case every
+        # matrix-leading stride and batch base must retain TMA's 16-byte
+        # alignment.
         if not can_use_tma(mat1, mat2):
             return
 
@@ -3429,10 +3430,9 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
 
         output_layout = kernel_inputs.output_layout()
         flatten_output = len(output_layout.size) == 2
-        tma_store = (
-            flatten_output
-            and config.triton.enable_template_tma_store
-            and can_use_tma(output_layout=output_layout)
+        rank3_output = len(output_layout.size) == 3
+        can_tma_store = config.triton.enable_template_tma_store and can_use_tma(
+            output_layout=output_layout
         )
         descriptor_options = {
             "BATCH_SIZE": batch,
@@ -3450,12 +3450,17 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             "NUM_SMS": get_num_sms(),
             "A_ROW_MAJOR": a_row_major,
             "B_ROW_MAJOR": b_row_major,
+            "A_BROADCAST_BATCH": int(mat1.get_stride()[0]) == 0,
+            "B_BROADCAST_BATCH": int(mat2.get_stride()[0]) == 0,
+            "VIRTUAL_BATCH": False,
             "FLATTEN_OUTPUT": flatten_output,
-            "tma_store": tma_store,
         }
         use_meta_ws = meta_ws_enabled()
         for candidate in self.bmm_configs:
             two_ctas = use_meta_ws and candidate.two_ctas
+            tma_store = can_tma_store and (
+                flatten_output or (two_ctas and rank3_output)
+            )
             if two_ctas and not is_blackwell_bmm_2cta_compatible(
                 output_batch_rows=m,
                 block_m=candidate.block_m,
@@ -3478,6 +3483,8 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
                 "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
                 "TWO_CTAS": two_ctas,
+                "RANK3_TMA_OUTPUT": two_ctas and rank3_output,
+                "tma_store": tma_store,
                 **descriptor_options,
             }
             if two_ctas:
