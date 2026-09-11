@@ -681,6 +681,34 @@ def _subprocess_save_child_module_artifact(path):
         torch.save(mod.state_dict(), path + ".state_dict")
 
 
+def _subprocess_load_then_compile(path):
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = ParentWithChildModule()
+        mod.load_state_dict(torch.load(path + ".state_dict"))
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        with open(path, "rb") as f:
+            model._load_aot_compiled_module(f.read())
+        model(torch.randn(4, 4))
+
+        # A fresh compile in the same process mints its __builtins_dict___N
+        # global from the process-global unique_id counter, still behind the
+        # loaded artifact's baked-in index, so it regenerates a name the load
+        # already seeded. install_global must retry past the taken name; without
+        # the retry this AssertionErrors in CleanupHook.create.
+        def later(x):
+            return x + 1
+
+        torch.compile(later, fullgraph=True, backend="eager")(torch.randn(3))
+
+
 class RedistributeModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1862,6 +1890,19 @@ from user code:
         self.assertIs(globals()[builtins_key], get_builtins_dict(globals()))
         x = torch.randn(4, 4)
         self.assertEqual(model(x), mod(x))
+
+    def test_load_then_compile_survives_baked_in_global_collision(self):
+        # output_graph.install_global's retry loop: a fresh process loads a
+        # module artifact (seeding __builtins_dict___0), then a later compile in
+        # that process regenerates index 0 (unique_id is still behind) and
+        # collides. Only a fresh process reproduces it -- once any in-process
+        # compile has run, unique_id is ahead of the baked-in index and the
+        # names never clash, which is why nothing in-suite covers the retry.
+        path = self.path()
+        _run_in_subprocess(
+            functools.partial(_subprocess_save_child_module_artifact, path)
+        )
+        _run_in_subprocess(functools.partial(_subprocess_load_then_compile, path))
 
     def test_load_seeds_exactly_the_recorded_import_aliases(self):
         # Loading may add only the aliases the artifact recorded, and must not
