@@ -8764,6 +8764,32 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
+    def test_memory_snapshot_preserves_argument_references(self):
+        for tuple_size in (2, 3):
+            with self.subTest(tuple_size=tuple_size):
+                script = f"""
+import os
+import sys
+import torch
+
+pool_id_component = int("1000000")
+args = (
+    (0, pool_id_component)
+    if {tuple_size} == 2
+    else (0, pool_id_component, False)
+)
+before = sys.getrefcount(pool_id_component)
+torch._C._cuda_memorySnapshot(args)
+after = sys.getrefcount(pool_id_component)
+if after != before:
+    print(f"reference count changed from {{before}} to {{after}}", file=sys.stderr)
+    os._exit(1)
+"""
+                proc = subprocess.run(
+                    [sys.executable, "-c", script], capture_output=True, text=True
+                )
+                self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
