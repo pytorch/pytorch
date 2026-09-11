@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.utils._triton import has_triton
 
 
 if IS_WINDOWS and IS_CI:
@@ -24,8 +24,9 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_LINUX,
     parametrize,
     skipIfRocm,
@@ -43,6 +44,8 @@ except ImportError:
 
 
 class TestMemoryPlanningOutputGroups(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class FakeBuffer:
         def __init__(self, name):
             self._name = name
@@ -106,14 +109,13 @@ class TestMemoryPlanningOutputGroups(TestCase):
         self.assertTrue(group.is_output)
 
 
-@requires_gpu()
-@config.patch(memory_planning=True)
-@instantiate_parametrized_tests
 class TestMemoryPlanning(TestCase):
-    device = GPU_TYPE
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch(memory_planning=True)
     @parametrize("memory_pool", ("none", "intermediates", "outputs", "combined"))
-    def test_branched_concat_projection_subgraph(self, memory_pool):
+    def test_branched_concat_projection_subgraph(self, device, memory_pool):
         """
         Two branches over one input, concatenated and projected. The outputs mix a
         graph input, a derived tensor, and a slice of that derived tensor, which is
@@ -133,11 +135,11 @@ class TestMemoryPlanning(TestCase):
 
         model = BranchedConcatProjection()
         args = (
-            torch.randn((6, 40), device=self.device),
-            torch.randn((6, 8), device=self.device),
-            torch.randn((40, 12), device=self.device),
-            torch.randn((40, 10), device=self.device),
-            torch.randn((30, 20), device=self.device),
+            torch.randn((6, 40), device=device),
+            torch.randn((6, 8), device=device),
+            torch.randn((40, 12), device=device),
+            torch.randn((40, 10), device=device),
+            torch.randn((30, 20), device=device),
         )
         expected = model(*args)
 
@@ -148,8 +150,10 @@ class TestMemoryPlanning(TestCase):
         self.assertTrue(same(expected, result))
         FileCheck().check("alloc_from_pool(pool").run(code)
 
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch(memory_planning=True)
     @parametrize("memory_pool", ("none", "intermediates", "outputs", "combined"))
-    def test_sliced_update_softmax_subgraph(self, memory_pool):
+    def test_sliced_update_softmax_subgraph(self, device, memory_pool):
         """
         Repeated split-update-concat over the tail columns of a tensor, then a softmax
         reduction. Each concat produces a short-lived buffer whose slices alias the
@@ -174,10 +178,10 @@ class TestMemoryPlanning(TestCase):
         # eager-vs-compiled comparison flip on a 1e-7 difference. eps is large enough
         # to stay representable in fp32 so the clamp is identical on both sides.
         args = (
-            torch.randn((6, 128), device=self.device),
-            torch.randn((6, 5), device=self.device),
-            torch.randn((10, 128), device=self.device) * 0.1,
-            torch.randn((10,), device=self.device),
+            torch.randn((6, 128), device=device),
+            torch.randn((6, 5), device=device),
+            torch.randn((10, 128), device=device) * 0.1,
+            torch.randn((10,), device=device),
         )
         expected = model(*args)
 
@@ -188,8 +192,10 @@ class TestMemoryPlanning(TestCase):
         self.assertTrue(same(expected, result))
         FileCheck().check("alloc_from_pool(pool").run(code)
 
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch(memory_planning=True)
     @parametrize("memory_pool", ("none", "intermediates", "outputs", "combined"))
-    def test_broadcast_gated_slice_subgraph(self, memory_pool):
+    def test_broadcast_gated_slice_subgraph(self, device, memory_pool):
         """
         A [B, 1] gate broadcast-multiplied into the tail columns, then re-concatenated.
         The gated intermediate is both consumed by the concat and returned as an
@@ -211,11 +217,11 @@ class TestMemoryPlanning(TestCase):
 
         model = BroadcastGatedSlice()
         args = (
-            torch.randn((6, 128), device=self.device),
-            torch.randn((6, 7), device=self.device),
-            torch.randn((6, 5), device=self.device),
-            torch.randn((128, 10), device=self.device),
-            torch.randn((13, 1), device=self.device),
+            torch.randn((6, 128), device=device),
+            torch.randn((6, 7), device=device),
+            torch.randn((6, 5), device=device),
+            torch.randn((128, 10), device=device),
+            torch.randn((13, 1), device=device),
         )
         expected = model(*args)
 
@@ -226,8 +232,10 @@ class TestMemoryPlanning(TestCase):
         self.assertTrue(same(expected, result))
         FileCheck().check("alloc_from_pool(pool").run(code)
 
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch(memory_planning=True)
     @parametrize("memory_pool", ("none", "intermediates", "outputs", "combined"))
-    def test_cloned_inplace_slice_subgraph(self, memory_pool):
+    def test_cloned_inplace_slice_subgraph(self, device, memory_pool):
         """
         An in-place slice update applied to a clone while the original is still live as
         an output. The clone is distinct storage that the planner must not alias onto
@@ -248,9 +256,9 @@ class TestMemoryPlanning(TestCase):
         # See test_sliced_update_softmax_subgraph: the weight is scaled down to keep the
         # softmax unsaturated so torch.logit stays finite.
         args = (
-            torch.randn((6, 128), device=self.device),
-            torch.randn((10, 128), device=self.device) * 0.1,
-            torch.randn((10,), device=self.device),
+            torch.randn((6, 128), device=device),
+            torch.randn((10, 128), device=device) * 0.1,
+            torch.randn((10,), device=device),
         )
         expected = model(*args)
 
@@ -279,14 +287,17 @@ class TestMemoryPlanning(TestCase):
         z = torch.randn((2, 3), device=device)
         return (Foo(), (x, y, z))
 
-    def test_python_wrapper(self):
-        f, args = self._generate(device=GPU_TYPE)
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch(memory_planning=True)
+    def test_python_wrapper(self, device):
+        f, args = self._generate(device=device)
         compiled = torch.compile(f, dynamic=True)
         result, code = run_and_get_cpp_code(compiled, *args)
 
+        device_type = torch.device(device).type
         FileCheck().check(
             "pool1 = empty_strided_"
-            + GPU_TYPE
+            + device_type
             + "((4*s27*s77 + align(4*s77*s77), ), (1, )"
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s77, s77), (s77, 1))"
@@ -294,8 +305,10 @@ class TestMemoryPlanning(TestCase):
         self.assertTrue(same(f(*args), result))
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180122")
-    def test_cpp_wrapper(self):
-        f, args = self._generate(device=GPU_TYPE)
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch(memory_planning=True)
+    def test_cpp_wrapper(self, device):
+        f, args = self._generate(device=device)
         compiled = torch.compile(f, dynamic=True)
         with config.patch({"cpp_wrapper": True}):
             result, code = run_and_get_cpp_code(compiled, *args)
@@ -307,8 +320,10 @@ class TestMemoryPlanning(TestCase):
         ).run(code)
         self.assertTrue(same(f(*args), result))
 
-    def test_aoti(self):
-        f, args = self._generate(device=GPU_TYPE)
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch(memory_planning=True)
+    def test_aoti(self, device):
+        f, args = self._generate(device=device)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
         result, code = run_and_get_cpp_code(
@@ -332,12 +347,11 @@ class TestMemoryPlanning(TestCase):
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/168171",
     )
-    @config.patch({"triton.autotune_at_compile_time": False})
-    def test_unbacked_symint(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch({"memory_planning": True, "triton.autotune_at_compile_time": False})
+    def test_unbacked_symint(self, device):
         # when allocation's size has unbacked symints
         # the unbacked symints are only available after computed
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
 
         class Repro(torch.nn.Module):
             def forward(self, x, y):
@@ -352,10 +366,10 @@ class TestMemoryPlanning(TestCase):
                 return sevens * 3
 
         example_inputs = (
-            torch.scalar_tensor(2, dtype=torch.int, device=self.device),
-            torch.ones(8, device=self.device),
+            torch.scalar_tensor(2, dtype=torch.int, device=device),
+            torch.ones(8, device=device),
         )
-        model = Repro().to(self.device)
+        model = Repro().to(device)
         result, code = run_and_get_cpp_code(
             lambda: AOTIRunnerUtil.run(model, example_inputs)
         )
@@ -426,6 +440,11 @@ class TestMemoryPlanning(TestCase):
         )
 
 
+instantiate_device_type_tests(
+    TestMemoryPlanning, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 if __name__ == "__main__":
-    if HAS_GPU:
+    if has_triton():
         run_tests()
