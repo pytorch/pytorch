@@ -977,19 +977,25 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 if transA
                 else torch.ones((m, 1), device=deviceid)
             )
+            scalingTypeA = torch.nn.functional.ScalingType.RowWise
             scaleB = (
                 torch.ones((1, n), device=deviceid)
                 if transB
                 else torch.ones((n, 1), device=deviceid)
             )
+            scalingTypeB = torch.nn.functional.ScalingType.RowWise
         else:
             scaleA = torch.tensor(0.8, device=deviceid)
             scaleB = torch.tensor(0.9, device=deviceid)
+            scalingTypeA = torch.nn.functional.ScalingType.TensorWise
+            scalingTypeB = torch.nn.functional.ScalingType.RowWise
 
         kwargs = {
             "scale_a": scaleA,
+            "scale_recipe_a": scalingTypeA,
             "scale_b": scaleB,
-            "out_dtype": scaled_gemm_options.dtypeC,
+            "scale_recipe_b": scalingTypeB,
+            "output_dtype": scaled_gemm_options.dtypeC,
             "use_fast_accum": scaled_gemm_options.use_fast_accum,
         }
         if scaled_gemm_options.bias_dtype is not None:
@@ -1009,7 +1015,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                     device=deviceid,
                 )
             )
-        torch._scaled_mm(matA, matB, **kwargs)
+        torch.nn.functional.scaled_mm(matA, matB, **kwargs)
 
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
