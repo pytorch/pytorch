@@ -20,6 +20,8 @@ if TEST_CUPTI:
 
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
 class TestPyLibCupti(TestCase):
+    """Wrapper surface that needs only a loaded libcupti, no CUDA context."""
+
     def test_get_version(self):
         self.assertGreaterEqual(pylibcupti().get_version(), 130300)
 
@@ -57,7 +59,13 @@ class TestPyLibCupti(TestCase):
         self.assertIn("deliberately_bad", str(cm.exception))
         self.assertIn("CUPTI_ERROR_INVALID_PARAMETER", str(cm.exception))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
+
+@unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
+@unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
+class TestPyLibCuptiCUDA(TestCase):
+    """Wrapper surface driven against a live CUDA context: subscription-scoped
+    activity collection, the global HW-trace toggle, and cuptiFinalize."""
+
     def test_v2_subscribe_timestamp_roundtrip(self):
         torch.cuda.init()
         lib = pylibcupti()
@@ -76,7 +84,6 @@ class TestPyLibCupti(TestCase):
         finally:
             lib.unsubscribe(sub_handle)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_v2_activity_lifecycle(self):
         # Drive the subscription-scoped wrapper surface against real libcupti, the
         # same sequence Cuspy runs: push/pop external correlation, arm UDR
@@ -130,7 +137,6 @@ class TestPyLibCupti(TestCase):
         finally:
             lib.unsubscribe(sub)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_activity_enable_hw_trace_toggle(self):
         # HW-trace is a GLOBAL toggle -- it perturbs process-wide CUPTI state (and
         # breaks a sibling UDR session), so exercise it in an isolated child that
@@ -154,7 +160,6 @@ class TestPyLibCupti(TestCase):
             self.skipTest("HW trace unsupported on this platform")
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_finalize_in_subprocess(self):
         # finalize() is cuptiFinalize -- a global, process-wide teardown Cuspy
         # never calls. Run it in a child (which inherits this process's libcupti via
