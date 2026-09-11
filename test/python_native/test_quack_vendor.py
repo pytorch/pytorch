@@ -20,6 +20,11 @@ FLEX_GEMM_PATCHES = REPO_ROOT / "tools" / "vendoring" / "quack" / "flex_gemm_pat
 FLEX_GEMM_PATCH_CLASSES = {"_FragmentEpiModMixin"}
 
 
+# Python 3.10's IntEnum formatting breaks QuACK schema inference, not native-AOT.
+@unittest.skipIf(
+    sys.version_info < (3, 11),
+    "QuACK custom-op imports require Python 3.11 or newer",
+)
 @unittest.skipIf(
     importlib.util.find_spec("cutlass") is None,
     "vendored QuACK imports require CuTeDSL/CUTLASS",
