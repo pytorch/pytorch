@@ -18,14 +18,15 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import requires_block_ptr, requires_triton
 
 
 importlib.import_module("filelock")
 
 
-@instantiate_parametrized_tests
-class CodegenInductorGeneric(InductorTestCase):
-    hw_classification = HardwareClassification.GENERIC
+class CodegenTestBase(InductorTestCase):
+    # Shared helpers only; keep this class free of test methods so that
+    # instantiate_device_type_tests variant generation is unaffected.
 
     def run_and_compare(
         self,
@@ -60,6 +61,11 @@ class CodegenInductorGeneric(InductorTestCase):
         count = sum(prog.count(substr) for prog in code)
         if expected is not None:
             self.assertEqual(count, expected)
+
+
+@instantiate_parametrized_tests
+class CodegenInductorGeneric(CodegenTestBase):
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("force_pointwise_cat", [False, True])
     def test_force_pointwise_cat(self, force_pointwise_cat: bool):
@@ -89,44 +95,12 @@ class CodegenInductorGeneric(InductorTestCase):
             self.count_code(reinterpret_call, code, 2)
 
 
-class CodegenInductorTest(InductorTestCase):
+class CodegenInductorTest(CodegenTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def run_and_compare(
-        self,
-        func: Callable[..., Any],
-        *args,
-        compile_kwargs: dict | None = None,
-        config_patches: dict | None = None,
-        atol: float | None = 1e-05,
-        rtol: float | None = 1e-08,
-    ):
-        if compile_kwargs is None:
-            compile_kwargs = {}
-        if config_patches is None:
-            config_patches = {}
-
-        def flatten_tensors(tensors):
-            flat, spec = pytree.tree_flatten(tensors)
-            return flat
-
-        with config.patch(config_patches):
-            compiled = torch.compile(func, backend="inductor", **compile_kwargs)
-            result, code = run_and_get_code(compiled, *args)
-
-        ref_tensors = flatten_tensors(func(*args))
-        actual_tensors = flatten_tensors(result)
-        for ref, actual in zip(ref_tensors, actual_tensors):
-            self.assertTrue(torch.allclose(ref, actual, atol=atol, rtol=rtol))
-
-        return result, code
-
-    def count_code(self, substr: str, code: list[str], expected: int | None):
-        count = sum(prog.count(substr) for prog in code)
-        if expected is not None:
-            self.assertEqual(count, expected)
-
     @onlyAccelerator
+    @requires_triton()
+    @requires_block_ptr
     def test_cse_make_block_ptr_reduction(self, device):
         if self.device_type == "mps":
             self.skipTest("Triton is not available for MPS")
@@ -157,6 +131,7 @@ class CodegenInductorTest(InductorTestCase):
         self.count_code("= tl.load(block_ptr", code, 2)
 
     @onlyAccelerator
+    @requires_triton()
     def test_block_ptr_falls_back_when_api_missing(self, device):
         if self.device_type == "mps":
             self.skipTest("Triton is not available for MPS")
@@ -191,6 +166,7 @@ class CodegenInductorTest(InductorTestCase):
         self.count_code("tl.make_block_ptr", code, 0)
 
     @onlyAccelerator
+    @requires_triton()
     @parametrize("disable_welford_reduction", [True, False])
     def test_disable_welford_reduction(self, disable_welford_reduction: bool, device):
         if self.device_type == "mps":
@@ -218,6 +194,7 @@ class CodegenInductorTest(InductorTestCase):
             self.assertGreater(welford_count, 0)
 
     @onlyAccelerator
+    @requires_triton()
     def test_kernel_fusion_thresholds(self, device):
         if self.device_type == "mps":
             self.skipTest("Triton is not available for MPS")
