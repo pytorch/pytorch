@@ -398,7 +398,9 @@ class FSDPState(_State):
             return grad
 
     @_dynamo_disable
-    def _root_post_backward_final_callback(self) -> None:
+    def _root_post_backward_final_callback(
+        self, finalize_gradient_accumulation: bool = False
+    ) -> None:
         logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             # Reset per-iteration state. With chunked loss, each standalone
@@ -415,7 +417,14 @@ class FSDPState(_State):
                 # autograd backward order and preserving RS overlap for
                 # per-param-mesh modules whose inputs lack gradients.
                 for fsdp_param_group in reversed(state._fsdp_param_groups):
-                    if fsdp_param_group._training_state != TrainingState.POST_BACKWARD:
+                    if finalize_gradient_accumulation:
+                        if fsdp_param_group._deferred_gradient_reduction:
+                            fsdp_param_group.post_backward()
+                        else:
+                            fsdp_param_group.reshard()
+                    elif (
+                        fsdp_param_group._training_state != TrainingState.POST_BACKWARD
+                    ):
                         # Run post-backward in case forward inputs did not require
                         # gradient so the autograd backward did not run
                         fsdp_param_group.post_backward()
@@ -436,6 +445,24 @@ class FSDPState(_State):
                         self._device_handle.current_stream().wait_event(rs_state.event)
                 self._comm_ctx.reduce_scatter_states.clear()
             self._state_ctx.post_backward_final_callback_queued = False
+
+    def _join_comm_streams(self) -> None:
+        if self._device.type == "cpu":
+            return
+        current_stream = self._device_handle.current_stream()
+        fork_event = self._device_handle.Event()
+        fork_event.record(current_stream)
+        # Fork from the current stream so communication joins an active capture.
+        for stream in (
+            self._comm_ctx.all_gather_copy_in_stream,
+            self._comm_ctx.all_gather_stream,
+            self._comm_ctx.reduce_scatter_stream,
+            self._comm_ctx.all_reduce_stream,
+        ):
+            stream.wait_event(fork_event)
+            join_event = self._device_handle.Event()
+            join_event.record(stream)
+            current_stream.wait_event(join_event)
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
