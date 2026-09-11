@@ -30,8 +30,9 @@ import torch.distributed as dist
 import torch.distributed._symmetric_memory._shmem_triton as shmem_triton
 from torch._inductor.runtime.triton_compat import triton
 from torch.distributed._symmetric_memory._shmem_triton import requires_shmem
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -49,10 +50,6 @@ def requires_h100():
         "NVSHMEM Triton tests require H100.",
     )
 
-
-# So that tests are written in device-agnostic way
-device_type = "cuda"
-device_module = torch.get_device_module(device_type)
 
 # Shared Triton JIT kernels
 
@@ -280,23 +277,25 @@ def my_reduce_kernel(
     shmem_backend.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
 
 
-@instantiate_parametrized_tests
 class SHMEMTritonTest(MultiProcContinuousTest):
-    def _init_device(self) -> None:
+    hw_classification = HardwareClassification.CUDA
+
+    def _init_device(self, device) -> None:
+        self._dev = torch.device(torch.device(device).type, self.rank)
         # TODO: relieve this (seems to hang if without)
-        device_module.set_device(self.device)
+        torch.get_device_module(self.device.type).set_device(self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return self._dev
 
     @requires_triton()
     @requires_h100()
-    def test_triton_put(self) -> None:
+    def test_triton_put(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
@@ -346,9 +345,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
     @requires_triton()
     @requires_h100()
     @parametrize("nbi", [False, True])  # Test both blocking and nonblocking interfaces
-    def test_triton_get(self, nbi: bool) -> None:
+    def test_triton_get(self, device, nbi: bool) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
@@ -384,9 +383,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_get_ring(self) -> None:
+    def test_triton_get_ring(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
@@ -424,9 +423,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_put_signal_set(self) -> None:
+    def test_triton_put_signal_set(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
@@ -480,9 +479,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_put_signal_add(self) -> None:
+    def test_triton_put_signal_add(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
@@ -536,9 +535,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_wait_until(self) -> None:
+    def test_triton_wait_until(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
 
         group_name = dist.distributed_c10d._get_default_group().group_name
 
@@ -583,8 +582,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_signal_wait_until(self) -> None:
-        self._init_device()
+    def test_triton_signal_wait_until(self, device) -> None:
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
         peer = 1 - rank
@@ -642,7 +641,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_fence(self) -> None:
+    def test_triton_fence(self, device) -> None:
         """
         Rank 0 performs two put operations into Rank 1's buffers with a fence
         between them, followed by another fence and a flag update. Rank 1 waits
@@ -652,7 +651,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         order.
         """
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
         peer = 1 - rank
@@ -713,9 +712,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_quiet(self) -> None:
+    def test_triton_quiet(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
         peer = 1 - rank
@@ -761,9 +760,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_barrier(self) -> None:
+    def test_triton_barrier(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
         numel = 1
@@ -794,9 +793,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
     @requires_triton()
     @requires_h100()
-    def test_triton_sync(self) -> None:
+    def test_triton_sync(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
@@ -837,9 +836,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
     @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
-    def test_triton_alltoall(self) -> None:
+    def test_triton_alltoall(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         world_size = dist.get_world_size()
         rank = self.rank
@@ -883,9 +882,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
     @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
-    def test_triton_broadcast(self) -> None:
+    def test_triton_broadcast(self, device) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
 
@@ -950,9 +949,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.bfloat16,
         ],
     )
-    def test_triton_sum_reduce(self, dtype) -> None:
+    def test_triton_sum_reduce(self, device, dtype) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         world_size = dist.get_world_size()
         rank = self.rank
@@ -1011,9 +1010,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.bfloat16,
         ],
     )
-    def test_triton_minmax_reduce(self, dtype) -> None:
+    def test_triton_minmax_reduce(self, device, dtype) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         world_size = dist.get_world_size()
         rank = self.rank
@@ -1096,9 +1095,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.bfloat16,
         ],
     )
-    def test_triton_prod_reduce(self, dtype) -> None:
+    def test_triton_prod_reduce(self, device, dtype) -> None:
         torch.manual_seed(42 + self.rank)
-        self._init_device()
+        self._init_device(device)
         group_name = dist.distributed_c10d._get_default_group().group_name
         world_size = dist.get_world_size()
         rank = self.rank
@@ -1153,6 +1152,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
+
+instantiate_device_type_tests(SHMEMTritonTest, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     run_tests()
