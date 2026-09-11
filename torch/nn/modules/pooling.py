@@ -1310,8 +1310,6 @@ class _AdaptiveMaxPoolNd(Module):
         return f"output_size={self.output_size}"
 
 
-# FIXME (by @ssnl): Improve adaptive pooling docs: specify what the input and
-#   output shapes are, and how the operation computes output.
 
 
 class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
@@ -1319,6 +1317,14 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
 
     The output size is :math:`L_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
+
+    Adaptive max pooling divides the input into a set of output-sized bins
+    and applies max pooling within each bin. For each output index ``i``
+    along a given dimension, the corresponding input window spans from
+    ``floor(i * input_size / output_size)`` to
+    ``ceil((i + 1) * input_size / output_size)``, so bin sizes may vary by
+    at most one element depending on how evenly ``input_size`` divides
+    into ``output_size``.
 
     Args:
         output_size: the target output size :math:`L_{out}`.
@@ -1350,6 +1356,14 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     The output is of size :math:`H_{out} \times W_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
+
+    Adaptive max pooling divides the input into a set of output-sized bins
+    and applies max pooling within each bin. For each output index ``i``
+    along a given dimension, the corresponding input window spans from
+    ``floor(i * input_size / output_size)`` to
+    ``ceil((i + 1) * input_size / output_size)``, so bin sizes may vary by
+    at most one element depending on how evenly ``input_size`` divides
+    into ``output_size``.
 
     Args:
         output_size: the target output size of the image of the form :math:`H_{out} \times W_{out}`.
@@ -1393,6 +1407,14 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     The output is of size :math:`D_{out} \times H_{out} \times W_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
+
+    Adaptive max pooling divides the input into a set of output-sized bins
+    and applies max pooling within each bin. For each output index ``i``
+    along a given dimension, the corresponding input window spans from
+    ``floor(i * input_size / output_size)`` to
+    ``ceil((i + 1) * input_size / output_size)``, so bin sizes may vary by
+    at most one element depending on how evenly ``input_size`` divides
+    into ``output_size``.
 
     Args:
         output_size: the target output size of the image of the form :math:`D_{out} \times H_{out} \times W_{out}`.
@@ -1449,6 +1471,14 @@ class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):
     The output size is :math:`L_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
 
+    Adaptive average pooling divides the input into a set of output-sized
+    bins and applies average pooling within each bin. For each output
+    index ``i`` along a given dimension, the corresponding input window
+    spans from ``floor(i * input_size / output_size)`` to
+    ``ceil((i + 1) * input_size / output_size)``, so bin sizes may vary by
+    at most one element depending on how evenly ``input_size`` divides
+    into ``output_size``.
+
     Args:
         output_size: the target output size :math:`L_{out}`.
 
@@ -1479,6 +1509,14 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     The output is of size H x W, for any input size.
     The number of output features is equal to the number of input planes.
+
+    Adaptive average pooling divides the input into a set of output-sized
+    bins and applies average pooling within each bin. For each output
+    index ``i`` along a given dimension, the corresponding input window
+    spans from ``floor(i * input_size / output_size)`` to
+    ``ceil((i + 1) * input_size / output_size)``, so bin sizes may vary by
+    at most one element depending on how evenly ``input_size`` divides
+    into ``output_size``.
 
     Args:
         output_size: the target output size of the image of the form H x W.
@@ -1519,6 +1557,14 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     The output is of size D x H x W, for any input size.
     The number of output features is equal to the number of input planes.
+
+    Adaptive average pooling divides the input into a set of output-sized
+    bins and applies average pooling within each bin. For each output
+    index ``i`` along a given dimension, the corresponding input window
+    spans from ``floor(i * input_size / output_size)`` to
+    ``ceil((i + 1) * input_size / output_size)``, so bin sizes may vary by
+    at most one element depending on how evenly ``input_size`` divides
+    into ``output_size``.
 
     Args:
         output_size: the target output size of the form D x H x W.
