@@ -2561,10 +2561,24 @@ class TestTorchDeviceType(TestCase):
         size = 1000
         for p in [0.2, 0.5, 0.8]:
             t = torch.empty(size, dtype=dtype, device=device).geometric_(p=p)
-            actual = np.histogram(t.cpu().to(torch.double), np.arange(1, 100))[0]
-            expected = stats.geom(p).pmf(np.arange(1, 99)) * size
-            res = stats.chisquare(actual, expected)
-            self.assertEqual(res.pvalue, 1.0, atol=0.1, rtol=0)
+            geom = stats.geom(p)
+            # Chi-square needs a healthy expected count in every bin. Giving each
+            # outcome its own bin leaves the far tail expecting far less than one
+            # draw, and then a single rare sample dominates the whole statistic,
+            # so collapse the tail into one bin instead.
+            k = 1
+            while size * min(geom.pmf(k + 1), geom.sf(k + 1)) >= 5:
+                k += 1
+            samples = t.cpu().to(torch.int64).numpy()
+            observed = np.bincount(np.minimum(samples, k + 1), minlength=k + 2)[1:]
+            expected = np.append(geom.pmf(np.arange(1, k + 1)), geom.sf(k)) * size
+            res = stats.chisquare(observed, expected)
+            # Under H0 the p-value is uniform, so this only needs to be small
+            # enough not to flake. The seed is fixed, and the smallest p-value
+            # this actually produces across all tested dtypes is ~0.10 on CUDA
+            # and ~0.046 on CPU, so 1e-3 leaves a wide margin while still
+            # rejecting a generator whose distribution is materially wrong.
+            self.assertGreater(res.pvalue, 1e-3)
 
     # FIXME: find test suite for pdist and cdist
     def test_pairwise_distance_empty(self, device):
