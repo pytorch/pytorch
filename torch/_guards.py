@@ -815,6 +815,12 @@ class InvokeSubgraphReuseEntry:
     # The graph may have additional outputs from side-effect intermediates;
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
+    # (element source, index source) for every subscript the region did with an
+    # index it read and used for nothing else. On cache hit each index is read
+    # again and every source derived from that subscript is rebuilt around the
+    # new index, so the entry is parameterized by the index rather than
+    # specialized to it.
+    reindex_nodes: list[tuple[Source, Source]] = dataclasses.field(default_factory=list)
 
 
 @dataclass

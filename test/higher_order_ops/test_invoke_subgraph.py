@@ -4852,6 +4852,580 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(res, fn(x))
         self.assertEqual(count(), 2)
 
+    def _indexed_layers(self, body, n=4, pool=None):
+        """n layers sharing a pool, each selecting its own slot by layer_id."""
+
+        class Pool:
+            def __init__(self, buffers):
+                self.buffers = buffers
+
+        pool = pool if pool is not None else Pool([torch.randn(8) for _ in range(n)])
+        layer_cls = type("Layer", (torch.nn.Module,), {"forward": body})
+
+        layers = []
+        for i in range(n):
+            layer = layer_cls()
+            layer.layer_id = i
+            layer.pool = pool
+            layers.append(layer)
+        return pool, layers
+
+    @staticmethod
+    def _sum_over_layers(gn, layers):
+        def fn(x):
+            return sum(gn(layer, x) for layer in layers)
+
+        return fn
+
+    def test_subgraph_reuse_element_selected_by_guarded_index(self):
+        """A capture selected by a read index is re-derived, not retraced.
+
+        The index is baked into the capture's source, so keeping its guard
+        would reject every layer after the first. The region reads the index
+        only to subscript with it, so reuse resolves it again per call instead.
+        See https://github.com/pytorch/pytorch/issues/191781
+        """
+
+        def body(self, x):
+            return x.sin() + self.pool.buffers[self.layer_id]
+
+        n = 4
+        _, layers = self._indexed_layers(body, n)
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        fn = self._sum_over_layers(gn, layers)
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_two_captures_share_one_index(self):
+        """Two containers subscripted with the same index both follow it.
+
+        This is the shape the KV cache has: one layer id selecting a key slot
+        and a value slot.
+        """
+
+        class Pool:
+            def __init__(self, n):
+                self.buffers = [torch.randn(8) for _ in range(n)]
+                self.values = [torch.randn(8) for _ in range(n)]
+
+        def body(self, x):
+            k = self.pool.buffers[self.layer_id]
+            v = self.pool.values[self.layer_id]
+            return x.sin() + k * v
+
+        n = 4
+        _, layers = self._indexed_layers(body, n, pool=Pool(n))
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        fn = self._sum_over_layers(gn, layers)
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_chained_indexes_are_re_derived(self):
+        """Every subscript in a chain follows its own index."""
+
+        class Group:
+            def __init__(self):
+                self.buffers = [torch.randn(8) for _ in range(3)]
+
+        class Root:
+            def __init__(self):
+                self.groups = [Group() for _ in range(3)]
+
+        class Layer(torch.nn.Module):
+            def __init__(self, root, gid, bid):
+                super().__init__()
+                self.root = root
+                self.gid = gid
+                self.bid = bid
+
+            def forward(self, x):
+                return x.sin() + self.root.groups[self.gid].buffers[self.bid]
+
+        root = Root()
+        layers = [Layer(root, i % 3, (2 * i) % 3) for i in range(4)]
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        fn = self._sum_over_layers(gn, layers)
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_index_selected_by_another_index(self):
+        """A re-derived index can itself be an element another index selected.
+
+        The subscripts have to be resolved in the order the region did them.
+        Here the index table sits under a deeper source than the subscript that
+        consumes it, so resolving by source depth instead would rebuild the
+        buffer lookup before the table moved, and it would silently follow the
+        index the trace saw. The table is a permutation so that shows up.
+        """
+
+        class Inner:
+            def __init__(self):
+                self.ids = [3, 1, 0, 2]
+
+        class Tables:
+            def __init__(self):
+                self.inner = Inner()
+
+        class Pool:
+            def __init__(self):
+                self.tables = Tables()
+
+        class Layer(torch.nn.Module):
+            def __init__(self, gid, pool, buf):
+                super().__init__()
+                self.gid = gid
+                self.pool = pool
+                self.buf = buf
+
+            def forward(self, x):
+                i = self.pool.tables.inner.ids[self.gid]
+                return x.sin() + self.buf[i]
+
+        pool = Pool()
+        buf = [torch.arange(8.0) * (10.0**i) for i in range(4)]
+        layers = [Layer(i, pool, buf) for i in range(4)]
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        fn = self._sum_over_layers(gn, layers)
+        x = torch.arange(8.0) / 10
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_index_read_for_anything_else_retraces(self):
+        """An index that also shapes the trace keeps its guard, so reuse is refused.
+
+        Re-deriving is only sound when the index was read purely to subscript.
+        Branching on it changes which ops are traced and using it as an operand
+        bakes it into the graph; either would make the cached body wrong for a
+        different index. Reading it out of a container first is the same, even
+        though the second read installs no guard of its own.
+        """
+
+        def branch_body(self, x):
+            if self.layer_id < 2:
+                return x.sin() + self.pool.buffers[self.layer_id]
+            return x.cos() + self.pool.buffers[self.layer_id]
+
+        def operand_body(self, x):
+            # Same line as the subscript, so only the column span separates them.
+            return x.sin() + self.pool.buffers[self.layer_id] + self.layer_id
+
+        def indirect_body(self, x):
+            i = self.layer_id
+            y = self.pool.buffers[i]
+            return (x.sin() if i < 2 else x.cos()) + y
+
+        n = 4
+        for name, body in (
+            ("branch", branch_body),
+            ("operand", operand_body),
+            ("indirect", indirect_body),
+        ):
+            with self.subTest(name):
+                torch._dynamo.reset()
+                _, layers = self._indexed_layers(body, n)
+
+                @nested_compile_region
+                def gn(layer, x):
+                    return layer(x)
+
+                fn = self._sum_over_layers(gn, layers)
+                x = torch.randn(8)
+                with self._count_speculate_calls() as count:
+                    res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+                self.assertEqual(res, fn(x))
+                self.assertEqual(count(), n)
+
+    def test_subgraph_reuse_re_derived_element_is_guard_checked(self):
+        """The element an index selects is guarded like any other capture.
+
+        A folded constant and tensor metadata both come from the element's own
+        source, which follows the index, so a layer whose slot differs cannot
+        reuse a body built for another one.
+        """
+
+        class Pool:
+            def __init__(self, n):
+                self.buffers = [torch.randn(8) for _ in range(n)]
+                self.scales = [0.5 + 0.25 * i for i in range(n)]
+
+        def scale_body(self, x):
+            return x.sin() * self.pool.scales[self.layer_id]
+
+        def buffer_body(self, x):
+            return x.sin() + self.pool.buffers[self.layer_id]
+
+        n = 4
+        for name, body, mutate in (
+            ("folded float", scale_body, lambda pool: None),
+            (
+                "element dtype",
+                buffer_body,
+                lambda pool: pool.buffers.__setitem__(
+                    2, pool.buffers[2].to(torch.float64)
+                ),
+            ),
+        ):
+            with self.subTest(name):
+                torch._dynamo.reset()
+                pool = Pool(n)
+                mutate(pool)
+                _, layers = self._indexed_layers(body, n, pool=pool)
+
+                @nested_compile_region
+                def gn(layer, x):
+                    return layer(x)
+
+                fn = self._sum_over_layers(gn, layers)
+                x = torch.randn(8)
+                with self._count_speculate_calls() as count:
+                    res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+                self.assertEqual(res, fn(x))
+                # Pin the refusal and not just the numerics. The exact count
+                # depends on how many entries the cache accumulates before one
+                # matches, so require only that the layers did not collapse
+                # onto a single body.
+                self.assertGreater(count(), 1)
+
+    def test_subgraph_reuse_element_materialized_before_the_region(self):
+        """An element the caller already read is still guarded on re-derivation.
+
+        A source materialized before the region runs does not land in that
+        region's traced_sources, so its guards would not reach the reuse
+        condition and the capture could move to an element with different
+        metadata unchecked.
+        """
+
+        class Pool:
+            def __init__(self, buffers):
+                self.buffers = buffers
+
+        class Layer(torch.nn.Module):
+            def __init__(self, layer_id, pool):
+                super().__init__()
+                self.layer_id = layer_id
+                self.pool = pool
+
+            def forward(self, x):
+                return x + self.pool.buffers[self.layer_id]
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        pool = Pool(
+            [
+                torch.full((4,), 1.0),
+                torch.full((4,), 2.0, dtype=torch.float64),
+                torch.full((4,), 3.0),
+            ]
+        )
+        layers = [Layer(i, pool) for i in range(3)]
+
+        def fn(x):
+            # Read the element the region will select first, so it is already
+            # materialized by the time the region traces.
+            warm = pool.buffers[0].sum()
+            return warm, [gn(layer, x) for layer in layers]
+
+        x = torch.zeros(4)
+        expected_warm, expected_outs = fn(x)
+        # inductor, because it is post grad fake tensor consistency that
+        # catches a capture moved to an element with different metadata.
+        warm, outs = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(warm, expected_warm)
+        for out, expected in zip(outs, expected_outs):
+            self.assertEqual(out.dtype, expected.dtype)
+            self.assertEqual(out, expected)
+
+    def test_reuse_hash_fn_re_derives_an_indexed_capture(self):
+        """A hash key that ignores the index still selects the right element.
+
+        Asserting equivalence is the reason to reach for reuse_hash_fn on a
+        per-layer cache, so the entry has to follow the index rather than stay
+        pinned to the one the region traced with. See #192906.
+        """
+
+        class Pool:
+            def __init__(self, buffers):
+                self.buffers = buffers
+
+        class Layer(torch.nn.Module):
+            def __init__(self, layer_id, pool):
+                super().__init__()
+                self.layer_id = layer_id
+                self.pool = pool
+
+            def forward(self, x):
+                return x.sin() + self.pool.buffers[self.layer_id]
+
+        @nested_compile_region(reuse_hash_fn=lambda layer, x: 0)
+        def gn(layer, x):
+            return layer(x)
+
+        n = 4
+        pool = Pool([torch.ones(4) * (i + 1) * 10 for i in range(n)])
+        layers = [Layer(i, pool) for i in range(n)]
+
+        def fn(x):
+            return sum(gn(layer, x) for layer in layers)
+
+        x = torch.zeros(4)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_one_element_two_indexes_retraces(self):
+        """Two indexes selecting one element cannot both be re-derived.
+
+        The element is lifted once, so following either index would make the
+        other read the wrong slot on a later call.
+        """
+
+        class Pool:
+            def __init__(self, n):
+                self.buffers = [torch.randn(8) for _ in range(n)]
+
+        class Layer(torch.nn.Module):
+            def __init__(self, pool, a, b):
+                super().__init__()
+                self.pool = pool
+                self.a = a
+                self.b = b
+
+            def forward(self, x):
+                return x.sin() + self.pool.buffers[self.a] + self.pool.buffers[self.b]
+
+        pool = Pool(4)
+        layers = [Layer(pool, a, 0) for a in range(4)]
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        fn = self._sum_over_layers(gn, layers)
+        x = torch.randn(8)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+
+    def test_subgraph_reuse_re_derived_index_is_guarded_in_the_frame(self):
+        """Re-deriving an index at compile time still guards it at runtime.
+
+        The stamped-out call reads the element rather than the index, so the
+        guard has to be installed on its behalf; without it, changing a layer
+        id would silently keep the old slot.
+        """
+
+        class Pool:
+            def __init__(self, n):
+                self.buffers = [torch.arange(8.0) * (10.0**i) for i in range(n)]
+
+        def body(self, x):
+            return x.sin() + self.pool.buffers[self.layer_id]
+
+        n = 4
+        _, layers = self._indexed_layers(body, n, pool=Pool(n))
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        fn = self._sum_over_layers(gn, layers)
+        x = torch.randn(8)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+        # Collapse the stamped-out layers onto slot 0. Not a permutation, so a
+        # missed recompile changes the result.
+        for layer in layers[1:]:
+            layer.layer_id = 0
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_subgraph_reuse_element_read_another_way(self):
+        """An element also reached without deferring an index is not re-derived.
+
+        Every element carries GetItemSource(container, i) whichever way it
+        leaves the list, so subscripting is not the only way to end up holding
+        the tracker a deferred subscript would move. Each form here selects a
+        fixed slot alongside a computed one, which is ordinary code, and getting
+        it wrong is a wrong result rather than a raise.
+        """
+
+        class Pool:
+            def __init__(self, buffers):
+                self.buffers = buffers
+
+        def by_subscript(self, x):
+            return x.sin() + self.pool.buffers[self.layer_id] + self.pool.buffers[0]
+
+        def by_unpack(self, x):
+            first, *_ = self.pool.buffers
+            return x.sin() + self.pool.buffers[self.layer_id] + first
+
+        def by_iteration(self, x):
+            total = x.sin() + self.pool.buffers[self.layer_id]
+            for buf in self.pool.buffers:
+                total = total + buf
+            return total
+
+        def by_list_call(self, x):
+            # list(...)[0] on purpose: the point is the access form, not the value.
+            first = list(self.pool.buffers)[0]  # noqa: RUF015
+            return x.sin() + self.pool.buffers[self.layer_id] + first
+
+        n = 4
+        for name, body in (
+            ("subscript", by_subscript),
+            ("unpack", by_unpack),
+            ("iteration", by_iteration),
+            ("list call", by_list_call),
+        ):
+            with self.subTest(name):
+                torch._dynamo.reset()
+                pool = Pool([torch.ones(4) * (i + 1) * 10 for i in range(n)])
+                _, layers = self._indexed_layers(body, n, pool=pool)
+
+                @nested_compile_region
+                def gn(layer, x):
+                    return layer(x)
+
+                fn = self._sum_over_layers(gn, layers)
+                x = torch.zeros(4)
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+                self.assertEqual(res, fn(x))
+
+    def test_subgraph_reuse_indexed_capture_hint(self):
+        """A refused re-derivation names the container in the reuse failure log."""
+
+        def body(self, x):
+            # The index is also an operand, so its guard survives and rejects
+            # the second layer.
+            return x.sin() + self.pool.buffers[self.layer_id] + self.layer_id
+
+        _, layers = self._indexed_layers(body, 2)
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        fn = self._sum_over_layers(gn, layers)
+        x = torch.randn(8)
+        # assertLogs enables the artifact logger on its own; set_logs() would
+        # clear unrelated log state for the rest of the process.
+        with self.assertLogs(
+            "torch._dynamo.variables.invoke_subgraph.__hierarchical_compile",
+            level="DEBUG",
+        ) as logs:
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        hints = [r for r in logs.output if "is selected from" in r]
+        self.assertTrue(hints, f"no indexed-capture hint in {logs.output}")
+        self.assertIn("pool.buffers", hints[0])
+
+    def test_subgraph_reuse_indexed_element_mutated_per_call(self):
+        """A reused region mutating its selected element writes only that element.
+
+        Guards against the re-derivation pinning every call to the first one's
+        slot, which would mutate one buffer repeatedly instead of each in turn.
+        """
+        n = 4
+
+        class Cache:
+            def __init__(self):
+                # Distinct starting values so a cross-slot write is visible.
+                self.layers = [torch.full((4,), (i + 1) * 100.0) for i in range(n)]
+
+        class Layer(torch.nn.Module):
+            def __init__(self, layer_id, cache):
+                super().__init__()
+                self.layer_id = layer_id
+                self.cache = cache
+
+            def forward(self, x):
+                slot = self.cache.layers[self.layer_id]
+                slot.add_(x)
+                return slot.sum()
+
+        @nested_compile_region
+        def gn(layer, x):
+            return layer(x)
+
+        def build():
+            cache = Cache()
+            return cache, [Layer(i, cache) for i in range(n)]
+
+        x = torch.ones(4)
+        eager_cache, eager_layers = build()
+        expected = sum(gn(layer, x) for layer in eager_layers)
+
+        compiled_cache, compiled_layers = build()
+        fn = self._sum_over_layers(gn, compiled_layers)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, expected)
+        self.assertEqual(count(), 1)
+        for eager_slot, compiled_slot in zip(eager_cache.layers, compiled_cache.layers):
+            self.assertEqual(eager_slot, compiled_slot)
+
+    def test_subgraph_reuse_hoisted_element_mutated_per_call(self):
+        """A reused region mutating a per-call argument writes only its own element.
+
+        Guards against a stamped-out region reapplying the first call's argument,
+        which would mutate one buffer repeatedly instead of each in turn.
+        """
+
+        @nested_compile_region
+        def gn(x, buf):
+            buf.add_(x)
+            return buf.sum()
+
+        n = 4
+
+        def fn(x, buffers):
+            return sum(gn(x, buffers[i]) for i in range(n))
+
+        x = torch.ones(4)
+        # Distinct starting values so a cross-element write is visible.
+        eager_buffers = [torch.full((4,), (i + 1) * 100.0) for i in range(n)]
+        compiled_buffers = [torch.full((4,), (i + 1) * 100.0) for i in range(n)]
+
+        expected = fn(x, eager_buffers)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+                x, compiled_buffers
+            )
+        self.assertEqual(res, expected)
+        self.assertEqual(count(), 1)
+        for eager_buf, compiled_buf in zip(eager_buffers, compiled_buffers):
+            self.assertEqual(eager_buf, compiled_buf)
+
     def test_subgraph_reuse_rebound_global_read_via_side_effects(self):
         """A region reading a global that is rebound between calls must retrace."""
         global _reuse_test_global
