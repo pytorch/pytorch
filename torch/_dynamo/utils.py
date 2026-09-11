@@ -552,7 +552,7 @@ class CompileEventLogger:
 
     @staticmethod
     def add_to_set(
-        event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
+        event_name: str, log_level: CompileEventLogLevel, key: str, value: object
     ) -> None:
         """
         Add metadata <value> to a set of values with key <key>. Creates a set if it doesn't exist.
@@ -587,7 +587,7 @@ class CompileEventLogger:
     @staticmethod
     def add_to_set_toplevel(
         key: str,
-        value: Any,
+        value: object,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ) -> None:
         """
@@ -901,7 +901,7 @@ def dynamo_timed(
                 runtime_context = get_runtime_metrics_context()
                 runtime_context.increment(dynamo_compile_column_us, duration_us)
                 if is_outer_event:
-                    extra = {
+                    extra: dict[str, object] = {
                         "compile_id": compile_id,
                         "is_runtime": True,
                         "is_forward": not is_backward,
@@ -1328,42 +1328,52 @@ def is_numpy_float_type(value: object) -> bool:
     )
 
 
-_unpack_fast_types_cache: tuple[type, ...] | None = None
-
-
+@functools.cache
 def _unpack_fast_types() -> tuple[type, ...]:
     # Builtin iterables whose elements we can get directly via
     # unpack_var_sequence, skipping the generic iter/getiter/iternext protocol
-    # (a bottleneck for large iterables). Built lazily since `variables` is a
+    # (a bottleneck for large iterables). Cached lazily since `variables` is a
     # circular import at module load.
-    global _unpack_fast_types_cache
-    if _unpack_fast_types_cache is None:
-        from . import variables
+    from . import variables
 
-        _unpack_fast_types_cache = (
-            variables.ConstDictVariable,
-            variables.DictViewVariable,
-            variables.MappingProxyVariable,
-            variables.DequeVariable,
-            variables.ListVariable,
-            variables.ListIteratorVariable,
-            variables.TupleIteratorVariable,
-            variables.DequeIteratorVariable,
-            variables.DequeReverseIteratorVariable,
-            variables.RangeVariable,
-            variables.SetVariable,
-            variables.FrozensetVariable,
-            variables.DictKeySetVariable,
-            variables.TensorVariable,
-            variables.TupleVariable,
-        )
-    return _unpack_fast_types_cache
+    return (
+        variables.ConstDictVariable,
+        variables.DequeIteratorVariable,
+        variables.DequeReverseIteratorVariable,
+        variables.DequeVariable,
+        variables.DictItemsVariable,
+        variables.DictKeySetVariable,
+        variables.DictKeysVariable,
+        variables.DictValuesVariable,
+        variables.DunderDictVariable,
+        variables.FakeItemVariable,
+        variables.FrozensetVariable,
+        variables.ListIteratorVariable,
+        variables.ListVariable,
+        variables.MappingProxyVariable,
+        variables.NNModuleHooksDictVariable,
+        variables.NumpyNdarrayVariable,
+        variables.OrderedDictVariable,
+        variables.OrderedSetVariable,
+        variables.RangeVariable,
+        variables.SetVariable,
+        variables.SizeVariable,
+        variables.TensorVariable,
+        variables.TensorWithTFOverrideVariable,
+        variables.TupleIteratorVariable,
+        variables.TupleVariable,
+        variables.UnspecializedPythonVariable,
+    )
 
 
 def unpack_iterable(
     tx: InstructionTranslatorBase, iterable: VariableTracker
 ) -> list[VariableTracker]:
-    if isinstance(iterable, _unpack_fast_types()):
+    # Realize first: istype is exact, so a lazy wrapper would otherwise miss
+    # the fast path (and a subclass VT stays excluded since its exact type is
+    # not in _unpack_fast_types).
+    iterable = iterable.realize()
+    if istype(iterable, _unpack_fast_types()):
         # unpack_var_sequence returns a fresh list, so hand it back directly:
         # no generator, no per-element callback, single allocation.
         return iterable.unpack_var_sequence(tx)
@@ -1386,7 +1396,8 @@ def lazily_unpack(
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
-    if isinstance(iterable, _unpack_fast_types()):
+    iterable = iterable.realize()
+    if istype(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
         return
 
@@ -1731,7 +1742,7 @@ class CompilationMetrics:
     functorch_config: str | None = None
 
     @classmethod
-    def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
+    def create(cls, metrics: dict[str, object]) -> CompilationMetrics:
         """
         Factory method to create a CompilationMetrics from a dict of fields.
         Includes the logic to add legacy fields and any pre-processing, e.g.,
@@ -1770,30 +1781,36 @@ class CompilationMetrics:
         # TODO: The following are legacy fields, populated from the fields that replace
         # them. Remove these when we decide we can really deprecate them.
         legacy_metrics = {
-            "start_time": us_to_s(metrics.get("start_time_us")),
+            "start_time": us_to_s(cast("int | None", metrics.get("start_time_us"))),
             "entire_frame_compile_time_s": us_to_s(
-                metrics.get("dynamo_cumulative_compile_time_us")
+                cast("int | None", metrics.get("dynamo_cumulative_compile_time_us"))
             ),
             "backend_compile_time_s": us_to_s(
-                metrics.get("aot_autograd_cumulative_compile_time_us")
+                cast(
+                    "int | None",
+                    metrics.get("aot_autograd_cumulative_compile_time_us"),
+                )
             ),
             "inductor_compile_time_s": us_to_s(
-                metrics.get("inductor_cumulative_compile_time_us")
+                cast("int | None", metrics.get("inductor_cumulative_compile_time_us"))
             ),
             "code_gen_time_s": us_to_s(
-                metrics.get("inductor_code_gen_cumulative_compile_time_us")
+                cast(
+                    "int | None",
+                    metrics.get("inductor_code_gen_cumulative_compile_time_us"),
+                )
             ),
             "remote_cache_time_saved_s": us_to_s(
-                metrics.get("distributed_ephemeral_timeout_us")
+                cast("int | None", metrics.get("distributed_ephemeral_timeout_us"))
             ),
             "remote_fx_graph_cache_get_time_ms": us_to_ms(
-                metrics.get("remote_fx_graph_cache_get_time_us")
+                cast("int | None", metrics.get("remote_fx_graph_cache_get_time_us"))
             ),
             "remote_fx_graph_cache_put_time_ms": us_to_ms(
-                metrics.get("remote_fx_graph_cache_put_time_us")
+                cast("int | None", metrics.get("remote_fx_graph_cache_put_time_us"))
             ),
             "structured_logging_overhead_s": us_to_s(
-                metrics.get("structured_logging_overhead_us")
+                cast("int | None", metrics.get("structured_logging_overhead_us"))
             ),
         }
 
@@ -2014,7 +2031,7 @@ def _functorch_config_for_logging() -> str | None:
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
-    metrics: dict[str, Any],
+    metrics: dict[str, object],
     exc_type: type[BaseException] | None,
     exc_value: BaseException | None,
 ) -> None:
@@ -2033,7 +2050,7 @@ def record_compilation_metrics(
 
     # Populate the compile_id from the metrics context if it's set. Otherwise,
     # look for it in the current compile context.
-    compile_id = metrics.get("compile_id")
+    compile_id = cast("CompileId | None", metrics.get("compile_id"))
     if not compile_id:
         compile_id = torch._guards.CompileContext.current_compile_id()
 
