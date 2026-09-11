@@ -9,6 +9,7 @@ import io
 import multiprocessing as mp
 import os
 import pickle
+import platform
 import sys
 import tempfile
 import threading
@@ -41,7 +42,7 @@ from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.output_graph import get_builtins_dict
-from torch._dynamo.package import DynamoCache, load_guards_state
+from torch._dynamo.package import DynamoCache, load_guards_state, SystemInfo
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -2692,6 +2693,33 @@ from user code:
         actual = loaded_fn(x)
         self.assertEqual(expected[0], actual[0])
         self.assertEqual(expected[1], actual[1])
+
+    def test_check_compatibility_triton_and_gpu_exempt_off_artifact(self):
+        # The Triton/GPU checks must exempt off the ARTIFACT (self), not the
+        # host (other). An artifact built with Triton must be rejected on a
+        # Triton-less host -- it would otherwise fail later at kernel load --
+        # while an artifact built without Triton bakes in no Triton code and
+        # loads anywhere. Same for gpu_name: only an artifact that recorded a
+        # GPU pins the model.
+        def make(triton, gpu):
+            return SystemInfo(
+                python_version=platform.python_version(),
+                torch_version=torch.__version__,
+                toolkit_version="12.0",
+                triton_version=triton,
+                gpu_name=gpu,
+            )
+
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "Triton version"):
+                make((3, 5), "A100").check_compatibility(make((0, 0), "A100"), "cuda")
+            make((0, 0), "A100").check_compatibility(make((3, 5), "A100"), "cuda")
+            with self.assertRaisesRegex(RuntimeError, "different GPU"):
+                make((3, 5), "A100").check_compatibility(make((3, 5), "H100"), "cuda")
+            make((3, 5), None).check_compatibility(make((3, 5), "H100"), "cuda")
+        with patch.object(torch.cuda, "is_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "cuda is not available"):
+                make((0, 0), None).check_compatibility(make((0, 0), None), "cuda")
 
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
         # Under dynamic shapes the leading placeholder is a SymInt, which has no
