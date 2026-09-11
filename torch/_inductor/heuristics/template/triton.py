@@ -23,7 +23,6 @@ from ...kernel.bmm import (
     BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS,
     blackwell_ws_persistent_tma_bmm_template,
     bmm_template,
-    is_blackwell_bmm_2cta_compatible,
 )
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -44,6 +43,7 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    has_free_symbols,
     TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
@@ -3120,8 +3120,6 @@ class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
 class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
     """Bounded configs for the Blackwell persistent-TMA BMM template."""
 
-    bmm_configs = BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS
-
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -3134,14 +3132,25 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
             raise NotImplementedError("Blackwell BMM requires rank-3 operands")
 
+        mat1_size = mat1.get_size()
+        mat2_size = mat2.get_size()
+        sizes = (*mat1_size, *mat2_size)
+        # The current bounded configs require concrete dimensions, and CUDA
+        # tensor-map dimensions must be positive.
+        if has_free_symbols(sizes):
+            return
+
+        batch, m, k = map(int, mat1_size)
+        batch_b, k_b, n = map(int, mat2_size)
+        if min(batch, m, n, k) <= 0:
+            return
+
         # Each logical batch is addressed through a rank-2 TMA descriptor.  In
         # particular, every matrix-leading stride and every per-batch base must
         # retain the 16-byte alignment required by TMA.
         if not can_use_tma(mat1, mat2):
             return
 
-        batch, m, k = map(int, mat1.get_size())
-        batch_b, k_b, _ = map(int, mat2.get_size())
         if batch != batch_b or k != k_b:
             raise NotImplementedError(
                 "Blackwell BMM does not broadcast logical batches"
@@ -3158,31 +3167,15 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "Blackwell BMM requires one contiguous matrix dimension"
             )
 
-        output_layout = kernel_inputs.output_layout()
-        flatten_output = len(output_layout.size) == 2
-        tma_store = (
-            flatten_output
-            and config.triton.enable_template_tma_store
-            and can_use_tma(output_layout=output_layout)
-        )
         tma_options = {
             "NUM_SMS": get_num_sms(),
             "A_ROW_MAJOR": a_row_major,
             "B_ROW_MAJOR": b_row_major,
-            "FLATTEN_OUTPUT": flatten_output,
-            "tma_store": tma_store,
+            "tma_store": False,
         }
         use_meta_ws = meta_ws_enabled()
-        for candidate in self.bmm_configs:
-            two_ctas = use_meta_ws and candidate.two_ctas
-            if two_ctas and not is_blackwell_bmm_2cta_compatible(
-                output_batch_rows=m,
-                block_m=candidate.block_m,
-                flatten_output=flatten_output,
-                tma_store=tma_store,
-            ):
-                continue
-            template_kwargs = {
+        for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
+            yield {
                 "BLOCK_M": candidate.block_m,
                 "BLOCK_N": candidate.block_n,
                 "BLOCK_K": candidate.block_k,
@@ -3195,12 +3188,8 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "FLATTEN": not use_meta_ws,
                 "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
                 "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
-                "TWO_CTAS": two_ctas,
                 **tma_options,
             }
-            if two_ctas:
-                template_kwargs["ctas_per_cga"] = (2, 1, 1)
-            yield template_kwargs
 
     def get_extra_kwargs(
         self,
