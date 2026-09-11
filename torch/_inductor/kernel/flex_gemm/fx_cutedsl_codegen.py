@@ -554,6 +554,7 @@ class FlexGemmEpiModSource:
     local_reduce_finalize: str | None = None
     local_reduce_finalize_operands: tuple[str, ...] = ()
     local_reduce_store_finalize: str | None = None
+    local_reduce_binary_store_finalize: bool = False
     local_reduce_prepass_combine: str | None = None
     local_reduce_prepass_finalize: str | None = None
     local_reduce_planes: int = 1
@@ -1583,6 +1584,7 @@ class FlexGemmEpilogueEmitter:
             local_reduce_store_finalize=(
                 finalize_name if self.local_reduce_prepass is not None else None
             ),
+            local_reduce_binary_store_finalize=self.local_reduce_finalize_uses_prepass,
             local_reduce_prepass_combine=(
                 None
                 if self.local_reduce_prepass is None
