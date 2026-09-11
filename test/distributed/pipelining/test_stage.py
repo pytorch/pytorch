@@ -64,6 +64,60 @@ instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
+    def test_pipeline_metadata_forward_kwargs(self):
+        class MetadataModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.received: tuple[int, int] | None = None
+
+            def forward(
+                self,
+                x,
+                *,
+                pipeline_stage_index: int = -1,
+                pipeline_microbatch_index: int = -1,
+            ):
+                self.received = (
+                    pipeline_stage_index,
+                    pipeline_microbatch_index,
+                )
+                return x
+
+        init_pg = not dist.is_initialized()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            if init_pg:
+                dist.init_process_group(
+                    "gloo",
+                    init_method=f"file://{os.path.join(tmpdir, 'pg')}",
+                    rank=0,
+                    world_size=1,
+                )
+            try:
+                module = MetadataModule()
+                stage = PipelineStage(
+                    module,
+                    stage_index=0,
+                    num_stages=1,
+                    device=torch.device("cpu"),
+                    pass_pipeline_metadata=True,
+                )
+                kwargs = {}
+                x = torch.ones(1)
+
+                self.assertIs(stage.forward_one_chunk(3, (x,), kwargs), x)
+                self.assertEqual(module.received, (0, 3))
+                self.assertEqual(kwargs, {})
+
+                with self.assertRaisesRegex(ValueError, "reserved name"):
+                    stage.forward_one_chunk(
+                        4,
+                        (x,),
+                        {"pipeline_microbatch_index": 4},
+                    )
+            finally:
+                if init_pg:
+                    dist.destroy_process_group()
+
     def test_dynamic_metadata_inference_restores_module_buffers(self):
         class BufferMutatingModule(torch.nn.Module):
             def __init__(self) -> None:
