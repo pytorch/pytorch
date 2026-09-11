@@ -437,6 +437,14 @@ def _set_pool_mode(mode):
         AOT_POOL_MODE = old
 
 
+AOT_ABSENT_WEIGHT = torch.eye(3) * 3.0
+
+
+class AbsentGlobalModule(torch.nn.Module):
+    def forward(self, x):
+        return x @ AOT_ABSENT_WEIGHT
+
+
 class ParentWithChildModule(torch.nn.Module):
     # Calling a CHILD module routes through nn.Module.__call__, whose hook-dict
     # guards are rooted at Dynamo's synthetic __import_torch_dot_nn_... alias.
@@ -1920,6 +1928,40 @@ from user code:
                 loaded(x)
         finally:
             globals()["AOT_POOL_MODE"] = saved
+
+    def test_aot_compile_module_absent_global_fails_guard(self):
+        # A guarded global the loading process does not have has to fail the
+        # guard. Falling back to the serialized scope would make the guard a
+        # no-op checked against capture-time state, which is the silent failure
+        # mode -- the loud one is recoverable on the serving machine.
+        mod = AbsentGlobalModule()
+        x = torch.randn(3, 3)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = globals().pop("AOT_ABSENT_WEIGHT")
+        try:
+            reloaded = torch.compile(
+                AbsentGlobalModule(),
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            with self.assertRaises(RuntimeError) as ctx:
+                reloaded(x)
+            self.assertIn("No AOT compiled graph matched", str(ctx.exception))
+            self.assertIn("AOT_ABSENT_WEIGHT", str(ctx.exception))
+            self.assertIn("load with an f_globals", str(ctx.exception))
+        finally:
+            globals()["AOT_ABSENT_WEIGHT"] = saved
 
     def test_aot_compile_module_import_alias_guard_survives_reload(self):
         # Dynamo mints __import_* aliases into the TRACING process's globals and
