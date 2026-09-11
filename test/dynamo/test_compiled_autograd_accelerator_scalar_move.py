@@ -121,6 +121,20 @@ class TestCompiledAutogradAcceleratorScalarMove(TestCase):
         self.assertEqual(indices, [])
         self.assertIsNone(target)
 
+    @mock.patch.object(
+        torch._C, "_get_privateuse1_backend_name", return_value=OOT_DEVICE
+    )
+    def test_mixed_oot_and_xpu_skip(self, _mock_name: mock.Mock) -> None:
+        indices, target, _ = _run_move_graph_nodes_to_cuda(
+            [
+                _MetaVal(_DeviceStub(OOT_DEVICE, 0), (2,)),
+                _MetaVal(_DeviceStub("xpu", 0), (2,)),
+                _MetaVal(torch.device("cpu")),
+            ]
+        )
+        self.assertEqual(indices, [])
+        self.assertIsNone(target)
+
     def test_cpu_only_graph_skips(self) -> None:
         indices, target, _ = _run_move_graph_nodes_to_cuda(
             [_MetaVal(torch.device("cpu"), (2,)), _MetaVal(torch.device("cpu"))]
