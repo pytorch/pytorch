@@ -1449,10 +1449,10 @@ class OutputGraph(OutputGraphCommon):
         # Escaping through the save_for_backward root specifically requires
         # the event to be created inside a resumed forward -- see
         # test_event_record_after_input_mutation_escapes_via_save_for_backward.
-        # save_for_backward only accepts Tensors, so a real caller can't
-        # get the event back out this way; this root is a conservative
-        # completeness measure -- it doesn't rely on that downstream
-        # check to neutralize a non-Tensor arg.
+        # This root is a conservative completeness measure -- it doesn't
+        # rely on the real ctx.save_for_backward to catch a non-Tensor arg
+        # for us (that check is downstream, gated on is_executable, and
+        # can silently no-op).
         #
         # local_generators is excluded: a returned generator
         # is rewritten to a ListIteratorVariable before compile_subgraph
@@ -1467,7 +1467,7 @@ class OutputGraph(OutputGraphCommon):
         # tx.debug_locals holds args to reorderable logging calls (e.g.
         # print).  This method and codegen_suffix are always called with
         # the same tx within one compile_subgraph invocation, and
-        # codegen_suffix drains exactly tx.debug_locals -- with the fast
+        # codegen_suffix iterates exactly tx.debug_locals -- with the fast
         # path that skips codegen_suffix entirely gated on
         # `not tx.debug_locals` -- so this root always matches what
         # actually gets emitted.  A different frame's own debug_locals
@@ -3769,6 +3769,7 @@ class OutputGraph(OutputGraphCommon):
         self.leaf_var_creation_order.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
+        self._pending_event_record_violations.clear()
 
     def add_graph_finalizer(
         self, register_finalizer: Callable[[fx.GraphModule], None]

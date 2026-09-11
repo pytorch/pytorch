@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
+    parametrize,
     requires_accelerator,
     requires_cuda,
     requires_xpu,
@@ -533,8 +534,14 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
             )
 
     def test_event_record_after_input_mutation_escapes_via_generator_finally(self):
-        # Same as above, but the finally block appends the event to a
-        # pre-existing list argument -- it does escape and must error.
+        # The event is created and recorded inside a generator's finally
+        # block -- close_local_generators traces the finally bytecode
+        # after the first escape scan, so this exercises the second scan
+        # at the end of compile_subgraph. Unlike
+        # test_event_record_after_input_mutation_non_escaping_generator_finally
+        # (same shape but no escape), the finally block here appends the
+        # event to a pre-existing list argument, so it does escape and
+        # must error.
         def gen(s, holder):
             try:
                 yield
@@ -2303,49 +2310,28 @@ class GraphModule(torch.nn.Module):
                 torch.Event(device=device),
             )
 
-    def test_event_record_after_input_mutation_non_escaping_no_error(self, device):
+    @parametrize("via_stream_record_event", (False, True))
+    def test_event_record_after_input_mutation_non_escaping_no_error(
+        self, device, via_stream_record_event
+    ):
         # The record-after-mutation hazard needs an observer outside the
         # compiled region; an event created during tracing that never
         # escapes (not returned, not stored) cannot have one, so this
-        # must compile.
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
-        def fn(x):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-                e.wait()
-            return x + 1
-
-        torch.compile(fn, backend=backend, fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
-
-        self.assertEqual(len(backend.graphs), 1)
-        nodes = list(backend.graphs[0].graph.nodes)
-        self.assertTrue(
-            any(node.target is torch.ops.streams.record_event for node in nodes),
-            "record_event op not found in graph",
-        )
-        self.assertTrue(
-            any(node.target is torch.ops.streams.wait_event for node in nodes),
-            "wait_event op not found in graph",
-        )
-
-    def test_event_record_event_after_input_mutation_non_escaping_no_error(
-        self, device
-    ):
-        # Same as the non-escaping test above but via stream.record_event()
-        # instead of event.record().
+        # must compile.  Parametrized over how the event is obtained --
+        # torch.Event(...).record() vs. stream.record_event() -- since
+        # both go through EventVariable.record but reach it from
+        # different call sites (streams.py:record vs. record_event).
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         def fn(x):
             s = torch.Stream(device=device)
             with s:
                 x.add_(1)
-                e = s.record_event()
+                if via_stream_record_event:
+                    e = s.record_event()
+                else:
+                    e = torch.Event(device=device)
+                    e.record()
                 e.wait()
             return x + 1
 
@@ -2393,14 +2379,16 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(len(backend.graphs), 1)
         nodes = list(backend.graphs[0].graph.nodes)
-        self.assertTrue(
-            any(node.target is torch.ops.streams.record_event for node in nodes),
-            "record_event op not found in graph",
+        record_node = next(
+            n for n in nodes if n.target is torch.ops.streams.record_event
         )
-        self.assertTrue(
-            any(node.target is torch.ops.streams.wait_event for node in nodes),
-            "wait_event op not found in graph",
-        )
+        wait_node = next(n for n in nodes if n.target is torch.ops.streams.wait_event)
+        # args are (event_index, stream_index); same event, different
+        # streams -- this is what makes the wait a genuine cross-stream
+        # wait rather than the ambient-stream wait _get_stream_arg would
+        # resolve a no-arg wait() to.
+        self.assertEqual(record_node.args[0], wait_node.args[0])
+        self.assertNotEqual(record_node.args[1], wait_node.args[1])
 
     def test_event_record_after_input_mutation_non_escaping_generator_finally(
         self, device
@@ -2460,22 +2448,6 @@ class GraphModule(torch.nn.Module):
             with s1:
                 e.record()
             return e
-
-        torch.compile(fn, backend="eager", fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
-
-    def test_event_not_returned_no_error(self, device):
-        # The event is created during tracing and never escapes the
-        # compiled region, so no observer outside the graph can wait on
-        # it: the record-after-mutation error must not fire.
-        def fn(x):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-            return x
 
         torch.compile(fn, backend="eager", fullgraph=True)(
             torch.ones(2, 2, device=device)
