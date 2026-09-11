@@ -94,10 +94,20 @@ class AOTCompilePickler(FunctionPicklerBase):
                 # resolves on it; the shared reducer would instead pickle
                 # __func__ (an nn.Module defines __getattr__), rebuilding a
                 # local subclass's method by value and failing on its __class__
-                # cell. Only a name that does not resolve back needs the pair.
+                # cell. pickle's rule is taken only on proof that the probe
+                # hands back a method over THIS receiver and THIS function (a
+                # rebound `a.forward = b.forward` resolves to b's); a probe that
+                # raises anything falls back to the pair, which is always right.
                 name = getattr(obj.__func__, "__name__", None)
-                inner = getattr(receiver, name, None) if name is not None else None
-                if inspect.ismethod(inner) and inner.__func__ is obj.__func__:
+                try:
+                    inner = getattr(receiver, name, None) if name is not None else None
+                except Exception:
+                    inner = None
+                if (
+                    inspect.ismethod(inner)
+                    and inner.__func__ is obj.__func__
+                    and inner.__self__ is receiver
+                ):
                     return NotImplemented
                 return type(self)._unpickle_bound_method, (obj.__func__, receiver)
             reduced = self._reduce_bound_method(obj)
@@ -105,19 +115,19 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so it carries what a
-            # call needs -- defaults, keyword defaults and closure -- with none
-            # of them pruned: a keyword default that will not pickle fails the
-            # save rather than vanishing (the old reduce dropped __kwdefaults__
-            # outright). __dict__, __doc__, annotations and type params follow
-            # in later commits, each pruned per value.
+            # call needs -- defaults, keyword defaults, closure and __doc__ --
+            # with none of them pruned: a keyword default that will not pickle
+            # fails the save rather than vanishing (the old reduce dropped
+            # __kwdefaults__ outright). __dict__, annotations and type params
+            # follow in later commits, each pruned per value.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
                 attributes={},
-                doc=None,
                 annotations={},
+                doc=obj.__doc__,
                 type_params=None,
                 globals_snapshot=None,
             )
