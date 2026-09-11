@@ -158,7 +158,7 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _build_function(
         cls,
-        f_globals: dict[str, Any],
+        f_globals: dict[str, object],
         module: Any,
         code: types.CodeType,
         qualname: str,
@@ -208,8 +208,8 @@ class FunctionPicklerBase(pickle.Pickler):
         # (".rel") or a module whose body raises fails import with something
         # other than ImportError. None of those should fail the load, so require
         # a non-empty str and swallow any Exception from the import into the
-        # empty scope (SystemExit/KeyboardInterrupt still propagate).
-        f_globals: dict[str, Any] = {}
+        # empty scope (a SystemExit or KeyboardInterrupt still propagates).
+        f_globals: dict[str, object] = {}
         why: str | Exception = f"scope {scope!r} is not an importable name"
         if isinstance(scope, str) and scope:
             try:
@@ -223,7 +223,7 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_snapshot(
         cls,
-        scope: dict[str, Any],
+        scope: dict[str, object],
         module: Any,
         code: types.CodeType,
         qualname: str,
@@ -310,7 +310,7 @@ class FunctionPicklerBase(pickle.Pickler):
         )
         if module is None:
             return False
-        resolved: Any = module
+        resolved: object = module
         for name in fn.__qualname__.split("."):
             resolved = getattr(resolved, name, None)
         return resolved is fn
@@ -352,7 +352,7 @@ class FunctionPicklerBase(pickle.Pickler):
 
     def _reduce_bound_method(
         self, method: types.MethodType, *, receiver_is_live: bool = False
-    ) -> tuple[Any, ...] | None:
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]] | None:
         # pickle rebuilds a bound method by getattr() on self at load, which is
         # wrong when that does not resolve back to the same bound method; those
         # carry the function and self explicitly. `receiver_is_live` says
@@ -363,18 +363,18 @@ class FunctionPicklerBase(pickle.Pickler):
         receiver = method.__self__
         cls = type(receiver)
         func = method.__func__
-        # __name__ is not guaranteed: MethodType accepts any callable, so
-        # method.__func__ may be a functools.partial with no __name__. Fall
-        # through to the explicit reduce rather than raising out of the reducer.
-        name = getattr(func, "__name__", None)
         # A name served PER-INSTANCE (an instance __dict__ monkeypatch such as
-        # m.forward = MethodType(f, m), or a __slots__ member) is carried as
+        # obj.f = MethodType(f, obj), or a __slots__ member) is carried as
         # func+self explicitly: getattr() at load hands back whatever the dict
         # or slot holds, a raw function or a method bound elsewhere, never a
         # method over this pair, and in the self-cycle case the slot is not even
-        # restored yet. A class defining __getattr__ (nn.Module included) takes
-        # the pair too, without probing: the probe would run that user code, and
-        # a subclass may rebuild such a receiver as a DIFFERENT type at load
+        # restored yet. The __dict__ clause only sees a receiver that HAS an
+        # instance dict, so a pure-slots receiver falls through it to the slot
+        # check (a slotted subclass of a non-slotted base has both, and either
+        # clause gives the same answer). A class defining __getattr__ (nn.Module
+        # included) takes the pair before either gate, without probing.
+        # Probing would run that user code, and a subclass may rebuild such a
+        # receiver as a DIFFERENT type at load
         # (GuardsStatePickler._unpickle_module turns a non-referenceable module
         # into a bare torch.nn.Module), on which getattr() would not resolve
         # the method. Both gates are skipped for a type receiver (a classmethod;
@@ -387,6 +387,12 @@ class FunctionPicklerBase(pickle.Pickler):
         try:
             if not exempt and hasattr(cls, "__getattr__"):
                 return explicit
+            # __name__ is not guaranteed: MethodType accepts any callable, so
+            # func may be a functools.partial with no __name__, or a proxy whose
+            # __getattr__ raises something other than AttributeError; both fall
+            # through to the explicit reduce rather than out of the reducer. Read
+            # after the gate above, which takes the pair without probing func.
+            name = getattr(func, "__name__", None)
             self_dict = getattr(receiver, "__dict__", None)
             if not exempt and (
                 (isinstance(self_dict, dict) and name in self_dict)
