@@ -258,6 +258,35 @@ class FunctionPicklerBase(pickle.Pickler):
             fn.__type_params__ = type_params
 
     @staticmethod
+    def _fqn_resolves(fn: types.FunctionType) -> bool:
+        """Whether pickling fn by reference (import __module__, walk __qualname__)
+        lands back on fn. False for a <locals> function, a functools.wraps
+        wrapper (it carries the wrappee's names), an exec-created function, or
+        a module absent from sys.modules; pickling those by reference fails at
+        dump with PicklingError (a bare AttributeError from the C pickler for a
+        <locals> name below 3.14), so the caller rebuilds them from the code
+        object (or prunes them). Conservative on purpose: pickle would import a
+        module that is not in sys.modules yet, this reports False for it
+        (guards.py explains why on its caller), and a "<locals>" qualname
+        component is refused like pickle refuses it. GuardsStatePickler handles
+        <locals> on its own branch before asking; the helper keeps the check so
+        that AOTCompilePickler can dispatch on it alone once it moves onto this
+        base."""
+        if "<locals>" in fn.__qualname__.split("."):
+            return False
+        # __module__ need not be a str (a decorator can set anything); an
+        # unhashable one must not TypeError out of the reducer.
+        module = (
+            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
+        )
+        if module is None:
+            return False
+        resolved: Any = module
+        for name in fn.__qualname__.split("."):
+            resolved = getattr(resolved, name, None)
+        return resolved is fn
+
+    @staticmethod
     def _read_raw_annotations(obj: Any) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the

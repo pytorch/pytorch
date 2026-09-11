@@ -4656,19 +4656,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
-            if "<locals>" in obj.__qualname__:
+            if "<locals>" in obj.__qualname__.split("."):
                 # Rebuilt whether or not a guard is rooted at it, as before this
                 # change: it can never be found by name, and unlike a wraps
                 # wrapper it has no module-level neighbourhood to drag along.
                 return self._reduce_function_by_value(obj)
-            resolved: Any = None
-            # __module__ need not be a str (a decorator can set anything); an
-            # unhashable one must not TypeError out of the reducer.
-            if isinstance(obj.__module__, str) and obj.__module__ in sys.modules:
-                resolved = sys.modules[obj.__module__]
-                for name in obj.__qualname__.split("."):
-                    resolved = getattr(resolved, name, None)
-            if resolved is not obj:
+            if not self._fqn_resolves(obj):
                 # See Note [Reconstructing a function a guard is rooted at].
                 # A module absent from sys.modules (an exec-created function, or
                 # __module__ is None) is an fqn mismatch too: pickling by
