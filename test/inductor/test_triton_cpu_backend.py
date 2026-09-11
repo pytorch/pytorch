@@ -27,10 +27,22 @@ TRITON_CPU_SLOW_TESTS = (
 )
 
 if HAS_CPU and TRITON_HAS_CPU:
+    # TODO: re-enable when the stable triton CPU backend can compile
+    # inductor CPU code. The backend is newly present via the stable
+    # channel, but inductor emits constructs it cannot compile yet:
+    # missing libdevice.* lowering and no CPUDriver.tensor_descriptor.
+    # Internal-only: stable is an old (3.5-era) frontend with a retrofitted
+    # 3.8-based CPU backend; drop this once stable is upgraded to 3.8.
+    _CPU_TRITON_SKIP_REASON = (
+        "triton CPU backend in stable cannot yet compile inductor CPU code "
+        "(missing libdevice lowering and tensor descriptor support)"
+    )
+
     # SweepInputsCpuTest is only defined when CPU tests are enabled
     # (RUN_CPU); otherwise there is nothing to subclass.
     if hasattr(test_torchinductor, "SweepInputsCpuTest"):
 
+        @unittest.skip(_CPU_TRITON_SKIP_REASON)
         @config.patch(
             {
                 "cpu_backend": "triton",
@@ -41,6 +53,7 @@ if HAS_CPU and TRITON_HAS_CPU:
         class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
             pass
 
+    @unittest.skip(_CPU_TRITON_SKIP_REASON)
     @config.patch(
         {
             "cpu_backend": "triton",
