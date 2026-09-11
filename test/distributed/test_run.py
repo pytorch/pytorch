@@ -206,6 +206,44 @@ class RunTest(TestCase):
             with redirect_stderr(io.StringIO()):
                 self._parse_args(["--print-completion=notashell"])
 
+    # ------------------------------------------------------------------
+    # --exit-barrier-timeout flag
+    # ------------------------------------------------------------------
+
+    def test_exit_barrier_timeout_flag_default(self):
+        """--exit-barrier-timeout defaults to None (resolved later in LaunchConfig)."""
+        parser = run.get_args_parser()
+        args = parser.parse_args(["dummy_script.py"])
+        self.assertIsNone(args.exit_barrier_timeout)
+
+    def test_exit_barrier_timeout_flag_custom(self):
+        """--exit-barrier-timeout parses a float value."""
+        parser = run.get_args_parser()
+        args = parser.parse_args(["--exit-barrier-timeout=600", "dummy_script.py"])
+        self.assertEqual(args.exit_barrier_timeout, 600.0)
+
+    def test_exit_barrier_timeout_underscore_alias(self):
+        """--exit_barrier_timeout (underscore form) is also accepted."""
+        parser = run.get_args_parser()
+        args = parser.parse_args(["--exit_barrier_timeout=450", "dummy_script.py"])
+        self.assertEqual(args.exit_barrier_timeout, 450.0)
+
+    def test_config_from_args_exit_barrier_timeout(self):
+        """config_from_args forwards --exit-barrier-timeout to LaunchConfig."""
+        args = self._parse_args(["--exit-barrier-timeout=750", "dummy_script.py"])
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT", None)
+            config, _, _ = run.config_from_args(args)
+        self.assertEqual(config.exit_barrier_timeout, 750.0)
+
+    def test_config_from_args_exit_barrier_timeout_default(self):
+        """Without the flag, config_from_args falls back to the 300-second default."""
+        args = self._parse_args(["dummy_script.py"])
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT", None)
+            config, _, _ = run.config_from_args(args)
+        self.assertEqual(config.exit_barrier_timeout, 300.0)
+
 
 if __name__ == "__main__":
     run_tests()
