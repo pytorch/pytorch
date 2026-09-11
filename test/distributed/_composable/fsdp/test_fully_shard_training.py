@@ -23,6 +23,7 @@ from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
+    GradientReductionHandle,
     MixedPrecisionPolicy,
     OffloadPolicy,
     register_fsdp_forward_method,
@@ -1710,6 +1711,122 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_finalize_gradient_accumulation(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model[1], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        torch.manual_seed(42 + self.rank)
+        inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(3)]
+        model.set_is_last_backward(False)
+        model.set_reshard_after_backward(False)
+        model.set_reduce_scatter_unused_params(True)
+        # Defer all gradient reduction until finalization.
+        with CommDebugMode() as comm_mode:
+            model.set_requires_gradient_sync(False)
+            for input_tensor in inputs:
+                model(input_tensor).sum().backward()
+            model.finalize_gradient_accumulation()
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts[c10d_ops._allgather_base_], 2)
+        self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 2)
+
+        for input_tensor in inputs:
+            ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsInstance(param, DTensor)
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+        # Finalization restores the no-sync and no-reshard settings.
+        model.zero_grad(set_to_none=True)
+        with CommDebugMode() as comm_mode:
+            for input_tensor in inputs[:2]:
+                model(input_tensor).sum().backward()
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts[c10d_ops._allgather_base_], 2)
+        self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 0)
+
+        model.finalize_gradient_accumulation()
+        model.zero_grad(set_to_none=True)
+        model.set_requires_gradient_sync(True)
+        # Finalization does not reduce again after a synchronized backward.
+        with CommDebugMode() as comm_mode:
+            model(inputs[0]).sum().backward()
+            model.finalize_gradient_accumulation()
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 2)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_finalize_gradient_accumulation_async(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model[1], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        torch.manual_seed(42 + self.rank)
+        inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(3)]
+        model.set_is_last_backward(False)
+        model.set_reshard_after_backward(False)
+        model.set_requires_gradient_sync(False)
+        for input_tensor in inputs:
+            model(input_tensor).sum().backward()
+
+        handle = model.finalize_gradient_accumulation(async_op=True)
+        self.assertIsInstance(handle, GradientReductionHandle)
+        state = model._get_fsdp_state()
+        self.assertTrue(state._state_ctx.gradient_reduction_pending)
+        self.assertGreater(len(state._comm_ctx.reduce_scatter_states), 0)
+        with self.assertRaisesRegex(RuntimeError, "must be waited on"):
+            model.finalize_gradient_accumulation(async_op=True)
+        with self.assertRaisesRegex(RuntimeError, "must be waited on"):
+            model(inputs[0])
+
+        handle.wait()
+        handle.wait()
+        self.assertFalse(state._state_ctx.gradient_reduction_pending)
+        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 0)
+
+        for input_tensor in inputs:
+            ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsInstance(param, DTensor)
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_finalize_gradient_accumulation_rejects_partial_all_reduce(self):
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        model = nn.Linear(8, 8, bias=False).to(device_type)
+        fully_shard(model, mesh=mesh)
+        model.set_is_last_backward(False)
+        model.set_requires_all_reduce(False)
+        model(torch.randn(4, 8, device=device_type.type)).sum().backward()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "does not support HSDP accumulation with all-reduce disabled",
+        ):
+            model.finalize_gradient_accumulation()
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_gradient_accumulation(self):
         """
         Tests gradient accumulation with/without gradient reduction and
@@ -2735,6 +2852,62 @@ class TestFullyShardCudaGraph(FSDPTest):
                 for graph_grad, ref_grad in zip(static_output_grads, ref_grads):
                     self.assertTrue(torch.equal(graph_grad, ref_grad))
                 model.zero_grad(set_to_none=True)
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_finalize_gradient_accumulation_cudagraph(self):
+        self.run_subtests(
+            {"async_op": [False, True]},
+            self._test_finalize_gradient_accumulation_cudagraph,
+        )
+
+    def _test_finalize_gradient_accumulation_cudagraph(self, async_op: bool) -> None:
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device)
+        for param in model.parameters():
+            dist.broadcast(param, src=0)
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model[1], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        static_inputs = [torch.randn(4, 8, device=device) for _ in range(3)]
+
+        def run_accumulation() -> tuple[torch.Tensor, ...]:
+            for input_tensor in static_inputs:
+                model(input_tensor).sum().backward()
+            handle = model.finalize_gradient_accumulation(async_op=async_op)
+            if handle is not None:
+                handle.wait()
+            return tuple(param.grad.detach().clone() for param in model.parameters())
+
+        model.set_is_last_backward(False)
+        model.set_reshard_after_backward(False)
+        model.set_requires_gradient_sync(False)
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            run_accumulation()
+            model.zero_grad(set_to_none=True)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            graph_grads = run_accumulation()
+
+        for _ in range(2):
+            model.zero_grad(set_to_none=False)
+            for input_tensor in static_inputs:
+                input_tensor.copy_(torch.randn_like(input_tensor))
+            ref_grads = run_accumulation()
+            graph.replay()
+            for graph_grad, ref_grad in zip(graph_grads, ref_grads):
+                self.assertEqual(graph_grad, ref_grad)
 
 
 if __name__ == "__main__":
