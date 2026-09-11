@@ -7,8 +7,6 @@ import onnxruntime
 import parameterized
 from onnx_test_common import MAX_ONNX_OPSET_VERSION, MIN_ONNX_OPSET_VERSION
 from pytorch_test_common import (
-    skipIfNoBFloat16Cuda,
-    skipIfNoCuda,
     skipIfUnsupportedMinOpsetVersion,
     skipScriptTest,
 )
@@ -17,15 +15,24 @@ from test_pytorch_onnx_onnxruntime import _parameterized_class_attrs_and_values
 import torch
 from torch.cuda.amp import autocast
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    Capability,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import HardwareClassification
 
+
+class_params = _parameterized_class_attrs_and_values(
+    MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
+)
 
 @parameterized.parameterized_class(
-    **_parameterized_class_attrs_and_values(
-        MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
-    ),
+    **class_params,
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
+    hw_classification = HardwareClassification.CUDA
     ort_backend = "CUDAExecutionProvider"
 
     @classmethod
@@ -35,8 +42,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
             raise unittest.SkipTest(f"onnxruntime {cls.ort_backend} is not available")
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfNoCuda
-    def test_gelu_fp16(self):
+    def test_gelu_fp16(self, device):
         class GeluModel(torch.nn.Module):
             def forward(self, x):
                 return torch.nn.functional.gelu(x)
@@ -48,14 +54,13 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
             6,
             requires_grad=True,
             dtype=torch.float16,
-            device=torch.device("cuda"),
+            device=device,
         )
         self.run_test(GeluModel(), x, rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfNoCuda
     @skipScriptTest()
-    def test_layer_norm_fp16(self):
+    def test_layer_norm_fp16(self, device):
         class LayerNormModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -72,14 +77,13 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
             10,
             requires_grad=True,
             dtype=torch.float16,
-            device=torch.device("cuda"),
+            device=device,
         )
-        self.run_test(LayerNormModel().cuda(), x, rtol=1e-3, atol=1e-5)
+        self.run_test(LayerNormModel().to(device), x, rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    @skipIfNoCuda
     @skipScriptTest()
-    def test_softmaxCrossEntropy_fusion_fp16(self):
+    def test_softmaxCrossEntropy_fusion_fp16(self, device):
         class FusionModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -92,8 +96,8 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
                 return output
 
         N, C = 5, 4
-        input = torch.randn(N, 16, dtype=torch.float16, device=torch.device("cuda"))
-        target = torch.empty(N, dtype=torch.long, device=torch.device("cuda")).random_(
+        input = torch.randn(N, 16, dtype=torch.float16, device=device)
+        target = torch.empty(N, dtype=torch.long, device=device).random_(
             0, C
         )
 
@@ -101,9 +105,8 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
         target[target == 1] = -100
         self.run_test(FusionModel(), (input, target))
 
-    @skipIfNoCuda
     @skipScriptTest()
-    def test_apex_o2(self):
+    def test_apex_o2(self, device):
         class LinearModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -116,45 +119,53 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
             from apex import amp
         except Exception as e:
             raise unittest.SkipTest("Apex is not available") from e
-        input = torch.randn(3, 3, device=torch.device("cuda"))
+        input = torch.randn(3, 3, device=device)
         model = amp.initialize(LinearModel(), opt_level="O2")
         self.run_test(model, input)
 
     # ONNX supports bfloat16 for opsets >= 13
     # Add, Sub and Mul ops don't support bfloat16 cpu in onnxruntime.
     @skipIfUnsupportedMinOpsetVersion(13)
-    @skipIfNoBFloat16Cuda
-    def test_arithmetic_bfp16(self):
+    @requires_capabilities(Capability.dtype.bf16)
+    def test_arithmetic_bfp16(self, device):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                y = torch.ones(3, 4, dtype=torch.bfloat16, device=torch.device("cuda"))
+                y = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
                 x = x.type_as(y)
                 return torch.mul(torch.add(x, y), torch.sub(x, y)).to(
                     dtype=torch.float16
                 )
 
         x = torch.ones(
-            3, 4, requires_grad=True, dtype=torch.float16, device=torch.device("cuda")
+            3, 4, requires_grad=True, dtype=torch.float16, device=device
         )
         self.run_test(MyModule(), x, rtol=1e-3, atol=1e-5)
 
-    @skipIfNoCuda
-    def test_deduplicate_initializers_diff_devices(self):
+    def test_deduplicate_initializers_diff_devices(self, device):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.w = torch.nn.Parameter(
                     torch.ones(2, 3, device=torch.device("cpu"))
                 )
-                self.b = torch.nn.Parameter(torch.ones(3, device=torch.device("cuda")))
+                self.b = torch.nn.Parameter(torch.ones(3, device=device))
 
             def forward(self, x, y):
                 return torch.matmul(self.w, x), y + self.b
 
         x = torch.randn(3, 3, device=torch.device("cpu"))
-        y = torch.randn(3, 3, device=torch.device("cuda"))
+        y = torch.randn(3, 3, device=device)
         self.run_test(Model(), (x, y))
 
+
+# Instantiate device-type tests for each parameterized subclass generated by
+# @parameterized_class above.
+attrs, input_values = class_params.values()
+for i, vals in enumerate(input_values):
+    name = onnx_test_common.parameterize_class_name(
+        TestONNXRuntime_cuda, i, dict(zip(attrs, vals))
+    )
+    instantiate_device_type_tests(globals()[name], globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     common_utils.run_tests()
