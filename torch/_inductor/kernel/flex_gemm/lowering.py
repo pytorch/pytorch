@@ -1095,8 +1095,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         input_gen_fns=input_gen_fns or None,
         **({"return_multi_template": False} if mutated_input_nodes else {}),
     )
-    if len(choices) == 1:
-        # A single choice skips autotuning; compile its kernel now instead of at first call.
+    if tuned and len(choices) == 1:
+        # autotune_select_algorithm skips a lone tuned candidate; compile it now so
+        # tuned=True never defers compilation to the first call. Untuned calls keep
+        # lazy first-call compilation and allocate no example tensors.
         choices[0].precompile()
     structural_outs = {}
     if indexed_output is not None:
