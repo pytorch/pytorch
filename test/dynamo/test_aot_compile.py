@@ -690,6 +690,37 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_prunes_functools_wraps_wrapped(self):
+        # functools.wraps writes __wrapped__ into the wrapper's __dict__, so a
+        # helper that merely decorates another function drags the wrapped one
+        # (and anything hanging off it) into the artifact. An unpicklable value
+        # there must be pruned, not fail the save.
+        def build():
+            def base(x):
+                return x * 3
+
+            base.lock = threading.Lock()
+
+            @functools.wraps(base)
+            def helper(x):
+                return x * 2
+
+            return helper
+
+        helper = build()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(*inputs), expected)
+
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
             return x + 1 * x
@@ -1908,6 +1939,41 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
             AOTCompilePickler({}, buf).dump(fn)
         self.assertIn("cannot pickle", str(cm.exception))
+
+    def test_pickler_rebuilds_a_nested_function_faithfully(self):
+        # The pickler passed __qualname__ where FunctionType wants __name__, so
+        # a reloaded function reported the dotted qualname as its __name__; it
+        # read cell_contents unguarded, so an EMPTY cell raised ValueError out
+        # of the pickler; and it dropped __kwdefaults__ and __dict__ outright.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            scale = None
+
+            def inner(*, k=1):
+                return unset, scale
+
+            inner.__name__ = "renamed"
+            inner.tag = 2.0
+            if inner is None:
+                unset = 1  # never runs, so the cell inner closes over stays empty
+            return inner
+
+        fn = outer()
+        cells = dict(zip(fn.__code__.co_freevars, fn.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__name__, "renamed")
+        self.assertEqual(out.__qualname__, fn.__qualname__)
+        self.assertEqual(out.__kwdefaults__, {"k": 1})
+        self.assertEqual(out.tag, 2.0)
+        cells = dict(zip(out.__code__.co_freevars, out.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        self.assertIsNone(cells["scale"].cell_contents)
 
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):

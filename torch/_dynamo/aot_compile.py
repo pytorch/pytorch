@@ -60,6 +60,15 @@ class CompileArtifacts:
         current_system.check_compatibility(self.system_info, self.device_type)
 
 
+@dataclasses.dataclass
+class _ProbeState:
+    """Shared by an AOTCompilePickler and the throwaway probe picklers its
+    _dumps_cleanly spawns, so the whole probe tree sees one memo."""
+
+    # id(value) -> picklable; without the memo a probe tree is exponential.
+    cache: dict[int, bool] = dataclasses.field(default_factory=dict)
+
+
 class AOTCompilePickler(FunctionPicklerBase):
     def __init__(self, external_data: dict[str, object], buf: io.BytesIO) -> None:
         super().__init__(buf)
@@ -68,6 +77,7 @@ class AOTCompilePickler(FunctionPicklerBase):
             id(value): key for key, value in external_data.items()
         }
         self.errors = {}
+        self._probe_state = _ProbeState()
 
     def persistent_id(self, obj: object) -> int | str | None:
         if id(obj) in self.id_map:
@@ -91,25 +101,55 @@ class AOTCompilePickler(FunctionPicklerBase):
             if reduced is not None:
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
-            # The runtime env has to RUN this function, so it carries what a
-            # call needs -- defaults, keyword defaults and closure -- with none
-            # of them pruned: a keyword default that will not pickle fails the
-            # save rather than vanishing (the old reduce dropped __kwdefaults__
-            # outright). __dict__, __doc__, annotations and type params follow
-            # in later commits, each pruned per value.
+            # The runtime env has to RUN this function, so unlike the guard
+            # pickler nothing it holds is pruned -- except __dict__ entries that
+            # will not pickle. The runtime assigns those back and never forces
+            # the pruned ones, so a value this pickler cannot serialize (a
+            # __dict__ entry like the __wrapped__ functools.wraps stashes, which
+            # can drag an unrelated lock/Module in) is dropped rather than left
+            # to fail the whole dump.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
-                attributes={},
-                doc=None,
+                attributes={
+                    k: v for k, v in obj.__dict__.items() if self._dumps_cleanly(v)
+                },
                 annotations={},
+                doc=None,
                 type_params=None,
                 globals_snapshot=None,
             )
 
         return NotImplemented
+
+    def _dumps_cleanly(self, value: Any) -> bool:
+        # "does it pickle?" has no cheaper predicate than trying. A throwaway
+        # pickler of this exact class keeps external_data/persistent_id behaviour
+        # identical to the real dump. A recursion overflow counts as unpicklable
+        # (the value is pruned) rather than re-raising, matching the guard side.
+        if value is None or type(value) in (str, int, bytes, bool, float):
+            return True
+        state = self._probe_state
+        vid = id(value)
+        cached = state.cache.get(vid)
+        if cached is not None:
+            return cached
+        probe = type(self)(self.external_data, io.BytesIO())
+        # Every probed value is owned by the function being pickled, which pickle
+        # keeps alive until dump() returns, so an id is not reused within one
+        # serialize().
+        probe._probe_state = state
+        try:
+            probe.dump(value)
+        except Exception as exc:
+            log.debug("pruning unpicklable %r from a nested function: %s", value, exc)
+            result = False
+        else:
+            result = True
+        state.cache[vid] = result
+        return result
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
