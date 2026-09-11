@@ -1034,20 +1034,8 @@ class TestSchedulePlan(TestCase):
                 break
         return count
 
-    def test_unshard_lookahead_default_is_rank_aware(self):
+    def test_unshard_lookahead_default_preserves_residency_window(self):
         schedule = self._interleaved_schedule()
-        self.assertEqual(
-            [
-                self._unshards_before_first_compute(
-                    schedule.pipeline_order_with_comms[rank]
-                )
-                for rank in range(4)
-            ],
-            [2, 3, 4, 4],
-        )
-
-    def test_unshard_lookahead_maximum_reproduces_legacy_prefetch(self):
-        schedule = self._interleaved_schedule(unshard_lookahead=4)
         self.assertEqual(
             [
                 self._unshards_before_first_compute(
@@ -1058,14 +1046,25 @@ class TestSchedulePlan(TestCase):
             [4, 4, 4, 4],
         )
 
+    def test_unshard_lookahead_override_staggers_prefetch(self):
+        schedule = self._interleaved_schedule(unshard_lookahead=2)
+        self.assertEqual(
+            [
+                self._unshards_before_first_compute(
+                    schedule.pipeline_order_with_comms[rank]
+                )
+                for rank in range(4)
+            ],
+            [2, 2, 2, 2],
+        )
+
     def test_unshard_lookahead_rejects_invalid_values(self):
-        self.assertEqual(_resolve_unshard_lookahead(None, 0, 4), 2)
-        self.assertEqual(_resolve_unshard_lookahead(None, 3, 4), 4)
-        self.assertEqual(_resolve_unshard_lookahead(3, 0, 4), 3)
+        self.assertEqual(_resolve_unshard_lookahead(None, 4), 4)
+        self.assertEqual(_resolve_unshard_lookahead(3, 4), 3)
         for lookahead in (True, False, 0, -1, 5, "auto"):
             with self.subTest(unshard_lookahead=lookahead):
                 with self.assertRaises(ValueError):
-                    _resolve_unshard_lookahead(lookahead, 0, 4)  # type: ignore[arg-type]
+                    _resolve_unshard_lookahead(lookahead, 4)  # type: ignore[arg-type]
 
     @parametrize(
         "ScheduleClass",
@@ -1096,43 +1095,43 @@ class TestSchedulePlan(TestCase):
                 unshard_lookahead=lookahead,
             )
 
-        adaptive = build(None)
-        legacy = build(num_local_stages)
+        staggered = build(1)
+        default = build(None)
         p2p = (SEND_F, SEND_B, RECV_F, RECV_B)
 
         for rank in range(group_size):
             with self.subTest(rank=rank):
-                adaptive_actions = adaptive.pipeline_order_with_comms[rank]
-                legacy_actions = legacy.pipeline_order_with_comms[rank]
+                staggered_actions = staggered.pipeline_order_with_comms[rank]
+                default_actions = default.pipeline_order_with_comms[rank]
                 self.assertEqual(
-                    sum(a.computation_type == UNSHARD for a in adaptive_actions),
-                    sum(a.computation_type == UNSHARD for a in legacy_actions),
+                    sum(a.computation_type == UNSHARD for a in staggered_actions),
+                    sum(a.computation_type == UNSHARD for a in default_actions),
                 )
                 self.assertEqual(
-                    sum(a.computation_type == RESHARD for a in adaptive_actions),
-                    sum(a.computation_type == RESHARD for a in legacy_actions),
+                    sum(a.computation_type == RESHARD for a in staggered_actions),
+                    sum(a.computation_type == RESHARD for a in default_actions),
                 )
                 self.assertEqual(
                     [
                         a
-                        for a in adaptive_actions
+                        for a in staggered_actions
                         if a.computation_type != UNSHARD
                         and a.computation_type not in p2p
                     ],
                     [
                         a
-                        for a in legacy_actions
+                        for a in default_actions
                         if a.computation_type != UNSHARD
                         and a.computation_type not in p2p
                     ],
                 )
                 self.assertEqual(
                     {
-                        kind: sum(a.computation_type == kind for a in adaptive_actions)
+                        kind: sum(a.computation_type == kind for a in staggered_actions)
                         for kind in p2p
                     },
                     {
-                        kind: sum(a.computation_type == kind for a in legacy_actions)
+                        kind: sum(a.computation_type == kind for a in default_actions)
                         for kind in p2p
                     },
                 )

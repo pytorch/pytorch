@@ -1888,12 +1888,11 @@ def _add_unshard_reshard(
 
 def _resolve_unshard_lookahead(
     unshard_lookahead: int | None,
-    rank: int,
     max_active_stages: int,
 ) -> int:
-    """Resolve the all-gather prefetch distance for one pipeline rank."""
+    """Resolve the all-gather prefetch distance."""
     if unshard_lookahead is None:
-        return min(rank + 2, max_active_stages)
+        return max_active_stages
     if isinstance(unshard_lookahead, bool) or not isinstance(unshard_lookahead, int):
         raise ValueError(
             f"unshard_lookahead must be an integer or None, got {unshard_lookahead!r}"
@@ -2916,7 +2915,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # Perform schedule lowering
             for rank in actions:
                 unshard_lookahead = _resolve_unshard_lookahead(
-                    self._unshard_lookahead, rank, self._max_active_stages
+                    self._unshard_lookahead, self._max_active_stages
                 )
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
                     actions[rank],
