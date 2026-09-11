@@ -4759,6 +4759,11 @@ class TestVmapOperatorsOpInfoDevice(TestCase):
                 # One or more of the overload doesn't have a Batch rule.
                 xfail("bincount"),
                 xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
+                # The vectorized CPU kernels return NaN when the divisor is
+                # FLT_MIN, since Sleef_fmodf8 is only valid for |a / b| <= 2**24.
+                # The scalar CPU path and other backends return the correct value.
+                xfail("fmod", device_type="cpu"),
+                xfail("remainder", device_type="cpu"),
             }
         ),
     )
