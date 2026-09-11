@@ -17,12 +17,10 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
 )
 from torch.distributed.pipelining._utils import PipeliningMetadataError
-from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -35,9 +33,6 @@ from torch.utils._pytree import tree_map_only
 d_hid = 512
 batch_size = 256
 chunks = 8
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = dist.get_default_backend_for_device(device_type)
 
 torch.manual_seed(0)
 
@@ -64,6 +59,8 @@ instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dynamic_metadata_inference_restores_module_buffers(self):
         class BufferMutatingModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -150,30 +147,31 @@ def get_flatten_hook():
     return flatten_hook
 
 
-class StageTest(MultiProcContinuousTest):
+class PipelineStageTestBase(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return backend
+        return dist.get_default_backend_for_device(cls.device_type)
 
-    @classmethod
-    def device_type(cls) -> str:
-        return device_type
-
-    @property
-    def device(self) -> torch.device:
+    def _rank_device(self, device: str) -> torch.device:
+        # `device` is the framework-injected primary device ("{type}:0",
+        # rank-0); resolve to this worker's per-rank device for self.rank.
+        device_type = torch.device(device).type
         return torch.device(device_type, self.rank)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+
+class StageTest(PipelineStageTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     @parametrize("ModelClass", [ExampleCode, MultiMLP])
-    def test_tracer(self, ModelClass):
+    def test_tracer(self, device, ModelClass):
+        rank_device = self._rank_device(device)
         mod = ModelClass(d_hid, self.world_size)
-        mod.to(self.device)
+        mod.to(rank_device)
 
-        x = torch.randn(batch_size, d_hid, device=self.device)
+        x = torch.randn(batch_size, d_hid, device=rank_device)
         x_mb = x.chunk(chunks)[0]
 
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
@@ -185,7 +183,7 @@ class StageTest(MultiProcContinuousTest):
 
         stage = pipe.build_stage(
             self.rank,
-            self.device,
+            rank_device,
         )
 
         # Attach to a schedule
@@ -213,17 +211,17 @@ class StageTest(MultiProcContinuousTest):
                 f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
             )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     @parametrize("ModelClass", [ModelWithKwargs])
-    def test_tracer_kwargs(self, ModelClass):
+    def test_tracer_kwargs(self, device, ModelClass):
+        rank_device = self._rank_device(device)
         mod = ModelClass(d_hid, self.world_size)
-        mod.to(self.device)
+        mod.to(rank_device)
 
-        x = torch.randn(batch_size, d_hid, device=self.device)
-        y = torch.randn(batch_size, d_hid, device=self.device)
+        x = torch.randn(batch_size, d_hid, device=rank_device)
+        y = torch.randn(batch_size, d_hid, device=rank_device)
 
         x_mb = x.chunk(chunks)[0]
         y_mb = y.chunk(chunks)[0]
@@ -241,7 +239,7 @@ class StageTest(MultiProcContinuousTest):
             stage_mod,
             self.rank,
             pipe.info(),
-            self.device,
+            rank_device,
         )
 
         # Attach to a schedule
@@ -267,22 +265,22 @@ class StageTest(MultiProcContinuousTest):
                 f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
             )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
-    def test_manual(self):
+    def test_manual(self, device):
+        rank_device = self._rank_device(device)
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
-        full_mod.to(self.device)
+        full_mod.to(rank_device)
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
 
-        x = torch.randn(batch_size, d_hid, device=self.device)
+        x = torch.randn(batch_size, d_hid, device=rank_device)
 
         stage = PipelineStage(
             stage_mod,
             self.rank,
             self.world_size,
-            self.device,
+            rank_device,
         )
 
         # Attach to a schedule
@@ -301,18 +299,18 @@ class StageTest(MultiProcContinuousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
-    def test_custom_dw_with_fb_schedule(self):
+    def test_custom_dw_with_fb_schedule(self, device):
         """Tests that separate weight grad function 'dw_runner' gets run under a schedule that's only aware of F/B."""
+        rank_device = self._rank_device(device)
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
-        full_mod.to(self.device)
+        full_mod.to(rank_device)
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
 
-        x = torch.randn(batch_size, d_hid, device=self.device)
-        target = torch.randn(batch_size, d_hid, device=self.device)
+        x = torch.randn(batch_size, d_hid, device=rank_device)
+        target = torch.randn(batch_size, d_hid, device=rank_device)
 
         class CustomState:
             def __init__(self) -> None:
@@ -336,7 +334,7 @@ class StageTest(MultiProcContinuousTest):
             stage_mod,
             self.rank,
             self.world_size,
-            self.device,
+            rank_device,
             dw_builder=cs.dw_builder,
         )
 
@@ -363,22 +361,22 @@ class StageTest(MultiProcContinuousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
-    def test_output_chunks_memory_usage(self):
+    def test_output_chunks_memory_usage(self, device):
         """Test that output_chunks doesn't store memory for non-first stages."""
+        rank_device = self._rank_device(device)
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
-        full_mod.to(self.device)
+        full_mod.to(rank_device)
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
-        x = torch.randn(batch_size, d_hid, device=self.device)
-        target = torch.randn(batch_size, d_hid, device=self.device)
+        x = torch.randn(batch_size, d_hid, device=rank_device)
+        target = torch.randn(batch_size, d_hid, device=rank_device)
         stage = PipelineStage(
             stage_mod,
             self.rank,
             self.world_size,
-            self.device,
+            rank_device,
         )
         self.assertEqual(
             len(stage.output_chunks), 0, "output_chunks should be empty initially"
@@ -424,39 +422,29 @@ class StageTest(MultiProcContinuousTest):
             )
 
 
-instantiate_parametrized_tests(StageTest)
+instantiate_device_type_tests(StageTest, globals(), except_for=["cpu"], allow_xpu=True)
 
 
-class StageNegativeTest(MultiProcContinuousTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        return backend
+class StageNegativeTest(PipelineStageTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    @classmethod
-    def device_type(cls) -> str:
-        return device_type
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
-
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
-    def test_shape_prop_mismatch(self):
+    def test_shape_prop_mismatch(self, device):
         """Tests shape prop errors are raised"""
+        rank_device = self._rank_device(device)
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
-        full_mod.to(self.device)
+        full_mod.to(rank_device)
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
 
-        x = torch.randn(batch_size, d_hid, device=self.device)
+        x = torch.randn(batch_size, d_hid, device=rank_device)
 
         stage = PipelineStage(
             stage_mod,
             self.rank,
             self.world_size,
-            self.device,
+            rank_device,
         )
         stage._runtime_validate = True
 
@@ -474,7 +462,7 @@ class StageNegativeTest(MultiProcContinuousTest):
 
         if self.rank == 0:
             with self.assertRaisesRegex(PipeliningMetadataError, "shape mismatch"):
-                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+                _run_step(torch.randn(batch_size + 1, d_hid, device=rank_device))
 
             with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
                 _run_step(x.to(torch.int32))
@@ -489,27 +477,34 @@ class StageNegativeTest(MultiProcContinuousTest):
             with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
                 _run_step(x)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
-    def test_custom_dw_errors(self):
+    def test_custom_dw_errors(self, device):
         """Tests expected errors are raised"""
+        rank_device = self._rank_device(device)
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
-        full_mod.to(self.device)
+        full_mod.to(rank_device)
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
 
         stage_with_dw_builder = PipelineStage(
             stage_mod,
             self.rank,
             self.world_size,
-            self.device,
+            rank_device,
             dw_builder=lambda: None,
         )
         stage_with_dw_builder._has_backward = True
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
             stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
 
+
+instantiate_device_type_tests(
+    StageNegativeTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
