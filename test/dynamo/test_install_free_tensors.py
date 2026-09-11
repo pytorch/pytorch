@@ -9,6 +9,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.graph_module import GraphModule
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def compile_and_extract_graph(
@@ -80,6 +81,8 @@ class ResBlock(torch.nn.Module):
 
 
 class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(install_free_tensors=False)
     def check_num_inputs_and_equality_no_install(
         self,
@@ -331,6 +334,8 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
 
 
 class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(install_free_tensors=True)
     def check_export_matches_expectation(
         self,
