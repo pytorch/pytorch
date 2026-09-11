@@ -870,6 +870,15 @@ automatic_dynamic_remote_pgo: bool | None = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
 )
 
+# Opt in to letting the "aot_eager_then_compile" stance derive dynamism from
+# automatic-dynamic PGO instead of diffing two f_locals snapshots. PGO also sees
+# nested inputs (attributes, dict entries) that the snapshot walk misses, but it
+# only records what Dynamo actually traces, so the preflight cache entry has to
+# be discarded for the production compile to count as a second observation.
+# Off by default: it changes preflight cache lifetime and starts writing warmup
+# observations to the persistent PGO cache.
+delayed_compile_use_native_pgo: bool = False
+
 # temporary config to kill later
 _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
