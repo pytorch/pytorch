@@ -421,6 +421,48 @@ class TestAugmentedGraphHelper(TestCase):
         self.assertIn(new2, tracker.extra_deps[external2])
         self.assertNotIn(old2, tracker.extra_deps[external2])
 
+    def test_transfer_to_erased_node_skips_transitive_reverse_path(self):
+        """A transferred use must not oppose a transitive data path."""
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        old_start = graph.call_function(torch.relu, args=(x,), name="old_start")
+        ancestor = graph.call_function(torch.neg, args=(x,), name="ancestor")
+        intermediate = graph.call_function(
+            torch.abs, args=(ancestor,), name="intermediate"
+        )
+        new_start = graph.call_function(
+            torch.sigmoid, args=(intermediate,), name="new_start"
+        )
+        graph.output(new_start)
+
+        tracker = AugmentedGraphHelper(graph)
+        tracker.add_extra_dep(n=ancestor, dep=old_start)
+        tracker.transfer_erased_node_deps({old_start: new_start})
+
+        self.assertNotIn(new_start, tracker.extra_deps[ancestor])
+        self.assertFalse(tracker.has_cycle())
+
+    def test_transfer_from_erased_node_skips_transitive_reverse_path(self):
+        """A transferred dependency must not oppose a transitive data path."""
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        old_wait = graph.call_function(torch.relu, args=(x,), name="old_wait")
+        new_wait = graph.call_function(torch.neg, args=(x,), name="new_wait")
+        intermediate = graph.call_function(
+            torch.abs, args=(new_wait,), name="intermediate"
+        )
+        descendant = graph.call_function(
+            torch.sigmoid, args=(intermediate,), name="descendant"
+        )
+        graph.output(descendant)
+
+        tracker = AugmentedGraphHelper(graph)
+        tracker.add_extra_dep(n=old_wait, dep=descendant)
+        tracker.transfer_erased_node_deps({old_wait: new_wait})
+
+        self.assertNotIn(descendant, tracker.extra_deps[new_wait])
+        self.assertFalse(tracker.has_cycle())
+
     def test_transfer_with_merge_sets(self):
         """Test transfer when nodes have merge sets."""
         graph = fx.Graph()

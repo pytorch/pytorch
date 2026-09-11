@@ -189,10 +189,9 @@ class AugmentedGraphHelper:
                 for extra_dep in self.extra_deps[old_node]:
                     updated_dep = erased_merge_sets.get(extra_dep, extra_dep)
                     if updated_dep is not None and updated_dep != new_node:
-                        # Skip if reverse dep already exists (extra or data)
-                        if new_node in self.extra_deps.get(
-                            updated_dep, ()
-                        ) or new_node in OrderedSet(updated_dep.all_input_nodes):
+                        # Skip if a reverse path already exists. Adding this
+                        # artificial ordering edge would create a cycle.
+                        if new_node in self._get_all_ancestors(updated_dep):
                             continue
                         self.extra_deps[new_node].add(updated_dep)
                         self.extra_uses[updated_dep].discard(old_node)
@@ -202,10 +201,9 @@ class AugmentedGraphHelper:
                 for extra_use in self.extra_uses[old_node]:
                     updated_use = erased_merge_sets.get(extra_use, extra_use)
                     if updated_use is not None and updated_use != new_node:
-                        # Skip if reverse dep already exists (extra or data)
-                        if updated_use in self.extra_deps.get(
-                            new_node, ()
-                        ) or updated_use in OrderedSet(new_node.all_input_nodes):
+                        # Skip if a reverse path already exists. Adding this
+                        # artificial ordering edge would create a cycle.
+                        if updated_use in self._get_all_ancestors(new_node):
                             continue
                         self.extra_deps[updated_use].discard(old_node)
                         self.extra_deps[updated_use].add(new_node)
