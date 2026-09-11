@@ -388,6 +388,9 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
         {}, std::get<0>(unpack_state), at::dtype(at::kLong).device(at::kCPU));
     philox_offset = at::full(
         {}, std::get<1>(unpack_state), at::dtype(at::kLong).device(at::kCPU));
+  } else {
+    philox_seed = at::empty({}, at::dtype(at::kLong));
+    philox_offset = at::empty({}, at::dtype(at::kLong));
   }
 
   at::native::onednn::sdpa(
