@@ -14,7 +14,7 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.package import FunctionPicklerBase, SerializedCode, SystemInfo
 
 from . import convert_frame
@@ -676,7 +676,9 @@ def aot_compile_fullgraph(
         if backend_input is None:
             raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        device_type = _graph_device_type(backend_input.graph_module.graph)
+        # A graph naming no device lowers to CPU code.
+        graph_devices = _graph_device_types(backend_input.graph_module.graph)
+        device_type = next((d for d in sorted(graph_devices) if d != "cpu"), "cpu")
         if (
             backend_input.fake_mode.shape_env
             is not graph_capture_output.output_graph.shape_env

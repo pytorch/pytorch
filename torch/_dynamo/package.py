@@ -32,7 +32,7 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -1195,7 +1195,8 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        self._device_type = _graph_device_type(graph)
+        devices = _graph_device_types(graph)
+        self._device_type = next((d for d in sorted(devices) if d != "cpu"), "cpu")
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
