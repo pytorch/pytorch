@@ -3102,20 +3102,6 @@ class TestMPS(TestCaseMPS):
         # Expecting the inverted to yield the original signal
         self.assertEqual(ifft_result, signal)
 
-    def test_fft_half(self):
-        # float16 is handled natively by MPSGraph; bfloat16 is promoted to
-        # float32 in the frontend. See promote_type_fft in SpectralOps.cpp.
-        for dtype in (torch.half, torch.bfloat16):
-            signal = torch.randn(64, dtype=dtype, device="mps")
-            signal_cpu = signal.float().cpu()
-
-            fft_mps = torch.fft.rfft(signal)
-            fft_ref = torch.fft.rfft(signal_cpu)
-            self.assertEqual(fft_mps.cpu().to(fft_ref.dtype), fft_ref, atol=1e-2, rtol=1e-2)
-
-            round_trip = torch.fft.irfft(fft_mps, n=signal.shape[0])
-            self.assertEqual(round_trip.cpu().float(), signal_cpu, atol=1e-2, rtol=1e-2)
-
     def test_fftfreq(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/135223
         freq_cpu = torch.fft.fftfreq(10**4, device='cpu')

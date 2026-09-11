@@ -757,6 +757,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.fftn",
         torch_opinfo_name="fft.fftn",
         decorators=[
+            # Note [FFT MPS fp16 ref tests]
             # fp16 N-D FFT: aten applies the FFT normalization inside each
             # kernel, while the _refs decomposition runs the prims unnormalized
             # and applies one fused normalization multiply at the end. That
@@ -783,14 +784,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.ifftn",
         torch_opinfo_name="fft.ifftn",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -809,14 +803,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.rfftn",
         torch_opinfo_name="fft.rfftn",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -830,14 +817,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.irfftn",
         torch_opinfo_name="fft.irfftn",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -863,14 +843,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.hfftn",
         torch_opinfo_name="fft.hfftn",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -896,14 +869,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.ihfftn",
         torch_opinfo_name="fft.ihfftn",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -951,14 +917,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.fft2",
         torch_opinfo_name="fft.fft2",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -972,14 +931,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.ifft2",
         torch_opinfo_name="fft.ifft2",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -998,14 +950,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.rfft2",
         torch_opinfo_name="fft.rfft2",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1019,14 +964,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.irfft2",
         torch_opinfo_name="fft.irfft2",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1045,14 +983,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.hfft2",
         torch_opinfo_name="fft.hfft2",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1071,14 +1002,7 @@ python_ref_db: list[OpInfo] = [
         "_refs.fft.ihfft2",
         torch_opinfo_name="fft.ihfft2",
         decorators=[
-            # fp16 N-D FFT: aten applies the FFT normalization inside each
-            # kernel, while the _refs decomposition runs the prims unnormalized
-            # and applies one fused normalization multiply at the end. That
-            # extra fp16 rounding leaves the ref marginally farther from the
-            # fp64 reference than eager, tripping test_python_ref's "ref must be
-            # at least as accurate as eager" check. CUDA skips a subset of these
-            # fp16 cases (ihfftn, ihfft2) for the same reason; the more accurate
-            # MPS kernel trips more of the multi-dim ops.
+            # See Note [FFT MPS fp16 ref tests]
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
