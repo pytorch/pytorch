@@ -78,6 +78,7 @@ class MemoryEntry(NamedTuple):
     index_name: str  # LoopBody.indexing_exprs[index_name]
     buffer_name: str | None
     mode: str | None  # V.ops.store(..., mode=mode)
+    result_range: tuple[str, int] | None = None  # (rank index name, rank size)
 
 
 class MemoryUsageType(Enum):
@@ -511,9 +512,10 @@ class LoopBody:
     def add_index_expr(
         self,
         expr: sympy.Expr,
-        mtype: MemoryUsageType,
+        mtype: MemoryUsageType | None,
         buffer_name: str | None = None,
         mode: str | None = None,
+        result_range: tuple[str, int] | None = None,
     ):
         expr = self._wrap_int_to_sympy_integer(expr)
         name = self.indexing_exprs_name.get(expr)
@@ -521,7 +523,10 @@ class LoopBody:
             name = f"index{len(self.indexing_exprs)}"
             self.indexing_exprs_name[expr] = name
             self.indexing_exprs[name] = expr
-        self.memory_usage[mtype].append(MemoryEntry(name, buffer_name, mode))
+        if mtype is not None:
+            self.memory_usage[mtype].append(
+                MemoryEntry(name, buffer_name, mode, result_range)
+            )
         return name
 
     def add_submodule(self, block, prefix):
@@ -715,6 +720,8 @@ class CountOps(DefaultHandler):
 
 
 class CaptureIndexing(WrapperHandler):
+    r"""Capture symbolic indices and memory accesses while tracing a LoopBody."""
+
     name = "CaptureIndexing"
 
     def __init__(
@@ -758,12 +765,28 @@ class CaptureIndexing(WrapperHandler):
         )
         return self._inner.store(name, index, value, mode)
 
-    def store_reduction(self, name, index, value):
+    def store_reduction(self, name, index, value, *, result_range=None):
+        rank_range = None
+        if result_range is not None:
+            rank, rank_size = result_range
+            rank_name = self.body.add_index_expr(rank, None)
+            rank_range = (rank_name, rank_size)
+            rank = self.tracer.create_proxy(
+                "call_module", "get_index", (rank_name,), {}
+            )
+            result_range = (rank, rank_size)
         index = self._simplify(index)
         index = self._add_index(
-            index, MemoryUsageType.STORE_REDUCTION, buffer_name=name
+            index,
+            MemoryUsageType.STORE_REDUCTION,
+            buffer_name=name,
+            result_range=rank_range,
         )
-        return self._inner.store_reduction(name, index, value)
+        if result_range is None:
+            return self._inner.store_reduction(name, index, value)
+        return self._inner.store_reduction(
+            name, index, value, result_range=result_range
+        )
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         result = self._inner.reduction(dtype, src_dtype, reduction_type, value)

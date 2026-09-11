@@ -70,7 +70,7 @@ from .ir import (
     MultiOutputLayout,
     NoneLayout,
 )
-from .loop_body import LoopBody
+from .loop_body import LoopBody, MemoryUsageType
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
@@ -566,6 +566,8 @@ class NestedReduction:
             and _is_gpu_triton_backend(outer_node, grouped_node)
             and not outer_node.has_strict_reduction()
             and not grouped_node.has_strict_reduction()
+            and not outer_node.has_reduction_result()
+            and not grouped_node.has_reduction_result()
         )
 
     @classmethod
@@ -712,6 +714,8 @@ class NestedReduction:
         ``None`` when the candidate cannot be emitted safely. See Note
         [Sub-parent reduction epilogues].
         """
+        if any(node.has_reduction_result() for node in nodes):
+            return None
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
         if not cls._mutations_survive_hoisting(nodes):
             return None
@@ -1667,7 +1671,7 @@ class NestedReduction:
         cls, grouped_node: BaseSchedulerNode, grouped_rnumel: sympy.Expr
     ) -> tuple[SchedulerNode, sympy.Integer] | None:
         """Validate the candidate as a single simple grouped reduction."""
-        if not grouped_node.is_reduction():
+        if not grouped_node.is_reduction() or grouped_node.has_reduction_result():
             return None
         reductions = [sn for sn in grouped_node.get_nodes() if sn.is_reduction()]
         if len(reductions) != 1:
@@ -2153,6 +2157,8 @@ class NestedReduction:
         extend the grouped topology. The approved axis and group size remain
         stable while ranges and domains are rebuilt from the final nodes.
         """
+        if outer_node.has_reduction_result() or grouped_node.has_reduction_result():
+            return None
         _, (outer_numel, outer_rnumel) = outer_node.group
         _, (grouped_numel, grouped_rnumel) = grouped_node.group
         domain_context = cls.PointwiseDomainContext.create(
@@ -2612,6 +2618,17 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
     defining_op: BaseSchedulerNode | None = None
 
 
+def _reduction_result_ranges(
+    nodes: Iterable[BaseSchedulerNode],
+) -> Iterator[tuple[str, int]]:
+    """Yield (rank index name, result size) for every ranked store_reduction."""
+    for node in nodes:
+        if isinstance(node, SchedulerNode) and node._body is not None:
+            for entry in node._body.memory_usage[MemoryUsageType.STORE_REDUCTION]:
+                if entry.result_range is not None:
+                    yield entry.result_range
+
+
 class BaseSchedulerNode:
     """
     One unit of work the scheduler orders, fuses and then hands to a backend.
@@ -2787,6 +2804,7 @@ class BaseSchedulerNode:
         typing.cast(Any, self.get_tiling).clear_cache(self)
         self.read_write_deps.clear_cache(self)
         self.read_size_by_name.clear_cache(self)
+        self.has_reduction_result.clear_cache(self)
 
     @cache_on_self
     def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
@@ -2919,6 +2937,10 @@ class BaseSchedulerNode:
             and node.node.data.strict_reduction_rblock is not None
             for node in self.get_nodes()
         )
+
+    @cache_on_self
+    def has_reduction_result(self) -> bool:
+        return next(_reduction_result_ranges(self.get_nodes()), None) is not None
 
     def get_outputs(self) -> Sequence[SchedulerBuffer]:
         return self.outputs
@@ -5021,7 +5043,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
         # Keep strict reductions standalone so their planned R0_BLOCK cannot change.
         filtered_nodes = [
-            node for node in filtered_nodes if not node.has_strict_reduction()
+            node
+            for node in filtered_nodes
+            if not node.has_strict_reduction() and not node.has_reduction_result()
         ]
 
         # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
@@ -10202,6 +10226,16 @@ class Scheduler:
         else:
             plan = None
 
+        reduction_result = node1.has_reduction_result() or node2.has_reduction_result()
+        # Ranked results keep their result-domain coordinates. Dimension
+        # expansion, index inversion, and the late reindex retry could
+        # re-express a compact consumer over the candidate domain, so they are
+        # skipped. Loop reordering re-traces bodies and re-extracts
+        # dependencies, and its reindex fallback only applies to pointwise
+        # nodes covering the full candidate extent, so it stays allowed.
+        allow_loop_rewrites = plan is None and not reduction_result
+        allow_loop_reorder = plan is None
+
         # A plan authorizes fusion only after every cross-domain producer
         # dependency is proved.
         staged_matches = None
@@ -10228,7 +10262,7 @@ class Scheduler:
             )
 
         if (
-            plan is None
+            allow_loop_rewrites
             and config.expand_dimension_for_pointwise_nodes
             and (
                 expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
@@ -10242,7 +10276,7 @@ class Scheduler:
             )
 
         if (
-            plan is None
+            allow_loop_reorder
             and can_reorder
             and shared_data_score < config.score_fusion_memory_threshold
             and (
@@ -10254,7 +10288,7 @@ class Scheduler:
                 shared_data_score = new_shared_data_score
 
         if (
-            plan is None
+            allow_loop_rewrites
             and config.loop_index_inversion_in_fusion
             and shared_data_score < config.score_fusion_memory_threshold
         ):
@@ -10296,7 +10330,7 @@ class Scheduler:
             # reduction's domain and retry. A staged plan keeps its original
             # frame because reindexing would invalidate its exact matches.
             if (
-                plan is None
+                allow_loop_rewrites
                 and config.loop_reindexing_after_fusion
                 and self._try_reindex_pointwise_for_reduction(node1, node2)
             ):
@@ -12465,7 +12499,8 @@ class BaseScheduling:  # noqa: docstring_linter
     def can_fuse_reduction_pair(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        return True
+        """Admit reduction contracts before fusion checks; unknown contracts decline."""
+        return not (node1.has_reduction_result() or node2.has_reduction_result())
 
     def can_fuse_multi_outputs_template(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

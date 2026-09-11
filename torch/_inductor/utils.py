@@ -4241,12 +4241,10 @@ def dump_node_schedule(node_schedule: Sequence[BaseSchedulerNode]) -> None:
     print(f"Node schedule with {len(node_schedule)} nodes")
     for idx, node in enumerate(node_schedule):
         print(f" {idx:3}:")
-        # pyrefly: ignore [unnecessary-comparison]
-        if node is EnableReduction:
+        if isinstance(node, EnableReduction):
             print("enable reduction")
-        # pyrefly: ignore [unnecessary-comparison]
-        elif node is DisableReduction:
-            print("disable reduction")
+        elif isinstance(node, DisableReduction):
+            print(f"disable reduction (result_size={node.result_size})")
         elif isinstance(node, SchedulerNode):
             is_red = node.is_reduction()
             print(f"{'red' if is_red else 'pw'} scheduler node")

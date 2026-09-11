@@ -506,6 +506,7 @@ class BackendFeature(Enum):
     MASKED_SCATTER_WITH_INDEX = auto()
     SCAN = auto()
     SORT = auto()
+    REDUCTION_RESULT = auto()
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
     TRITON_TEMPLATES = auto()
@@ -1254,7 +1255,14 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
         )
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: OpVarT) -> None:
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: OpVarT,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: store_reduction should be handled by CSEProxy"
         )
@@ -2465,7 +2473,14 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         finally:
             self.loads = prior
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def store(
@@ -3131,16 +3146,24 @@ class CSEProxy(DefaultHandler):
     def partial_accumulate(self, *args: Any) -> None:
         self.kernel.partial_accumulate(*args)
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
         self.kernel.store_buffer_names.add(name)
         self._update_store_cache(name, value)
-
         if name not in V.graph.removed_buffers:
             self.kernel.num_store += 1
             self.kernel.store_buffer_counts[name] = (
                 self.kernel.store_buffer_counts.get(name, 0) + 1
             )
-            return self.kernel.store_reduction(name, index, value)
+            if result_range is None:
+                return self.kernel.store_reduction(name, index, value)
+            self.kernel.store_reduction(name, index, value, result_range=result_range)
 
     def reduction(
         self,
