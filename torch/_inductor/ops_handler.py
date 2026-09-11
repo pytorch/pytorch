@@ -301,7 +301,10 @@ class OpsHandler(Generic[T]):
 
         With ``result_range=(rank, size)``, the value is stored once per rank
         in ``[0, size)`` instead of once per row; only this store uses that
-        result domain, and input loads keep the full reduction extent.
+        result domain, and input loads keep the full reduction extent. The
+        Triton emitter keeps ranked results in registers, so the producing
+        kernel must be a persistent, non-cooperative reduction; ops.sort
+        guarantees this, and any other producer must too.
         """
         raise NotImplementedError
 

@@ -8496,6 +8496,7 @@ def _use_triton_topk(x, k, dim) -> bool:
         and device.type == "cuda"
         and torch.version.hip is None
         and V.graph.has_feature(device, BackendFeature.SORT)
+        and V.graph.has_feature(device, BackendFeature.REDUCTION_RESULT)
         and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and dim == len(shape) - 1
         and isinstance(k, (int, sympy.Integer))
