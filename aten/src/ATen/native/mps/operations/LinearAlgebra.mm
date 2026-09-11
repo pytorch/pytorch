@@ -1855,8 +1855,13 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   // X op(A) = B is the same as solving op(A)^T X^T = B^T, so the right case only
   // costs the O(nk) transposes of B and X, never an O(n^2) copy of A.
   const bool kernel_transpose = transpose != !left;
-  const Tensor Brhs = left ? B_ : B_.mT().contiguous();
-  Tensor X = left ? out_ : at::empty_like(Brhs, at::MemoryFormat::Contiguous);
+  // clone, not contiguous(): when B^T is already contiguous the latter aliases
+  // B, and the solve below writes into this buffer.
+  const Tensor Brhs = left ? B_ : B_.mT().clone(at::MemoryFormat::Contiguous);
+  // Brhs is a private temporary in the right case, so the solve runs in place:
+  // the blocked path already works in place, and the kernel reads b[t] before
+  // writing x[t] at every step, taking everything else from threadgroup memory.
+  Tensor X = left ? out_ : Brhs;
 
   // Substitution reads all of A once per right-hand side and runs a chain of n
   // dependent steps; the blocked solve shortens that chain to nb and turns the
@@ -1869,7 +1874,9 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
     if (conjugate) {
       M = M.conj();
     }
-    X.copy_(Brhs);
+    if (!X.is_same(Brhs)) {
+      X.copy_(Brhs);
+    }
     triangular_solve_blocked(M, upper != kernel_transpose, unitriangular, kBlockSize, X);
   } else {
     triangular_solve_metal(A_, Brhs, upper, kernel_transpose, conjugate, unitriangular, X);
