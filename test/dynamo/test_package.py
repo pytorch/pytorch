@@ -8,6 +8,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -16,11 +17,17 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    _current_cpu_codegen_target,
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
+from torch._inductor import cpu_vec_isa
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -133,6 +140,34 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
+        # pick_vec_isa never raises for a missing compiler; it returns
+        # invalid_vec_isa, which must read as "no target", not as a target
+        # named INVALID_VEC_ISA that only an equally broken host would match.
+        # Patch pick_vec_isa directly, not valid_vec_isa_list: in fbcode on x86
+        # pick_vec_isa returns VecAVX2 before ever consulting the list, so
+        # emptying the list would leave this assertion inert there.
+        with patch.object(
+            cpu_vec_isa, "pick_vec_isa", return_value=cpu_vec_isa.invalid_vec_isa
+        ):
+            self.assertIsNone(_current_cpu_codegen_target())
+
+    def test_sve_widths_do_not_collide_in_the_codegen_fingerprint(self):
+        # VecSVE(128) and VecSVE(256) both stringify to "asimd", so the ISA name
+        # alone cannot tell a 128-bit tiling from a 256-bit one. The fingerprint
+        # records bit_width() so the two do not compare equal and a kernel tiled
+        # for one width is refused on a host that picks the other.
+        narrow = cpu_vec_isa.VecSVE(_bit_width=128)
+        wide = cpu_vec_isa.VecSVE(_bit_width=256)
+        self.assertEqual(str(narrow), str(wide))
+        with patch.object(cpu_vec_isa, "pick_vec_isa", return_value=narrow):
+            narrow_target = _current_cpu_codegen_target()
+        with patch.object(cpu_vec_isa, "pick_vec_isa", return_value=wide):
+            wide_target = _current_cpu_codegen_target()
+        self.assertEqual(narrow_target[1], wide_target[1])
+        self.assertNotEqual(narrow_target[2], wide_target[2])
+        self.assertNotEqual(narrow_target, wide_target)
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
