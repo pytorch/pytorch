@@ -11,7 +11,6 @@ import functools
 import json
 import os
 import signal
-import unittest
 import uuid
 from multiprocessing.pool import ThreadPool
 from typing import Any
@@ -35,13 +34,16 @@ from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
 from torch.distributed.elastic.rendezvous.api import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.distributed import get_free_port
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 def do_nothing():
     pass
 
 
-class WorkerStateTest(unittest.TestCase):
+class WorkerStateTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_is_running(self):
         for state in WorkerState:
             if state == WorkerState.HEALTHY or state == WorkerState.UNHEALTHY:
@@ -50,7 +52,9 @@ class WorkerStateTest(unittest.TestCase):
                 self.assertFalse(WorkerState.is_running(state))
 
 
-class WorkerGroupTest(unittest.TestCase):
+class WorkerGroupTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_worker_group_constructor(self):
         spec = WorkerSpec(
             role="test_trainer",
@@ -84,7 +88,9 @@ class WorkerGroupTest(unittest.TestCase):
         self.assertIsNone(worker_group.store)
 
 
-class RoleInstanceInfoTest(unittest.TestCase):
+class RoleInstanceInfoTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compare(self):
         agent_role1 = _RoleInstanceInfo("role", 1, 10)
         agent_role2 = _RoleInstanceInfo("role", 2, 10)
@@ -144,7 +150,7 @@ class TestAgent(SimpleElasticAgent):
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
         raise NotImplementedError("mock this method")
 
-    def _shutdown(self):
+    def _shutdown(self, death_sig=signal.SIGTERM, timeout=30):
         pass
 
 
@@ -158,7 +164,9 @@ def monres(state: WorkerState):
         return RunResult(state=state)
 
 
-class RecordWorkerEventsTest(unittest.TestCase):
+class RecordWorkerEventsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.spec = MagicMock()
@@ -276,7 +284,9 @@ class RecordWorkerEventsTest(unittest.TestCase):
         self.assertEqual(md["worker_pid"], [None])
 
 
-class ConstructEventTest(unittest.TestCase):
+class ConstructEventTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Create minimal spec and agent for testing
@@ -400,7 +410,9 @@ class ConstructEventTest(unittest.TestCase):
         self.assertNotIn("exit_code", [None])
 
 
-class SimpleElasticAgentTest(unittest.TestCase):
+class SimpleElasticAgentTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_worker_spec(
         self,
         max_restarts=1,
