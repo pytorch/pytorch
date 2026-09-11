@@ -3974,6 +3974,31 @@ class CPUReproTests(TestCase):
             )
         check_metrics_vec_kernel_count(1)
 
+    def test_internal_copy_source_depends_on_destination(self):
+        # When lowering copy_, destination's StorageBox swings to source. A prior
+        # ReinterpretView loader of destination must freeze its buffer reference
+        # to avoid reading source and forming a circular dependency cycle.
+        def fn(x):
+            destination = torch.ops._inductor_test.realize(x + 1)
+            before = torch.as_strided(
+                destination,
+                destination.shape,
+                destination.stride(),
+            ).clone()
+            source = torch.ops._inductor_test.realize(before + 1)
+            destination.copy_(source)
+            after = torch.as_strided(
+                destination,
+                destination.shape,
+                destination.stride(),
+            ).clone()
+            return before, destination, after
+
+        x = torch.randn(16)
+        gm = make_fx(fn)(x)
+        compiled = compile_fx_inner(gm, [x])
+        self.assertEqual(fn(x), compiled([x]))
+
     def test_emulate_precision_casts_explicit_lowp_round_trip(self):
         # An explicit fp32->fp16->fp32 round-trip must keep its intermediate
         # rounding under emulate_precision_casts. The CPU codegen used to collapse
