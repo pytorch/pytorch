@@ -204,7 +204,7 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=10.0
+    ROCM_VERSION=10.1.0rc0
     THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
