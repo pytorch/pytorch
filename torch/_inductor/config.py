@@ -1081,6 +1081,7 @@ numerics: Literal["default", "strict"] = Config(
         "strict": {
             "eager_numerics.disable_ftz": True,
             "eager_numerics.division_rounding": True,
+            "eager_numerics.use_pytorch_libdevice": True,
             "emulate_precision_casts": True,
         }
     },
@@ -3199,8 +3200,7 @@ class eager_numerics:
     # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
     # can flip the result of a subsequent ceil(log2(...)) and produce a
     # different uint8 encoded value (see gh-178045).
-    # This can be enabled directly; Inductor also enables it while
-    # emulate_precision_casts is active.
+    # This can be enabled directly and is implied by numerics="strict".
     use_pytorch_libdevice: bool = False
 
 
