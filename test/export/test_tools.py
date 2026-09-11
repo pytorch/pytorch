@@ -3,7 +3,7 @@
 import torch
 from torch._dynamo.test_case import TestCase
 from torch._export.tools import report_exportability
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 torch.library.define(
@@ -22,6 +22,8 @@ def op_missing_meta(x, z):
 
 
 class TestExportTools(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_report_exportability_basic(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
