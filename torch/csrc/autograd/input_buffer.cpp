@@ -172,6 +172,20 @@ static void accumulate(
   }
 }
 
+// Note [Direct accumulation thread and stream safety]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Buffers exposed here live in GraphTask::not_ready_. The engine calls add()
+// on those buffers and get_for_direct_accumulation() with the GraphTask mutex
+// held. This serializes ordinary additions with exposing a buffer and makes the
+// recorded thread visible to subsequent producers. The mutex is released
+// before user backward code mutates the returned Tensor, so later producers
+// must run on the same engine thread; a producer on another thread is rejected
+// before it can touch the buffer.
+//
+// Accelerator writes are asynchronous, so thread serialization is not enough.
+// The producer, accumulation, ready, and consumer streams must all match. This
+// orders prior writes, the direct mutation, later additions, and the consumer
+// without recording a new completion event when backward returns None.
 void InputBuffer::validate_direct_accumulation(
     size_t pos,
     const at::Device& device,
@@ -222,6 +236,7 @@ Variable InputBuffer::get_for_direct_accumulation(
   }
   auto& thread = direct_accumulation_threads_[pos];
   const auto current_thread = std::this_thread::get_id();
+  // See Note [Direct accumulation thread and stream safety].
   validate_direct_accumulation(
       pos,
       var.device(),
@@ -311,6 +326,7 @@ void InputBuffer::add(
     if (C10_UNLIKELY(
             direct_accumulation_threads_ != nullptr &&
             direct_accumulation_threads_[pos].has_value())) {
+      // See Note [Direct accumulation thread and stream safety].
       validate_direct_accumulation(
           pos,
           device,
@@ -355,6 +371,7 @@ void InputBuffer::add(
   if (C10_UNLIKELY(
           direct_accumulation_threads_ != nullptr &&
           direct_accumulation_threads_[pos].has_value())) {
+    // See Note [Direct accumulation thread and stream safety].
     validate_direct_accumulation(
         pos,
         device,
