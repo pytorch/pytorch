@@ -243,6 +243,7 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
             timeout=RendezvousTimeout(),
             keep_alive_interval=timedelta(seconds=30),
             keep_alive_max_attempt=3,
+            cas_backoff_max_seconds=0.3,
         )
 
         self._cache_duration = 0
@@ -581,6 +582,7 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
             timeout=self._timeout,
             keep_alive_interval=timedelta(seconds=30),
             keep_alive_max_attempt=3,
+            cas_backoff_max_seconds=0.3,
         )
 
     def _create_op_executor(
@@ -904,6 +906,7 @@ class AbstractTestRendezvousOp(ABC):
             timeout=RendezvousTimeout(),
             keep_alive_interval=self._keep_alive_interval,
             keep_alive_max_attempt=3,
+            cas_backoff_max_seconds=0.3,
         )
 
         ctx = _RendezvousContext(self._node, self._state, settings)
@@ -1203,6 +1206,7 @@ class DynamicRendezvousHandlerTest(TestCase):
             ),
             keep_alive_interval=self._keep_alive_interval,
             keep_alive_max_attempt=3,
+            cas_backoff_max_seconds=0.3,
         )
 
         self._state_holder.state = self._state
@@ -1278,6 +1282,7 @@ class DynamicRendezvousHandlerTest(TestCase):
             timeout=RendezvousTimeout(),
             keep_alive_interval=self._keep_alive_interval,
             keep_alive_max_attempt=3,
+            cas_backoff_max_seconds=0.3,
         )
 
         rdzv_info = handler.next_rendezvous()
