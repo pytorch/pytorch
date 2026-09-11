@@ -1321,7 +1321,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(mod): mod}, {}, {}, buf).dump({"m": mod.forward})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(type(out.__self__), torch.nn.Module)
-        self.assertTrue(out.__func__.__qualname__.endswith("Local.forward"))
+        # The code object's name, not __qualname__: at this commit the <locals>
+        # rebuild passes __qualname__ as the function's NAME, and on 3.10
+        # FunctionType then reports the bare co_name as __qualname__.
+        self.assertEqual(out.__func__.__code__.co_name, "forward")
         self.assertEqual(out(torch.ones(1)), torch.ones(1) + 1)
 
 
