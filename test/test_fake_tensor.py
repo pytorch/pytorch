@@ -684,6 +684,100 @@ class FakeTensorTest(TestCase):
             fake_tensor.fake_device = torch.device("cuda")
             self.assertEqual(fake_tensor.fake_device, torch.device("cuda:0"))
 
+    def test_init_gpu_context_only_for_current_accelerator(self):
+        """The warmup allocation targets the accelerator device, only when it
+        matches the current accelerator, and stays REAL under the dispatch
+        states FakeTensor construction can hold (FakeTensorMode pushed and
+        in_kernel_invocation_manager's meta TLS include set)."""
+        from torch._subclasses import fake_tensor as ft
+
+        def attempts_for(accel, device, ctx=None):
+            attempts = []
+            results = []
+            meta_tls = []
+            real_empty = torch.empty
+            real_zeros = torch.zeros
+
+            def spy(*args, **kwargs):
+                attempts.append(kwargs.get("device"))
+                meta_tls.append(torch._C._meta_in_tls_dispatch_include())
+                if torch.version.hip is None:
+                    out = real_empty(*args, **kwargs)
+                else:
+                    out = real_zeros(*args, **kwargs)
+                results.append(out)
+                return out
+
+            ft.init_gpu_context.cache_clear()
+            with (
+                patch(
+                    "torch.accelerator.current_accelerator",
+                    lambda check_available=False: accel,
+                ),
+                patch.object(torch, "empty", spy),
+                patch.object(torch, "zeros", spy),
+            ):
+                if ctx is None:
+                    FakeTensor._normalize_fake_device(device)
+                else:
+                    with ctx:
+                        FakeTensor._normalize_fake_device(device)
+            return attempts, results, meta_tls
+
+        def assert_real_warmup(accel, device, ctx=None):
+            attempts, results, meta_tls = attempts_for(accel, device, ctx=ctx)
+            self.assertEqual(attempts, [torch.device(device)])
+            # The allocation must be a real tensor, not a FakeTensor: a meta
+            # kernel or mode interception would leave the accelerator context
+            # uninitialized while functools.cache records it as warmed up.
+            self.assertEqual(len(results), 1)
+            self.assertNotIsInstance(results[0], FakeTensor)
+            self.assertEqual(results[0].device.type, torch.device(device).type)
+            # The meta TLS include set must be cleared at allocation time: with
+            # a non-meta accelerator held under in_kernel_invocation_manager,
+            # leaving it set diverts torch.empty to the meta kernel.
+            self.assertEqual(meta_tls, [False])
+
+        meta = torch.device("meta")
+        # Accelerator matches: allocation requested on that device, real.
+        assert_real_warmup(meta, meta)
+        # Under an avoid_device_init mode, FakeTensorMode.__enter__ sets
+        # only_lift_cpu_tensors, whose contract forbids materializing on
+        # device, so the warmup is skipped even though the accelerator
+        # matches. avoid_device_init is True on cpu-only builds and Apple
+        # silicon (which it does not consult mps for), False when an
+        # accelerator it consults is available: branch the expectation on the
+        # mode's own property so the case is deterministic on every build.
+        with FakeTensorMode() as mode:
+            expected_in_mode = [] if mode.avoid_device_init else [torch.device(meta)]
+            self.assertEqual(attempts_for(meta, meta)[0], expected_in_mode)
+        # Outside the mode the warmup runs again (the TLS gate is restored).
+        assert_real_warmup(meta, meta)
+        # With the meta TLS include set held (as in_kernel_invocation_manager
+        # does) but the only-lift gate off (as on a cuda build), the warmup
+        # still runs and clears the include around the real allocation.
+        prev_lift = torch._C._only_lift_cpu_tensors()
+        prev_include = torch._C._meta_in_tls_dispatch_include()
+        torch._C._set_only_lift_cpu_tensors(False)
+        try:
+            torch._C._set_meta_in_tls_dispatch_include(True)
+            assert_real_warmup(meta, meta)
+            # The include must be restored after _normalize_fake_device: a
+            # leaked False would divert later in-kernel ops to the wrong
+            # kernel.
+            include_still_set = torch._C._meta_in_tls_dispatch_include()
+        finally:
+            torch._C._set_only_lift_cpu_tensors(prev_lift)
+            torch._C._set_meta_in_tls_dispatch_include(prev_include)
+        self.assertTrue(include_still_set)
+        # Non-matching accelerator: no allocation at all.
+        self.assertEqual(
+            attempts_for(torch.device("meta"), torch.device("cpu"))[0],
+            [],
+        )
+        # No accelerator (CPU-only build): no allocation at all.
+        self.assertEqual(attempts_for(None, torch.device("meta"))[0], [])
+
     def test_convert_fake_to_real(self):
         x = torch.ones([20])
         with FakeTensorMode(allow_non_fake_inputs=True) as m:
