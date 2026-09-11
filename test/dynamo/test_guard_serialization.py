@@ -1265,6 +1265,31 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
+    def test_rebuilt_wrapper_is_scoped_to_the_module_that_compiled_it(self):
+        # functools.wraps copies __module__ from the wrappee, but the wrapper's
+        # body reads the decorator module's globals. A rebuild that imported
+        # __module__ handed it the wrappee's dict; the compile scope travels
+        # separately so the rebuilt function's __globals__ is the decorator's.
+        deco_mod = types.ModuleType("_guard_deco_mod_for_scope_test")
+        exec(
+            "import functools\n"
+            "def deco(f):\n"
+            "    @functools.wraps(f)\n"
+            "    def wrapper(x):\n"
+            "        return f(x)\n"
+            "    return wrapper\n",
+            deco_mod.__dict__,
+        )
+        sys.modules[deco_mod.__name__] = deco_mod
+        self.addCleanup(sys.modules.pop, deco_mod.__name__, None)
+        fn = deco_mod.deco(global_func)
+        self.assertEqual(fn.__module__, __name__)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIs(out.__globals__, deco_mod.__dict__)
+        self.assertEqual(out.__module__, __name__)
+
     def test_reduce_restores_a_non_str_module(self):
         # Dynamo cannot trace a function whose __module__ is not a str (its
         # trace rules split it), so this is pickler-level: a decorator can still
