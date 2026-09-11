@@ -770,8 +770,12 @@ class RaisingProbes:
 
 class RaisingNameProxy:
     # A callable whose __name__ lookup raises something other than
-    # AttributeError, as a proxy might.
+    # AttributeError, as a proxy might. Records what was asked for, so a test
+    # can pin that the reducer never asks at all.
+    probed: list[str] = []
+
     def __getattr__(self, name):
+        RaisingNameProxy.probed.append(name)
         if name == "__name__":
             raise RuntimeError("proxy has no __name__")
         raise AttributeError(name)
@@ -1376,6 +1380,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         )
         odd = types.FunctionType(global_func.__code__, globals(), "global_func")
         odd.__module__ = ["not", "a", "module"]  # unhashable: must not TypeError
+        walks = types.FunctionType(global_func.__code__, globals(), "global_func")
+        walks.__qualname__ = "PlainMethods.<locals>.f"
+        # The walk alone would land on `walks`; the <locals> component is
+        # refused before it, as pickle refuses it.
+        setattr(PlainMethods, "<locals>", types.SimpleNamespace(f=walks))
+        self.addCleanup(delattr, PlainMethods, "<locals>")
         # The oracle is pickle itself: every False case fails a by-reference
         # dump. save_global replaces the import/lookup failure with a
         # PicklingError; the C pickler raises a bare AttributeError for a
@@ -1386,6 +1396,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         unhashable_exc = TypeError if new_pickle else pickle.PicklingError
         cases = {
             "locals": (local_fn, locals_exc),
+            "locals_component_that_walks": (walks, locals_exc),
             "wraps_wrapper": (wrapper, pickle.PicklingError),
             "bad_qualname": (renamed, pickle.PicklingError),
             "module_not_imported": (exec_fn, pickle.PicklingError),
@@ -1828,7 +1839,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # explicitly. That is also what keeps the right function: a module whose
         # class cannot be pickled by reference is rebuilt as a bare nn.Module, on
         # which a getattr() reconstruction would resolve "forward" to
-        # nn.Module's own placeholder.
+        # nn.Module's own placeholder. The call is what pins that (the
+        # placeholder raises NotImplementedError); the two name assertions just
+        # record what the rebuild carries, and the name path itself is pinned by
+        # test_rebuilt_locals_function_keeps_its_name.
         class Local(torch.nn.Module):
             def forward(self, x):
                 return x + 1
@@ -1850,7 +1864,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         obj = PlainMethods()
         obj.global_add = types.MethodType(global_add, obj)
         buf = io.BytesIO()
-        GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump({"m": obj.global_add})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": obj.global_add})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIs(type(out.__self__), PlainMethods)
@@ -1865,6 +1879,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": method})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(type(out.__func__), RaisingNameProxy)
+        self.assertEqual(out(3), 3)
+        # A receiver whose class defines __getattr__ takes the pair at the gate,
+        # so the name is never asked for: this pins the read as being BELOW that
+        # gate, not merely inside the try.
+        RaisingNameProxy.probed.clear()
+        method = types.MethodType(RaisingNameProxy(), GetattrProxy())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": method})
+        self.assertNotIn("__name__", RaisingNameProxy.probed)
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(type(out.__func__), RaisingNameProxy)
+        self.assertIs(type(out.__self__), GetattrProxy)
         self.assertEqual(out(3), 3)
 
 
