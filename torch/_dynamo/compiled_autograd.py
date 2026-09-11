@@ -103,14 +103,20 @@ def snapshot_cudagraph_enabled() -> bool:
     return torch._inductor.config.triton.cudagraphs
 
 
-def _move_cpu_scalar_to_accelerator(
-    val: torch.Tensor, device_type: str, *, for_runtime: bool = False
+def _is_compiled_autograd_accelerator_device(
+    device: torch.device, privateuse1_name: str
+) -> bool:
+    if device.type == "cuda":
+        return True
+    return privateuse1_name != "privateuseone" and device.type == privateuse1_name
+
+
+def _move_cpu_scalar_to_device(
+    val: torch.Tensor, device: torch.device, *, for_runtime: bool = False
 ) -> torch.Tensor:
-    if device_type == "cuda":
-        if for_runtime:
-            return val.pin_memory().cuda(non_blocking=True)
-        return val.cuda()
-    return val.to(device_type)
+    if for_runtime and device.type == "cuda":
+        return val.pin_memory().to(device, non_blocking=True)
+    return val.to(device)
 
 
 def maybe_clone(x: torch.Tensor | None) -> torch.Tensor | None:
@@ -1039,9 +1045,9 @@ class AutogradCompilerInstance:
     # ATen/prims ops will accept accelerator 0-dim tensors too.
     def move_graph_nodes_to_cuda(
         self, graph: torch.fx.Graph
-    ) -> tuple[list[int], str | None]:
+    ) -> tuple[list[int], torch.device | None]:
         to_move: dict[int, torch.fx.Node] = {}
-        accelerator_device_type: str | None = None
+        accelerator_devices: set[torch.device] = set()
         nodes = list(graph.nodes)
         if nodes[0].target != "inputs":
             raise AssertionError(
@@ -1059,18 +1065,12 @@ class AutogradCompilerInstance:
         privateuse1_name = torch._C._get_privateuse1_backend_name()
         # getitem nodes on inputs
         for i, node in enumerate(inputs_users):
-            device_type = node.meta["val"].device.type
-            if accelerator_device_type is None and (
-                device_type == "cuda"
-                or (
-                    privateuse1_name != "privateuseone"
-                    and device_type == privateuse1_name
-                )
-            ):
-                accelerator_device_type = device_type
+            device = node.meta["val"].device
+            if _is_compiled_autograd_accelerator_device(device, privateuse1_name):
+                accelerator_devices.add(device)
                 continue
 
-            is_cpu = device_type == "cpu"
+            is_cpu = device.type == "cpu"
             is_scalar = len(node.meta["val"].size()) == 0
             if is_cpu and is_scalar:
                 node_users = list(node.users.keys())
@@ -1089,20 +1089,21 @@ class AutogradCompilerInstance:
                     # all users are prims/aten, can move safely
                     to_move[i] = node
 
-        # only move cpu scalars to the accelerator if the graph has accelerator activations,
-        # this is to handle the case where cudagraphs is enabled on a cpu-only graph
-        if accelerator_device_type is not None:
+        # only move cpu scalars when the graph has exactly one accelerator device,
+        # this is to handle cpu-only graphs and mixed-accelerator graphs conservatively
+        if len(accelerator_devices) == 1:
+            target_device = next(iter(accelerator_devices))
             for node in to_move.values():
                 verbose_log.debug(
                     "Moving node %s from cpu to %s",
                     node,
-                    accelerator_device_type,
+                    target_device,
                 )
-                node.meta["val"] = _move_cpu_scalar_to_accelerator(
-                    node.meta["val"], accelerator_device_type
+                node.meta["val"] = _move_cpu_scalar_to_device(
+                    node.meta["val"], target_device
                 )
 
-            return list(to_move.keys()), accelerator_device_type
+            return list(to_move.keys()), target_device
 
         return [], None
 
@@ -1197,9 +1198,9 @@ class AutogradCompilerInstance:
             {},
         )
         runtime_inputs_to_move: list[int] = []
-        runtime_accelerator_device_type: str | None = None
+        runtime_accelerator_device: torch.device | None = None
         if snapshot_cudagraph_enabled():
-            runtime_inputs_to_move, runtime_accelerator_device_type = (
+            runtime_inputs_to_move, runtime_accelerator_device = (
                 self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
             )
 
@@ -1288,11 +1289,11 @@ class AutogradCompilerInstance:
                         else:
                             filtered_sizes.append(integer)
 
-                if runtime_accelerator_device_type is not None:
+                if runtime_accelerator_device is not None:
                     for i in runtime_inputs_to_move:
-                        inputs[i] = _move_cpu_scalar_to_accelerator(
+                        inputs[i] = _move_cpu_scalar_to_device(
                             inputs[i],
-                            runtime_accelerator_device_type,
+                            runtime_accelerator_device,
                             for_runtime=True,
                         )
 
