@@ -990,8 +990,12 @@ def add(x, y):
         loaded = DynamoCache.load(fn).dynamo
         package = CompilePackage(fn, dynamo=loaded)
         self.assertEqual(len(resume_of(loaded).guarded_codes), 1)
-        self.assertEqual(resume_of(package.cache_entry()).guarded_codes, [])
-        self.assertEqual(resume_of(package.cache_entry()).backend_ids, [])
+        reset = resume_of(package.cache_entry())
+        self.assertEqual(reset.guarded_codes, [])
+        self.assertEqual(reset.backend_ids, [])
+        # The containers the fresh compile writes to are detached as well.
+        self.assertIsNot(reset.import_sources, resume_of(loaded).import_sources)
+        self.assertIsNot(reset.function_names, resume_of(loaded).function_names)
         self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
         self._save_and_reload(expected_backends=2, expected_dynamo=1)
         # One guarded code and one backend id, not two of each; and installable:
