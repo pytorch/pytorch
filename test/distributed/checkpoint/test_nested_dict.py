@@ -5,10 +5,12 @@ from torch.distributed.checkpoint._nested_dict import (
     flatten_state_dict,
     unflatten_state_dict,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, HardwareClassification
 
 
 class TestFlattening(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_flattening_round_trip(self) -> None:
         state_dict = {
             "key0": 1,
