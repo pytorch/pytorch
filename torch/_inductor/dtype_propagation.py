@@ -427,6 +427,7 @@ class DtypePropagationOpsHandler:
         values: tuple[T, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
     ) -> tuple[torch.dtype, ...]:
         return dtypes
 
