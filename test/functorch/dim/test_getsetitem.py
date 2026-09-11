@@ -1,6 +1,6 @@
 # Owner(s): ["module: functorch"]
 import torch
-from functorch.dim import Dim, DimList, dims, Tensor
+from functorch.dim import Dim, DimList, DimensionBindError, dims, Tensor
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -225,11 +225,11 @@ class TestGetSetItem(TestCase):
         # Multiple unbound dim lists
         dl1 = DimList()
         dl2 = DimList()
-        with self.assertRaises(Exception):  # Should raise DimensionBindError
+        with self.assertRaises(DimensionBindError):  # Should raise DimensionBindError
             _ = tensor[dl1, dl2]
 
         # Multiple ellipsis
-        with self.assertRaises(Exception):
+        with self.assertRaises(DimensionBindError):
             _ = tensor[..., x, ...]
 
     def test_inferred_dimension_binding(self):

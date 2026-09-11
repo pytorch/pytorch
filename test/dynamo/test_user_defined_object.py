@@ -126,7 +126,7 @@ class TestSlotsAttrAssignment(TestCase):
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         t = torch.ones(1)
         self.assertRaises(AttributeError, fn, t)
-        self.assertRaises(Exception, compiled_fn, t)
+        self.assertRaises(AttributeError, compiled_fn, t)
 
     def test_slots_with_dict_allows_arbitrary_attrs(self):
         # Case 3: __slots__ includes __dict__ — arbitrary attr assignment should work
@@ -235,7 +235,7 @@ class TestSlotsAttrAssignment(TestCase):
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         t = torch.ones(1)
         self.assertRaises(AttributeError, fn, t)
-        self.assertRaises(Exception, compiled_fn, t)
+        self.assertRaises(AttributeError, compiled_fn, t)
 
     def test_slot_shadowed_by_class_attribute(self):
         # Class attribute in subclass shadows parent slot descriptor:

@@ -279,7 +279,7 @@ class TestMarkKernels(TestCase):
         graph = torch.cuda.CUDAGraph()
         side = torch.cuda.Stream()
         entry_stream = torch.cuda.current_stream()
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             with torch.cuda.graph(graph, enable_annotations=True):
                 with mark_kernels("completed_scope"):
                     _ = x + 1

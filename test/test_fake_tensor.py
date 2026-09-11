@@ -903,7 +903,7 @@ class FakeTensorTest(TestCase):
             x_conv = mode.from_tensor(x)
             y = torch.rand([4, 4], device="cuda")
             z = torch.rand([4, 4], device="cpu")
-            self.assertRaises(Exception, lambda: torch.lerp(x_conv, y, z))
+            self.assertRaises(AssertionError, lambda: torch.lerp(x_conv, y, z))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_type_as(self):
@@ -1983,7 +1983,7 @@ def forward(self, x_1):
         self.checkType(run_meta(), "meta", [4])
 
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
-            self.assertRaises(Exception, run_meta)
+            self.assertRaises(AssertionError, run_meta)
 
     def test_embedding_bag_meta(self):
         def f():
@@ -2891,7 +2891,8 @@ class FakeTensorConverterTest(TestCase):
             x = torch.empty(2, 2, device="cpu")
         with FakeTensorMode():
             y = torch.empty(2, 2, device="cpu")
-        self.assertRaises(Exception, lambda: x, y)
+        # The lambda receives `y` as a positional arg, triggering TypeError
+        self.assertRaises(TypeError, lambda: x, y)
 
     @xfailIfTorchDynamo
     def test_no_ref_cycle(self):

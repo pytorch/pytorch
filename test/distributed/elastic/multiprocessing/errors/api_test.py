@@ -116,7 +116,7 @@ class ApiTest(unittest.TestCase):
         content = {"unknown_key": "unknown_value"}
         with open(self.test_error_file, "w") as fp:
             json.dump(content, fp)
-        with self.assertRaises(Exception):
+        with self.assertRaises(KeyError):
             ProcessFailure(
                 local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
             )

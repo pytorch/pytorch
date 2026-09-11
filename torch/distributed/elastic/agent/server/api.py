@@ -969,7 +969,7 @@ class SimpleElasticAgent(ElasticAgent):
                     )
                     self._restart_workers(self._worker_group)
             else:
-                raise Exception(  # noqa: TRY002
+                raise RuntimeError(
                     f"[{role}] Worker group in {state.name} state"
                 )
 

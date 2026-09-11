@@ -940,7 +940,7 @@ class TestCommon(TestCase):
 
             # Validates the op doesn't support out if it claims not to
             if not op.supports_out:
-                with self.assertRaises(Exception):
+                with self.assertRaises(Exception):  # noqa: B017 - supports_out guard, exception varies per op
                     if op_out(out=expected) == NotImplemented:
                         raise AssertionError("op_out returned NotImplemented")
                 return
@@ -1070,7 +1070,7 @@ class TestCommon(TestCase):
 
             # Validates the op doesn't support out if it claims not to
             if not op.supports_out:
-                with self.assertRaises(Exception):
+                with self.assertRaises(Exception):  # noqa: B017 - supports_out guard, exception varies per op
                     if op_out(out=expected) == NotImplemented:
                         raise AssertionError("op_out returned NotImplemented")
                 return

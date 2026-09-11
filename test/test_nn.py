@@ -2396,7 +2396,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input = cast(torch.randn(3, 5))
         target = cast(torch.randn(5, 3))
         for fn in losses.values():
-            self.assertRaises(Exception, lambda: fn(input, target))
+            self.assertRaises(RuntimeError, lambda: fn(input, target))
 
     def test_loss_equal_input_target_shape(self):
         self._test_loss_equal_input_target_shape(lambda x: x)
@@ -2573,15 +2573,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         hx = torch.randn(3, 20)
         cx = torch.randn(3, 20)
         lstm = nn.LSTMCell(10, 20)
-        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+        self.assertRaises(RuntimeError, lambda: lstm(input, (hx, cx)))
 
     def test_LSTM_cell_forward_hidden_size(self):
         input = torch.randn(3, 10)
         hx = torch.randn(3, 21)
         cx = torch.randn(3, 20)
         lstm = nn.LSTMCell(10, 20)
-        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
-        self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
+        self.assertRaises(RuntimeError, lambda: lstm(input, (hx, cx)))
+        self.assertRaises(RuntimeError, lambda: lstm(input, (cx, hx)))
 
 
     def test_Transformer_cell(self):
