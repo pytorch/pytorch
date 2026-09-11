@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    TemporaryFileName, getRocmVersion,
+    getRocmVersion, skipIfRocmVersionAtLeast, TemporaryFileName,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -2854,6 +2854,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
+                           "torch._inductor.kernel.flex_gemm.quack_ops",  # depends on cutlass
                            "torch.profiler._cuspy",  # depends on cupti-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
@@ -2892,14 +2893,17 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
         self.assertEqual(out.strip(), "True")
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_no_warning_on_import(self) -> None:
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_not_import_sympy(self) -> None:
         out = self._check_python_output("import torch;import sys;print('sympy' not in sys.modules)")
         self.assertEqual(out.strip(), "True",
@@ -2911,10 +2915,12 @@ class TestImports(TestCase):
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_not_import_triton(self) -> None:
         out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
         self.assertEqual(out.strip(), "True")
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global

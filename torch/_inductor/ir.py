@@ -7015,15 +7015,13 @@ class ConcatKernel(NopKernel):
                 input_unwrapped = inp.data.unwrap_view()
             else:
                 input_unwrapped = inp.data
+
             if (
                 isinstance(input_unwrapped, StorageBox)
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
-                and (
-                    not is_dynamic(input_buffer)
-                    or config.combo_kernel_foreach_dynamic_shapes
-                )
+                and not is_dynamic(input_buffer)
             ):
                 op_names.append(input_buffer.get_operation_name())
 
