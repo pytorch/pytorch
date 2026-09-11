@@ -1,0 +1,53 @@
+name: "PR review scripts: test"
+
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pr_review/**"
+      - ".github/workflows/hardened-pr-review.yml"
+      - ".github/workflows/hardened-pr-review-run.yml"
+      - ".github/workflows/pr-review-scripts-test.yml"
+  pull_request:
+    paths:
+      - "scripts/pr_review/**"
+      - ".github/workflows/hardened-pr-review.yml"
+      - ".github/workflows/hardened-pr-review-run.yml"
+      - ".github/workflows/pr-review-scripts-test.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-review-scripts-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    # The suite runs in under a second; the rest is checkout. Five minutes is
+    # already generous, and it is the window a hostile PR gets a runner for.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Refuse a suppressed or emptied suite
+        run: |
+          python3 -c "
+          import scripts.pr_review as p
+          from scripts.pr_review._suite_manifest import EXPECTED_MODULES, HERE
+          if hasattr(p, 'load_tests'):
+              raise SystemExit('scripts/pr_review/__init__.py defines load_tests, '
+                               'which suppresses discovery of the whole suite')
+          missing = sorted(n for n in EXPECTED_MODULES if not (HERE / n).is_file())
+          if missing:
+              raise SystemExit(f'test module(s) missing from the suite: {missing}')
+          "
+
+      - name: Run the pr_review suite
+        run: python3 -m unittest discover -s scripts/pr_review -t .
