@@ -975,16 +975,23 @@ def add(x, y):
                 del PrecompileContext._backend_artifacts_by_key[backend]
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        def resume_entry():
+        def resume_of(entry):
             (code,) = [
-                c
-                for c in DynamoCache.load(fn).dynamo.codes
-                if any("resume" in n for n in c.function_names)
+                c for c in entry.codes if any("resume" in n for n in c.function_names)
             ]
             return code
 
+        def resume_entry():
+            return resume_of(DynamoCache.load(fn).dynamo)
+
         self.assertTrue(resume_entry().bypassed)
         self.assertEqual(len(resume_entry().guarded_codes), 1)
+        # Loading resets the package's copy, not the caller's entry.
+        loaded = DynamoCache.load(fn).dynamo
+        package = CompilePackage(fn, dynamo=loaded)
+        self.assertEqual(len(resume_of(loaded).guarded_codes), 1)
+        self.assertEqual(resume_of(package.cache_entry()).guarded_codes, [])
+        self.assertEqual(resume_of(package.cache_entry()).backend_ids, [])
         self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
         self._save_and_reload(expected_backends=2, expected_dynamo=1)
         # One guarded code and one backend id, not two of each; and installable:
