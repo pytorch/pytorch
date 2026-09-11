@@ -376,17 +376,21 @@ See the {doc}`documentation <cuda._sanitizer>` for information on how to use it.
 cuda._sanitizer
 ```
 
-## GPU Direct Storage (prototype)
+## GPUDirect Storage (prototype)
 
-The APIs in `torch.cuda.gds` provide thin wrappers around certain GPU Direct Storage (GDS) APIs that allow
+The APIs in `torch.cuda.gds` provide thin wrappers around certain cuFile APIs that allow
 direct memory access transfers between GPU memory and storage, avoiding a bounce buffer in the CPU. See the
 [cufile api documentation](https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api)
-and the [hipFile documentation](https://rocm.docs.amd.com/projects/hipFile/en/latest/)
 for more details.
 
-These APIs can be used in versions greater than or equal to CUDA 12.6 or ROCm 7.14. In order to use these APIs, one must
-ensure that their system is appropriately configured to use GDS per the
-[GDS documentation](https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html).
+These APIs can be used with CUDA 12.6 or newer. In order to use these APIs, one must
+ensure that their system is appropriately configured to use GPUDirect Storage per the
+[GPUDirect Storage documentation](https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html).
+
+On ROCm, the same APIs are backed by [hipFile](https://rocm.docs.amd.com/projects/hipFile/en/latest/)
+rather than cuFile and require ROCm 7.14 or newer. The hipFile entry points and the ROCm system
+configuration steps, which differ from the CUDA ones, are covered in
+{ref}`hipFile (GPUDirect Storage)<rocm-gds>`.
 
 See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use these.
 

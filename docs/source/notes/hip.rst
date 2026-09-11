@@ -134,6 +134,37 @@ hipFFT/rocFFT plan cache
 
 Setting the size of the cache for hipFFT/rocFFT plans is not supported.
 
+.. _rocm-gds:
+
+hipFile (GPUDirect Storage)
+---------------------------
+
+The ``torch.cuda.gds`` APIs are implemented with `hipFile
+<https://rocm.docs.amd.com/projects/hipFile/en/latest/>`_ on ROCm, taking the
+place of cuFile on CUDA. hipFile ships with ROCm 7.14 and later; on older ROCm
+the build disables GDS support and :func:`torch.cuda.gds.is_available` returns
+``False``. As elsewhere in the HIP port, the build option keeps its CUDA name,
+so ``USE_CUFILE=0`` is what disables the support in a ROCm build. hipFile is
+Linux-only, so a Windows ROCm build never has GDS support.
+
+Each wrapper in ``torch.cuda.gds`` calls the hipFile counterpart of the
+cuFile function named in its docstring: ``hipFileRead``, ``hipFileWrite``,
+``hipFileBufRegister``, ``hipFileBufDeregister``, ``hipFileHandleRegister`` and
+``hipFileHandleDeregister``. Errors quote the hipFile name, so a failed read
+raises ``hipFileRead failed: ...``. hipFile is close to cuFile but not identical;
+the known divergences, including that numeric error codes are not guaranteed to
+match, are listed in `cuFile compatibility
+<https://rocm.docs.amd.com/projects/hipFile/en/latest/reference/hipFile-cuFile-compatibility.html>`_.
+
+Configuring a system for GDS on ROCm differs from CUDA, and the NVIDIA
+GPUDirect Storage installation and troubleshooting guide does not apply. Refer
+instead to the hipFile documentation:
+
+* `Install hipFile <https://rocm.docs.amd.com/projects/hipFile/en/latest/install/install.html>`_
+* `Check for fastpath compatibility <https://rocm.docs.amd.com/projects/hipFile/en/latest/how-to/checking-system-compatibility.html>`_
+* `Set up a local NVMe drive <https://rocm.docs.amd.com/projects/hipFile/en/latest/how-to/setup-local-nvme.html>`_
+* `Troubleshooting <https://rocm.docs.amd.com/projects/hipFile/en/latest/troubleshooting/troubleshooting.html>`_
+
 .. _torch-distributed-backends:
 
 torch.distributed backends
