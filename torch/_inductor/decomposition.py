@@ -1199,7 +1199,7 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     else:
         result = fast_random_decomps()
     if (
-        config.should_use_pytorch_libdevice()
+        config.eager_numerics.use_pytorch_libdevice
         and torch.version.cuda is not None
         and torch.version.hip is None
     ):
