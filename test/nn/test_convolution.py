@@ -3853,7 +3853,6 @@ class TestConvolutionNNCPU(NNTestCase):
 
     hw_classification = HardwareClassification.CPU
 
-    # see https://github.com/pytorch/pytorch/issues/177245
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.
         for dtype in [torch.float, torch.bfloat16, torch.half]:
