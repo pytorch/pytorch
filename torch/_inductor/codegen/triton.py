@@ -98,7 +98,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, OpsValue, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -2631,6 +2631,32 @@ class TritonKernelOverrides(TritonOverrides):
             )
             fn.__name__ = fn_name  # type: ignore[attr-defined]
             setattr(cls, fn_name, staticmethod(fn))
+
+    @staticmethod
+    def _use_aten_fp32_special(x):
+        return (
+            config.eager_numerics.use_pytorch_libdevice
+            and torch.version.cuda is not None
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and triton_arg_dtype(x) == torch.float32
+        )
+
+    @staticmethod
+    def i0(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return cast(OpsValue, OpDecompositions._aten_i0_fp32(x)).value
+        return cast(Any, TritonOverrides).i0(x)
+
+    @staticmethod
+    def i1(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return cast(OpsValue, OpDecompositions._aten_i1_fp32(x)).value
+        return cast(Any, TritonOverrides).i1(x)
 
     @classmethod
     def constant(cls, value, dtype):
