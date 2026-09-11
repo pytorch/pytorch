@@ -248,7 +248,22 @@ class AOTICUDAGraphManager {
     aoti_torch_cuda_graph_pool_destroy_handle(pool_handle_);
   }
 
-  // Run the whole lowered component for one dynamic shape.
+  // Start of one forward. Frees the PREVIOUS forward's uncaptured outputs,
+  // which is what gives the uncaptured path the same "valid until the next
+  // forward" contract the captured path has.
+  //
+  // This is per-FORWARD, not per-run_graph, because regional mode makes several
+  // run_graph calls per forward and a later partition's uncaptured outputs are
+  // frequently still live as an earlier one's chained inputs. Freeing per call
+  // would be a use-after-free. The generated run_impl calls this once, up front,
+  // in both modes.
+  void begin_forward() {
+    release_uncaptured_outputs();
+  }
+
+  // Run one captured region for one dynamic shape. In whole-graph mode that is
+  // the entire component; in regional mode it is one partition, and the caller
+  // distinguishes them by prepending the partition id to shape_key.
   //   shape_key     : value of every dynamic symbol, in a codegen-fixed order.
   //   copy_in       : input indices staged into node-owned slots and refreshed
   //                   per replay. Whole-graph capture stages every tensor input,
@@ -269,12 +284,6 @@ class AOTICUDAGraphManager {
       const std::vector<int32_t>& escape_outs,
       void* caller_stream,
       const GraphBody& body) {
-    // Free the PREVIOUS call's uncaptured outputs. Deferring the free to here,
-    // rather than to the end of the call that produced them, is what gives the
-    // uncaptured path the same "valid until the next run_graph" contract that
-    // the captured path has.
-    release_uncaptured_outputs();
-
     // Shared (read) lock over capture/replay (see captureMutex in the shim):
     // replay + output reconstruction run concurrently with other instances'
     // replays but are excluded while ANY instance holds the exclusive capture
