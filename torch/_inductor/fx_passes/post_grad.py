@@ -471,6 +471,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         fix_auto_functionalized_dtype_views
     )
 
+    if _has_flydsl_kernel_wrapper(gm.graph):
+        from torch._inductor.codegen.flydsl.user_defined_kernel import (
+            decompose_functional_wrapper,
+        )
+
+        GraphTransformObserver(
+            gm,
+            "decompose_flydsl_kernel_wrapper_functional",
+        ).apply_graph_pass(decompose_functional_wrapper)
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
@@ -900,6 +909,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
                 torch.ops._c10d_functional.wait_tensor.default,
                 torch.ops._c10d_functional.wait_tensors.default,
             )
+
     else:
 
         def check():
@@ -1444,6 +1454,29 @@ def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
     for child_name, child_mod in gm.named_children():
         if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
             pass_fn(child_mod.graph)
+
+
+def _has_flydsl_kernel_wrapper(graph: fx.Graph) -> bool:
+    from torch._higher_order_ops.flydsl_kernel_wrap import (
+        flydsl_kernel_wrapper_functional,
+    )
+
+    if graph.find_nodes(
+        op="call_function",
+        target=flydsl_kernel_wrapper_functional,
+    ):
+        return True
+    gm = graph.owning_module
+    if gm is None:
+        return False
+    subgraph_names: OrderedSet[str] = OrderedSet(
+        node.target for node in graph.find_nodes(op="get_attr")
+    )
+    return any(
+        _has_flydsl_kernel_wrapper(child.graph)
+        for name, child in gm.named_children()
+        if name in subgraph_names and isinstance(child, torch.fx.GraphModule)
+    )
 
 
 def apply_pass_to_control_deps_subgraphs(
