@@ -306,7 +306,7 @@ class TestInstrumentation(_LoggerCaptureTest):
 
     def test_cached_plan_reports_a_compile(self):
         # The first call compiles; the memo serves the second without emitting an event.
-        from torch._native.ops._cutedsl.plan_cache import cached_plan
+        from torch._native.cutedsl.plan_cache import cached_plan
 
         cache, built = {}, []
         plan = cached_plan(
@@ -742,7 +742,7 @@ _CACHED_COMPILE_CALL = "cute.compile"
 _CACHE_DECORATORS = ("jit_cache", "instrumented_cutedsl_cache")
 # Paths are POSIX-normalized so Windows labels match. Keep one shared helper: the runtime
 # test covers only it, and another indicates factoring drift.
-_SHARED_COMPILE_HELPERS = (("_cutedsl/launch.py", "compile_kernel"),)
+_SHARED_COMPILE_HELPERS = (("cutedsl/launch.py", "compile_kernel"),)
 
 
 def _scan_for_raw_cute_compile(source, label):
@@ -798,11 +798,11 @@ class TestInstrumentationCoverage(TestCase):
     functions without local decorators or calls are covered by their own tests.
     """
 
-    def _ops_files(self):
+    def _native_files(self):
         import torch._native
 
-        ops_dir = os.path.join(os.path.dirname(torch._native.__file__), "ops")
-        for root, _, files in os.walk(ops_dir):
+        native_dir = os.path.dirname(torch._native.__file__)
+        for root, _, files in os.walk(native_dir):
             for name in files:
                 if name.endswith(".py"):
                     yield os.path.join(root, name)
@@ -823,7 +823,7 @@ class TestInstrumentationCoverage(TestCase):
     def test_every_compile_site_is_instrumented(self):
         missing = []
         checked = 0
-        for path in self._ops_files():
+        for path in self._native_files():
             with open(path) as f:
                 violations, n = _scan_for_missing_instrumentation(
                     f.read(), os.path.relpath(path).replace(os.sep, "/")
@@ -892,10 +892,10 @@ class TestInstrumentationCoverage(TestCase):
 
     def test_no_raw_cute_compile_calls(self):
         # Every cute.compile() must be decorated or use the shared helper to be cached and
-        # instrumented. Unlike the runtime test, this scans every file under ops/.
+        # instrumented. Unlike the runtime test, this scans every file under torch._native.
         bad = []
         seen = 0
-        for path in self._ops_files():
+        for path in self._native_files():
             with open(path) as f:
                 violations, n = _scan_for_raw_cute_compile(
                     f.read(), os.path.relpath(path).replace(os.sep, "/")
@@ -929,14 +929,14 @@ class TestInstrumentationCoverage(TestCase):
 
         helper_file, helper_name = _SHARED_COMPILE_HELPERS[0]
         src = f"def {helper_name}(op):\n    return cute.compile(op)\n"
-        v, _ = _scan_for_raw_cute_compile(src, f"torch/_native/ops/{helper_file}")
+        v, _ = _scan_for_raw_cute_compile(src, f"torch/_native/{helper_file}")
         self.assertEqual(v, [], "the shared compile helper was wrongly flagged")
-        v, _ = _scan_for_raw_cute_compile(src, "torch/_native/ops/elsewhere.py")
+        v, _ = _scan_for_raw_cute_compile(src, "torch/_native/elsewhere.py")
         self.assertEqual(
             len(v), 1, "the allowance ignored the file and exempted the name anywhere"
         )
         # Reject unnormalized backslashes here rather than only on Windows shards.
-        win = f"torch\\_native\\ops\\{helper_file}".replace("/", "\\")
+        win = f"torch\\_native\\{helper_file}".replace("/", "\\")
         v, _ = _scan_for_raw_cute_compile(src, win.replace("\\", "/"))
         self.assertEqual(v, [], "a normalized Windows path was wrongly flagged")
 
@@ -948,8 +948,8 @@ class TestInstrumentationCoverage(TestCase):
         import cutlass
         import cutlass.cute as cute
 
-        from torch._native.ops._cutedsl import launch as _L
-        from torch._native.ops._cutedsl.plan_cache import cached_plan
+        from torch._native.cutedsl import launch as _L
+        from torch._native.cutedsl.plan_cache import cached_plan
 
         @cute.jit
         def _noop(x: cutlass.Int32):
