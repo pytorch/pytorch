@@ -1,11 +1,14 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton
 
 
 try:
@@ -221,6 +224,8 @@ class _TestSelectCat(torch.nn.Module):
 
 
 class TestSplitCatAten(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
@@ -245,11 +250,9 @@ class TestSplitCatAten(TestCase):
     def compare_gradients(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_grad = {key: param.grad for key, param in module.named_parameters()}
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
-        self.assertTrue(
-            self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
-        )
+        self.assertTrue(self.compare_dict_tensors(ref_grad, res_grad, rtol, atol))
 
-    @requires_gpu_and_triton
+    @unittest.skipIf(not has_triton(), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -257,12 +260,12 @@ class TestSplitCatAten(TestCase):
             "split_cat_aten_pass": {"threshold_to_cat": 5},
         },
     )
-    def test_split_cat_post_grad(self):
+    def test_split_cat_post_grad(self, device):
         counters.clear()
         inputs = [
-            torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
-            torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
-            torch.randn(1024, 32, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 128, device=device),
+            torch.randn(1024, 128, device=device),
+            torch.randn(1024, 32, device=device),
         ]
         module = _TestSplitCat()
         traced = torch.compile(module)
@@ -276,10 +279,10 @@ class TestSplitCatAten(TestCase):
         counters.clear()
 
         inputs = [
-            torch.randn(1024, 96 * 21, device=torch.device(device=GPU_TYPE)),
-            torch.randn(1024, 96 * 4, device=torch.device(device=GPU_TYPE)),
-            torch.randn(1024, 96, device=torch.device(device=GPU_TYPE)),
-            torch.randn(1024, 96, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 96 * 21, device=device),
+            torch.randn(1024, 96 * 4, device=device),
+            torch.randn(1024, 96, device=device),
+            torch.randn(1024, 96, device=device),
         ]
         module = _TestSplitCatPartial()
         traced = torch.compile(module)
@@ -292,7 +295,7 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_gpu_and_triton
+    @unittest.skipIf(not has_triton(), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -300,12 +303,12 @@ class TestSplitCatAten(TestCase):
             "split_cat_aten_pass": {"threshold_to_cat": 5},
         },
     )
-    def test_split_cat_post_grad_singular(self):
+    def test_split_cat_post_grad_singular(self, device):
         counters.clear()
         inputs = [
-            torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
-            torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
-            torch.randn(1024, 32, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 128, device=device),
+            torch.randn(1024, 128, device=device),
+            torch.randn(1024, 32, device=device),
         ]
         module = _TestSplitCatSingular()
         traced = torch.compile(module)
@@ -318,7 +321,7 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_gpu_and_triton
+    @unittest.skipIf(not has_triton(), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -326,11 +329,11 @@ class TestSplitCatAten(TestCase):
             "select_cat_aten_pass": {},
         },
     )
-    def test_select_cat_post_grad(self):
+    def test_select_cat_post_grad(self, device):
         counters.clear()
         inputs = [
-            torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
-            torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 6, 128, device=device),
+            torch.randn(1024, 6, 128, device=device),
         ]
         module = _TestSelectCat()
         traced = torch.compile(module)
@@ -343,7 +346,7 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_gpu_and_triton
+    @unittest.skipIf(not has_triton(), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -351,10 +354,10 @@ class TestSplitCatAten(TestCase):
             "move_view_after_cat_aten_pass": {},
         },
     )
-    def test_move_view_after_cat_aten(self):
+    def test_move_view_after_cat_aten(self, device):
         counters.clear()
         inputs = [
-            torch.randn(7, 8, 96, device=torch.device(device=GPU_TYPE)),
+            torch.randn(7, 8, 96, device=device),
         ]
         module = _TestMoveViewAferCat()
         traced = torch.compile(module)
@@ -369,6 +372,8 @@ class TestSplitCatAten(TestCase):
 
 
 class TestSplitCatAtenNormalizationPasses(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -399,6 +404,9 @@ class TestSplitCatAtenNormalizationPasses(TestCase):
                 msg=lambda msg: f"{msg}\nfor {fn}",
             )
             counters.clear()
+
+
+instantiate_device_type_tests(TestSplitCatAten, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
