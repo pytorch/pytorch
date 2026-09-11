@@ -142,12 +142,12 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except __dict__ entries that
-            # will not pickle. The runtime assigns those back and never forces
-            # the pruned ones, so a value this pickler cannot serialize (a
-            # __dict__ entry like the __wrapped__ functools.wraps stashes, which
-            # can drag an unrelated lock/Module in) is dropped rather than left
-            # to fail the whole dump.
+            # pickler nothing it holds is pruned -- except __doc__ and __dict__
+            # entries that will not pickle. The runtime assigns those back and
+            # never forces the pruned ones, so a value this pickler cannot
+            # serialize (a __dict__ entry like the __wrapped__ functools.wraps
+            # stashes, which can drag an unrelated lock/Module in) is dropped
+            # rather than left to fail the whole dump.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
@@ -155,7 +155,7 @@ class AOTCompilePickler(FunctionPicklerBase):
                 closure=obj.__closure__,
                 attributes=self._pickleable_attributes(obj),
                 annotations={},
-                doc=obj.__doc__,
+                doc=self._pickleable_doc(obj),
                 type_params=None,
                 globals_snapshot=None,
             )
@@ -203,6 +203,17 @@ class AOTCompilePickler(FunctionPicklerBase):
         if not self._probing:
             state.attributes[id(obj)] = attributes
         return attributes
+
+    def _pickleable_doc(self, obj: Any) -> Any:
+        # Nothing on the load path forces __doc__ (_apply_function_state
+        # assigns it, that is all), so an unpicklable docstring is dropped like
+        # a pruned attribute rather than failing the dump. A plain str is not
+        # probed. __kwdefaults__ is never pruned: a function cannot be called
+        # without it.
+        if self._dumps_cleanly(obj.__doc__):
+            return obj.__doc__
+        self._warn_dropped(obj, "__doc__", obj.__doc__)
+        return None
 
     def _dumps_cleanly(self, value: Any) -> bool:
         # "does it pickle?" has no cheaper predicate than trying. A throwaway
