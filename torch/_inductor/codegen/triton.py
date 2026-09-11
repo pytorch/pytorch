@@ -2658,6 +2658,12 @@ class TritonKernelOverrides(TritonOverrides):
             return cast(OpsValue, OpDecompositions._aten_i1_fp32(x)).value
         return cast(Any, TritonOverrides).i1(x)
 
+    @staticmethod
+    def erfcx(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            return f"triton_helpers.aten_erfcx({x})"
+        return TritonOverrides.erfcx(x)
+
     @classmethod
     def constant(cls, value, dtype):
         # NOTE: Cannot use shape=[] as it's not supported by triton-rocm
