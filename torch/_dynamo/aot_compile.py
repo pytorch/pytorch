@@ -339,7 +339,30 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
         buf = io.BytesIO()
         pickler = AOTCompilePickler(external_data or {}, buf)
-        pickler.dump(state)
+        try:
+            pickler.dump(state)
+        except (pickle.PicklingError, TypeError, AttributeError, RecursionError) as e:
+            # Preserve the original exception object -- callers and tests match
+            # on it (e.g. "cannot pickle '_thread.lock' object") -- and append
+            # guidance. Mutate args and re-raise rather than type(e)(msg): a
+            # TypeError subclass from a user __reduce__ may take a non-message
+            # constructor, so reconstructing would swap the real error for a
+            # constructor failure. AttributeError is caught too: the C _pickle
+            # accelerator raises a bare AttributeError "Can't get local object"
+            # for a <locals> class in a default/kwdefault (3.14+ raises
+            # PicklingError), so it needs the same guidance. RecursionError as
+            # well: a deep-but-finite value in an unpruned slot overflows the C
+            # pickler, and external_data is its fix too.
+            message = str(e)
+            prefix = f"{message}\n" if message else ""
+            e.args = (
+                prefix + "Some value reached by the artifact is not picklable (a "
+                "closure cell, a default/kwdefault, or the top-level function's "
+                "own signature annotations, which ride unpruned, are the common "
+                "sources). Mark it as external data by using "
+                "`external_data={'key': ...}`.",
+            )
+            raise
         if pickler.errors:
             raise RuntimeError(
                 f"Failed to serialize the following objects: {list(pickler.errors.values())}\n"
