@@ -3012,8 +3012,10 @@ class TMACompatibilityChecker:
             and has_triton_stable_tma_api()
         ):
             log.debug(
-                "%s Requires a supported CUDA/XPU TMA target or a TDM-capable "
-                "gfx1250 target with tensor descriptors and aligned inputs enabled",
+                "%s Requires use_tensor_descriptor=True and a supported backend: "
+                "CUDA cc>=9.0 with the stable descriptor API (upstream triton>=3.4.0) "
+                "and assume_aligned_inputs=True; XPU with the stable descriptor API; "
+                "or TDM-capable gfx1250 with ROCm>=7.14 and assume_aligned_inputs=True",
                 self.failed_debug_prefix,
             )
             return False
@@ -3060,19 +3062,11 @@ class TMACompatibilityChecker:
                 V.graph.sizevars.replace_backed_symbols_with_hints(st)
                 for st in block_params.strides
             ]
-            # Resolve the shape the same way as the strides, so that `force`
-            # keeps deciding on hints rather than rejecting every dynamic
-            # descriptor in the int32 range check below.
-            shape = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(sz)
-                for sz in block_params.shape
-            ]
             constant_offset_expr = V.graph.sizevars.replace_backed_symbols_with_hints(
                 sympy.sympify(constant_offset)
             )
         else:
             strides = block_params.strides
-            shape = block_params.shape
             constant_offset_expr = sympy.sympify(constant_offset)
 
         # Scope these shared descriptor constraints to the new gfx1250 path
@@ -3081,6 +3075,15 @@ class TMACompatibilityChecker:
         # Without force, symbolic int32 bounds must already be provable; an
         # in-range hint alone is not enough.
         if self._gfx1250_capable(device):
+            # Resolve backed shape hints only where the TDM range check uses them.
+            shape = (
+                [
+                    V.graph.sizevars.replace_backed_symbols_with_hints(sz)
+                    for sz in block_params.shape
+                ]
+                if self.force
+                else block_params.shape
+            )
             if not 1 <= len(shape) <= 5:
                 log.debug(
                     "%s TDM descriptors require rank between 1 and 5. Shape is: %s",

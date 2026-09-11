@@ -6931,6 +6931,51 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         )
 
 
+@instantiate_parametrized_tests
+class TestTensorDescriptorCompatibility(TestCase):
+    @parametrize("device_type", ("cuda", "xpu"))
+    def test_tdm_generic_descriptor_checker_force_path_skips_unused_shape_hints(
+        self, device_type
+    ):
+        from torch._inductor.codegen.triton import (
+            BlockParameters,
+            TMACompatibilityChecker,
+            TritonSymbols,
+        )
+        from torch.utils._sympy.symbol import SymT
+
+        extent = sympy.Symbol("shape_extent", integer=True, positive=True)
+        sizevars = _TDMFakeSizeVars({extent: 1024})
+        graph = mock.Mock(sizevars=sizevars)
+        graph.get_current_device_or_throw.return_value = torch.device(device_type)
+        block_params = BlockParameters(
+            shape=[extent],
+            block_shape=[TritonSymbols.block_sizes[SymT.XBLOCK]],
+            strides=[1],
+            offsets=[0],
+        )
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=False,
+            ),
+            mock.patch.object(
+                sizevars,
+                "replace_backed_symbols_with_hints",
+                wraps=sizevars.replace_backed_symbols_with_hints,
+            ) as resolve_hint,
+        ):
+            checker = TMACompatibilityChecker(
+                _tdm_fake_kernel(), torch.float16, for_store=False, force=True
+            )
+            self.assertTrue(checker.are_block_parameters_compatible(block_params))
+            # Stride and offset still need hints; the unused shape does not.
+            resolve_hint.assert_any_call(1)
+            resolve_hint.assert_any_call(sympy.Integer(0))
+            self.assertNotIn(mock.call(extent), resolve_hint.call_args_list)
+
+
 def simple_fn():
     return 42
 
