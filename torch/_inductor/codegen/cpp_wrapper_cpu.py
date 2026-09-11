@@ -13,7 +13,6 @@ from itertools import chain, count
 from typing import Any, Literal, TYPE_CHECKING
 
 import sympy
-
 import torch
 import torch._higher_order_ops.torchbind
 import torch._inductor.async_compile
@@ -1622,9 +1621,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
 
+    def _output_array_name(self) -> str:
+        """Name of the C array `generate_return` writes results into.
+
+        Normally the entry point's `output_handles` parameter. The GPU
+        whole-graph cuda-graph wrapper redirects it to the capture lambda's
+        `out` parameter, whose contents the runtime records and then hands back
+        as views -- the body's local RAII handles are not visible outside the
+        lambda, so it cannot write `output_handles` directly.
+        """
+        return "output_handles"
+
     def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
+        out_arr = self._output_array_name()
 
         # If any output ref represents an rvalue tensor, materialize it to an lvalue
         # RAIIAtenTensorHandle first.  This prevents situations where the code for the
@@ -1654,7 +1665,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
                 output_tensor = self.codegen_scalar_to_tensor(output)
                 self.wrapper_call.writeline(
-                    f"output_handles[{idx}] = {output_tensor}.release();"
+                    f"{out_arr}[{idx}] = {output_tensor}.release();"
                 )
                 continue
 
@@ -1662,17 +1673,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # See NOTE(return_constant) above.
                 self.wrapper_call.writeline(
                     "AOTI_TORCH_ERROR_CODE_CHECK("
-                    f"aoti_torch_clone({output}, &output_handles[{idx}]));"
+                    f"aoti_torch_clone({output}, &{out_arr}[{idx}]));"
                 )
             else:
                 if output in output2idx:
                     src_idx = output2idx[output]
                     self.wrapper_call.writeline(
-                        f"output_handles[{idx}] = output_handles[{src_idx}];"
+                        f"{out_arr}[{idx}] = {out_arr}[{src_idx}];"
                     )
                 else:
                     self.wrapper_call.writeline(
-                        f"output_handles[{idx}] = {output}.release();"
+                        f"{out_arr}[{idx}] = {output}.release();"
                     )
 
             if output not in output2idx:
