@@ -141,6 +141,9 @@ __all__ = [
     "is_torchelastic_launched",
     "is_ucc_available",
     "is_xccl_available",
+    "is_tccl_available",
+    "check_tccl_link_layer",
+    "list_tccl_devices",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -191,6 +194,7 @@ _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
+_TCCL_AVAILABLE = True
 
 try:
     try:
@@ -406,6 +410,14 @@ try:
 except ImportError:
     _XCCL_AVAILABLE = False
 
+try:
+    from torch._C._distributed_c10d import ProcessGroupTCCL
+
+    ProcessGroupTCCL.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupTCCL"]
+except ImportError:
+    _TCCL_AVAILABLE = False
+
 
 if TYPE_CHECKING:
     from torch._C._distributed_c10d import (  # noqa: TC004
@@ -495,6 +507,7 @@ class Backend(str):  # noqa: SLOT000
     UCC = "ucc"
     MPI = "mpi"
     XCCL = "xccl"
+    TCCL = "tccl"
     FAKE = "fake"
 
     class _BackendPlugin(NamedTuple):
@@ -503,14 +516,17 @@ class Backend(str):  # noqa: SLOT000
 
     _plugins: dict[str, _BackendPlugin] = {}
 
-    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI, FAKE]
+    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI, FAKE, TCCL]
 
     # 3rd-party devices can register the default backend support here
     default_device_backend_map: dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
         "xpu": XCCL,
-        "mps": GLOO,
+        # TCCL (Thunderbolt RDMA) is the MPS backend; requires USE_C10D_TCCL.
+        # If torch was built without it, backend creation raises a clear
+        # "rebuild with USE_TCCL=1" error (see _create_tccl_process_group).
+        "mps": TCCL,
     }
 
     backend_capability: dict[str, list[str]] = {
@@ -520,6 +536,7 @@ class Backend(str):  # noqa: SLOT000
         UCC: ["cpu", "cuda"],
         MPI: ["cpu", "cuda"],
         FAKE: ["cpu", "cuda", "hpu", "xpu"],
+        TCCL: ["mps"],
     }
 
     backend_type_map: dict[str, ProcessGroup.BackendType] = {
@@ -530,6 +547,7 @@ class Backend(str):  # noqa: SLOT000
         UCC: ProcessGroup.BackendType.UCC,
         MPI: ProcessGroup.BackendType.MPI,
         FAKE: ProcessGroup.BackendType.CUSTOM,
+        TCCL: ProcessGroup.BackendType.CUSTOM,
     }
 
     def __new__(cls, name: str) -> str:
@@ -956,6 +974,36 @@ def _register_builtin_xccl_backend() -> None:
         extended_api=True,
         devices=Backend.backend_capability[Backend.XCCL],
         _backend_type=ProcessGroup.BackendType.XCCL,
+    )
+
+
+def _create_tccl_process_group(
+    opts: _DistributedBackendOptions, backend_options: Any | None
+) -> C10DBackend:
+    if not is_tccl_available():
+        raise RuntimeError(
+            "Distributed package doesn't have TCCL built in. "
+            "Rebuild with USE_TCCL=1 on macOS 26.2+ with librdma.dylib."
+        )
+    backend_class = ProcessGroupTCCL(
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        # pyrefly: ignore [bad-argument-type]
+        timeout=opts.timeout,
+    )
+    backend_class.options.global_ranks_in_group = opts.global_ranks_in_group
+    backend_class.options.group_name = opts.group_id
+    return backend_class
+
+
+def _register_builtin_tccl_backend() -> None:
+    Backend.register_backend(
+        Backend.TCCL,
+        _create_tccl_process_group,
+        extended_api=True,
+        devices=Backend.backend_capability[Backend.TCCL],
+        _backend_type=ProcessGroup.BackendType.CUSTOM,
     )
 
 
@@ -1989,6 +2037,63 @@ def is_ucc_available() -> bool:
 def is_xccl_available() -> bool:
     """Check if the XCCL backend is available."""
     return _XCCL_AVAILABLE
+
+
+def is_tccl_available() -> bool:
+    """Check if the TCCL (Thunderbolt RDMA) backend is available."""
+    return _TCCL_AVAILABLE
+
+
+def check_tccl_link_layer(device_name: str) -> None:
+    """Verify the link-layer prerequisite for TCCL on a given RDMA device.
+
+    Thunderbolt RDMA requires that the BSD interface underlying ``device_name``
+    (e.g. ``rdma_en2`` -> ``en2``) has a non-link-local static IPv4 address.
+    Without it, ``ibv_modify_qp(QP -> RTR)`` silently times out with
+    ``errno=60`` and ``init_process_group(backend="tccl")`` hangs.
+
+    This helper runs the same check that ``ProcessGroupTCCL``'s constructor
+    runs, but standalone -- useful for validating cluster setup before any
+    PyTorch distributed call.
+
+    Raises:
+        RuntimeError: if the interface is missing or has only a link-local
+            (169.254/16) address. The message contains the exact ``ifconfig``
+            and ``route`` commands to run.
+    """
+    if not is_tccl_available():
+        raise RuntimeError(
+            "Distributed package doesn't have TCCL built in. "
+            "Rebuild with USE_TCCL=1 on macOS 26.2+ with librdma.dylib."
+        )
+    from torch._C._distributed_c10d import _tccl_check_link_layer
+
+    _tccl_check_link_layer(device_name)
+
+
+def list_tccl_devices() -> list[str]:
+    """Enumerate RDMA devices visible to TCCL on this host.
+
+    Loads ``librdma.dylib`` on first call (process-wide singleton).
+
+    Returns:
+        list[str]: Device names (e.g. ``["rdma_en2"]``). Empty if the library
+        loads but no devices appear -- most likely the Thunderbolt fabric is
+        bridged. Run ``sudo tbtrdmactl unbridge`` and try again.
+
+    Raises:
+        RuntimeError: if ``librdma.dylib`` cannot be loaded (e.g. macOS
+            < 26.2 or RDMA not enabled via ``bputil -enable rdma`` in
+            Recovery Mode).
+    """
+    if not is_tccl_available():
+        raise RuntimeError(
+            "Distributed package doesn't have TCCL built in. "
+            "Rebuild with USE_TCCL=1 on macOS 26.2+ with librdma.dylib."
+        )
+    from torch._C._distributed_c10d import _tccl_list_devices
+
+    return _tccl_list_devices()
 
 
 def _check_single_backend_availability(backend_name: str) -> bool:
