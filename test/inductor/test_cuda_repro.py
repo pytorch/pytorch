@@ -4204,6 +4204,34 @@ class TopkRegressionTests(TestCase):
         ).run(code)
 
     @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("case", ["epilogue", "scalar", "flat", "gather"])
+    @config.patch(
+        {
+            "test_configs.runtime_triton_shape_assert": True,
+            "test_configs.runtime_triton_dtype_assert": True,
+        }
+    )
+    def test_topk_fusible_ir_shape_asserts(self, device, case):
+        # Every value in the result stage carries the compact block shape; the
+        # runtime asserts turn a wrong recorded shape into a compile failure.
+        def f(x):
+            values, indices = torch.topk(x, 3)
+            if case == "scalar":
+                total = x.sum(-1, keepdim=True)
+                return values + total, indices, total + 1
+            if case == "flat":
+                return values.flatten() + 1, indices.flatten()
+            if case == "gather":
+                return x.gather(-1, indices) * values, indices
+            return values + 1, indices + 1
+
+        x = torch.randn(64, 33, device=device)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+        FileCheck().check("tl.static_assert(").check("shape == (XBLOCK, 4)").run(code)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("width", [33, 512])
     @parametrize("largest", [True, False])
