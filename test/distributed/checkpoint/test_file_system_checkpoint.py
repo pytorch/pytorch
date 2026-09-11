@@ -23,12 +23,14 @@ from torch.distributed.checkpoint import (
 )
 from torch.distributed.checkpoint._extension import ZStandard
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -114,6 +116,8 @@ class MyShardedModel3(torch.nn.Module):
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_read_write_only_tensor(self) -> None:
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
@@ -167,15 +171,19 @@ class TestDistributedStateDictSaveLoad(TestCase):
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
     @parametrize("extensions", [None, [Rot13Example()], [ZStandard()]])
-    def test_read_write_shard_tensor(self, extensions) -> None:
+    def test_read_write_shard_tensor(self, device, extensions) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
 
@@ -224,6 +232,8 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
 
 
 class TestDistributedReshardOnLoad(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -244,8 +254,10 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
-    def test_load_with_different_shard_plan(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_load_with_different_shard_plan(self, device) -> None:
         path = self.get_file_path()
 
         # We hardcode the assumption of how many shards are around
@@ -359,8 +371,10 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
-    def test_load_rowwise_to_colwise(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_load_rowwise_to_colwise(self, device) -> None:
         path = self.get_file_path()
         self.assertEqual(self.world_size, dist.get_world_size())
 
@@ -410,8 +424,10 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
-    def test_save_load_bytes(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_save_load_bytes(self, device) -> None:
         path = self.get_file_path()
 
         state_dict_to_save = {"bytes0": [1], "bytes1": "string"}
@@ -429,8 +445,10 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
-    def test_switch_between_sharded_tensor_to_tensor(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_switch_between_sharded_tensor_to_tensor(self, device) -> None:
         path = self.get_file_path()
         tensor_size = 32
 
@@ -515,15 +533,19 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
 
 class TestDistributedStateDictSaveLoadWithCaching(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
     @with_temp_dir
-    def test_read_write_shard_tensor(self) -> None:
+    def test_read_write_shard_tensor(self, device) -> None:
         # pyre-fixme [28]: Unexpected keyword argument `dim` to call `dist._sharding_spec.api.ChunkShardingSpec.__init__`.
         spec = ChunkShardingSpec(
             dim=0,
@@ -600,7 +622,21 @@ class TestDistributedStateDictSaveLoadWithCaching(ShardedTensorTestBase):
         dist.barrier()
 
 
-instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
+instantiate_device_type_tests(
+    TestDistributedStateDictSaveLoadWithSharedTensor,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDistributedReshardOnLoad, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestDistributedStateDictSaveLoadWithCaching,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
