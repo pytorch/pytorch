@@ -153,12 +153,12 @@ class TestRenderingHazards(unittest.TestCase):
     def test_defuses_mentions_links_images_and_html(self):
         out = neutralize(
             "cc @pytorch-dev and @alice, see #1234 "
-            "![x](http://evil/beacon.png) [click](http://evil) <img src=x onerror=1>"
+            "![x](http://evil/beacon.png) [click](http://evil) <img src=x onerror=1>"  # @lint-ignore
         )
         self.assertIn("@ pytorch-dev", out)
         self.assertIn("@ alice", out)
         self.assertIn("# 1234", out)
-        self.assertNotIn("http://evil", out)
+        self.assertNotIn("http://evil", out)  # @lint-ignore
         self.assertNotIn("<img", out)
         # The visible label of a markdown link survives; only the target goes.
         self.assertIn("click", out)
@@ -351,7 +351,9 @@ class TestRoundTwoRegressions(unittest.TestCase):
     def test_html_separator_cannot_reassemble_a_url(self):
         # HTML must be stripped BEFORE the URL rule, or <i></i> acts as a
         # separator that survives it and then vanishes.
-        self.assertNotIn("https://evil", neutralize("https:<i></i>//evil/path"))
+        self.assertNotIn(
+            "https://evil", neutralize("https:<i></i>//evil/path")
+        )  # @lint-ignore
 
     def test_html_separator_cannot_reassemble_an_encoded_blob(self):
         half = base64.b64encode(bytes(range(256)) * 4).decode()[:70]

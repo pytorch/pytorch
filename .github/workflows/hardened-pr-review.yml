@@ -6,6 +6,16 @@ on:
     types: [labeled, synchronize, reopened, ready_for_review]
 
 
+# The trailing label is load-bearing. This repo requires a workflow-level
+# cancelling group, but GitHub claims that group BEFORE evaluating the job
+# `if:`, so without the label a run this workflow will skip - a CLA bot
+# labelling the PR - still joins it and cancels a review already in flight.
+# The prefix is what the repo check requires; the suffix keeps runs for
+# different labels apart. The job-level group below still collapses pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.label.name }}
+  cancel-in-progress: true
+
 env:
   # The PR-lifecycle state label that gates automated review.
   REVIEW_LABEL: "in progress"

@@ -566,19 +566,31 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
     and both Stage 2 runs skipped. Moving the group onto `capture` fixes it,
     because a job rejected by `if:` never enters the group.
 
-    Reverting this is a two-line edit that looks tidier and silently restores
-    the failure, which is why it is pinned rather than only commented.
+    This repo REQUIRES a workflow-level cancelling group, so the group cannot
+    simply be absent. The reconciliation is the suffix: the required prefix is
+    followed by the event's label, so two runs triggered by DIFFERENT labels
+    land in different groups and cannot cancel each other. Drop the suffix and
+    the incident above comes straight back.
+
+    Reverting either half is a small edit that looks tidier and silently
+    restores the failure, which is why both are pinned rather than commented.
     """
 
     def setUp(self):
         self.text = STAGE1.read_text()
 
-    def test_stage1_has_no_workflow_level_concurrency(self):
-        # Column 0 == workflow level; the job's own block is indented.
-        self.assertIsNone(
-            re.search(r"^concurrency:", self.text, re.M),
-            "Stage 1 has a workflow-level concurrency group again — an ignored "
-            "run will cancel a live review",
+    def test_workflow_level_group_is_differentiated_by_label(self):
+        """Column 0 == workflow level. Present is fine; undifferentiated is not."""
+        m = re.search(r"^concurrency:\n(?:[ \t]+.*\n)+", self.text, re.M)
+        self.assertIsNotNone(m, "this repo requires a workflow-level group")
+        group = re.search(r"^\s+group:\s*(.+)$", m.group(0), re.M)
+        self.assertIsNotNone(group, "workflow-level concurrency has no group")
+        self.assertIn(
+            "github.event.label.name",
+            group.group(1),
+            "the workflow-level group is not differentiated by label — a run "
+            "this workflow skips will cancel a live review, as it did in "
+            "pytorch/ciforge",
         )
 
     def test_capture_job_keeps_a_collapse_group(self):

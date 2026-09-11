@@ -105,12 +105,12 @@ _ISSUE_REF = re.compile(r"(?<!\w)#(\d+)")
 # it however the lookbehind is written. It needs its own pattern, run first.
 _XREF = re.compile(r"(?<![\w/])([A-Za-z0-9._-]{1,64}/[A-Za-z0-9._-]{1,64})#(\d+)")
 # Scheme-relative `//host/path` is a live link in both HTML and markdown and was
-# not covered: `_URL` required `scheme://`, so `[click](//evil.example.com)`
+# not covered: `_URL` required `scheme://`, so `[click](//evil.example.com)`  # @lint-ignore
 # kept its target through every pass. `mailto:` and `tel:` have no `//` at all.
 #
 # The host alternative demands a dot BEFORE the first slash, which is what keeps
 # `//caffe2/core:core` (a Buck label, plausible in review prose) and `// TODO`
-# out of it while still matching `//user@evil.example.com/` and `//203.0.113.9/x`.
+# out of it while still matching `//user@evil.example.com/` and `//203.0.113.9/x`.  # @lint-ignore
 _URL = re.compile(
     r"(?:\b(?:https?|ftp|data|javascript|vbscript|file)://\S+"
     r"|\b(?:mailto|tel):\S+"
@@ -268,7 +268,7 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
 
     Backslashes are removed before the URL pass, because CommonMark honours
     escapes inside a link destination: ``\\/\\/evil.example.com`` renders as
-    ``//evil.example.com`` while containing no ``//`` for ``_URL`` to match.
+    ``//evil.example.com`` while containing no ``//`` for ``_URL`` to match.  # @lint-ignore
 
     Residual ``<``, ``>`` and ``&`` are escaped LAST, which closes what
     stripping structurally cannot: an unterminated ``<!--`` has no closing
