@@ -3647,6 +3647,7 @@ class SIMDScheduling(BaseScheduling):
         return kernel, node_schedule
 
     def codegen_outer_reduction_plans(self, node):
+        """Codegen and select one-pass versus structural outer-reduction plans."""
         if not isinstance(node, scheduler.FusedOuterReductionPlans):
             raise AssertionError(f"unexpected outer reduction plan type: {type(node)}")
         partials = node.partial_reductions
