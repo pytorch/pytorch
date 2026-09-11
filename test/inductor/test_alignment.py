@@ -7,6 +7,7 @@ import torch
 import torch._functorch.config as functorch_config
 from torch._inductor import config
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     MACOS_VERSION,
     parametrize,
@@ -270,6 +271,7 @@ class CommonTemplate:
 if RUN_CPU:
 
     class CpuTests(TestCase):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -278,6 +280,7 @@ if RUN_CPU:
 if RUN_GPU:
 
     class GPUTests(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
         device = GPU_TYPE
 
