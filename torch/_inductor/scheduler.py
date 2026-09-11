@@ -11600,13 +11600,7 @@ class Scheduler:
         mode = config.aot_inductor.cudagraph_mode
         if mode == "off":
             return
-        if mode == "regional":
-            raise RuntimeError(
-                'config.aot_inductor.cudagraph_mode="regional" is not implemented '
-                "yet -- it is added by the follow-up regional cuda-graph stack. "
-                'Use "whole" or "off".'
-            )
-        if mode != "whole":
+        if mode not in ("whole", "regional"):
             raise RuntimeError(
                 f"config.aot_inductor.cudagraph_mode={mode!r} is not a valid mode; "
                 'expected "off", "whole" or "regional".'
@@ -11615,12 +11609,15 @@ class Scheduler:
             V.graph.aot_mode and V.graph.cpp_wrapper and is_gpu(V.graph.device_type)
         ):
             raise RuntimeError(
-                'config.aot_inductor.cudagraph_mode="whole" requires an '
+                f'config.aot_inductor.cudagraph_mode="{mode}" requires an '
                 "AOTInductor GPU compile, but this graph has "
                 f"aot_mode={V.graph.aot_mode}, cpp_wrapper={V.graph.cpp_wrapper}, "
                 f"device_type={V.graph.device_type!r}."
             )
-        cudagraph_capture.check_whole_graph_capturable(self.nodes)
+        if mode == "whole":
+            cudagraph_capture.check_whole_graph_capturable(self.nodes)
+        # "regional" needs no whole-graph scan: it partitions AROUND the
+        # uncapturable nodes instead of rejecting the model for having them.
 
     def _codegen_partition_wrapper(
         self,
