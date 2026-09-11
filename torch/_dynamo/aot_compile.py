@@ -87,6 +87,19 @@ class AOTCompilePickler(FunctionPicklerBase):
         elif inspect.ismodule(obj):
             return type(self)._unpickle_python_module, (obj.__name__,)
         elif inspect.ismethod(obj):
+            receiver = obj.__self__
+            if id(receiver) in self.id_map or isinstance(receiver, torch.nn.Module):
+                # The receiver is served by persistent_id, so it is the LIVE
+                # object at load and pickle's default getattr(receiver, name)
+                # resolves on it; the shared reducer would instead pickle
+                # __func__ (an nn.Module defines __getattr__), rebuilding a
+                # local subclass's method by value and failing on its __class__
+                # cell. Only a name that does not resolve back needs the pair.
+                name = getattr(obj.__func__, "__name__", None)
+                inner = getattr(receiver, name, None) if name is not None else None
+                if inspect.ismethod(inner) and inner.__func__ is obj.__func__:
+                    return NotImplemented
+                return type(self)._unpickle_bound_method, (obj.__func__, receiver)
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:
                 return reduced
