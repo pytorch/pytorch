@@ -278,14 +278,16 @@ static Tensor mkldnn_reorder_linear_weight(
   if (batch_size_opt.has_value()) {
     input_size = {batch_size_opt.value(), in_features};
   }
-  auto packed_desc = ideep::inner_product_forward::expected_weights_desc(
-      {out_features, in_features},
+  auto packed_desc = ideep::matmul_forward::expected_weights_desc(
+      {in_features, out_features},
       input_size,
       /* weight dtype */ dtype,
-      /* src dtype */ dtype,
-      ideep::prop_kind::forward_inference);
+      /* src dtype */ dtype);
   ideep::tensor result;
-  result.init(packed_desc);
+  // Store the transposed matmul-packed descriptor so the tensor keeps Linear's
+  // public {out_features, in_features} shape. Linear transposes the descriptor
+  // back before execution.
+  result.init(packed_desc.transpose(0, 1));
   result.feed_from(w);
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
