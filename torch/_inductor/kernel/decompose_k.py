@@ -11,6 +11,7 @@ from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import can_use_tma, get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._ordered_set import OrderedSet
 
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
@@ -51,17 +52,21 @@ def get_cat2_fp32_prologue_sources(input_node) -> list[str] | None:
         return None
 
     size = tuple(V.graph.sizevars.simplify(s) for s in node.get_size())
-    origin_targets = {origin.target for origin in node.get_origins()}
-    cat_cast_targets = {
-        torch.ops.aten.cat.default,
-        torch.ops.prims.convert_element_type.default,
-    }
+    origin_targets = OrderedSet(origin.target for origin in node.get_origins())
+    cat_cast_targets = OrderedSet(
+        [
+            torch.ops.aten.cat.default,
+            torch.ops.prims.convert_element_type.default,
+        ]
+    )
     if (
         len(size) != 2
         or node.get_dtype() != torch.bfloat16
         or not V.graph.sizevars.statically_known_equals(size[1], 128)
         or not cat_cast_targets.issubset(origin_targets)
-        or not origin_targets.issubset(cat_cast_targets | {torch.ops.aten.mm.default})
+        or not origin_targets.issubset(
+            cat_cast_targets | OrderedSet([torch.ops.aten.mm.default])
+        )
     ):
         return None
 

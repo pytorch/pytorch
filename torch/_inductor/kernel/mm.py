@@ -2,7 +2,7 @@
 import functools
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch._dynamo.utils import counters
@@ -519,12 +519,16 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         get_cat2_fp32_prologue_sources(mat2) if enable_cat2_fusion else None
     )
     decompose_k_backends = (
-        {
-            backend.strip().upper()
-            for backend in inductor_config.triton.decompose_k_bmm_backends.split(",")
-        }
+        OrderedSet(
+            [
+                backend.strip().upper()
+                for backend in inductor_config.triton.decompose_k_bmm_backends.split(
+                    ","
+                )
+            ]
+        )
         if enable_cat2_fusion
-        else set()
+        else OrderedSet()
     )
     if (
         enable_cat2_fusion
@@ -552,7 +556,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         source_nodes = [
             ir.TensorBox.create(V.graph.get_buffer(name)) for name in cat2_source_names
         ]
-        whole_plan_inputs = [mat1, *source_nodes]
+        whole_plan_inputs = cast(list[Buffer], [mat1, *source_nodes])
         whole_plan_choices = [
             cat2_decompose_k_whole_plan_template.generate(
                 input_nodes=whole_plan_inputs,
