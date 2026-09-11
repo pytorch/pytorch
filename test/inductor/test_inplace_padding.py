@@ -211,6 +211,23 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
+    def test_negative_padding(self):
+        """
+        Negative padding (shrinking the tensor) should not trigger inplace padding
+        and should evaluate correctly without ValueRangeError.
+        """
+
+        def f(x, y):
+            x = aten.constant_pad_nd(x + 1.0, (0, -2, 0, 0), 12345.0)
+            return x @ y
+
+        M, N = 64, 64
+        x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
+        y = torch.randn(N - 2, M, device=GPU_TYPE)
+        check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
+
+        self.assertEqual(num_inplace_padding(), 0)
+
     @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
     @serialTest()

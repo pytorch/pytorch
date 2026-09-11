@@ -1,0 +1,49 @@
+diff --git a/test/cpython/v3_13/test_userstring.py b/test/cpython/v3_13/test_userstring.py
+index 74df52f5412af01b216ce574ca3a13c99f3c20ec..85bd3facb66a93a9411289f6b62b9ce9dcb3232e 100644
+--- a/test/cpython/v3_13/test_userstring.py
++++ b/test/cpython/v3_13/test_userstring.py
+@@ -1,18 +1,36 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_userstring.py
++
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ # UserString is a wrapper around the native builtin string type.
+ # UserString instances should behave similar to builtin string objects.
+ 
+ import unittest
+-from test import string_tests
++import string_tests
+ 
+ from collections import UserString
+ 
+ class UserStringTest(
+     string_tests.StringLikeTest,
+-    unittest.TestCase
++    CPythonTestCase
+     ):
+ 
+     type2test = UserString
+ 
++    @unittest.skip("CPython C API test (_testcapi)")
++    def test_formatting_c_limits(self):
++        super().test_formatting_c_limits()
++
+     # Overwrite the three testing methods, because UserString
+     # can't cope with arguments propagated to UserString
+     # (and we don't test with subclasses)
+@@ -68,4 +86,4 @@ class UserStringTest(
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

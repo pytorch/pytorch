@@ -7,7 +7,12 @@ import pytest
 import torch
 import torch._export as export
 from torch.testing._internal.common_quantization import skip_if_no_torchvision
-from torch.testing._internal.common_utils import IS_LINUX, IS_MACOS, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    IS_MACOS,
+    TestCase,
+)
 
 
 def _get_ops_list(m: torch.fx.GraphModule):
@@ -19,6 +24,8 @@ def _get_ops_list(m: torch.fx.GraphModule):
 
 
 class TestQuantizePT2EModels(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(
         IS_LINUX or IS_MACOS, "https://github.com/pytorch/pytorch/issues/113506"
     )
