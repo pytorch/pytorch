@@ -40,6 +40,14 @@ def compiled_region_with_backend_id_for_package_test():
     return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
 
 
+class UnpicklableConfig:
+    # Like ConfigThatCannotPickle, but the failure is not an AttributeError.
+    scale = 2.0
+
+    def __reduce__(self):
+        raise RuntimeError("config cannot pickle")
+
+
 class ConfigThatCannotPickle:
     scale = 2.0
 
@@ -151,20 +159,22 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.backend_ids, [backend_id])
         self.assertTrue(package.cache_entry().source_info.inlined_sources)
 
+    @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
-    def test_bypassed_guards_keep_the_frames_earlier_variant(self):
+    def test_bypassed_guards_keep_the_frames_earlier_variant(self, config_cls):
         # The title path: the second variant guards on a value whose __reduce__
         # raises, so serializing its guards bypasses the compile. The first
         # variant is still saved, installed on reload and hit; the second is
         # traced fresh. On main this tripped `check_fn.guards_state must not be
-        # None` in convert_frame.
+        # None` in convert_frame; a __reduce__ raising anything other than
+        # AttributeError escaped as an internal error.
         def fn(x, cfg=None):
             if cfg is not None:
                 return x.sin() * cfg.scale
             return x.sin()
 
         x = torch.randn(3)
-        cfg = ConfigThatCannotPickle()
+        cfg = config_cls()
         compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(compiled(x), fn(x))
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
@@ -186,7 +196,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
             self.assertEqual(compiled(x), fn(x))
         # Deliberate: re-triggers the bypass in the loading process against an
         # entry that already holds one installed guarded code.
-        self.assertEqual(compiled(x, cfg), fn(x, cfg))
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x, cfg), fn(x, cfg))
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
 
     @torch._dynamo.config.patch(
         caching_precompile=True, strict_precompile=False, prepare_freezing=True
@@ -648,6 +660,32 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_unserializable_guard_bypasses_the_package(self):
+        # A guarded value that cannot be pickled is a package bypass, not a
+        # compile failure: the frame still compiles and runs, and its entry is
+        # saved bypassed with no backend, so nothing is installed on reload.
+        def fn(x, cfg=UnpicklableConfig()):
+            if cfg.scale == 2.0:
+                x = x + 1
+            return x.sin()
+
+        x = torch.randn(3)
+        expected = fn(x)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(entry["backend_ids"], [])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        # Wrapping is what reloads the cache; the bypassed entry installs nothing.
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x), expected)
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
