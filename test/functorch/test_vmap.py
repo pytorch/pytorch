@@ -4544,7 +4544,7 @@ class TestVmapOperatorsOpInfoDevice(TestCase):
         dtypes=OpDTypes.any_one,
     )
     @opsToleranceOverride(
-        "TestVmapOperatorsOpInfo",
+        "TestVmapOperatorsOpInfoDevice",
         "test_vmap_exhaustive",
         (
             tol1(
@@ -4615,7 +4615,7 @@ class TestVmapOperatorsOpInfoDevice(TestCase):
         dtypes=OpDTypes.any_one,
     )
     @opsToleranceOverride(
-        "TestVmapOperatorsOpInfo",
+        "TestVmapOperatorsOpInfoDevice",
         "test_op_has_batch_rule",
         (
             tol1(
