@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     LazyVal,
     parametrize,
     run_tests,
@@ -95,6 +96,7 @@ FUSION_CASES = (
     "multi_output",
 )
 
+NUMERICS_MODES = ("default", "strict_pointwise", "strict_reduction", "strict")
 EFFECTIVE_NUMERICS = (
     "eager_numerics.division_rounding",
     "eager_numerics.disable_ftz",
@@ -117,24 +119,29 @@ def _effective_numerics():
     }
 
 
+@instantiate_parametrized_tests
 class StrictNumericsConfigTest(TestCase):
-    def test_config_patch_enables_eager_numerics(self):
+    @parametrize("numerics", NUMERICS_MODES)
+    def test_config_patch_enables_eager_numerics(self, numerics):
+        enabled = numerics in ("strict_pointwise", "strict")
         with config.patch(_numerics_options("strict", False)):
+            with config.patch(numerics=numerics):
+                self.assertEqual(
+                    _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, enabled)
+                )
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
             )
-            with config.patch(numerics="default"):
-                self.assertEqual(
-                    _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, False)
-                )
-        with config.patch(_numerics_options("default", True)):
+        with config.patch(_numerics_options(numerics, True)):
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
             )
 
-    def test_strict_env_enables_eager_numerics(self):
+    @parametrize("numerics", NUMERICS_MODES)
+    def test_env_enables_eager_numerics(self, numerics):
+        enabled = numerics in ("strict_pointwise", "strict")
         env = os.environ.copy()
-        env["TORCHINDUCTOR_NUMERICS"] = "strict"
+        env["TORCHINDUCTOR_NUMERICS"] = numerics
         env["TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING"] = "0"
         env["TORCHINDUCTOR_EMULATE_PRECISION_CASTS"] = "0"
         output = subprocess.check_output(
@@ -151,7 +158,7 @@ class StrictNumericsConfigTest(TestCase):
             env=env,
             text=True,
         )
-        self.assertEqual(output.strip(), "True True True")
+        self.assertEqual(output.split(), [str(enabled)] * len(EFFECTIVE_NUMERICS))
 
 
 @unittest.skipUnless(
@@ -159,7 +166,8 @@ class StrictNumericsConfigTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
-    def test_compile_options_enable_eager_division(self, device):
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
         y = torch.full((1024,), 7.0, device=device)
 
@@ -167,7 +175,7 @@ class StrictNumericsCompileTest(TestCase):
             torch.compile(
                 lambda a, b: a / b,
                 fullgraph=True,
-                options={"numerics": "strict"},
+                options={"numerics": numerics},
             ),
             x,
             y,
