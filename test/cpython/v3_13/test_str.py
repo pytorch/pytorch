@@ -137,10 +137,6 @@ class StrTest(string_tests.StringLikeTest,
         codecs.register(search_function)
         self.addCleanup(codecs.unregister, search_function)
 
-    @unittest.skip("CPython-only test")
-    def test_formatting_c_limits(self):
-        pass
-
     def checkequalnofix(self, result, object, methodname, *args):
         method = getattr(object, methodname)
         realresult = method(*args)
@@ -654,7 +650,6 @@ class StrTest(string_tests.StringLikeTest,
                                     left + delim * 2 + right,
                                     'replace', delim * 2, repl)
 
-    @unittest.skip("CPython-only test")
     @support.cpython_only
     def test_replace_id(self):
         pattern = 'abc'
@@ -1067,7 +1062,6 @@ class StrTest(string_tests.StringLikeTest,
         self.assertEqual('x'.center(4, '\U0010FFFF'),
                          '\U0010FFFFx\U0010FFFF\U0010FFFF')
 
-    @unittest.skip("CPython-only test")
     @unittest.skipUnless(sys.maxsize == 2**31 - 1, "requires 32-bit system")
     @support.cpython_only
     def test_case_operation_overflow(self):
@@ -1717,7 +1711,6 @@ class StrTest(string_tests.StringLikeTest,
         self.assertEqual('lhs %% %r' % SubclassedStr('rhs'),
                          "Success, self.__rmod__('lhs %% %r') was called")
 
-    @unittest.skip("CPython-only test")
     @support.cpython_only
     @unittest.skipIf(_testcapi is None, 'need _testcapi module')
     def test_formatting_huge_precision_c_limits(self):
@@ -2520,13 +2513,11 @@ class StrTest(string_tests.StringLikeTest,
     def test_expandtabs_overflows_gracefully(self):
         self.assertRaises(OverflowError, 't\tt\t'.expandtabs, sys.maxsize)
 
-    @unittest.skip("CPython-only test")
     @support.cpython_only
     def test_expandtabs_optimization(self):
         s = 'abc'
         self.assertIs(s.expandtabs(), s)
 
-    @unittest.skip("CPython-only test")
     def test_raiseMemError(self):
         asciifields = "nnb"
         compactfields = asciifields + "nP"
@@ -2666,12 +2657,10 @@ class StrTest(string_tests.StringLikeTest,
         self.assertTrue(astral >= bmp2)
         self.assertFalse(astral >= astral2)
 
-    @unittest.skip("CPython-only test")
     def test_free_after_iterating(self):
         support.check_free_after_iterating(self, iter, str)
         support.check_free_after_iterating(self, reversed, str)
 
-    @unittest.skip("CPython-only test")
     def test_check_encoding_errors(self):
         # bpo-37388: str(bytes) and str.decode() must check encoding and errors
         # arguments in dev mode

@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_str.py b/test/cpython/v3_13/test_str.py
-index 46673cc56adb3561c98bf4b49ffd758265d3e88c..613121c14a09f55f9d4af7d870902c220828a7de 100644
+index 46673cc56adb3561c98bf4b49ffd758265d3e88c..2ebb2ce5524965afa7c742b269a00ebedaa063f3 100644
 --- a/test/cpython/v3_13/test_str.py
 +++ b/test/cpython/v3_13/test_str.py
 @@ -1,3 +1,57 @@
@@ -70,7 +70,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..613121c14a09f55f9d4af7d870902c22
  from test.support.script_helper import assert_python_failure
  
  try:
-@@ -73,14 +128,19 @@ class WithRepr:
+@@ -73,11 +128,12 @@ class WithRepr:
  
  class StrTest(string_tests.StringLikeTest,
          string_tests.MixinStrUnicodeTest,
@@ -84,65 +84,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..613121c14a09f55f9d4af7d870902c22
          codecs.register(search_function)
          self.addCleanup(codecs.unregister, search_function)
  
-+    @unittest.skip("CPython-only test")
-+    def test_formatting_c_limits(self):
-+        pass
-+
-     def checkequalnofix(self, result, object, methodname, *args):
-         method = getattr(object, methodname)
-         realresult = method(*args)
-@@ -594,6 +654,7 @@ class StrTest(string_tests.StringLikeTest,
-                                     left + delim * 2 + right,
-                                     'replace', delim * 2, repl)
- 
-+    @unittest.skip("CPython-only test")
-     @support.cpython_only
-     def test_replace_id(self):
-         pattern = 'abc'
-@@ -1006,6 +1067,7 @@ class StrTest(string_tests.StringLikeTest,
-         self.assertEqual('x'.center(4, '\U0010FFFF'),
-                          '\U0010FFFFx\U0010FFFF\U0010FFFF')
- 
-+    @unittest.skip("CPython-only test")
-     @unittest.skipUnless(sys.maxsize == 2**31 - 1, "requires 32-bit system")
-     @support.cpython_only
-     def test_case_operation_overflow(self):
-@@ -1655,6 +1717,7 @@ class StrTest(string_tests.StringLikeTest,
-         self.assertEqual('lhs %% %r' % SubclassedStr('rhs'),
-                          "Success, self.__rmod__('lhs %% %r') was called")
- 
-+    @unittest.skip("CPython-only test")
-     @support.cpython_only
-     @unittest.skipIf(_testcapi is None, 'need _testcapi module')
-     def test_formatting_huge_precision_c_limits(self):
-@@ -2457,11 +2520,13 @@ class StrTest(string_tests.StringLikeTest,
-     def test_expandtabs_overflows_gracefully(self):
-         self.assertRaises(OverflowError, 't\tt\t'.expandtabs, sys.maxsize)
- 
-+    @unittest.skip("CPython-only test")
-     @support.cpython_only
-     def test_expandtabs_optimization(self):
-         s = 'abc'
-         self.assertIs(s.expandtabs(), s)
- 
-+    @unittest.skip("CPython-only test")
-     def test_raiseMemError(self):
-         asciifields = "nnb"
-         compactfields = asciifields + "nP"
-@@ -2601,10 +2666,12 @@ class StrTest(string_tests.StringLikeTest,
-         self.assertTrue(astral >= bmp2)
-         self.assertFalse(astral >= astral2)
- 
-+    @unittest.skip("CPython-only test")
-     def test_free_after_iterating(self):
-         support.check_free_after_iterating(self, iter, str)
-         support.check_free_after_iterating(self, reversed, str)
- 
-+    @unittest.skip("CPython-only test")
-     def test_check_encoding_errors(self):
-         # bpo-37388: str(bytes) and str.decode() must check encoding and errors
-         # arguments in dev mode
-@@ -2707,7 +2774,7 @@ class StrTest(string_tests.StringLikeTest,
+@@ -2707,7 +2763,7 @@ class StrTest(string_tests.StringLikeTest,
              str(b"x", "utf-8", "strict", errors="ignore")
  
  
@@ -151,7 +93,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..613121c14a09f55f9d4af7d870902c22
      def test_formatter_parser(self):
          def parse(format):
              return list(_string.formatter_parser(format))
-@@ -2783,4 +2850,4 @@ class StringModuleTest(unittest.TestCase):
+@@ -2783,4 +2839,4 @@ class StringModuleTest(unittest.TestCase):
  
  
  if __name__ == "__main__":
