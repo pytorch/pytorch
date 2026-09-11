@@ -83,6 +83,9 @@ class AOTCompilePickler(FunctionPicklerBase):
         }
         self.errors = {}
         self._probe_state = _ProbeState()
+        # True on the throwaway picklers _dumps_cleanly spawns; only the real
+        # dump reports what it drops, a probe's verdict may not be final.
+        self._probing = False
 
     def persistent_id(self, obj: object) -> int | str | None:
         if id(obj) in self.id_map:
@@ -102,6 +105,19 @@ class AOTCompilePickler(FunctionPicklerBase):
         elif inspect.ismodule(obj):
             return type(self)._unpickle_python_module, (obj.__name__,)
         elif inspect.ismethod(obj):
+            receiver = obj.__self__
+            if id(receiver) in self.id_map or isinstance(receiver, torch.nn.Module):
+                # The receiver is served by persistent_id, so it is the LIVE
+                # object at load and pickle's default getattr(receiver, name)
+                # resolves on it; the shared reducer would instead pickle
+                # __func__ (an nn.Module defines __getattr__), rebuilding a
+                # local subclass's method by value and failing on its __class__
+                # cell. Only a name that does not resolve back needs the pair.
+                name = getattr(obj.__func__, "__name__", None)
+                inner = getattr(receiver, name, None) if name is not None else None
+                if inspect.ismethod(inner) and inner.__func__ is obj.__func__:
+                    return NotImplemented
+                return type(self)._unpickle_bound_method, (obj.__func__, receiver)
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:
                 return reduced
@@ -118,15 +134,13 @@ class AOTCompilePickler(FunctionPicklerBase):
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
-                attributes={
-                    k: v for k, v in obj.__dict__.items() if self._dumps_cleanly(v)
-                },
+                attributes=self._pickleable_attributes(obj),
                 annotations={},
-                # __doc__ is the one reduced value the runtime never reads back
-                # (_apply_function_state assigns it, nothing forces it), so an
-                # unpicklable docstring must not fail the whole dump -- drop it
-                # like the pruned attributes above. __kwdefaults__ stays unpruned:
-                # a function cannot be called without it.
+                # Nothing on the load path forces __doc__ (_apply_function_state
+                # assigns it, that is all), so an unpicklable docstring must not
+                # fail the whole dump -- drop it like the pruned attributes.
+                # __kwdefaults__ stays unpruned: a function cannot be called
+                # without it.
                 doc=obj.__doc__ if self._dumps_cleanly(obj.__doc__) else None,
                 type_params=None,
                 globals_snapshot=None,
@@ -134,17 +148,35 @@ class AOTCompilePickler(FunctionPicklerBase):
 
         return NotImplemented
 
+    def _pickleable_attributes(self, obj: Any) -> dict[str, Any]:
+        # The body may read a pruned attribute (`with helper.lock:`), so the
+        # drop is a warning that names the fix, not a silent debug line; the
+        # user can hand the object over as external data and it is kept.
+        attributes = {}
+        for name, value in obj.__dict__.items():
+            if self._dumps_cleanly(value):
+                attributes[name] = value
+            elif not self._probing:
+                log.warning(
+                    "dropping %s.%s (%s) from the artifact: it does not pickle; pass it in external_data to keep it",
+                    obj.__qualname__,
+                    name,
+                    type(value).__name__,
+                )
+        return attributes
+
     def _dumps_cleanly(self, value: Any) -> bool:
         # "does it pickle?" has no cheaper predicate than trying. A throwaway
         # pickler of this exact class keeps external_data/persistent_id behaviour
         # identical to the real dump. A recursion overflow counts as unpicklable
-        # (the value is pruned) rather than re-raising, matching the guard side.
+        # (the value is pruned) rather than re-raising: a deep-but-finite value
+        # in an optional slot must not fail a save that has nothing wrong with it.
         if value is None or type(value) in (str, int, bytes, bool, float):
             return True
         state = self._probe_state
         vid = id(value)
         cached = state.cache.get(vid)
-        if cached is None and state.inflight:
+        if cached is None:
             cached = state.parked.get(vid)
         if cached is not None:
             return cached
@@ -156,20 +188,35 @@ class AOTCompilePickler(FunctionPicklerBase):
             state.leaned = True
             return True
         probe = type(self)(self.external_data, io.BytesIO())
-        # Every probed value is owned by the function being pickled, which pickle
-        # keeps alive until dump() returns, so an id is not reused within one
-        # serialize().
+        # Every probed value is reachable from the function being pickled, which
+        # pickle keeps alive until dump() returns, so an id is not reused within
+        # one dump; the cache lives as long as this pickler, one per serialize().
         probe._probe_state = state
+        probe._probing = True
         state.inflight.add(vid)
         leaned_before = state.leaned
         state.leaned = False
         try:
             probe.dump(value)
         except Exception as exc:
-            log.debug("pruning unpicklable %r from a nested function: %s", value, exc)
+            # No %r of the value: a repr can raise or be huge.
+            log.debug(
+                "pruning an unpicklable %s from a nested function: %s",
+                type(value).__name__,
+                exc,
+            )
             result = False
         else:
-            result = True
+            # persistent_id records an unmarked nn.Module rather than raising, so
+            # such a value dumps here but would fail the real serialize(); treat
+            # it as unpicklable so it is pruned now instead of failing the whole
+            # dump later.
+            result = not probe.errors
+            if not result:
+                log.debug(
+                    "pruning unmarked nn.Module(s) %s from a nested function",
+                    list(probe.errors.values()),
+                )
         finally:
             state.inflight.discard(vid)
         leaned = state.leaned
