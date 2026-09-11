@@ -203,9 +203,13 @@ class AOTCompilePickler(FunctionPicklerBase):
     def _dumps_cleanly(self, value: Any) -> bool:
         # "does it pickle?" has no cheaper predicate than trying. A throwaway
         # pickler of this exact class keeps external_data/persistent_id behaviour
-        # identical to the real dump. A recursion overflow counts as unpicklable
-        # (the value is pruned) rather than re-raising: a deep-but-finite value
-        # in an optional slot must not fail a save that has nothing wrong with it.
+        # identical to the real dump. The cache stops a value from being probed
+        # twice, not from being dumped again inside an ancestor's probe, so the
+        # total work is the reachable bytes times the nesting depth, and user
+        # __reduce__ code runs once per probe that reaches it. A recursion
+        # overflow counts as unpicklable (the value is pruned) rather than
+        # re-raising: a deep-but-finite value in an optional slot must not fail a
+        # save that has nothing wrong with it.
         if self._is_literal(value):
             return True
         state = self._probe_state
@@ -258,12 +262,17 @@ class AOTCompilePickler(FunctionPicklerBase):
         # A False that leaned on an in-flight True may be a false negative, so
         # it is not cached as final. It is parked for the rest of this probe
         # tree -- re-deriving it is exponential on a cyclic cluster -- and
-        # dropped when the tree finishes, so the real dump never consults it
-        # (a stale park can only over-prune inside a probe, which never flips a
-        # probe verdict). A True, or a False that leaned on nothing, is final.
-        # So is the OUTERMOST probe's verdict, leaned or not: the only in-flight
-        # id it can lean on is its own, and that lean is exact because pickle's
-        # memo resolves the back-reference; the caller acts on it irrevocably.
+        # dropped when the tree finishes, so the real dump never consults it.
+        # Consulting a park is not a lean: it can make a probe over-prune, and
+        # over-pruning CAN flip a probe's verdict False -> True, but such a True
+        # is only ever consumed as a keep decision inside probes (a probe's
+        # attribute set never reaches the real dump; the memo above is gated on
+        # not _probing), and every value the real dump asks about is probed
+        # outermost, cached final, after the parks were cleared. A True, or a
+        # False that leaned on nothing, is final. So is the OUTERMOST probe's
+        # verdict, leaned or not: the only in-flight id it can lean on is its
+        # own, and that lean is exact because pickle's memo resolves the
+        # back-reference; the caller acts on it irrevocably.
         if result or not leaned or not state.inflight:
             state.cache[vid] = result
         else:
