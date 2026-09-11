@@ -1696,6 +1696,8 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
 static void triangular_solve_metal(const Tensor& A_,
                                    const Tensor& B_,
                                    bool upper,
+                                   bool transpose,
+                                   bool conjugate,
                                    bool unitriangular,
                                    const Tensor& out) {
   using namespace mps;
@@ -1709,6 +1711,8 @@ static void triangular_solve_metal(const Tensor& A_,
   params.n = safe_downcast<uint32_t, uint64_t>(n);
   params.k = safe_downcast<uint32_t, uint64_t>(k);
   params.upper = upper;
+  params.transpose = transpose;
+  params.conj = conjugate;
   params.unit = unitriangular;
 
   const uint64_t elem_size = A_.element_size();
@@ -1753,8 +1757,12 @@ static void triangular_solve_blocked(const Tensor& M, bool upper, bool unitriang
   const int64_t k = X.size(-1);
   // Both are contiguous, so these fold the batch dims into one without copying
   // and let the trailing update be a single baddbmm_.
-  const Tensor M3 = M.reshape({-1, n, n});
-  Tensor X3 = X.reshape({-1, n, k});
+  // M may be a transposed and/or conjugated view, so fold the batch dims with
+  // flatten (a view here) rather than reshape, which would copy. matmul and
+  // baddbmm_ take such views directly, which is what keeps a transposed or
+  // adjoint solve from materializing an n x n copy of op(A).
+  const Tensor M3 = M.dim() == 2 ? M.unsqueeze(0) : M.flatten(0, -3);
+  Tensor X3 = X.dim() == 2 ? X.unsqueeze(0) : X.flatten(0, -3);
   const int64_t nbatch = M3.size(0);
 
   // An upper triangle is solved from the bottom block up.
@@ -1762,20 +1770,23 @@ static void triangular_solve_blocked(const Tensor& M, bool upper, bool unitriang
     const int64_t rows = std::min(nb, n - b);
     const int64_t i0 = upper ? n - b - rows : b;
     auto Xi = X3.narrow(1, i0, rows);
-    auto diag = M3.narrow(1, i0, rows).narrow(2, i0, rows).contiguous();
+    // The kernel reads raw elements, so the diagonal block is materialized;
+    // it is only nb x nb.
+    auto diag = M3.narrow(1, i0, rows).narrow(2, i0, rows).resolve_conj().contiguous();
     // Inverting the diagonal block turns the panel solve into a matmul, and the
     // block is small enough that it does not measurably cost accuracy. But the
     // inverse itself is a solve with `rows` right-hand sides, so it only pays
     // off once there are at least that many to amortize it over.
     Tensor Xi_new;
     if (k >= rows) {
-      Tensor eye = at::eye(rows, M.options()).expand({nbatch, rows, rows}).contiguous();
+      Tensor eye = at::eye(rows, M.options().memory_format(std::nullopt)).expand({nbatch, rows, rows}).contiguous();
       Tensor dinv = at::empty_like(eye);
-      triangular_solve_metal(diag, eye, upper, unitriangular, dinv);
+      triangular_solve_metal(diag, eye, upper, /*transpose=*/false, /*conjugate=*/false, unitriangular, dinv);
       Xi_new = at::matmul(dinv, Xi);
     } else {
       Xi_new = at::empty_like(Xi, at::MemoryFormat::Contiguous);
-      triangular_solve_metal(diag, Xi.contiguous(), upper, unitriangular, Xi_new);
+      triangular_solve_metal(
+          diag, Xi.contiguous(), upper, /*transpose=*/false, /*conjugate=*/false, unitriangular, Xi_new);
     }
     Xi.copy_(Xi_new);
     const int64_t rest = upper ? i0 : n - i0 - rows;
@@ -1840,20 +1851,10 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   // It is fully overwritten, hence empty rather than a copy of out.
   Tensor out_ = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
 
-  // Normalize to op(A) X = B against a materialized op(A): X op(A) = B is the
-  // same as op(A)^T X^T = B^T. The O(n^2) copy is dominated by the O(n^2 k)
-  // solve, and it leaves the kernel a plain forward/back substitution with no
-  // transpose, conjugation or side to handle.
-  Tensor M = transpose ? A_.mT() : A_;
-  if (conjugate) {
-    M = M.conj();
-  }
-  bool eff_upper = upper != transpose;
-  if (!left) {
-    M = M.mT();
-    eff_upper = !eff_upper;
-  }
-  M = M.resolve_conj().contiguous();
+  // Fold the side into the transpose rather than materializing op(A): solving
+  // X op(A) = B is the same as solving op(A)^T X^T = B^T, so the right case only
+  // costs the O(nk) transposes of B and X, never an O(n^2) copy of A.
+  const bool kernel_transpose = transpose != !left;
   const Tensor Brhs = left ? B_ : B_.mT().contiguous();
   Tensor X = left ? out_ : at::empty_like(Brhs, at::MemoryFormat::Contiguous);
 
@@ -1864,10 +1865,14 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   // nb trades a costlier diagonal-block inverse against fewer trailing matmuls.
   constexpr int64_t kBlockSize = 128;
   if (A_.size(-1) > 4 * kBlockSize) {
+    Tensor M = kernel_transpose ? A_.mT() : A_;
+    if (conjugate) {
+      M = M.conj();
+    }
     X.copy_(Brhs);
-    triangular_solve_blocked(M, eff_upper, unitriangular, kBlockSize, X);
+    triangular_solve_blocked(M, upper != kernel_transpose, unitriangular, kBlockSize, X);
   } else {
-    triangular_solve_metal(M, Brhs, eff_upper, unitriangular, X);
+    triangular_solve_metal(A_, Brhs, upper, kernel_transpose, conjugate, unitriangular, X);
   }
   if (!left) {
     out_.copy_(X.mT());

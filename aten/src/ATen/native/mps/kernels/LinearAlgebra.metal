@@ -548,12 +548,26 @@ INSTANTIATE_APPLY_TRSM(L, false, float)
 INSTANTIATE_APPLY_TRSM(U, true, float2)
 INSTANTIATE_APPLY_TRSM(L, false, float2)
 
+// op(A)(i, j): row-major (n x n) A, optionally transposed and/or conjugated.
+template <typename T>
+inline T tri_opA(
+    device const T* Ab,
+    uint i,
+    uint j,
+    uint n,
+    bool transpose,
+    bool conj) {
+  T v = transpose ? Ab[j * n + i] : Ab[i * n + j];
+  return conj ? c10::metal::conj(v) : v;
+}
+
 // Batched triangular solve by forward/back substitution. One threadgroup owns
 // one right-hand side and walks the n substitution steps serially; the dot
 // product against the already-solved prefix is split across the group and
-// reduced. The caller normalizes to op(A) X = B with a materialized op(A), so
-// there is no transpose, conjugation or right-hand side to handle here, and it
-// keeps n small enough that the prefix always fits in threadgroup memory.
+// reduced. The caller folds the side into the transpose so only op(A) X = B is
+// handled here, and keeps n small enough that the prefix always fits in
+// threadgroup memory; op itself stays in the kernel so that a transposed or
+// conjugated solve does not have to materialize an n x n copy.
 // Complex support comes from the c10::metal mul/div helpers, no-ops for real T.
 template <typename T>
 kernel void triangular_solve(
@@ -576,8 +590,11 @@ kernel void triangular_solve(
   const uint batch = tgid / k;
   const uint vec = tgid % k;
   device const T* Ab = A + batch * n * n;
-  // A lower triangle substitutes forward, an upper one backward.
-  const bool forward = p.upper == 0;
+  const bool tr = p.transpose;
+  const bool cj = p.conj;
+  // A is upper before op; a transpose flips the effective triangle, and a lower
+  // one substitutes forward.
+  const bool forward = (p.upper != 0) == (p.transpose != 0);
   device const T* b = B + batch * n * k + vec;
   device T* x = X + batch * n * k + vec;
   const uint nsimd = (tg_size + 31) / 32;
@@ -589,7 +606,7 @@ kernel void triangular_solve(
 
     T part = T(0);
     for (uint s = s_begin + lid; s < s_end; s += tg_size) {
-      part = part + c10::metal::mul(Ab[t * n + s], xs[s]);
+      part = part + c10::metal::mul(tri_opA(Ab, t, s, n, tr, cj), xs[s]);
     }
     part = c10::metal::simd_sum(part);
     if (sg_lane == 0) {
@@ -602,7 +619,8 @@ kernel void triangular_solve(
       for (uint s = 0; s < nsimd; ++s) {
         sum = sum - red[s];
       }
-      const T xt = p.unit ? sum : c10::metal::div(sum, Ab[t * n + t]);
+      const T xt =
+          p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, t, t, n, tr, cj));
       xs[t] = xt;
       x[t * k] = xt;
     }
