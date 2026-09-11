@@ -18,8 +18,13 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -73,6 +78,8 @@ def mul_forward(X, scalar):  # no device mesh needed since we don't do collectiv
 
 
 class TestLocalMap(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -441,6 +448,8 @@ class TestLocalMap(DTensorTestBase):
 class TestLocalMapSpmdTypes(TestCase):
     """Single-process tests for local_map with spmd_types type checking."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     WORLD_SIZE = 2
 
     @classmethod
@@ -761,6 +770,8 @@ If the forward and backward layouts intentionally diverge in a way not represent
 class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
     """Multi-GPU tests for local_map with spmd_types type checking."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -1003,6 +1014,8 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
 class TestLocalMapSpmdTypesMesh(TestCase):
     """Tests for local_map spmd_types with multi-dimensional meshes."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     WORLD_SIZE = 4
 
     @classmethod
@@ -1068,6 +1081,9 @@ class TestLocalMapSpmdTypesMesh(TestCase):
             """Output tensor has no spmd_types annotation on DeviceMesh dimension dp but out_placements expects S(0). Actual annotations on this DeviceMesh are: []""",
         )
 
+
+instantiate_device_type_tests(TestLocalMap, globals())
+instantiate_device_type_tests(TestLocalMapSpmdTypesMultiGPU, globals())
 
 if __name__ == "__main__":
     run_tests()
