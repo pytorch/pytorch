@@ -256,10 +256,20 @@ def _try_fast_row(
         return None
     from . import kernel_rowtile as rt
 
-    # Packed rows floor at one warp (25% utilized at N=32); tpr=1 needs no merge.
-    if rt.narrow_row(N, x.element_size(), x.shape[0]):
+    # Packed rows floor at one warp (25% utilized at N=32), but inner-tree order owns
+    # its thread map. Forcing tpr=1 changed bits at (524288, 16) and (524288, 128).
+    if (
+        rt.narrow_row(N, x.element_size(), x.shape[0])
+        and not rt.inner_tree_order_enabled()
+    ):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts, tpr=1)
     if _oneshot_ok(x):
+        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
+    # Bypass default-order xcta whenever the fold gate has a plan. Otherwise bits differed at
+    # (64, 100000), (8, 200000), and (8, 1000000).
+    if rt.inner_tree_order_enabled() and (
+        rt.itree_plan(N, x.shape[0], x.element_size()) is not None
+    ):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
     from . import kernel_xcta as xc
 
