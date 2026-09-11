@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: distributed"]
-import unittest
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -8,8 +7,12 @@ import torch
 from torch import nn, optim
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -59,6 +62,8 @@ class SimpleCNN(nn.Module):
 
 
 class TestRuntimeEstimator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _train_step(
         self,
         model: nn.Module,
@@ -71,21 +76,23 @@ class TestRuntimeEstimator(TestCase):
         optimizer.step()
         optimizer.zero_grad()
 
-    def _measure_actual_cuda_time(
+    def _measure_actual_time(
         self,
         func: Callable,
         args: tuple[Any, ...],
+        device: str,
     ) -> float:
         warmup_iters, actual_iters = 2, 5
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
+        device_module = torch.get_device_module(torch.device(device))
+        start_event = device_module.Event(enable_timing=True)
+        end_event = device_module.Event(enable_timing=True)
         for _ in range(warmup_iters):
             func(*args)
         start_event.record()
         for _ in range(actual_iters):
             func(*args)
         end_event.record()
-        torch.cuda.synchronize()
+        device_module.synchronize()
         measured_time = start_event.elapsed_time(end_event) / actual_iters
         return measured_time
 
@@ -107,8 +114,9 @@ class TestRuntimeEstimator(TestCase):
         model_type: str,
         model_args: ConvArgs | ModelArgs,
         bsz: int,
+        device: str,
     ) -> tuple[nn.Module, optim.Optimizer, torch.Tensor]:
-        dev = torch.cuda.current_device()
+        dev = torch.device(device)
         if model_type == "Transformer":
             model_args = cast(ModelArgs, model_args)
             with torch.device(dev):
@@ -129,10 +137,7 @@ class TestRuntimeEstimator(TestCase):
             raise NotImplementedError("Only Transformer and CNN is supported")
         return (model, optimizer, inp)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_transformer_runtime(
-        self,
-    ):
+    def test_transformer_runtime(self, device):
         """Runs a basic GPT-2 model"""
         vocab_size = 8192
         bsz, seq_len = 8, 1024
@@ -145,10 +150,12 @@ class TestRuntimeEstimator(TestCase):
             dropout_p=0.1,
         )
 
-        args = self._init_model_and_args("Transformer", model_args, bsz)
-        actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
+        args = self._init_model_and_args("Transformer", model_args, bsz, device)
+        actual_runtime = self._measure_actual_time(self._train_step, args, device)
         with FakeTensorMode():
-            fake_args = self._init_model_and_args("Transformer", model_args, bsz)
+            fake_args = self._init_model_and_args(
+                "Transformer", model_args, bsz, device
+            )
             benchmark_estimate = self._runtime_estimate(
                 "operator-level-benchmark", self._train_step, fake_args
             )
@@ -156,7 +163,9 @@ class TestRuntimeEstimator(TestCase):
                 "operator-level-cost-model", self._train_step, fake_args
             )
         benchmark_accuracy = actual_runtime / benchmark_estimate
-        roofline_accuracy = actual_runtime / roofline_estimate
+        roofline_accuracy = (
+            actual_runtime / roofline_estimate if roofline_estimate else float("inf")
+        )
         print(
             f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}"
             f"\n Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
@@ -165,18 +174,15 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_conv_model_runtime(
-        self,
-    ):
+    def test_conv_model_runtime(self, device):
         """Runs a simple CNN model"""
         num_classes = 100
         bsz, img_sz = 256, 128
         model_args = ConvArgs(img_sz, num_classes)
-        args = self._init_model_and_args("CNN", model_args, bsz)
-        actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
+        args = self._init_model_and_args("CNN", model_args, bsz, device)
+        actual_runtime = self._measure_actual_time(self._train_step, args, device)
         with FakeTensorMode():
-            fake_args = self._init_model_and_args("CNN", model_args, bsz)
+            fake_args = self._init_model_and_args("CNN", model_args, bsz, device)
             benchmark_estimate = self._runtime_estimate(
                 "operator-level-benchmark", self._train_step, fake_args
             )
@@ -184,7 +190,9 @@ class TestRuntimeEstimator(TestCase):
                 "operator-level-cost-model", self._train_step, fake_args
             )
         benchmark_accuracy = actual_runtime / benchmark_estimate
-        roofline_accuracy = actual_runtime / roofline_estimate
+        roofline_accuracy = (
+            actual_runtime / roofline_estimate if roofline_estimate else float("inf")
+        )
         print(
             f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}\n"
             f"Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
@@ -192,6 +200,9 @@ class TestRuntimeEstimator(TestCase):
         # No accuracy check for benchmark in CI as it is highly variable
         # self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.4)
+
+
+instantiate_device_type_tests(TestRuntimeEstimator, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
