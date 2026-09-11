@@ -7,6 +7,7 @@ import sympy
 
 from torch._inductor import config
 from torch._inductor.heuristics.registry import register_template_heuristic
+from torch.utils._ordered_set import OrderedSet
 
 from ...ir import get_free_symbols
 from ...kernel.decompose_k import (
@@ -45,6 +46,8 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
 # by either adding specific register_template_heuristic tags, or setting the
 # device to None (enabled on all devices)
 class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
+    """Generate backend-specific decompose-K partial-BMM configurations."""
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -68,10 +71,10 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        bmm_backends = {
+        bmm_backends = OrderedSet(
             backend.strip().upper()
             for backend in config.triton.decompose_k_bmm_backends.split(",")
-        }
+        )
         k_splits = get_k_splits(m, n, k)
         exact_k_splits = [
             k_split
