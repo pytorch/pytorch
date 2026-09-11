@@ -105,6 +105,7 @@ from torch._inductor.utils import (
     ALIGN_BYTES,
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
+    get_autotune_cache_fp32_precision,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -466,7 +467,7 @@ class PersistentCache(CacheBase):
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
-        precision = torch.get_float32_matmul_precision()
+        precision = get_autotune_cache_fp32_precision()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}

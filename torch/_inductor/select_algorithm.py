@@ -86,6 +86,7 @@ from .utils import (
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
+    get_autotune_cache_fp32_precision,
     get_dtype_size,
     is_gpu,
     Placeholder,
@@ -3917,7 +3918,7 @@ def create_precompile_key(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            get_autotune_cache_fp32_precision(),
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )

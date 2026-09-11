@@ -3643,6 +3643,21 @@ def parallel_num_threads() -> int:
     return threads
 
 
+def get_autotune_cache_fp32_precision() -> str:
+    """Precision string for Inductor autotune / PersistentCache keys.
+
+    Prefer the per-backend CUDA matmul API. Calling the legacy
+    ``torch.get_float32_matmul_precision()`` after the new API has been used
+    (e.g. ``fp32_precision="bfx9"`` or ``"tf32"``) raises a mixed-API error —
+    see #196728. Fall back to the legacy getter only when the new API reports
+    ``"none"``.
+    """
+    precision = torch.backends.cuda.matmul.fp32_precision
+    if precision != "none":
+        return precision
+    return torch.get_float32_matmul_precision()
+
+
 @functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
