@@ -19,10 +19,8 @@ from torch.distributed.elastic.control_plane import (
 from torch.monitor import _WaitCounter
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
-    MI200_ARCH,
     requires_cuda,
     run_tests,
-    skipIfRocmArch,
     TestCase,
 )
 
@@ -189,14 +187,13 @@ class WorkerServerTest(TestCase):
                 self.assertEqual(resp.status, 200, msg=path)
                 self.assertIn("pg_status", json.loads(resp.data))
 
-    @skipIfRocmArch(MI200_ARCH)
     def test_tcp(self) -> None:
         import requests
 
         from torch._C._distributed_c10d import _WorkerServer
 
-        server = _WorkerServer("", 1234)
-        out = requests.get("http://localhost:1234/handler/")
+        server = _WorkerServer("127.0.0.1", 0)
+        out = requests.get(f"http://127.0.0.1:{server.port}/handler/")
         self.assertEqual(out.status_code, 200)
 
         server.shutdown()
