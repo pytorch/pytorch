@@ -1,5 +1,5 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index d82e05a..ad91a69 100644
+index 46dc637..fb26fca 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -328,0 +329,4 @@ class _FragmentEpiModMixin(_EpiModMixinBase):

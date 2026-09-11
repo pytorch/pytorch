@@ -33,6 +33,8 @@ static_inputs_log = torch._logging.getArtifactLogger(
 OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
+_CUDAGRAPH_SUPPORTED_DEVICE_TYPES = frozenset(OrderedSet(["cuda"]))
+
 
 def cudagraph_trees_generation_cloning() -> Literal["user_visible"] | None:
     mode = config.triton.cudagraph_trees_generation_cloning
@@ -360,7 +362,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
     if (
         len(device_node_mapping) == 1
-        and next(iter(device_node_mapping.keys())).type == "cuda"
+        and next(iter(device_node_mapping)).type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
     ):
         return None
 
