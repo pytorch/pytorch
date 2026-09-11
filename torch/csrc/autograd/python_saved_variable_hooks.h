@@ -13,12 +13,11 @@ namespace py = pybind11;
 
 namespace torch::autograd {
 
+// Copy/move are already deleted on SavedVariableHooks; clang-tidy doesn't
+// see that inherited deletion, hence the suppression below.
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct PySavedVariableHooks : public SavedVariableHooks {
   PySavedVariableHooks(py::function&& pack_hook, py::function&& unpack_hook);
-  PySavedVariableHooks(const PySavedVariableHooks&) = delete;
-  PySavedVariableHooks& operator=(const PySavedVariableHooks&) = delete;
-  PySavedVariableHooks(PySavedVariableHooks&&) = delete;
-  PySavedVariableHooks& operator=(PySavedVariableHooks&&) = delete;
   void call_pack_hook(const at::Tensor& tensor) override;
   at::Tensor call_unpack_hook() override;
   ~PySavedVariableHooks() override {

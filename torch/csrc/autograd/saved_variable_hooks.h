@@ -6,6 +6,11 @@
 namespace torch::autograd {
 
 struct TORCH_API SavedVariableHooks {
+  SavedVariableHooks() = default;
+  SavedVariableHooks(const SavedVariableHooks&) = delete;
+  SavedVariableHooks& operator=(const SavedVariableHooks&) = delete;
+  SavedVariableHooks(SavedVariableHooks&&) = delete;
+  SavedVariableHooks& operator=(SavedVariableHooks&&) = delete;
   virtual void call_pack_hook(const at::Tensor& tensor) = 0;
   virtual at::Tensor call_unpack_hook() = 0;
   virtual ~SavedVariableHooks() = default;
