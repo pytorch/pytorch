@@ -1569,5 +1569,126 @@ class TestSimpleNamespace(TestCase):
         self.assertEqual(vars(ns_eager), vars(ns_compiled))
 
 
+class TestRuntimeCheckableProtocolIsinstance(TestCase):
+    @staticmethod
+    def _run_compiled(fn, *args):
+        opt_fn = torch.compile(fn, backend="eager")
+        return opt_fn(*args)
+
+    def test_isinstance_data_member_protocol_recompiles_on_presence(self):
+        """
+        isinstance() on a runtime_checkable Protocol inspects per-instance
+        attribute presence (getattr_static over __protocol_attrs__). Dynamo
+        constant-folds that result, so it must install HASATTR guards; two
+        instances of the same class that differ in attribute presence must not
+        share a cache entry.
+        """
+
+        from typing import Protocol, runtime_checkable
+
+        @runtime_checkable
+        class HasPorts(Protocol):
+            ports: tuple[int, ...]
+
+        class Obj:
+            def __init__(self, with_ports):
+                if with_ports:
+                    self.ports = (1, 2)
+
+        def fn(x, o):
+            return x + 1 if isinstance(o, HasPorts) else x - 1
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(3)
+
+        self.assertEqual(fn(x, Obj(True)), opt_fn(x, Obj(True)))
+        # Second call with an instance lacking the attribute must recompile and
+        # take the other branch, not silently reuse the first result.
+        self.assertEqual(fn(x, Obj(False)), opt_fn(x, Obj(False)))
+
+    def test_isinstance_protocol_guards_each_member(self):
+        """
+        The guards cover every member the protocol inspects: presence of a
+        method member and presence of a data member both trigger recompiles.
+        """
+
+        from typing import Protocol, runtime_checkable
+
+        @runtime_checkable
+        class Mixed(Protocol):
+            name: str
+
+            def bar(self): ...
+
+        class MixedYes:
+            name = "x"
+
+            def bar(self):
+                return 1
+
+        class MixedNoName:
+            def bar(self):
+                return 1
+
+        class MixedNoBar:
+            name = "x"
+
+        def fn(x, o):
+            return x + 2 if isinstance(o, Mixed) else x - 2
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(3)
+
+        self.assertEqual(fn(x, MixedYes()), opt_fn(x, MixedYes()))
+        self.assertEqual(fn(x, MixedNoName()), opt_fn(x, MixedNoName()))
+        self.assertEqual(fn(x, MixedNoBar()), opt_fn(x, MixedNoBar()))
+
+    def test_isinstance_protocol_installs_hasattr_guards(self):
+        """The cache entry must carry a HASATTR guard per protocol member."""
+
+        from typing import Protocol, runtime_checkable
+
+        @runtime_checkable
+        class HasPorts(Protocol):
+            ports: tuple[int, ...]
+
+        class Obj:
+            def __init__(self):
+                self.ports = (1, 2)
+
+        def fn(x, o):
+            return x + 1 if isinstance(o, HasPorts) else x - 1
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(3)
+        opt_fn(x, Obj())
+
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+        guard_str = str(cache_entries[0].guard_manager)
+        # HASATTR materializes as a GetAttrGuardAccessor on the arg's source.
+        self.assertIn("GetAttrGuardAccessor(ports)", guard_str)
+
+    def test_isinstance_plain_class_unchanged(self):
+        """Non-protocol classes keep folding without extra guards."""
+
+        class Plain:
+            pass
+
+        def fn(x, o):
+            return x + 3 if isinstance(o, Plain) else x - 3
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(3)
+
+        self.assertEqual(fn(x, Plain()), opt_fn(x, Plain()))
+
+
 if __name__ == "__main__":
     run_tests()

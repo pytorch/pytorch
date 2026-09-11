@@ -2670,6 +2670,25 @@ class BuiltinVariable(BaseBuiltinVariable):
             isinstance(arg, variables.UserDefinedObjectVariable)
             and "__instancecheck__" in isinstance_type.__class__.__dict__
         ):
+            # _ProtocolMeta.__instancecheck__ (i.e. isinstance() on a
+            # runtime_checkable Protocol) inspects the *instance*: it runs
+            # getattr_static(instance, attr) for every member in
+            # __protocol_attrs__, so the result depends on per-instance
+            # attribute presence, not just the class. Folding the hook result
+            # into the graph without guarding those attributes lets two
+            # instances of the same class share a cache entry while returning
+            # different isinstance() answers, silently producing wrong results.
+            # Install HASATTR guards for every member the protocol inspects so
+            # a change in attribute presence triggers a recompile.
+            if arg.source is not None and getattr(
+                isinstance_type, "_is_runtime_protocol", False
+            ):
+                for attr in getattr(isinstance_type, "__protocol_attrs__", ()):
+                    install_guard(
+                        arg.source.make_guard(
+                            functools.partial(GuardBuilder.HASATTR, attr=attr)
+                        )
+                    )
             return VariableTracker.build(
                 tx,
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value),
