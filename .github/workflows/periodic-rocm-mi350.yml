@@ -44,7 +44,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: amd-do
+      check_experiments: amd-dpx
 
   linux-noble-rocm-py3_12-build:
     name: linux-noble-rocm-py3.12-mi350
@@ -57,9 +57,9 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 

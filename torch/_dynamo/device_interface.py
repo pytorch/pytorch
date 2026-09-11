@@ -796,19 +796,8 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
 def init_device_reg() -> None:
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
-    for i in range(torch.cuda.device_count()):
-        register_interface_for_device(f"cuda:{i}", CudaInterface)
-
     register_interface_for_device("xpu", XpuInterface)
-    for i in range(torch.xpu.device_count()):
-        register_interface_for_device(f"xpu:{i}", XpuInterface)
-
     register_interface_for_device("mtia", MtiaInterface)
-    # MtiaInterface.device_count() reports 0 until an MTIAHooks impl is
-    # registered, so this enumeration cannot latch the fallback hooks.
-    for i in range(MtiaInterface.device_count()):
-        register_interface_for_device(f"mtia:{i}", MtiaInterface)
-
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
     register_interface_for_device("tpu", TpuInterface)

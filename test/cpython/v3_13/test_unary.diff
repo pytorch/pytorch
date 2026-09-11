@@ -1,0 +1,38 @@
+diff --git a/test/cpython/v3_13/test_unary.py b/test/cpython/v3_13/test_unary.py
+index a45fbf6bd6bc54b150c80902f09c8dcf0c0fc673..0f5b7cb136145198a3f0e941cc7e95f084db5c8a 100644
+--- a/test/cpython/v3_13/test_unary.py
++++ b/test/cpython/v3_13/test_unary.py
+@@ -1,8 +1,26 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_unary.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ """Test compiler changes for unary ops (+, -, ~) introduced in Python 2.2"""
+ 
+ import unittest
+ 
+-class UnaryOpTestCase(unittest.TestCase):
++class UnaryOpTestCase(CPythonTestCase):
+ 
+     def test_negative(self):
+         self.assertTrue(-2 == 0 - 2)
+@@ -47,4 +65,4 @@ class UnaryOpTestCase(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
