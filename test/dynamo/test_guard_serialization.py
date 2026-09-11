@@ -1314,6 +1314,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         )
         odd = types.FunctionType(global_func.__code__, globals(), "global_func")
         odd.__module__ = ["not", "a", "module"]  # unhashable: must not TypeError
+        walks = types.FunctionType(global_func.__code__, globals(), "global_func")
+        walks.__qualname__ = "PlainMethods.<locals>.f"
+        # The walk alone would land on `walks`; the <locals> component is
+        # refused before it, as pickle refuses it.
+        setattr(PlainMethods, "<locals>", types.SimpleNamespace(f=walks))
+        self.addCleanup(delattr, PlainMethods, "<locals>")
         # The oracle is pickle itself: every False case fails a by-reference
         # dump. save_global replaces the import/lookup failure with a
         # PicklingError; the C pickler raises a bare AttributeError for a
@@ -1324,6 +1330,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         unhashable_exc = TypeError if new_pickle else pickle.PicklingError
         cases = {
             "locals": (local_fn, locals_exc),
+            "locals_component_that_walks": (walks, locals_exc),
             "wraps_wrapper": (wrapper, pickle.PicklingError),
             "bad_qualname": (renamed, pickle.PicklingError),
             "module_not_imported": (exec_fn, pickle.PicklingError),
