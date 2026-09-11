@@ -7434,7 +7434,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if (
             config.max_autotune
-            and config.triton.enable_experimental_large_output_outer_reductions
+            and (
+                config.triton.enable_experimental_large_output_outer_reductions
+                or config.triton.autotune_experimental_large_output_outer_reductions
+            )
             and not config.deterministic
             and not config.batch_invariant
             and not torch.are_deterministic_algorithms_enabled()
@@ -8859,12 +8862,15 @@ class TritonScheduling(SIMDScheduling):
             # TODO(jansel): scan does not yet work with cooperative reductions
             kernel_kwargs["override_cooperative_reduction"] = False
 
+        disable_multi_kernel = kernel_kwargs.pop("disable_multi_kernel", False)
         kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
+        if disable_multi_kernel:
+            return [kernel]
         return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
 
     def add_multi_kernel_choices(

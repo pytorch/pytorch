@@ -119,6 +119,43 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_outer_reduction_plan_aggregate_workspace_limit(self, device):
+        node1 = Mock()
+        node2 = Mock()
+        max_bytes = ir.Reduction.EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES
+
+        with (
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_roles",
+                return_value=OrderedSet(["partial"]),
+            ),
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_workspace_bytes",
+                return_value=max_bytes,
+            ),
+        ):
+            self.assertFalse(
+                Scheduler._fusion_would_break_outer_reduction_plan(node1, node2)
+            )
+
+        with (
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_roles",
+                return_value=OrderedSet(["partial"]),
+            ),
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_workspace_bytes",
+                return_value=max_bytes + 1,
+            ),
+        ):
+            self.assertTrue(
+                Scheduler._fusion_would_break_outer_reduction_plan(node1, node2)
+            )
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
