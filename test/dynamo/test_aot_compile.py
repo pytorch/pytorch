@@ -1892,6 +1892,28 @@ from user code:
 
 
 class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
+    def test_pickler_keeps_an_external_modules_method_by_reference(self):
+        # The receiver is external data, so it is the live object at load and
+        # pickle's default getattr(receiver, name) resolves the method on it.
+        # The shared bound-method reducer would instead carry __func__ (an
+        # nn.Module defines __getattr__) and rebuild it by value, which for a
+        # local subclass fails on the __class__ cell of its super() call.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def make():
+            class LocalMod(torch.nn.Linear):
+                def forward(self, x):
+                    return super().forward(x) + 1
+
+            return LocalMod(2, 2)
+
+        mod = make()
+        buf = io.BytesIO()
+        AOTCompilePickler({"mod": mod}, buf).dump(mod.forward)
+        out = AOTCompileUnpickler({"mod": mod}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.__func__, type(mod).forward)
+        self.assertIs(out.__self__, mod)
+
     def test_pickler_does_not_prune_an_unpicklable_kwdefault(self):
         # Unlike __doc__/annotations, __kwdefaults__ is never pruned: a function
         # cannot be called without it, so an unpicklable kwdefault fails loudly.
