@@ -1073,11 +1073,19 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
-# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# Use eager-compatible math settings and INNER_TREE ordering for eligible CUDA reductions.
 # pyrefly: ignore [bad-assignment]
-numerics: Literal["default", "strict"] = os.environ.get(
-    "TORCHINDUCTOR_NUMERICS", "default"
-)  # type: ignore[assignment]
+numerics: Literal["default", "strict"] = Config(
+    default=os.environ.get("TORCHINDUCTOR_NUMERICS", "default"),
+    implies={
+        "strict": {
+            "eager_numerics.disable_ftz": True,
+            "eager_numerics.division_rounding": True,
+            "emulate_precision_casts": True,
+        }
+    },
+)
+
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
