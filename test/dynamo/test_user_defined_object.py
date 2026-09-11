@@ -2,6 +2,7 @@
 
 import copy
 import dataclasses
+import os
 import sys
 import types
 import unittest
@@ -10,7 +11,11 @@ import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+)
 
 
 class SlotsOnly:
@@ -1567,6 +1572,111 @@ class TestSimpleNamespace(TestCase):
         ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
         self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
         self.assertEqual(vars(ns_eager), vars(ns_compiled))
+
+
+class _LenZeroDict(dict):
+    def __len__(self):
+        return 0
+
+
+class _FalseBoolDict(dict):
+    def __bool__(self):
+        return False
+
+
+class _LenZeroSet(set):
+    def __len__(self):
+        return 0
+
+
+class _DoublingList(list):
+    def __init__(self, iterable=()):
+        super().__init__(x * 2 for x in iterable)
+
+
+@instantiate_parametrized_tests
+class TestContainerSubclassConstness(TestCase):
+    """A container subclass is not a Python constant: its storage does not
+    determine its truthiness, and it cannot be rebuilt by calling its own
+    constructor on already-built items."""
+
+    @parametrize("name", ["len_dict", "bool_dict", "len_set"])
+    def test_falsy_override_beats_container_storage(self, name):
+        obj = {
+            "len_dict": lambda: _LenZeroDict(a=1),
+            "bool_dict": lambda: _FalseBoolDict(a=1),
+            "len_set": lambda: _LenZeroSet({1}),
+        }[name]()
+
+        def fn(x, o):
+            return (x + 1 if o else x - 1), not o, bool(o)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, obj), compiled(x, obj))
+
+    def test_list_subclass_init_not_reapplied(self):
+        def fn(x):
+            return x + sum(_DoublingList([1, 2]))
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), compiled(x))
+
+    def test_constant_subclass_proxies_as_plain_builtin(self):
+        class MyInt(int):
+            pass
+
+        seen = []
+
+        def backend(gm, example_inputs):
+            for node in gm.graph.nodes:
+                seen.extend(type(a).__name__ for a in node.args if not hasattr(a, "op"))
+            return gm.forward
+
+        def fn(x):
+            return torch.add(x, MyInt(3))
+
+        torch.compile(fn, backend=backend, fullgraph=True)(torch.randn(4))
+        self.assertIn("int", seen)
+        self.assertNotIn("MyInt", seen)
+
+
+class _PathLikeStr(str, os.PathLike):
+    __slots__ = ()
+
+    def __fspath__(self):
+        return str(self)
+
+
+@instantiate_parametrized_tests
+class TestConstantSubclassHash(TestCase):
+    """hash() comes from the value's real constant base, which is not
+    __mro__[-2] once extra bases are mixed in."""
+
+    @parametrize("name", ["pathlike_str", "sdp_backend", "pytree_key"])
+    def test_hash_matches_eager(self, name):
+        value = {
+            "pathlike_str": lambda: _PathLikeStr("a/b"),
+            "sdp_backend": lambda: torch.nn.attention.SDPBackend.MATH,
+            "pytree_key": lambda: torch.utils._pytree.SequenceKey(1),
+        }[name]()
+
+        def fn(x, v):
+            return hash(v)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, value), compiled(x, value))
+
+    def test_subclass_used_as_key(self):
+        def fn(x):
+            d = {_PathLikeStr("k"): 1}
+            return d.get("k", "missing"), _PathLikeStr("k") in {"k"}
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), compiled(x))
 
 
 if __name__ == "__main__":
