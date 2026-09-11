@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
-"""Tests for strict inner-contiguous reduction ordering."""
+"""Tests for strict numerics mode."""
 
 import os
+import subprocess
+import sys
 import unittest
 
 
@@ -19,6 +21,7 @@ from torch._native.ops.reductions.inner_tree_plan import (
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
@@ -85,6 +88,94 @@ FUSION_CASES = (
     "multi_kernel",
     "multi_output",
 )
+
+NUMERICS_MODES = ("default", "strict_pointwise", "strict_reduction", "strict")
+EFFECTIVE_NUMERICS = (
+    "eager_numerics.division_rounding",
+    "eager_numerics.disable_ftz",
+    "emulate_precision_casts",
+)
+
+
+def _numerics_options(numerics, enabled):
+    return {
+        key: numerics if key == "numerics" else enabled
+        for key in ("numerics", *EFFECTIVE_NUMERICS)
+    }
+
+
+def _effective_numerics():
+    return {
+        "eager_numerics.division_rounding": config.eager_numerics.division_rounding,
+        "eager_numerics.disable_ftz": config.eager_numerics.disable_ftz,
+        "emulate_precision_casts": config.emulate_precision_casts,
+    }
+
+
+@instantiate_parametrized_tests
+class StrictNumericsConfigTest(TestCase):
+    @parametrize("numerics", NUMERICS_MODES)
+    def test_config_patch_enables_eager_numerics(self, numerics):
+        enabled = numerics in ("strict_pointwise", "strict")
+        with config.patch(_numerics_options("strict", False)):
+            with config.patch(numerics=numerics):
+                self.assertEqual(
+                    _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, enabled)
+                )
+            self.assertEqual(
+                _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
+            )
+        with config.patch(_numerics_options(numerics, True)):
+            self.assertEqual(
+                _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
+            )
+
+    @parametrize("numerics", NUMERICS_MODES)
+    def test_env_enables_eager_numerics(self, numerics):
+        enabled = numerics in ("strict_pointwise", "strict")
+        env = os.environ.copy()
+        env["TORCHINDUCTOR_NUMERICS"] = numerics
+        env["TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING"] = "0"
+        env["TORCHINDUCTOR_EMULATE_PRECISION_CASTS"] = "0"
+        output = subprocess.check_output(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from torch._inductor import config; "
+                    "print(config.eager_numerics.division_rounding, "
+                    "config.eager_numerics.disable_ftz, "
+                    "config.emulate_precision_casts)"
+                ),
+            ],
+            env=env,
+            text=True,
+        )
+        self.assertEqual(output.split(), [str(enabled)] * len(EFFECTIVE_NUMERICS))
+
+
+@unittest.skipUnless(
+    HAS_CUDA_AND_TRITON and torch.version.hip is None,
+    "requires NVIDIA CUDA and Triton",
+)
+class StrictNumericsCompileTest(TestCase):
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_compile_options_enable_eager_division(self, device, numerics):
+        x = torch.full((1024,), 11.0, device=device)
+        y = torch.full((1024,), 7.0, device=device)
+
+        result, codes = run_and_get_code(
+            torch.compile(
+                lambda a, b: a / b,
+                fullgraph=True,
+                options={"numerics": numerics},
+            ),
+            x,
+            y,
+        )
+
+        self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
+        self.assertIn("div_rn", "\n".join(codes))
 
 
 @unittest.skipUnless(
@@ -384,6 +475,7 @@ class StrictNumericsTest(TestCase):
         self.assertIn("tensor_descriptor" if kind == "split" else "tl.store", code)
 
 
+instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cuda")
 instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
 
 
