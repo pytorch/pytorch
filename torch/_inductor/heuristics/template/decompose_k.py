@@ -104,7 +104,10 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         ):
             return
 
-        m_hint, n_hint, k_hint = map(int, (m, n, k))
+        # The partial template uses compile-time descriptor geometry, so backed
+        # dynamic dimensions must be specialized explicitly. Unbacked symbols
+        # were rejected above.
+        m_hint, n_hint, k_hint = V.graph.sizevars.guard_int_seq((m, n, k))
         config_indices = [0, 3]
         if m_hint > 128:
             config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
