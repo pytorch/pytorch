@@ -71,11 +71,7 @@ on:
         value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
 
 jobs:
-  check-ci:
-    uses: ./.github/workflows/_check-ci.yml
-
   runner-determinator:
-    needs: check-ci
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-24.04
@@ -98,6 +94,10 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       WORKFLOW_NAME: ${{ github.workflow }}
     steps:
+      - name: Check for disabled CI
+        # Apply the gate even when the PR checkout predates it.
+        uses: pytorch/pytorch/.github/actions/check-ci@main
+
       - name: Checkout PyTorch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

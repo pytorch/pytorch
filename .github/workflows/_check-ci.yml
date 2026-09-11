@@ -7,24 +7,16 @@ on:
 jobs:
   check-ci:
     if: github.repository_owner == 'pytorch'
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     steps:
-      - name: Check for disabled CI (nonretryable)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          pr_number="${PR_NUMBER:-}"
-          if [[ -z "${pr_number}" && "${GITHUB_REF}" =~ ^refs/tags/ciflow/[^/]+/([0-9]+)$ ]]; then
-            pr_number="${BASH_REMATCH[1]}"
-          fi
-          if [[ -z "${pr_number}" ]]; then
-            exit 0
-          fi
+      - name: Checkout CI gate
+        if: github.event.pull_request.number || startsWith(github.ref, 'refs/tags/ciflow/')
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/check-ci
 
-          pr_title="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" --jq .title)"
-          if [[ "${pr_title}" == "[no-ci]"* ]]; then
-            echo "::error::CI is disabled by the [no-ci] PR title prefix. Remove the prefix and push a new commit to run CI."
-            exit 1
-          fi
+      - name: Check for disabled CI
+        if: github.event.pull_request.number || startsWith(github.ref, 'refs/tags/ciflow/')
+        uses: ./.github/actions/check-ci

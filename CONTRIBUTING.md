@@ -510,9 +510,11 @@ of very low signal to reviewers.
 Prefix your PR title with `[no-ci]` to disable CI while iterating, for example
 `[no-ci] Add a new operator`. The prefix is checked on PR runs and on runs
 triggered by `ciflow/*` labels, including when those labels trigger CI again
-after a push. A short `check-ci` job fails with an explanation before the
-build, test, and lint jobs start. This failure keeps the PR from being merged
-without CI. PR administration, such as CLA and mergeability checks, still runs.
+after a push. A check in the runner selector, or a separate `check-ci` job,
+fails with an explanation before the build, test, and lint jobs start. This
+failure keeps the PR from being merged without CI. PR administration, such
+as CLA and mergeability checks, still runs. If GitHub cannot return the PR
+title after retries, CI runs normally.
 
 The prefix must be in the title when the run starts; adding it does not cancel
 CI that is already running. To enable CI, remove the prefix and push a new
