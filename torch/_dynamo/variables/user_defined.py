@@ -1247,14 +1247,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
-            constant_fn = self.as_python_constant()
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            try:
-                res = constant_fn(*const_args, **const_kwargs)  # type: ignore[operator]
-            except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
-            return VariableTracker.build(tx, res)
+            return VariableTracker.build(
+                tx,
+                self.as_python_constant()(  # type: ignore[operator]
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
@@ -3675,9 +3674,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 type_attr, "__wrapped__", self, source=source
             )
         elif isinstance(type_attr, types.FunctionType):
-            while hasattr(type_attr, "_torchdynamo_inline"):
-                type_attr = type_attr._torchdynamo_inline  # type: ignore[union-attr]
-                source = AttrSource(source, "_torchdynamo_inline") if source else None
+            if inspect.getattr_static(type_attr, "_torchdynamo_inline", False):
+                if can_use_mro_source:
+                    source = self.get_source_by_walking_mro(tx, name)
+                return variables.WrapperUserMethodVariable(
+                    type_attr, "_torchdynamo_inline", self, source=source
+                )
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
             if can_use_mro_source:
@@ -3929,7 +3931,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             *graph_break_hints.USER_ERROR,
                         ],
                     )
-                return result.as_python_constant(), False
+                # Normalize int subclasses to a plain int (mirrors CPython's
+                # own PyLong_AsSsize_t-style coercion in slot_tp_hash), since
+                # `ConstantVariable` only holds plain literal types.
+                return int(result.as_python_constant()), False
             try:
                 in_allowlist = type_hash in _safe_c_tp_hash_funcs()
             except TypeError:

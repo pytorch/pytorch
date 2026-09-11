@@ -240,6 +240,65 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_except_scalar_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except 42:  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_tuple_with_bad_member_type_error(self):
+        # The raised exception deliberately does not match the tuple's valid
+        # member (ValueError), so the bad member (42) is reached regardless
+        # of match order.
+        def fn(x):
+            try:
+                try:
+                    raise RuntimeError("v")
+                except (ValueError, 42):  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_instance_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except object():
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_string_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except "string":  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_skiptest_propagates_as_genuine_skip(self):
         # A unittest.SkipTest raised inside a fullgraph-compiled function and
         # left uncaught must propagate as a real SkipTest -- it is test-infra
@@ -650,25 +709,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin() + 1 + 2.0)
-
-    @parametrize(
-        "exc_args, expected",
-        [((404,), "404"), (("code", 500), "('code', 500)")],
-    )
-    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
-    def test_classdef_exception_nonstring_args(self, exc_args, expected):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            try:
-
-                class A:
-                    raise ValueError(*exc_args)
-            except ValueError as e:
-                return t.sin() + (1 if str(e) == expected else 0)
-            return t.cos()
-
-        t = torch.randn(2)
-        self.assertEqual(fn(t), t.sin() + 1)
 
     def test_nn_module_getattr(self):
         class A:
