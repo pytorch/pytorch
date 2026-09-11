@@ -36,11 +36,9 @@ CUDA_ARCHES_FULL_VERSION = {
     "13.4": "13.4.1",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
-# apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo, which carries
-# 13-0 through 13-3 only; 13.4 is not published there yet. The
-# runtime image just pip-installs the published cu134 nightly, so it builds.
+# apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
 # Drop an entry once its toolkit ships in the apt repo.
-CUDA_ARCHES_RUNTIME_IMAGE_ONLY = ["13.4"]
+CUDA_ARCHES_RUNTIME_IMAGE_ONLY = []
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
     "13.0": "9",
