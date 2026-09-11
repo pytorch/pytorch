@@ -189,11 +189,9 @@ class GetattrProxy:
 
 
 class RaisingProbes:
-    # Any attribute probe of the instance (isinstance reads __class__, so that
-    # one is served) raises something other than AttributeError.
+    # Any attribute probe of the instance raises something other than
+    # AttributeError; the reducer must not read the instance outside its try.
     def __getattribute__(self, name):
-        if name == "__class__":
-            return object.__getattribute__(self, name)
         raise RuntimeError(f"probed {name}")
 
 
@@ -574,7 +572,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
 
-    def test_reducer_handles_an_empty_cell_reached_directly(self):
+    def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
         # raised ValueError out of the pickler for an empty cell. Pickler-level
         # because a guard cannot root at a raw cell through a capture:
