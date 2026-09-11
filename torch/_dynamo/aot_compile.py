@@ -885,8 +885,42 @@ class AOTCompiledModel:
 
     @classmethod
     def deserialize(cls, model: torch.nn.Module, data: bytes) -> "AOTCompiledModel":
+        """Rebuild the compiled forward of ``model`` from ``serialize()`` output.
+
+        Guards on globals are evaluated, by reference, against the live
+        ``__globals__`` of the function ``model.forward`` resolves to. That dict
+        is mutated: the ``__import_*`` aliases and the ``__builtins_dict___N``
+        key the artifact recorded at capture are inserted (never overwriting an
+        existing key) so guards rooted at them resolve in a process that never
+        traced. A guarded global the dict
+        lacks fails the guard; there is no fallback to the serialized scope.
+        The compiled bytecode itself still reads the globals serialized with
+        the artifact, not this dict. Only when ``model.forward`` is not a plain
+        function or a bound method with an importable ``__globals__`` is there
+        no live scope to use, and guards then resolve against the reconstructed
+        one, with a warning.
+        """
         from torch._dynamo.utils import get_metrics_context
         from torch._guards import compile_context, CompileContext
+
+        # Resolve from model.forward, not the model: for a hooked module
+        # get_traced_fn would return Module._wrapped_call_impl and nn.Module's
+        # namespace.
+        forward = model.forward
+        try:
+            traced_fn, _ = convert_frame.get_traced_fn(forward)
+            guard_globals = traced_fn.__globals__
+        except (RuntimeError, AttributeError):
+            log.warning(
+                "%s.forward is %r, from which no live guard scope could be "
+                "resolved (not a plain function or a bound method with an "
+                "importable __globals__); global guards on this artifact "
+                "resolve against the scope reconstructed from the serialized "
+                "bytecode instead",
+                type(model).__name__,
+                forward,
+            )
+            guard_globals = None
 
         results: list[bytes] = pickle.loads(data)
         compiled_results = []
@@ -895,7 +929,9 @@ class AOTCompiledModel:
                 compile_context(CompileContext(convert_frame.get_compile_id({}))),
                 get_metrics_context(),
             ):
-                compiled_results.append(AOTCompiledFunction.deserialize(result))
+                compiled_results.append(
+                    AOTCompiledFunction.deserialize(result, guard_globals=guard_globals)
+                )
         return cls(model, compiled_results)
 
 
