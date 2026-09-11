@@ -733,6 +733,17 @@ class SerializationMixin:
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = torch.load(buf)
 
+    @unittest.skipIf(torch.mps.is_available(), "Testing torch.load on a machine without MPS")
+    def test_load_nonexistent_mps_device(self):
+        # Asking for a device the machine does not have must report that, the same
+        # way every other backend does, rather than surfacing an allocator error.
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(torch.randn(2), f)
+            f.seek(0)
+            error_msg = r'Attempting to deserialize object on a MPS device'
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                _ = torch.load(f, map_location='mps')
+
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
         tensor = torch.randn(3, 5)
