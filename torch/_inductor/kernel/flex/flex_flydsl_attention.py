@@ -1,14 +1,26 @@
 # mypy: allow-untyped-defs
 
-import operator
 from typing import Any
 
 import torch
+from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
-from ...virtualized import V
-from .common import infer_dense_strides, load_flex_template
+from ...ir import FixedLayout, Pointwise
+from ...lowering import empty_strided, full
+from ...select_algorithm import autotune_select_algorithm
+from ...virtualized import ops, V
+from .common import (
+    construct_strides,
+    create_indices_fake,
+    create_num_blocks_fake_generator,
+    freeze_irnodes,
+    get_fwd_subgraph_outputs,
+    infer_dense_strides,
+    load_flex_template,
+    maybe_realize,
+)
 from .flex_flash_attention import is_trivial_mask_graph, is_trivial_score_graph
 from .flex_flydsl_mask import lower_flydsl_mask_graph
 
@@ -18,58 +30,10 @@ flex_flydsl_forward_template = FlyDSLTemplate(
 )
 
 _MAX_BUFFER_BYTES = 1 << 32
-_ADD_TARGETS = (
-    operator.add,
-    torch.ops.aten.add.Tensor,
-    torch.ops.aten.add.Scalar,
-)
-_ALPHA_ADD_TARGETS = (
-    torch.ops.aten.add.Tensor,
-    torch.ops.aten.add.Scalar,
-)
-_GE_TARGETS = (operator.ge, torch.ops.aten.ge.Tensor, torch.ops.aten.ge.Scalar)
-_LE_TARGETS = (operator.le, torch.ops.aten.le.Tensor, torch.ops.aten.le.Scalar)
 
 
-def is_causal_mask_graph(graph_module, q_offset: int = 0) -> bool:
-    nodes = list(graph_module.graph.nodes)
-    placeholders = [node for node in nodes if node.op == "placeholder"]
-    outputs = [node for node in nodes if node.op == "output"]
-    if len(placeholders) != 4 or len(outputs) != 1:
-        return False
-    result = outputs[0].args[0]
-    if not hasattr(result, "target") or len(result.args) != 2:
-        return False
-    lhs, rhs = result.args
-    query = placeholders[2]
-
-    def is_offset_query(value) -> bool:
-        if q_offset == 0 and value is query:
-            return True
-        if (
-            not hasattr(value, "target")
-            or value.target not in _ADD_TARGETS
-            or len(value.args) < 2
-        ):
-            return False
-        add_lhs, add_rhs = value.args[:2]
-        if value.target in _ALPHA_ADD_TARGETS and value.kwargs.get("alpha", 1) != 1:
-            return False
-        return (
-            add_lhs is query
-            and isinstance(add_rhs, (int, float))
-            and add_rhs == q_offset
-        ) or (
-            add_rhs is query
-            and isinstance(add_lhs, (int, float))
-            and add_lhs == q_offset
-        )
-
-    return (
-        result.target in _GE_TARGETS and is_offset_query(lhs) and rhs is placeholders[3]
-    ) or (
-        result.target in _LE_TARGETS and lhs is placeholders[3] and is_offset_query(rhs)
-    )
+def _contiguous_strides(shape):
+    return construct_strides(shape, range(len(shape) - 1, -1, -1))
 
 
 def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] | None:
@@ -80,13 +44,7 @@ def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] 
         return None
     if len(sizes) != 4 or len(strides) != 4:
         return None
-    contiguous = [
-        sizes[1] * sizes[2] * sizes[3],
-        sizes[2] * sizes[3],
-        sizes[3],
-        1,
-    ]
-    if strides == contiguous:
+    if strides == _contiguous_strides(sizes):
         return tuple(strides)
     if allow_strided and strides[-1] == 1 and all(stride > 0 for stride in strides):
         return tuple(strides)
@@ -113,12 +71,11 @@ def _is_contiguous_shape_stride(
 ) -> bool:
     if len(shape) != len(stride):
         return False
-    expected_stride = 1
-    for size, actual_stride in reversed(tuple(zip(shape, stride))):
-        if size != 1 and actual_stride != expected_stride:
-            return False
-        expected_stride *= max(size, 1)
-    return True
+    expected = _contiguous_strides(tuple(max(size, 1) for size in shape))
+    return all(
+        size == 1 or actual == contiguous
+        for size, actual, contiguous in zip(shape, stride, expected)
+    )
 
 
 def _is_gfx950_device(device) -> bool:
@@ -150,10 +107,10 @@ def _check_flydsl_common_compatibility(
         return "requires query, key, and value to have the same dtype"
     if not is_trivial_score_graph(subgraph.graph_module):
         return "supports identity score_mod only"
-    if score_mod_other_buffers or (
-        mask_mod_other_buffers and not allow_mask_mod_buffers
-    ):
-        return "does not support captured score_mod or mask_mod buffers"
+    if score_mod_other_buffers:
+        return "does not support captured score_mod buffers"
+    if mask_mod_other_buffers and not allow_mask_mod_buffers:
+        return "does not support captured mask_mod buffers"
 
     tensors = (query, key, value, *extra_tensors)
     if not all(
@@ -247,26 +204,17 @@ def _get_flydsl_flex_attention_forward_config(
             tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
             for node in metadata_nodes
         )
-    except NotImplementedError:
-        # Pointwise-created metadata is realized before template registration,
-        # where this check runs again with a concrete layout.
-        metadata_strides = None
-    except (AttributeError, TypeError, ValueError):
+    except (AttributeError, NotImplementedError, TypeError, ValueError):
         return None, "requires statically known BlockMask metadata strides"
-    if metadata_strides is not None:
-        if not all(
-            _is_contiguous_shape_stride(shape, stride)
-            for shape, stride in zip(metadata_shapes, metadata_strides)
-        ):
-            return None, "requires contiguous BlockMask metadata"
+    if not all(
+        _is_contiguous_shape_stride(shape, stride)
+        for shape, stride in zip(metadata_shapes, metadata_strides)
+    ):
+        return None, "requires contiguous BlockMask metadata"
 
-    causal_mask = is_causal_mask_graph(
-        mask_graph.graph_module,
-        sk - sq,
-    )
     trivial_mask = is_trivial_mask_graph(mask_graph.graph_module)
     mask_program = None
-    if not trivial_mask and not causal_mask:
+    if not trivial_mask:
         mask_program, mask_reason = lower_flydsl_mask_graph(
             mask_graph.graph_module,
             mask_mod_other_buffers,
@@ -366,7 +314,6 @@ def _get_flydsl_flex_attention_forward_config(
             "MAX_FULL_BLOCKS": max_full_blocks,
             "SPARSE_Q_BLOCK_SIZE": sparse_q_block_size,
             "SPARSE_KV_BLOCK_SIZE": sparse_kv_block_size,
-            "CAUSAL_PARTIAL_BLOCKS": causal_mask,
             "MASK_PROGRAM": (() if mask_program is None else mask_program.instructions),
             "MASK_PROGRAM_OUTPUT": (0 if mask_program is None else mask_program.output),
             "MASK_BUFFER_COUNT": (
@@ -386,42 +333,6 @@ def _get_flydsl_flex_attention_forward_config(
         },
         "",
     )
-
-
-def can_use_flydsl_flex_attention_forward(
-    *,
-    query,
-    key,
-    value,
-    kv_num_blocks,
-    kv_indices,
-    full_kv_num_blocks,
-    full_kv_indices,
-    subgraph,
-    mask_graph,
-    score_mod_other_buffers,
-    mask_mod_other_buffers,
-    scale,
-    sparse_q_block_size,
-    sparse_kv_block_size,
-) -> tuple[bool, str]:
-    config, reason = _get_flydsl_flex_attention_forward_config(
-        query=query,
-        key=key,
-        value=value,
-        kv_num_blocks=kv_num_blocks,
-        kv_indices=kv_indices,
-        full_kv_num_blocks=full_kv_num_blocks,
-        full_kv_indices=full_kv_indices,
-        subgraph=subgraph,
-        mask_graph=mask_graph,
-        score_mod_other_buffers=score_mod_other_buffers,
-        mask_mod_other_buffers=mask_mod_other_buffers,
-        scale=scale,
-        sparse_q_block_size=sparse_q_block_size,
-        sparse_kv_block_size=sparse_kv_block_size,
-    )
-    return config is not None, reason
 
 
 def maybe_append_flydsl_flex_attention_choice(
@@ -492,3 +403,134 @@ def maybe_append_flydsl_flex_attention_choice(
     if len(choices) == choices_before:
         return False, f"FlyDSL template registration failed: {error}"
     return True, ""
+
+
+def _create_dense_metadata(query, key):
+    """Materialize only the forward metadata for the frontend's no-mask sentinel."""
+    seq_q = V.graph.sizevars.guard_int(query.get_size()[2])
+    seq_kv = V.graph.sizevars.guard_int(key.get_size()[2])
+    num_q_blocks = (seq_q + 127) // 128
+    num_kv_blocks = (seq_kv + 127) // 128
+    shape = [1, 1, num_q_blocks]
+    device = query.get_device()
+    return (
+        full(shape, 0, dtype=torch.int32, device=device),
+        full([*shape, 1], 0, dtype=torch.int32, device=device),
+        full(shape, num_kv_blocks, dtype=torch.int32, device=device),
+        Pointwise.create(
+            device=device,
+            dtype=torch.int32,
+            ranges=[*shape, num_kv_blocks],
+            inner_fn=lambda index: ops.index_expr(index[-1], torch.int32),
+        ),
+    )
+
+
+def create_flydsl_flex_attention_kernel(
+    *,
+    query,
+    key,
+    value,
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+    subgraph,
+    mask_graph,
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+    scale,
+    sparse_q_block_size,
+    sparse_kv_block_size,
+    subgraph_buffer,
+    mask_graph_buffer,
+):
+    """Lower the explicitly selected FlyDSL backend independently of Triton."""
+    if (
+        sparse_q_block_size == _LARGE_SPARSE_BLOCK_SIZE
+        and sparse_kv_block_size == _LARGE_SPARSE_BLOCK_SIZE
+        and is_trivial_mask_graph(mask_graph.graph_module)
+    ):
+        (
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ) = _create_dense_metadata(query, key)
+        sparse_q_block_size = sparse_kv_block_size = 128
+
+    (
+        query,
+        key,
+        value,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+    ) = maybe_realize(
+        [query, key, value, kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices]
+    )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
+
+    batch, heads, seq_q, _ = query.get_size()
+    out_size = [batch, heads, seq_q, value.get_size()[-1]]
+    layout = FixedLayout(
+        query.get_device(),
+        query.get_dtype(),
+        out_size,
+        stride=infer_dense_strides(out_size, query.get_stride()),
+    )
+    logsumexp = empty_strided(
+        [batch, heads, seq_q], None, dtype=torch.float32, device=query.get_device()
+    )
+    max_scores = empty_strided(
+        [batch, heads, seq_q], None, dtype=torch.float32, device=query.get_device()
+    )
+    choices = []
+    appended, reason = maybe_append_flydsl_flex_attention_choice(
+        choices,
+        query=query,
+        key=key,
+        value=value,
+        logsumexp=logsumexp,
+        max_scores=max_scores,
+        kv_num_blocks=kv_num_blocks,
+        kv_indices=kv_indices,
+        full_kv_num_blocks=full_kv_num_blocks,
+        full_kv_indices=full_kv_indices,
+        layout=layout,
+        subgraph=subgraph,
+        mask_graph=mask_graph,
+        score_mod_other_buffers=score_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+        scale=scale,
+        sparse_q_block_size=sparse_q_block_size,
+        sparse_kv_block_size=sparse_kv_block_size,
+    )
+    if not appended:
+        raise RuntimeError(
+            "BACKEND='FLYDSL' but the FlyDSL flex forward candidate "
+            f"could not be registered: {reason}"
+        )
+    out, _ = autotune_select_algorithm(
+        "flex_attention_flydsl",
+        choices,
+        [
+            query, key, value, logsumexp, max_scores,
+            kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices,
+            *mask_mod_other_buffers,
+        ],
+        layout,
+        input_gen_fns={
+            5: create_num_blocks_fake_generator(kv_indices),
+            6: create_indices_fake,
+            7: create_num_blocks_fake_generator(full_kv_indices),
+            8: create_indices_fake,
+        },
+    )
+    out.data.data.subgraph_inps = list(score_mod_other_buffers) + list(mask_mod_other_buffers)
+    out.data.data.subgraph_outs = get_fwd_subgraph_outputs(subgraph_buffer, mask_graph_buffer)
+    return out, logsumexp, max_scores

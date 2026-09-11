@@ -7,6 +7,10 @@ import torch
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     build_flex_attn_fwd_module,
 )
+from torch._inductor.runtime.flydsl_cache import (
+    configure_flydsl_cache_dir,
+    run_cached_flydsl,
+)
 
 
 {{gen_defines()}}
@@ -14,8 +18,6 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
 
 _launcher = None
 _launcher_lock = threading.Lock()
-_compiled_dispatchers = {}
-_compiled_dispatchers_lock = threading.Lock()
 
 
 def _get_launcher():
@@ -40,7 +42,6 @@ def _get_launcher():
                     max_full_blocks=MAX_FULL_BLOCKS,
                     sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
                     sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
-                    causal_partial_blocks=CAUSAL_PARTIAL_BLOCKS,
                     mask_program=MASK_PROGRAM,
                     mask_program_output=MASK_PROGRAM_OUTPUT,
                     mask_buffer_shapes=MASK_BUFFER_SHAPES,
@@ -54,35 +55,6 @@ def _get_launcher():
                 )
                 _launcher = launcher
     return launcher
-
-
-def _inductor_tensor_arg(tensor):
-    # This generated module is already specialized to each tensor's shape and
-    # stride, and the outer Inductor wrapper guards that layout before launch.
-    # Keep only the data pointer dynamic so the compiled FlyDSL dispatcher does
-    # not repack every tensor's shape/stride metadata on each invocation.
-    return flyc.from_torch_tensor(tensor)
-
-
-def _run_compiled(launcher, compile_args, dispatch_args):
-    device = getattr(dispatch_args[0], "device", None)
-    device_index = getattr(device, "index", None)
-    compiled = _compiled_dispatchers.get(device_index)
-    if compiled is not None:
-        compiled(*dispatch_args)
-        return
-
-    dispatch_after_wait = False
-    with _compiled_dispatchers_lock:
-        compiled = _compiled_dispatchers.get(device_index)
-        if compiled is None:
-            compiled = flyc.compile(launcher, *compile_args)
-            _compiled_dispatchers[device_index] = compiled
-        else:
-            dispatch_after_wait = True
-
-    if dispatch_after_wait:
-        compiled(*dispatch_args)
 
 
 @contextlib.contextmanager
@@ -111,52 +83,13 @@ def _run_flydsl_forward(
     kv_indices,
     full_kv_num_blocks,
     full_kv_indices,
-{% if MASK_BUFFER_COUNT >= 1 %}
-    mask_buffer_0,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 2 %}
-    mask_buffer_1,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 3 %}
-    mask_buffer_2,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 4 %}
-    mask_buffer_3,
-{% endif %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+    mask_buffer_{{index}},
+{% endfor %}
     output,
     stream,
 ):
-    device_index = query.device.index
-    compiled = _compiled_dispatchers.get(device_index)
-    if compiled is not None:
-        # Avoid building and unpacking an extra tuple on every cached launch.
-        compiled(
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-{% if MASK_BUFFER_COUNT >= 1 %}
-            mask_buffer_0,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 2 %}
-            mask_buffer_1,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 3 %}
-            mask_buffer_2,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 4 %}
-            mask_buffer_3,
-{% endif %}
-            output,
-            stream,
-        )
-        return output
-
+    configure_flydsl_cache_dir()
     dispatch_args = (
         query,
         key,
@@ -167,62 +100,48 @@ def _run_flydsl_forward(
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-{% if MASK_BUFFER_COUNT >= 1 %}
-        mask_buffer_0,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 2 %}
-        mask_buffer_1,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 3 %}
-        mask_buffer_2,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 4 %}
-        mask_buffer_3,
-{% endif %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+        mask_buffer_{{index}},
+{% endfor %}
         output,
         stream,
     )
     launcher = _get_launcher()
+    # The generated module already guards tensor layouts, so only the pointers
+    # and stream vary between calls to the cached dispatcher.
     compile_args = tuple(
-        _inductor_tensor_arg(tensor) for tensor in dispatch_args[:-1]
+        flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
     ) + (stream,)
-    if os.environ.get("FLYDSL_COMPILE_ONLY") == "1":
+    flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
+    compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    if compile_only != flydsl_compile_only:
+        raise RuntimeError(
+            "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
+            "by the FlyDSL precompile path"
+        )
+    if flydsl_compile_only:
         flyc.compile(launcher, *compile_args)
     else:
-        _run_compiled(launcher, compile_args, dispatch_args)
+        run_cached_flydsl(
+            launcher,
+            *compile_args,
+            constexpr_param=compile_args[0],
+            compiler=flyc.compile,
+            dispatch_args=dispatch_args,
+        )
     return output
 
 
-{% if MASK_BUFFER_COUNT == 1 %}
-{{def_kernel(
+{% set kernel_args = [
     "query", "key", "value", "logsumexp", "max_scores",
     "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
-    "mask_buffer_0",
-)}}
-{% elif MASK_BUFFER_COUNT == 2 %}
-{{def_kernel(
-    "query", "key", "value", "logsumexp", "max_scores",
-    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
-    "mask_buffer_0", "mask_buffer_1",
-)}}
-{% elif MASK_BUFFER_COUNT == 3 %}
-{{def_kernel(
-    "query", "key", "value", "logsumexp", "max_scores",
-    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
-    "mask_buffer_0", "mask_buffer_1", "mask_buffer_2",
-)}}
-{% elif MASK_BUFFER_COUNT == 4 %}
-{{def_kernel(
-    "query", "key", "value", "logsumexp", "max_scores",
-    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
-    "mask_buffer_0", "mask_buffer_1", "mask_buffer_2", "mask_buffer_3",
-)}}
-{% else %}
-{{def_kernel(
-    "query", "key", "value", "logsumexp", "max_scores",
-    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
-)}}
-{% endif %}
+] %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+{% set _ = kernel_args.append("mask_buffer_" ~ index) %}
+{% endfor %}
+{{def_kernel(*kernel_args)}}
     output = {{get_output()}}
     return _run_flydsl_forward(
         query,
@@ -234,18 +153,9 @@ def _run_flydsl_forward(
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-{% if MASK_BUFFER_COUNT >= 1 %}
-        mask_buffer_0,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 2 %}
-        mask_buffer_1,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 3 %}
-        mask_buffer_2,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 4 %}
-        mask_buffer_3,
-{% endif %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+        mask_buffer_{{index}},
+{% endfor %}
         output,
         stream,
     )
@@ -270,7 +180,7 @@ def {{kernel_name}}_precompile(
             device="cpu",
         )
 
-    env_updates = {"FLYDSL_COMPILE_ONLY": "1"}
+    env_updates = {"COMPILE_ONLY": "1", "FLYDSL_COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
@@ -287,18 +197,9 @@ def {{kernel_name}}_precompile(
             kv_indices = _fake_proxy("kv_indices")
             full_kv_num_blocks = _fake_proxy("full_kv_num_blocks")
             full_kv_indices = _fake_proxy("full_kv_indices")
-{% if MASK_BUFFER_COUNT >= 1 %}
-            mask_buffer_0 = _fake_proxy("mask_buffer_0")
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 2 %}
-            mask_buffer_1 = _fake_proxy("mask_buffer_1")
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 3 %}
-            mask_buffer_2 = _fake_proxy("mask_buffer_2")
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 4 %}
-            mask_buffer_3 = _fake_proxy("mask_buffer_3")
-{% endif %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+            mask_buffer_{{index}} = _fake_proxy("mask_buffer_{{index}}")
+{% endfor %}
             output = _fake_proxy("output")
             {{kernel_name}}_main(
                 query,
@@ -310,18 +211,9 @@ def {{kernel_name}}_precompile(
                 kv_indices,
                 full_kv_num_blocks,
                 full_kv_indices,
-{% if MASK_BUFFER_COUNT >= 1 %}
-                mask_buffer_0,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 2 %}
-                mask_buffer_1,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 3 %}
-                mask_buffer_2,
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 4 %}
-                mask_buffer_3,
-{% endif %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+                mask_buffer_{{index}},
+{% endfor %}
                 output,
                 stream=0,
             )

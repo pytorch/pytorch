@@ -12,23 +12,42 @@ _CAUSAL_DOCUMENT_MASK_PROGRAM = (
     ("ge", 3, 8),
     ("and", 6, 9),
 )
+_SCHED_GROUP_MASKS = {
+    "vmem_read": 0x020,
+    "transcendental": 0x400,
+}
 
-# Intentional FlyDSL 0.3.1 unstable boundary: no stable API exposes nonzero
-# scheduler groups, a scheduler fence, or native exp2. Keep those calls
-# centralized here so the kernel otherwise uses the stable surface.
+
+def make_global_view(tensor, coord, shape, stride):
+    view = fx.make_view(fx.get_iter(tensor), fx.make_layout(shape, stride))
+    if coord is not None:
+        # Slice the global pointer before creating the 32-bit buffer descriptor.
+        # Callers widen batch/head coordinates to i64; local strides stay static.
+        view = fx.slice(view, coord)
+    num_records_bytes = (
+        fx.get_scalar(fx.cosize(view.layout)) * view.element_type.width + 7
+    ) // 8
+    if not 0 <= num_records_bytes <= 0xFFFFFFFF:
+        raise ValueError("FlyDSL buffer view must fit in a 32-bit byte range")
+    return fx.rocdl.make_buffer_tensor(view, num_records_bytes=num_records_bytes)
 
 
-def make_global_view(tensor, offset, shape, stride):
-    layout = fx.make_layout(shape, stride)
-    iterator = fx.get_iter(tensor)
-    if offset is None:
-        return fx.rocdl.make_buffer_tensor(fx.make_view(iterator, layout))
+def make_qk_shared_layout(rows, columns):
+    layout = fx.make_layout(
+        ((32, rows // 32), (32, columns // 32)),
+        ((32, 32 * columns), (1, 32 * 32)),
+    )
+    # Swizzle eight-element packs without changing their 16-byte alignment.
+    return fx.make_composed_layout(
+        fx.static(fx.SwizzleType.get(2, 3, 5)), layout
+    )
 
-    # AMD buffer-resource offsets are 32-bit. Rebase the raw 64-bit pointer
-    # before constructing the descriptor so only this CTA-local view must fit
-    # in the descriptor's addressable range.
-    iterator = fx.add_offset(iterator, fx.Int64(offset))
-    return fx.rocdl.make_buffer_tensor(fx.make_view(iterator, layout))
+
+def make_value_shared_layout(rows, columns):
+    return fx.make_layout(
+        ((8, rows // 8), (32, columns // 32)),
+        ((32, 8 * columns), (1, 8 * 32)),
+    )
 
 
 def make_shared_view(pointer, shape, stride):
@@ -92,7 +111,9 @@ def evaluate_mask_program(
                 elif op == "floordiv":
                     values.append(lhs // rhs)
                 elif op == "remainder":
-                    values.append(lhs % rhs)
+                    remainder = lhs % rhs
+                    needs_adjustment = (remainder != 0) & ((remainder < 0) != (rhs < 0))
+                    values.append(needs_adjustment.select(remainder + rhs, remainder))
                 elif op == "ge":
                     values.append(lhs >= rhs)
                 elif op == "gt":
@@ -115,7 +136,7 @@ def evaluate_mask_program(
 
 
 def _schedule_group(kind: str, count: int, group: int):
-    fx.rocdl.sched_group_barrier(kind, count, group)
+    fx.rocdl.sched_group_barrier(_SCHED_GROUP_MASKS[kind], count, group)
 
 
 def schedule_fence():
@@ -123,7 +144,7 @@ def schedule_fence():
 
 
 def fast_exp2(value):
-    return fx.Float32(fx.rocdl.exp2(fx.Float32.ir_type, value.ir_value()))
+    return fx.math.exp2(fx.Float32(value), fastmath=fx.FastMathFlags.afn)
 
 
 def schedule_fwd_qk_pipeline(*, reduction_steps: int, vmem_count: int = 0):
