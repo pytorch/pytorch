@@ -19,7 +19,8 @@ if not TEST_CUTEDSL:
 import cutlass
 import cutlass.cute as cute
 
-from torch._native.ops._cutedsl import launch as _L, traits as T
+from torch._native.cutedsl import launch as _L
+from torch._native.ops.reductions import traits as T
 
 
 class TestTraitProtocol(TestCase):
@@ -70,6 +71,16 @@ class TestTraitProtocol(TestCase):
                 t = self._make(trait)
                 self.assertEqual(len(t.init()), t.nfields)
 
+    def test_butterfly_width_is_a_power_of_two(self):
+        self.assertEqual(T._offsets(1), [])
+        self.assertEqual(T._offsets(8), [4, 2, 1])
+        for width in (0, 3, 6):
+            with (
+                self.subTest(width=width),
+                self.assertRaisesRegex(ValueError, "positive power of two"),
+            ):
+                T._offsets(width)
+
     @unittest.skipUnless(TEST_CUDA, "CUDA required")
     def test_welford_divisor_clamps_at_zero(self):
         # correction >= n must divide by zero, yielding ATen's +inf, not negative variance.
@@ -107,6 +118,45 @@ class TestTraitProtocol(TestCase):
                 fn(out, nf, _L.stream())
                 torch.cuda.synchronize()
                 self.assertEqual(out.item(), want)
+
+    @unittest.skipUnless(TEST_CUDA, "CUDA required")
+    def test_welford_empty_accumulator_is_identity(self):
+        trait = T.WelfordOps(acc=cutlass.Float32)
+
+        @cute.kernel
+        def probe(dst: cute.Tensor):
+            tidx, _, _ = cute.arch.thread_idx()
+            if tidx == 0:
+                empty = trait.init()
+                value = trait.leaf(cutlass.Float32(1e20), cutlass.Int32(0))
+                left = trait.combine(empty, value)
+                right = trait.combine(value, empty)
+                dst[0] = left[0]
+                dst[1] = left[1]
+                dst[2] = left[2]
+                dst[3] = right[0]
+                dst[4] = right[1]
+                dst[5] = right[2]
+
+        @cute.jit
+        def run(dst: cute.Tensor, stream):
+            probe(dst).launch(grid=[1, 1, 1], block=[1, 1, 1], stream=stream)
+
+        out = torch.empty(6, device="cuda")
+        fn = _L.compile_kernel(
+            run,
+            _L.fake_compact(cutlass.Float32, (6,), align=4),
+            _L.stream(),
+        )
+        fn(out, _L.stream())
+        torch.cuda.synchronize()
+        self.assertEqual(
+            out,
+            torch.tensor(
+                [1e20, 0.0, 1.0, 1e20, 0.0, 1.0],
+                device="cuda",
+            ),
+        )
 
 
 if __name__ == "__main__":
