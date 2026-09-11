@@ -597,8 +597,7 @@ kernel void triangular_solve(
   const bool forward = p.upper == p.transpose;
   device const T* b = B + batch * n * k + vec;
   device T* x = X + batch * n * k + vec;
-  const uint nsimd =
-      (tg_size + c10::metal::simdgroup_size - 1) / c10::metal::simdgroup_size;
+  const uint nsimd = c10::metal::round_up(tg_size, c10::metal::simdgroup_size);
 
   for (uint step = 0; step < n; ++step) {
     const uint t = forward ? step : n - 1 - step;
