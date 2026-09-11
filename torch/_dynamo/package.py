@@ -32,7 +32,7 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -116,10 +116,9 @@ class FunctionPicklerBase(pickle.Pickler):
     closure cells, python modules, bound methods, and functions rebuilt from
     their code object.
 
-    GuardsStatePickler is the one subclass today and decides what a rebuilt
-    function carries; this class fixes HOW it is rebuilt. AOTCompilePickler
-    keeps its own copies of these reducers until it is moved onto this base
-    separately; once both share it, a fix here cannot be missed in one pickler.
+    GuardsStatePickler and AOTCompilePickler each keep their own dispatch and
+    decide what a rebuilt function carries; this class fixes HOW it is rebuilt,
+    so a fix here cannot be missed in one pickler.
 
     Defaults, kwdefaults, __doc__, __dict__, __annotations__ and __type_params__
     travel as pickle STATE, applied after memoization, so `wrapper.me = wrapper`
@@ -159,7 +158,7 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _build_function(
         cls,
-        f_globals: dict[str, Any],
+        f_globals: dict[str, object],
         module: Any,
         code: types.CodeType,
         qualname: str,
@@ -179,44 +178,52 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_module(
         cls,
+        scope: Any,
         module: Any,
         code: types.CodeType,
         qualname: str,
         name: str,
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
-        # functools.wraps copies __module__, so this scope can be a different
-        # file from the one the function lives in; a pickler that guards
-        # __globals__ sends the snapshot variant instead. Importing it here runs
-        # that module's top-level code at guard-load time if it is not loaded
-        # yet; for a wraps wrapper that is the wrapped function's module, almost
-        # always already imported. A module that only existed in sys.modules
-        # at save (exec-created, transformers_modules.*) gets an empty scope.
-        # That is safe on the guard-serialization path, which reads attributes
-        # off the rebuilt function without calling it; a pickler whose
-        # functions are CALLED after load would see an empty scope as a
-        # NameError at first call, not a load error.
-        f_globals: dict[str, Any]
-        # __module__ need not be an importable string: a decorator can set it to
-        # a non-str (42), a <locals>/exec function can carry None or "" (bare
-        # globals with no __name__), and a relative name (".rel") or a module
-        # whose body raises fails import with something other than ImportError.
-        # None of those should fail the load, so require a non-empty str and
-        # swallow any import failure into the empty scope.
-        if isinstance(module, str) and module:
+        # `scope` is the __name__ of the module dict the code was compiled
+        # against (fn.__globals__), which is what the body reads at call time;
+        # `module` is fn.__module__, restored as an attribute. functools.wraps
+        # copies __module__ from the wrappee, so the two differ for a wrapper
+        # defined in another file, and a function whose __module__ is None still
+        # has a scope. A pickler that guards __globals__ sends the snapshot
+        # variant instead. Importing here runs that module's top-level code at
+        # load if it is not loaded yet; for a wraps wrapper that is the
+        # decorator's module, almost always already imported. A scope that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # comes back empty: safe on the guard-serialization path, which reads
+        # attributes off the rebuilt function without calling it; a pickler
+        # whose functions are CALLED after load (AOTCompilePickler) sees an
+        # empty scope as a NameError at first call, not a load error. "__main__"
+        # imports the LOADING process's __main__, as pickle's own by-reference
+        # path does; a module that swapped a proxy into sys.modules
+        # (torch.backends.cudnn) imports as that proxy, as the old import of
+        # __module__ did.
+        # Not every __name__ is importable: a <locals>/exec function can carry
+        # None or "" (bare globals with no __name__), and a relative name
+        # (".rel") or a module whose body raises fails import with something
+        # other than ImportError. None of those should fail the load, so require
+        # a non-empty str and swallow any Exception from the import into the
+        # empty scope (a SystemExit or KeyboardInterrupt still propagates).
+        f_globals: dict[str, object] = {}
+        why: str | Exception = f"scope {scope!r} is not an importable name"
+        if isinstance(scope, str) and scope:
             try:
-                f_globals = importlib.import_module(module).__dict__
+                f_globals = importlib.import_module(scope).__dict__
             except Exception as e:
-                logger.debug("rebuilding %s with an empty scope: %s", qualname, e)
-                f_globals = {}
-        else:
-            f_globals = {}
+                why = e
+        if not f_globals:
+            logger.debug("rebuilding %s with an empty scope: %s", qualname, why)
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
     def _unpickle_fn_from_snapshot(
         cls,
-        scope: dict[str, Any],
+        scope: dict[str, object],
         module: Any,
         code: types.CodeType,
         qualname: str,
@@ -258,19 +265,97 @@ class FunctionPicklerBase(pickle.Pickler):
             fn.__type_params__ = type_params
 
     @staticmethod
-    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+    def _is_literal(value: object) -> bool:
+        # An always-picklable constant: the singletons and scalars dynamo treats
+        # as constants, NOT every common_constant_type (torch.finfo/iinfo do not
+        # pickle). The guard pickler carries these whether or not a guard reads
+        # them: pruning buys nothing and, since _keep matches by id, would make
+        # the rebuilt state depend on whether some unrelated guard happened to
+        # register the interned value. The AOT pickler skips probing them.
+        if value is None or value is Ellipsis or value is NotImplemented:
+            return True
+        return type(value) in (
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+        )
+
+    @staticmethod
+    def _fqn_resolves(fn: types.FunctionType) -> bool:
+        """Whether pickling fn by reference (import __module__, walk __qualname__)
+        lands back on fn. False for a <locals> function, a functools.wraps
+        wrapper (it carries the wrappee's names), an exec-created function, or
+        a module absent from sys.modules; pickling those by reference fails at
+        dump with PicklingError (a bare AttributeError from the C pickler for a
+        <locals> name below 3.14), so the caller rebuilds them from the code
+        object (or prunes them). Conservative on purpose: pickle would import a
+        module that is not in sys.modules yet, this reports False for it
+        (guards.py explains why on its caller), and a "<locals>" qualname
+        component is refused like pickle refuses it. GuardsStatePickler handles
+        <locals> on its own branch before asking; AOTCompilePickler dispatches
+        on this alone."""
+        if "<locals>" in fn.__qualname__.split("."):
+            return False
+        # __module__ need not be a str (a decorator can set anything); an
+        # unhashable one must not TypeError out of the reducer.
+        module = (
+            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
+        )
+        if module is None:
+            return False
+        resolved: object = module
+        for name in fn.__qualname__.split("."):
+            resolved = getattr(resolved, name, None)
+        return resolved is fn
+
+    @staticmethod
+    def _read_raw_annotations(obj: Any, *, evaluate: bool = False) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the
         # FORWARDREF format instead: it evaluates what it can and falls back to
         # proxies only for names that do not resolve, returning a COPY either
         # way. A ForwardRef proxy carries its owner and may not pickle (it does
         # not for a local function), so the caller prunes any it does not need.
+        # `evaluate` asks for the VALUE format instead, for a caller that has to
+        # serialize the values and cannot carry a proxy; that read raises for a
+        # name that does not resolve.
         if sys.version_info >= (3, 14):
             import annotationlib
 
-            return annotationlib.get_annotations(
-                obj, format=annotationlib.Format.FORWARDREF
-            )
+            if evaluate:
+                # An evaluating caller logs its own drop, with the reason.
+                return annotationlib.get_annotations(
+                    obj, format=annotationlib.Format.VALUE
+                )
+            # FORWARDREF reruns the annotate function with every NAME lookup
+            # proxied, so it absorbs a missing name, a raising attribute or a
+            # raising call, but a sub-expression with no name in it (an
+            # f-string, `()[0]`) still raises out of it; that would fail the
+            # dump for a slot the prune exists to make optional. Dropping the
+            # whole set is safe for guards: a guard rooted at fn.__annotations__
+            # evaluated them at trace time (VALUE format, cached on the
+            # function), so a read that raises here is one no guard performed.
+            try:
+                return annotationlib.get_annotations(
+                    obj, format=annotationlib.Format.FORWARDREF
+                )
+            except Exception as e:
+                code = obj.__code__
+                logger.debug(
+                    "dropping the annotations of %s (%s:%d): %s",
+                    getattr(code, "co_qualname", code.co_name),
+                    code.co_filename,
+                    code.co_firstlineno,
+                    e,
+                )
+                return {}
         return obj.__annotations__
 
     def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
@@ -288,37 +373,51 @@ class FunctionPicklerBase(pickle.Pickler):
             type(self)._set_cell_contents,
         )
 
-    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+    def _reduce_bound_method(
+        self, method: types.MethodType, *, receiver_is_live: bool = False
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]] | None:
         # pickle rebuilds a bound method by getattr() on self at load, which is
         # wrong when that does not resolve back to the same bound method; those
-        # carry the function and self explicitly.
+        # carry the function and self explicitly. `receiver_is_live` says
+        # getattr() on the load-time receiver serves names as it does here (it
+        # is handed over as external data, a persistent_id reference), so only
+        # the probe below decides; the per-instance and __getattr__ gates exist
+        # for a receiver that is rebuilt, possibly as a different type.
         receiver = method.__self__
         cls = type(receiver)
         func = method.__func__
-        # __name__ is not guaranteed: MethodType accepts any callable, so
-        # method.__func__ may be a functools.partial with no __name__. Fall
-        # through to the explicit reduce rather than raising out of the reducer.
-        name = getattr(func, "__name__", None)
         # A name served PER-INSTANCE (an instance __dict__ monkeypatch such as
-        # m.forward = MethodType(f, m), or a __slots__ member) is carried as
+        # obj.f = MethodType(f, obj), or a __slots__ member) is carried as
         # func+self explicitly: getattr() at load hands back whatever the dict
         # or slot holds, a raw function or a method bound elsewhere, never a
         # method over this pair, and in the self-cycle case the slot is not even
-        # restored yet. A class defining __getattr__ (nn.Module included) takes
-        # the pair too, without probing: the probe would run that user code, and
-        # a subclass may rebuild such a receiver as a DIFFERENT type at load
+        # restored yet. The __dict__ clause only sees a receiver that HAS an
+        # instance dict, so a pure-slots receiver falls through it to the slot
+        # check (a slotted subclass of a non-slotted base has both, and either
+        # clause gives the same answer). A class defining __getattr__ (nn.Module
+        # included) takes the pair before either gate, without probing.
+        # Probing would run that user code, and a subclass may rebuild such a
+        # receiver as a DIFFERENT type at load
         # (GuardsStatePickler._unpickle_module turns a non-referenceable module
         # into a bare torch.nn.Module), on which getattr() would not resolve
-        # the method. A type receiver (classmethod) is exempt: its namespace is
-        # restored with the class. issubclass(cls, ...) rather than isinstance
-        # so a raising __getattribute__ cannot escape before the try below.
+        # the method. Both gates are skipped for a type receiver (a classmethod;
+        # its namespace is restored with the class) and for a live receiver,
+        # whose names getattr() serves at load exactly as it does now; those
+        # are probed. issubclass(cls, ...) rather than isinstance so a raising
+        # __getattribute__ cannot escape before the try below.
         explicit = (type(self)._unpickle_bound_method, (func, receiver))
-        is_type = issubclass(cls, type)
+        exempt = issubclass(cls, type) or receiver_is_live
         try:
-            if not is_type and hasattr(cls, "__getattr__"):
+            if not exempt and hasattr(cls, "__getattr__"):
                 return explicit
+            # __name__ is not guaranteed: MethodType accepts any callable, so
+            # func may be a functools.partial with no __name__, or a proxy whose
+            # __getattr__ raises something other than AttributeError; both fall
+            # through to the explicit reduce rather than out of the reducer. Read
+            # after the gate above, which takes the pair without probing func.
+            name = getattr(func, "__name__", None)
             self_dict = getattr(receiver, "__dict__", None)
-            if not is_type and (
+            if not exempt and (
                 (isinstance(self_dict, dict) and name in self_dict)
                 or (
                     name is not None
@@ -366,9 +465,12 @@ class FunctionPicklerBase(pickle.Pickler):
         # no guard reads so an unpicklable local class in an annotation -- or a
         # __doc__ reassigned to an unpicklable object -- cannot fail the whole
         # dump (a failure there silently bypasses the package).
+        # Both unpicklers take (scope, module, code, qualname, name, closure):
+        # the scope is the module NAME to import or the snapshot dict itself.
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
             unpickle = type(self)._unpickle_fn_from_module
+            args = (fn.__globals__.get("__name__"), *args)
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
             args = (globals_snapshot, *args)
@@ -493,9 +595,13 @@ class _DynamoCodeCacheEntry:
          it was bypassed (its guards could not be serialized), or a backend
          artifact was missing when the package was saved. install() then leaves
          the frame to be traced fresh rather than skipping it as trivial.
-         Cleared once a compile records a guarded code. (The save-time writer,
-         PrecompileCacheEntry.from_cache_entry, still flags the whole entry and
-         keeps the stale guarded codes.)
+         Cleared once a compile records a guarded code. The save-time writer,
+         PrecompileCacheEntry.from_cache_entry, flags the whole entry when any
+         one of its backend artifacts is missing; CompilePackage.initialize then
+         loads it without its stale guarded codes and backend ids, every variant
+         of that code object included, since install() would have used none.
+         TODO(#196773): prune only the guarded codes whose bytecode names the
+         missing backend at write time, so the other variants stay installable.
     """
 
     python_code: SerializedCode
@@ -658,10 +764,47 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
+_CpuCodegenTarget = tuple[str, str, int, tuple[str, ...], int | None, str | None]
+
+
+def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
+    """(machine, vec_isa, vec_isa_width, vec_isa_macro, simdlen, march): the CPU codegen context.
+
+    ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
+    only when the artifact can hold native CPU code. None means the host has no
+    usable CPU codegen target: the probe raised, or it picked no valid vector
+    ISA (``pick_vec_isa`` never raises for a missing compiler; it returns
+    ``invalid_vec_isa``), so it can neither produce nor run a vectorized
+    inductor CPU kernel.
+    """
+    from torch._inductor import config as inductor_config, cpu_vec_isa
+
+    try:
+        vec_isa = cpu_vec_isa.pick_vec_isa()
+    except Exception:
+        logger.warning(
+            "Could not determine the CPU vector ISA, so no CPU codegen target "
+            "is recorded and none will be checked.",
+            exc_info=True,
+        )
+        return None
+    if isinstance(vec_isa, cpu_vec_isa.InvalidVecISA):
+        return None
+
+    return (
+        platform.machine(),
+        str(vec_isa),
+        vec_isa.bit_width(),
+        tuple(vec_isa.build_macro()),
+        inductor_config.cpp.simdlen,
+        inductor_config.cpp.march,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
-    System information including Python, PyTorch, and GPU details.
+    System information including Python, PyTorch, CPU codegen, and GPU details.
     This information is used to ensure compiled artifacts can only be loaded
     with compatible system configurations.
     """
@@ -671,13 +814,16 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    cpu_codegen_target: _CpuCodegenTarget | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
-    def current(cls) -> "SystemInfo":
-        """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
+    def current(cls, *, cpu_codegen: bool = True) -> "SystemInfo":
+        """Create a SystemInfo instance with current system information.
+
+        ``cpu_codegen=False`` skips the C++ toolchain probe behind
+        ``cpu_codegen_target``.
+        """
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
@@ -696,6 +842,7 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            cpu_codegen_target=_current_cpu_codegen_target() if cpu_codegen else None,
         )
 
     def check_compatibility(
@@ -723,16 +870,20 @@ class SystemInfo:
                     f"Compile package was created with a different toolkit version: {self.toolkit_version}"
                 )
 
+            # Exempt off the artifact (self), not the host: an artifact built
+            # without Triton (self == (0, 0)) bakes in no Triton-specific code,
+            # but one built with Triton must match, even on a Triton-less host
+            # (which would otherwise fail later at kernel load).
             if (
-                other.triton_version != (0, 0)
+                self.triton_version != (0, 0)
                 and self.triton_version != other.triton_version
             ):
                 raise RuntimeError(
                     f"Compile package was created with a different Triton version: {self.triton_version}"
                 )
 
-            # Check GPU name if CUDA/XPU was used
-            if other.gpu_name is not None and self.gpu_name != other.gpu_name:
+            # Check GPU name if the artifact recorded one (self, not the host).
+            if self.gpu_name is not None and self.gpu_name != other.gpu_name:
                 raise RuntimeError(
                     f"Compile package was created with different GPU: "
                     f"cached={self.gpu_name}, current={other.gpu_name}"
@@ -744,7 +895,9 @@ class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
     source_info: SourceInfo
     device_type: str
-    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    system_info: SystemInfo = dataclasses.field(
+        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
+    )
     fn_name: str | None = None
     fn_first_lineno: str | None = None
 
@@ -961,6 +1114,23 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            for key, code in self._codes.items():
+                if code.bypassed:
+                    # install() skips a bypassed entry entirely, so its guarded
+                    # codes and backend ids are dead; start from a copy without
+                    # them so the fresh compile's record replaces them and the
+                    # next save writes an installable entry. A copy, not a
+                    # clear, with the mutable containers the fresh compile
+                    # writes to (import_sources, function_names) detached too:
+                    # the caller's entry may be a store's own object
+                    # (InMemoryDynamoStore hands out what it holds).
+                    self._codes[key] = dataclasses.replace(
+                        code,
+                        guarded_codes=[],
+                        backend_ids=[],
+                        function_names=list(code.function_names),
+                        import_sources=dict(code.import_sources),
+                    )
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -1072,7 +1242,8 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        self._device_type = _graph_device_type(graph)
+        devices = _graph_device_types(graph)
+        self._device_type = next((d for d in sorted(devices) if d != "cpu"), "cpu")
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
@@ -1294,6 +1465,9 @@ class CompilePackage:
             codes=list(self._codes.values()),
             source_info=self._source_info,
             device_type=self._device_type,
+            # The codegen probe runs the C++ toolchain; only pay for it when the
+            # artifact can hold native CPU code.
+            system_info=SystemInfo.current(cpu_codegen=(self._device_type == "cpu")),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
