@@ -2176,9 +2176,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                 bucket_mode="custom_ops",
             )
             replacements, replaced_users = bucketer._bucket_group([ag1, ag2])
-            _move_wait_users_after_latest_inputs(
-                gm.graph, replacements, replaced_users
-            )
+            _move_wait_users_after_latest_inputs(gm.graph, replacements, replaced_users)
             gm.graph.lint()
 
             (

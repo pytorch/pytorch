@@ -2056,9 +2056,7 @@ class TestManualOverlapSchedulingUnit(TestCase):
             return result
 
         with (
-            patch.object(
-                bucketer, "_bucket_group", side_effect=bucket_group_and_check
-            ),
+            patch.object(bucketer, "_bucket_group", side_effect=bucket_group_and_check),
             patch.object(
                 overlap_manual_scheduling,
                 "_move_wait_users_after_latest_inputs",
