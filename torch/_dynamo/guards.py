@@ -4461,13 +4461,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if f is not obj:
                     return _Missing, ("fqn mismatch",)
         elif inspect.ismethod(obj):
-            func = obj.__func__
-            method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
-            if inspect.ismethod(inner_func):
-                inner_func = inner_func.__func__
-            if func is not inner_func:
-                return type(self)._unpickle_bound_method, (func, method_self)
+            reduced = self._reduce_bound_method(obj)
+            if reduced is not None:
+                return reduced
 
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)

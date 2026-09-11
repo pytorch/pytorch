@@ -163,6 +163,62 @@ class FunctionPicklerBase(pickle.Pickler):
             type(self)._set_cell_contents,
         )
 
+    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+        # pickle rebuilds a bound method by getattr() on self at load, which is
+        # wrong when that does not resolve back to the same bound method; those
+        # carry the function and self explicitly.
+        receiver = method.__self__
+        cls = type(receiver)
+        func = method.__func__
+        # __name__ is not guaranteed: MethodType accepts any callable, so
+        # method.__func__ may be a functools.partial with no __name__. Fall
+        # through to the explicit reduce rather than raising out of the reducer.
+        name = getattr(func, "__name__", None)
+        # A name served PER-INSTANCE resolves only after self is restored, which
+        # is after pickle rebuilds the method, so getattr() at load would miss
+        # it: carry func+self explicitly. That covers a class defining
+        # __getattr__ (nn.Module included: any name may be served dynamically,
+        # and probing the instance would run that user code, so this gate comes
+        # first and such a receiver is not read at all, not even for __dict__),
+        # an instance __dict__ monkeypatch (m.forward = MethodType(f, m)), and a
+        # __slots__ member descriptor. A type receiver (classmethod) is exempt:
+        # its namespace is restored with the class.
+        explicit = (type(self)._unpickle_bound_method, (func, receiver))
+        is_type = isinstance(receiver, type)
+        try:
+            if not is_type and hasattr(cls, "__getattr__"):
+                return explicit
+            self_dict = getattr(receiver, "__dict__", None)
+            if not is_type and (
+                (isinstance(self_dict, dict) and name in self_dict)
+                or (
+                    name is not None
+                    and isinstance(
+                        inspect.getattr_static(cls, name, None),
+                        types.MemberDescriptorType,
+                    )
+                )
+            ):
+                return explicit
+            inner = getattr(receiver, name, None) if name is not None else None
+        except Exception:
+            # A probe that raises anything -- a __getattribute__ override, a
+            # metaclass __getattr__ (which hasattr(cls, ...) also reaches), a
+            # property -- falls back to the explicit reduce, which is always
+            # correct.
+            return explicit
+        # Only a method BOUND to this receiver over this function proves the
+        # class MRO resolves back to it. getattr can also hand back the raw
+        # function (a staticmethod under that name), and pickle's default
+        # getattr() reconstruction would then load a function where a method was.
+        if (
+            inspect.ismethod(inner)
+            and inner.__func__ is func
+            and inner.__self__ is receiver
+        ):
+            return None
+        return explicit
+
 
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
