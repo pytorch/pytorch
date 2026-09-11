@@ -861,10 +861,8 @@ class TestInstrumentationCoverage(TestCase):
         self.assertEqual(len(jit_v), 1)
 
     def test_no_raw_cute_compile_calls(self):
-        # Caching is compulsory for cutedsl compiles: every cute.compile() must
-        # sit inside a function decorated with @jit_cache or the combined
-        # @instrumented_cutedsl_cache. A raw call would be uncached and
-        # invisible to instrumentation.
+        # Every cute.compile() must be decorated or use the shared helper to be cached and
+        # instrumented. Unlike the runtime test, this scans every file under ops/.
         bad = []
         seen = 0
         for path in self._ops_files():
@@ -883,8 +881,7 @@ class TestInstrumentationCoverage(TestCase):
         )
 
     def test_scan_flags_raw_cute_compile(self):
-        # Meta-test: prove the caching requirement fires, and that both the raw
-        # @jit_cache and the combined decorator satisfy it.
+        # Verify both decorators satisfy the guard and helper allowances key on file and function.
         raw = "def f():\n    return cute.compile(k)\n"
         raw_v, raw_n = _scan_for_raw_cute_compile(raw, "<raw>")
         self.assertEqual(raw_n, 1, "scan didn't see the cute.compile call")
