@@ -8,12 +8,15 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.utils import disable_cache_limit
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 # NB: do NOT include this test class in test_dynamic_shapes.py
 
 
 class ConfigTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_config_module(self, name: str):
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
