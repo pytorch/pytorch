@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/engine.h>
 
 #include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
@@ -415,6 +416,32 @@ bool get_current_graph_task_keep_graph() {
   return current_graph_task ? current_graph_task->keep_graph_ : true;
 }
 
+variable_list take_current_grad_input_buffers(Node* fn) {
+  variable_list buffers(fn->num_outputs());
+  const auto& task = current_graph_task;
+  if (!task || get_current_node().get() != fn ||
+      !task->can_fuse_grad_accumulation_ || at::GradMode::is_enabled() ||
+      c10::AutogradState::get_tls_state().get_multithreading_enabled() ||
+      !fn->post_hooks().empty()) {
+    return buffers;
+  }
+
+  std::lock_guard<std::mutex> lock(task->mutex_);
+  for (const auto i : c10::irange(fn->num_outputs())) {
+    const auto& edge = fn->next_edge(i);
+    if (!edge.is_valid() ||
+        dynamic_cast<AccumulateGrad*>(edge.function.get())) {
+      continue;
+    }
+    auto it = task->not_ready_.find(edge.function.get());
+    if (it != task->not_ready_.end()) {
+      buffers[i] = it->second.take_for_accumulation(
+          edge.input_nr, fn->stream(), edge.function->stream());
+    }
+  }
+  return buffers;
+}
+
 void add_node_to_current_graph_task_exec_info(Node* fn) {
   current_graph_task->exec_info_[fn].needed_ = true;
 }
@@ -660,6 +687,9 @@ GraphTask::GraphTask(
     c10::SmallVector<Node*, 4> graph_roots,
     bool exit_on_error)
     : keep_graph_(keep_graph),
+      can_fuse_grad_accumulation_(
+          !grad_mode &&
+          !c10::AutogradState::get_tls_state().get_multithreading_enabled()),
       graph_roots_(std::move(graph_roots)),
 
       reentrant_depth_(reentrant_depth),

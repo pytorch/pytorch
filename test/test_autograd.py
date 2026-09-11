@@ -13798,6 +13798,390 @@ class TestAutogradForwardMode(TestCase):
 
 
 # Generic device type autograd tests.
+class TestGradInputBuffer(TestCase):
+    def _scale(self, x, factor, seen):
+        class Scale(Function):
+            @staticmethod
+            def forward(ctx, x, factor):
+                ctx.factor = factor
+                return x * factor
+
+            @staticmethod
+            def backward(ctx, grad):
+                buffers = ctx.grad_input_buffer
+                self.assertIs(buffers, ctx.grad_input_buffer)
+                buffer, non_tensor = buffers
+                self.assertIsNone(non_tensor)
+                seen.append(buffer is not None)
+                if buffer is None:
+                    return grad * ctx.factor, None
+                buffer.add_(grad, alpha=ctx.factor)
+                return None, None
+
+        return Scale.apply(x, factor)
+
+    @parametrize("use_grad", [False, True])
+    @parametrize("custom_first", [False, True])
+    def test_grad_input_buffer_accumulation(self, device, use_grad, custom_first):
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        seen = []
+        if custom_first:
+            custom = self._scale(x, 5, seen)
+            ordinary = x * 3
+        else:
+            ordinary = x * 3
+            custom = self._scale(x, 5, seen)
+        loss = (custom + ordinary).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            if use_grad:
+                (grad,) = torch.autograd.grad(loss, leaf)
+            else:
+                loss.backward()
+                grad = leaf.grad
+        self.assertEqual(grad, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [custom_first])
+
+    @parametrize("multithreading", [False, True])
+    def test_grad_input_buffer_leaf(self, device, multithreading):
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        leaf.grad = torch.full_like(leaf, 7)
+        seen = []
+        loss = (self._scale(leaf, 5, seen) + leaf * 3).sum()
+        with torch.autograd.set_multithreading_enabled(multithreading):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 15))
+        self.assertEqual(seen, [False])
+
+    def test_grad_input_buffer_multithreading_fallback(self, device):
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        seen = []
+        loss = (self._scale(x, 5, seen) + x * 3).sum()
+        with torch.autograd.set_multithreading_enabled(True):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [False])
+
+    @parametrize("alias", ["tensor", "storage", "expanded"])
+    def test_grad_input_buffer_preserves_aliases(self, device, alias):
+        retained = []
+
+        class OtherBranch(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 3
+
+            @staticmethod
+            def backward(ctx, grad):
+                if alias == "expanded":
+                    result = torch.full((), 3.0, device=device).expand_as(grad)
+                else:
+                    result = grad * 3
+                retained.append(result if alias == "tensor" else result.view(-1))
+                return result
+
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        seen = []
+        loss = (self._scale(x, 5, seen) + OtherBranch.apply(x)).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+        self.assertEqual(retained[0], torch.full_like(retained[0], 3))
+        self.assertEqual(seen, [False])
+
+    def test_grad_input_buffer_higher_order(self, device):
+        seen = []
+
+        class Square(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.square()
+
+            @staticmethod
+            def backward(ctx, grad):
+                # The graph's create_graph setting must remain authoritative.
+                with torch.no_grad():
+                    seen.append(ctx.grad_input_buffer)
+                (x,) = ctx.saved_tensors
+                return grad * 2 * x
+
+        leaf = torch.randn(8, device=device, dtype=torch.double, requires_grad=True)
+        x = leaf * 2
+        loss = (Square.apply(x) + x.square()).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            (first,) = torch.autograd.grad(loss, leaf, create_graph=True)
+            (second,) = torch.autograd.grad(first.sum(), leaf)
+        self.assertEqual(first, leaf * 16)
+        self.assertEqual(second, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [(None,)])
+
+    def test_grad_input_buffer_backward_hook(self, device):
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        seen, hooked = [], []
+        custom = self._scale(x, 5, seen)
+
+        def hook(grad_inputs, grad_outputs):
+            hooked.append(grad_inputs[0].clone())
+            return (grad_inputs[0] * 2,)
+
+        custom.grad_fn.register_hook(hook)
+        loss = (custom + x * 3).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 26))
+        self.assertEqual(hooked, [torch.full_like(leaf, 5)])
+        self.assertEqual(seen, [False])
+
+    def test_grad_input_buffer_consumer_hooks(self, device):
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        seen, hooked = [], []
+        x.retain_grad()
+        x.register_hook(lambda grad: hooked.append(grad.clone()))
+        loss = (self._scale(x, 5, seen) + x * 3).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+        self.assertEqual(x.grad, torch.full_like(x, 8))
+        self.assertEqual(hooked, [torch.full_like(x, 8)])
+        self.assertEqual(seen, [True])
+
+    def test_grad_input_buffer_repeated_inputs(self, device):
+        seen = []
+
+        class Add(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y
+
+            @staticmethod
+            def backward(ctx, grad):
+                outputs = []
+                for buffer in ctx.grad_input_buffer:
+                    seen.append(buffer is not None)
+                    if buffer is None:
+                        outputs.append(grad.clone())
+                    else:
+                        buffer.add_(grad)
+                        outputs.append(None)
+                return tuple(outputs)
+
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        loss = (Add.apply(x, x) + x * 3).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 10))
+        self.assertEqual(seen, [True, False])
+
+    def test_grad_input_buffer_repeated_backward(self, device):
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        seen = []
+        loss = (self._scale(x, 5, seen) + x * 3).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            for _ in range(3):
+                (grad,) = torch.autograd.grad(loss, leaf, retain_graph=True)
+                self.assertEqual(grad, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [True] * 3)
+
+    def test_grad_input_buffer_multiple_edges(self, device):
+        class Join(Function):
+            @staticmethod
+            def forward(ctx, unused, x, y, constant):
+                return x * 5 + y * 7 + constant
+
+            @staticmethod
+            def backward(ctx, grad):
+                unused, dx, dy, constant = ctx.grad_input_buffer
+                self.assertIsNone(unused)
+                self.assertIsNone(constant)
+                self.assertIsNotNone(dx)
+                self.assertIsNotNone(dy)
+                dx.add_(grad, alpha=5)
+                dy.add_(grad, alpha=7)
+                return None, None, None, None
+
+        leaf = torch.randn(2, 8, device=device, requires_grad=True)
+        x, y = (leaf * 2).unbind()
+        constant = torch.ones_like(x)
+        loss = (Join.apply("unused", x, y, constant) + x * 3 + y * 11).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        expected = torch.stack((torch.full_like(x, 16), torch.full_like(y, 36)))
+        self.assertEqual(leaf.grad, expected)
+
+    def test_grad_input_buffer_vmap_fallback(self, device):
+        seen = []
+
+        class Scale(Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(x):
+                return x * 5
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                seen.append(ctx.grad_input_buffer)
+                return grad * 5
+
+        leaf = torch.randn(3, 8, device=device, requires_grad=True)
+        x = leaf * 2
+        loss = (torch.vmap(Scale.apply)(x) + x * 3).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [(None,)])
+
+    def test_grad_input_buffer_nested_backward(self, device):
+        seen = []
+
+        class Reentrant(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 5
+
+            @staticmethod
+            def backward(ctx, grad):
+                buffers = ctx.grad_input_buffer
+                (buffer,) = buffers
+                self.assertIsNotNone(buffer)
+                with torch.enable_grad():
+                    inner_leaf = torch.ones(8, device=device, requires_grad=True)
+                    inner = inner_leaf * 2
+                    loss = (self._scale(inner, 5, seen) + inner * 3).sum()
+                    loss.backward()
+                self.assertEqual(inner_leaf.grad, torch.full_like(inner_leaf, 16))
+                self.assertIs(buffers, ctx.grad_input_buffer)
+                buffer.add_(grad, alpha=5)
+                return None
+
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        loss = (Reentrant.apply(x) + x * 3).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [True])
+
+    def test_grad_input_buffer_concurrent_backward(self, device):
+        from concurrent.futures import ThreadPoolExecutor
+
+        barrier = threading.Barrier(2)
+
+        class Concurrent(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 5
+
+            @staticmethod
+            def backward(ctx, grad):
+                buffers = ctx.grad_input_buffer
+                (buffer,) = buffers
+                self.assertIsNotNone(buffer)
+                barrier.wait(timeout=30)
+                self.assertIs(buffers, ctx.grad_input_buffer)
+                buffer.add_(grad, alpha=5)
+                return None
+
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        loss = (Concurrent.apply(x) + x * 3).sum()
+
+        def backward():
+            with torch.autograd.set_multithreading_enabled(False):
+                return torch.autograd.grad(loss, leaf, retain_graph=True)[0]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(backward) for _ in range(2)]
+            for future in futures:
+                self.assertEqual(future.result(), torch.full_like(leaf, 16))
+
+    @onlyCUDA
+    def test_grad_input_buffer_stream_fallback(self, device):
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        seen = []
+        default = torch.cuda.current_stream()
+        stream = torch.cuda.Stream()
+        stream.wait_stream(default)
+        with torch.cuda.stream(stream):
+            custom = self._scale(x, 5, seen)
+        default.wait_stream(stream)
+        loss = (custom + x * 3).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [False])
+
+    @parametrize("reentrant", [False, True])
+    def test_grad_input_buffer_checkpoint(self, device, reentrant):
+        seen = []
+
+        def block(leaf):
+            x = leaf * 2
+            return self._scale(x, 5, seen) + x * 3
+
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        loss = checkpoint(block, leaf, use_reentrant=reentrant).sum()
+        with torch.autograd.set_multithreading_enabled(False):
+            loss.backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [True])
+
+    @parametrize("violation", ["return_grad", "register_hook"])
+    def test_grad_input_buffer_scope_and_errors(self, device, violation):
+        contexts = []
+
+        class Invalid(Function):
+            @staticmethod
+            def forward(ctx, x):
+                contexts.append(ctx)
+                with self.assertRaisesRegex(RuntimeError, "only available"):
+                    _ = ctx.grad_input_buffer
+                return x * 5
+
+            @staticmethod
+            def backward(ctx, grad):
+                (buffer,) = ctx.grad_input_buffer
+                self.assertIsNotNone(buffer)
+                buffer.add_(grad, alpha=5)
+                if violation == "return_grad":
+                    return grad * 5
+                ctx.register_hook(lambda *args: None)
+                return None
+
+        leaf = torch.randn(8, device=device, requires_grad=True)
+        x = leaf * 2
+        loss = (Invalid.apply(x) + x * 3).sum()
+        error = (
+            "must return None for input 0"
+            if violation == "return_grad"
+            else "Cannot register a backward hook"
+        )
+        with torch.autograd.set_multithreading_enabled(False):
+            with self.assertRaisesRegex(RuntimeError, error):
+                loss.backward()
+            seen = []
+            y = leaf * 2
+            (self._scale(y, 5, seen) + y * 3).sum().backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+        self.assertEqual(seen, [True])
+        with self.assertRaisesRegex(RuntimeError, "only available"):
+            _ = contexts[0].grad_input_buffer
+        with self.assertRaises(AttributeError):
+            contexts[0].grad_input_buffer = ()
+
+
 class TestAutogradDeviceType(TestCase):
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
@@ -18396,6 +18780,7 @@ from autograd.test_logging import TestAutogradLogging  # noqa: F401
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(TestAutogradDeviceType, globals(), except_for=None)
+instantiate_device_type_tests(TestGradInputBuffer, globals(), only_for=("cpu", "cuda"))
 
 instantiate_device_type_tests(
     TestAutogradMultipleDispatch,

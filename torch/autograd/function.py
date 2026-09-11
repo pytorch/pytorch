@@ -37,6 +37,39 @@ _P = ParamSpec("_P")
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
     output_grad_dtypes: "tuple[torch.dtype | None, ...] | None"
+    _grad_input_buffer: tuple[torch.Tensor | None, ...]
+
+    @property
+    def grad_input_buffer(self) -> tuple[torch.Tensor | None, ...]:
+        r"""Acquire existing input gradients for fused accumulation in backward.
+
+        Returns a tuple with one entry for each argument to :meth:`Function.forward`,
+        including ``None`` entries for non-Tensor arguments. A Tensor contains
+        contributions already computed by other branches of this backward pass.
+        Add this Function's contribution to that Tensor in place and return
+        ``None`` for the corresponding input gradient. Do not retain the buffer
+        beyond this backward call or change its shape, dtype, device, or storage.
+        Repeated reads during the same call return the same tuple.
+
+        For ``None`` entries, compute and return the gradient normally. Reuse
+        requires exclusively owned, dense intermediate gradients, first-order
+        backward, and unchanged streams. Run backward inside
+        ``with torch.autograd.set_multithreading_enabled(False):`` to enable it.
+        Leaf inputs, Functions with backward hooks, traced backwards, and
+        :mod:`torch.func` transforms use the ordinary path. This property never
+        exposes a parameter's ``.grad`` and is only available during backward.
+
+        For example, a backward for ``forward(ctx, x): return x * 2`` can use::
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (buffer,) = ctx.grad_input_buffer
+                if buffer is None:
+                    return grad_output * 2
+                buffer.add_(grad_output, alpha=2)
+                return None
+        """
+        return self._grad_input_buffer
 
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.backward`.

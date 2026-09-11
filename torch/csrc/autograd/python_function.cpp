@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
@@ -63,6 +64,13 @@ PyObject* THPGradientEdgeClass = nullptr;
 
 // Anonymous namespace for helpful functions used in this file
 namespace {
+
+struct GradInputBufferState {
+  THPFunction* function;
+  THPObjectPtr buffers;
+};
+
+C10_DEFINE_TLS_static(GradInputBufferState*, tls_grad_input_buffers);
 
 inline void check_legacy_fn_attr_access(
     const c10::intrusive_ptr<torch::autograd::Node>& cdata,
@@ -174,6 +182,11 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   auto* py_fn = reinterpret_cast<THPFunction*>(pyobj());
+  GradInputBufferState grad_input_buffers{py_fn, {}};
+  auto* previous =
+      std::exchange(tls_grad_input_buffers.get(), &grad_input_buffers);
+  auto restore_buffers = c10::make_scope_exit(
+      [previous] { tls_grad_input_buffers.get() = previous; });
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -247,7 +260,33 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
       ")");
 
   // Massage the Python results tuple back into a C++ variable_list
-  return to_variable_list(r.get(), is_variable_input);
+  auto outputs = to_variable_list(r.get(), is_variable_input);
+  if (grad_input_buffers.buffers) {
+    size_t output_idx = 0;
+    for (const auto i : c10::irange(num_forward_inputs)) {
+      if (!is_variable_input[i]) {
+        continue;
+      }
+      auto* buffer = PyTuple_GET_ITEM(grad_input_buffers.buffers.get(), i);
+      if (!Py_IsNone(buffer)) {
+        TORCH_CHECK(
+            Py_IsNone(PyTuple_GET_ITEM(r.get(), i)),
+            "function ",
+            name(),
+            " must return None for input ",
+            i,
+            " after acquiring its grad_input_buffer");
+        TORCH_CHECK(
+            post_hooks().empty(),
+            "Cannot register a backward hook after acquiring grad_input_buffer");
+        // Return the accumulated value through the normal engine path. Taking
+        // the old buffer out of InputBuffer avoids adding it a second time.
+        outputs[output_idx] = THPVariable_Unpack(buffer);
+      }
+      ++output_idx;
+    }
+  }
+  return outputs;
 }
 
 auto PyNode::apply_with_saved_impl(
@@ -2183,6 +2222,38 @@ PyObject* getNeedsInputGrad(PyObject* obj, void* _unused) {
   return materialize_needs_input_grad(self);
 }
 
+PyObject* getGradInputBuffer(PyObject* obj, void* _unused) {
+  HANDLE_TH_ERRORS
+  auto* self = reinterpret_cast<THPFunction*>(obj);
+  auto* state = tls_grad_input_buffers.get();
+  TORCH_CHECK(
+      state && state->function == self,
+      "grad_input_buffer is only available while this Function's backward is executing");
+  if (!state->buffers) {
+    auto buffers = are_functorch_transforms_active()
+        ? variable_list(self->cdata->num_outputs())
+        : take_current_grad_input_buffers(self->cdata.get());
+    const auto& is_variable = self->is_variable_input;
+    THPObjectPtr result(
+        PyTuple_New(static_cast<Py_ssize_t>(is_variable.size())));
+    if (!result) {
+      throw_python_error();
+    }
+    size_t tensor_idx = 0;
+    for (const auto i : c10::irange(is_variable.size())) {
+      PyObject* value = is_variable[i] ? THPVariable_Wrap(buffers[tensor_idx++])
+                                       : Py_NewRef(Py_None);
+      if (!value) {
+        throw_python_error();
+      }
+      PyTuple_SET_ITEM(result.get(), i, value);
+    }
+    state->buffers = std::move(result);
+  }
+  return Py_NewRef(state->buffers.get());
+  END_HANDLE_TH_ERRORS
+}
+
 int setNeedsInputGrad(PyObject* obj, PyObject* value, void* _unused) {
   auto self = (THPFunction*)obj;
   if (Py_IsNone(value)) {
@@ -2265,6 +2336,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      &setNeedsInputGrad,
      nullptr,
      nullptr},
+    {"_grad_input_buffer", &getGradInputBuffer, nullptr, nullptr, nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
     {"_input_metadata",

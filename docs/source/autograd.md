@@ -234,6 +234,7 @@ When creating a new {class}`Function`, the following methods are available to `c
     function.FunctionCtx.mark_non_differentiable
     function.FunctionCtx.save_for_backward
     function.FunctionCtx.set_materialize_grads
+    function.FunctionCtx.grad_input_buffer
 ```
 
 ## Custom Function utilities

@@ -233,6 +233,35 @@ class ModuleWithGradFunc(torch.nn.Module):
 
 
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_grad_input_buffer_fallback(self, backend):
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, factor):
+                ctx.factor = factor
+                return x * factor
+
+            @staticmethod
+            def backward(ctx, grad):
+                buffer, _ = ctx.grad_input_buffer
+                if buffer is None:
+                    return grad * ctx.factor, None
+                buffer.add_(grad, alpha=ctx.factor)
+                return None, None
+
+        def fn(leaf):
+            x = leaf * 2
+            return (Scale.apply(x, 5) + x * 3).sum()
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        for _ in range(2):
+            leaf = torch.randn(8, requires_grad=True)
+            with torch.autograd.set_multithreading_enabled(False):
+                result = compiled(leaf)
+                result.backward()
+            self.assertEqual(result, fn(leaf))
+            self.assertEqual(leaf.grad, torch.full_like(leaf, 16))
+
     # Sound behaviors, tested for working capture
     def test_function_ctx_does_not_instantiate_function(self):
         class Foo(torch.autograd.Function):

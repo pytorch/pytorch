@@ -114,6 +114,8 @@ class FakeBackwardCFunction:
         self.saved_tensors = saved_tensors
 
     def __getattr__(self, name: str) -> Any:
+        if name == "grad_input_buffer":
+            return (None,) * len(self.real.needs_input_grad)
         if name == "saved_variables":
             warnings.warn(
                 "'saved_variables' is deprecated; use 'saved_tensors'",

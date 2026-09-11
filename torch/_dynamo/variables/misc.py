@@ -1731,6 +1731,11 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return variables.TupleVariable(list(self.dirty_tensors))
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
+        if name == "_grad_input_buffer":
+            needs_grad = self.tp_getattro_impl(tx, "needs_input_grad")
+            return ConstantVariable.create(
+                (None,) * len(needs_grad.unpack_var_sequence(tx))
+            )
 
         return super().tp_getattro_impl(tx, name)
 

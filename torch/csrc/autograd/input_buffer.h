@@ -57,6 +57,13 @@ struct InputBuffer {
       const std::optional<c10::Stream>& opt_consumer_stream,
       Node* fn);
 
+  // Move out an exclusively owned buffer when accumulation needs no stream
+  // sync.
+  TORCH_API Variable take_for_accumulation(
+      size_t pos,
+      const std::optional<c10::Stream>& producer_stream,
+      const std::optional<c10::Stream>& consumer_stream);
+
   Variable operator[](size_t pos) {
     return buffer[pos];
   }

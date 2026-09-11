@@ -23,6 +23,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   std::atomic_bool future_completed_{false};
   // It is safe to read keep_graph_ without synchronization
   bool keep_graph_;
+  const bool can_fuse_grad_accumulation_;
 
   // To protect reads/writes to not_ready_, dependencies_, captured_vars_,
   // has_error_, future_result_, cpu_ready_queue_, and leaf_streams.
@@ -226,6 +227,7 @@ get_current_graph_task_nodes_in_graph();
 TORCH_API bool get_current_graph_task_keep_graph();
 TORCH_API std::vector<Node*> get_current_graph_task_execution_order();
 TORCH_API int get_current_graph_task_id();
+TORCH_API variable_list take_current_grad_input_buffers(Node* fn);
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
 } // namespace torch::autograd

@@ -1728,6 +1728,32 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_custom_fn_grad_input_buffer_fallback(self):
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, factor):
+                ctx.factor = factor
+                return x * factor
+
+            @staticmethod
+            def backward(ctx, grad):
+                buffer, _ = ctx.grad_input_buffer
+                if buffer is None:
+                    return grad * ctx.factor, None
+                buffer.add_(grad, alpha=ctx.factor)
+                return None, None
+
+        def fn():
+            for _ in range(2):
+                leaf = torch.randn(8, requires_grad=True)
+                x = leaf * 2
+                (Scale.apply(x, 5) + x * 3).sum().backward()
+                yield leaf.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[1, 0], compiler_fn=make_compiler_fn(backend="eager")
+        )
+
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
             class MyFn(torch.autograd.Function):

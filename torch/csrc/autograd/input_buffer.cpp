@@ -130,6 +130,34 @@ bool can_accumulate_inplace(const Variable& v) {
 }
 } // anonymous namespace
 
+Variable InputBuffer::take_for_accumulation(
+    size_t pos,
+    const std::optional<c10::Stream>& producer_stream,
+    const std::optional<c10::Stream>& consumer_stream) {
+  auto& var = buffer.at(pos);
+  if (!var.defined() || !can_accumulate_inplace(var)) {
+    return {};
+  }
+  if (at::accelerator::isAccelerator(var.device().type())) {
+    if (!producer_stream || producer_stream != consumer_stream ||
+        producer_stream != opt_accum_streams[pos] ||
+        producer_stream != ready_streams[pos] ||
+        *producer_stream !=
+            at::accelerator::getCurrentStream(var.device().index())) {
+      return {};
+    }
+  } else if (producer_stream || consumer_stream) {
+    return {};
+  }
+
+  // A reentrant backward may deliver another contribution while this buffer
+  // is in use. Leave an empty slot that can accept a new first producer.
+  opt_accum_streams[pos].reset();
+  ready_events[pos].reset();
+  ready_streams[pos].reset();
+  return std::exchange(var, Variable());
+}
+
 static void accumulate(
     std::vector<Variable>& buffer,
     const size_t pos,
