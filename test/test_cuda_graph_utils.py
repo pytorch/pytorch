@@ -16,6 +16,7 @@ from torch.cuda._graph_annotations import (
     mark_stream,
     resolve_and_remap,
     resolve_pending_annotations,
+    source_node_ids_available,
 )
 from torch.cuda._utils import _check_cuda_bindings, _check_cuda_bindings_driver
 from torch.cuda.graph_annotations import (
@@ -218,6 +219,52 @@ class TestMarkKernels(TestCase):
                 lambda msg: f"{msg}\nmemset toolsId {hex(tools_id)} was not annotated",
             )
             self.assertEqual(annotations[tools_id], [{"name": "reduction"}])
+
+    @unittest.skipIf(
+        not source_node_ids_available(),
+        "annotation_config={'key_by': 'source'} needs a CUDA driver >= 13.4",
+    )
+    def test_key_by_source_keeps_capture_keys(self):
+        """``key_by="source"`` leaves annotations on the capture graph, for a consumer
+        reading CUPTI's sourceGraphNodeId. Nothing is rekeyed -- not on the first
+        instantiate, and not on a re-instantiate, which mints a fresh exec id the default
+        keying would have chased. The capture id is still handed to the destroy hooks, so
+        the entries are purged with the graph."""
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(
+            graph, enable_annotations=True, annotation_config={"key_by": "source"}
+        ):
+            with mark_kernels("phase_a"):
+                _ = x + 1
+
+        capture_id = graph._capture_graph_id
+        keys = set(get_kernel_annotations())
+        self.assertEqual({k >> 32 for k in keys}, {capture_id})
+
+        for _ in range(2):
+            graph.instantiate()
+            self.assertIsNone(graph._remapped_exec_id)
+            self.assertEqual(set(get_kernel_annotations()), keys)
+        self.assertIn(capture_id, graph._recorded_exec_ids)
+
+    def test_key_by_exec_is_the_default(self):
+        """The default rekeys to the exec graph, which is what a consumer reading CUPTI's
+        (exec) graphNodeId needs. Guards the default against key_by's introduction."""
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("phase_a"):
+                _ = x + 1
+        graph.instantiate()
+
+        self.assertIsNotNone(graph._remapped_exec_id)
+        self.assertNotEqual(graph._remapped_exec_id, graph._capture_graph_id)
+        self.assertEqual(
+            {k >> 32 for k in get_kernel_annotations()}, {graph._remapped_exec_id}
+        )
 
     def test_single_scope_at_capture_start_uses_root_fallback(self):
         graph = torch.cuda.CUDAGraph()
@@ -1234,8 +1281,10 @@ class TestMarkKernels(TestCase):
         """A scope containing a nested graph node warns; the rest is annotated.
 
         The dependent-edge walk stops at such a node, so the work in its body is
-        left unannotated (and its ids, being in the body graph's id space, would
-        never be rekeyed by remap_to_exec_graph). What is recorded stays correct.
+        left unannotated: its ids are in the body graph's id space, which
+        remap_to_exec_graph does not rekey. (The CUPTI backend can annotate that
+        work under key_by="source", where nothing is rekeyed.) What is recorded
+        stays correct.
         """
         from cuda.bindings import runtime as cuda_runtime
 
@@ -2185,6 +2234,48 @@ class TestCuptiAnnotationBackend(TestCase):
         for tools_id in annotations:
             self.assertEqual(tools_id >> 32, exec_graph_id)
 
+    @unittest.skipIf(
+        not source_node_ids_available(),
+        "annotation_config={'key_by': 'source'} needs a CUDA driver >= 13.4",
+    )
+    def test_conditional_body_annotated_under_source_keying(self):
+        # Body nodes are dropped only because their ids cannot be rekeyed to the exec
+        # graph. Under key_by="source" nothing is rekeyed and CUPTI reports the body work
+        # with a sourceGraphNodeId equal to the body node as built, so the handler keeps
+        # them -- silently, and with the body graph id carried to the destroy hooks, which
+        # would otherwise never see an id that is neither the capture nor an exec graph's.
+        import warnings as _warnings
+
+        from torch._higher_order_ops.cudagraph_conditional_nodes import _if_body
+
+        x = torch.ones([2048], device="cuda")
+        pred = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
+            with torch.cuda.graph(
+                g,
+                enable_annotations=True,
+                annotation_config={"backend": "cupti", "key_by": "source"},
+            ):
+                with mark_kernels("region"):
+                    z = x + 1
+                    with _if_body(pred):
+                        _ = torch.sqrt(z)
+        self.assertEqual(
+            [w for w in caught if "were not annotated" in str(w.message)], []
+        )
+
+        capture_id = g._capture_graph_id
+        graph_ids = {tools_id >> 32 for tools_id in self._annotations()}
+        self.assertIn(capture_id, graph_ids)
+        body_ids = graph_ids - {capture_id}
+        self.assertTrue(body_ids, "the conditional body's nodes were not annotated")
+        self.assertEqual(g._annotated_body_graph_ids, body_ids)
+
+        g.instantiate()
+        self.assertTrue(body_ids <= g._recorded_exec_ids)
+
     def test_no_warning_without_body_work(self):
         # The counter must not leak across captures: a plain capture right after one that
         # dropped body nodes has to be silent.
@@ -2297,6 +2388,28 @@ class TestCuptiAnnotationBackend(TestCase):
         self.assertEqual(seen, ["edge_walk"])
         self.assertEqual(len(self._annotations()), 1)
 
+    def test_source_keying_needs_a_new_enough_cupti(self):
+        # A 13.4 driver with an older CUPTI is the quiet failure: the driver would report
+        # source node ids but the consumer's CUPTI has no field to carry them, so
+        # annotations kept on the capture graph resolve to nothing. Both ends are checked.
+        import torch.cuda._graph_annotations as _ga
+
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=130301
+        ):
+            self.assertFalse(_ga.source_node_ids_available())
+        # No CUPTI in the process yet: nothing to be wrong about, so the driver alone
+        # decides -- the same answer a new-enough CUPTI gives.
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=None
+        ):
+            absent = _ga.source_node_ids_available()
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=130400
+        ):
+            new_enough = _ga.source_node_ids_available()
+        self.assertEqual(absent, new_enough)
+
     def test_invalid_backend_rejected(self):
         with self.assertRaisesRegex(ValueError, r"annotation_config\['backend'\]"):
             torch.cuda.graph(
@@ -2307,6 +2420,10 @@ class TestCuptiAnnotationBackend(TestCase):
         with self.assertRaisesRegex(ValueError, "unrecognized annotation_config key"):
             torch.cuda.graph(
                 torch.cuda.CUDAGraph(), annotation_config={"backend_name": "cupti"}
+            )
+        with self.assertRaisesRegex(ValueError, r"annotation_config\['key_by'\]"):
+            torch.cuda.graph(
+                torch.cuda.CUDAGraph(), annotation_config={"key_by": "capture"}
             )
 
 
