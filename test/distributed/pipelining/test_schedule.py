@@ -30,6 +30,8 @@ from torch.distributed.pipelining.schedules import (
     _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
+    _analyze_pipeline_resource_liveness,
+    _assign_pipeline_recv_buffer_slots,
     _batch_p2p,
     _defer_recv_ops,
     _format_pipeline_order,
@@ -201,6 +203,136 @@ class ScheduleTest(TestCase):
             grads = stage._retrieve_recv_grads(0)
             self.assertIs(grads[0], bwd_buffer)
             self.assertIsNone(stage.grad_recv_info[0][0].buffer)
+
+    def test_recv_buffer_slots_follow_schedule_lifetimes(self):
+        actions = [
+            _Action(1, RECV_F, 0),
+            _Action(1, F, 0),
+            _Action(1, RECV_F, 1),
+            _Action(1, F, 1),
+            _Action(1, RECV_B, 1),
+            _Action(1, I, 1),
+            _Action(1, RECV_B, 0),
+            _Action(1, RECV_F, 2),
+            _Action(1, F, 2),
+            _Action(1, W, 1),
+            _Action(1, RECV_F, 3),
+            _Action(1, F, 3),
+            _Action(1, B, 0),
+            _Action(1, B, 2),
+            _Action(1, B, 3),
+        ]
+
+        slots = _assign_pipeline_recv_buffer_slots(actions, has_backward=True)[1]
+
+        self.assertEqual(slots.forward, {0: 0, 1: 1, 2: 2, 3: 1})
+        self.assertEqual(slots.backward, {1: 0, 0: 1})
+        inference_slots = _assign_pipeline_recv_buffer_slots(
+            [
+                _Action(1, RECV_F, 0),
+                _Action(1, F, 0),
+                _Action(1, RECV_F, 1),
+                _Action(1, F, 1),
+            ],
+            has_backward=False,
+        )[1]
+        self.assertEqual(inference_slots.forward, {0: 0, 1: 1})
+
+    def test_pipeline_resource_liveness_reuses_completed_slots(self):
+        stage = MockPipelineStage(group_size=1, num_stages=1)
+        stage.stage_index = 0
+        schedule = PipelineScheduleMulti([stage], n_microbatches=3)
+        schedule.pipeline_order = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, F, 1),
+                _Action(0, I, 0),
+                _Action(0, W, 0),
+                _Action(0, F, 2),
+                _Action(0, I, 1),
+                _Action(0, W, 1),
+                _Action(0, I, 2),
+                _Action(0, W, 2),
+            ]
+        }
+
+        plan = _analyze_pipeline_resource_liveness(
+            schedule,
+            physical_rank=0,
+            stage_indices=(0,),
+            granularity="stage_microbatch",
+        )
+
+        self.assertEqual(plan.num_slots, 2)
+        self.assertEqual([plan.slot_for(0, mb) for mb in range(3)], [0, 1, 0])
+        self.assertEqual(
+            [(item.start_position, item.release_position) for item in plan.lifetimes],
+            [(0, 3), (1, 6), (4, 8)],
+        )
+
+    def test_pipeline_resource_liveness_uses_finalized_schedule(self):
+        stages = []
+        for stage_index in (0, 2):
+            stage = MockPipelineStage(group_size=2, group_rank=0, num_stages=4)
+            stage.stage_index = stage_index
+            stages.append(stage)
+        schedule = ScheduleInterleaved1F1B(stages, n_microbatches=4)
+        schedule.pipeline_order = {0: []}
+
+        stage_plan = _analyze_pipeline_resource_liveness(
+            schedule,
+            physical_rank=0,
+            stage_indices=(0, 2),
+            granularity="stage_microbatch",
+        )
+        microbatch_plan = _analyze_pipeline_resource_liveness(
+            schedule,
+            physical_rank=0,
+            stage_indices=(0, 2),
+            granularity="microbatch",
+        )
+
+        self.assertEqual(len(stage_plan.lifetimes), 8)
+        self.assertEqual(len(microbatch_plan.lifetimes), 4)
+        self.assertEqual(stage_plan.stage_indices, (0, 2))
+        self.assertEqual(stage_plan.num_microbatches, 4)
+        self.assertEqual(stage_plan.num_slots, 5)
+        self.assertEqual(stage_plan.peak_live_count, 5)
+        self.assertEqual(microbatch_plan.num_slots, 4)
+        self.assertTrue(
+            all(
+                stage_plan.local_compute_actions[index][0]
+                < stage_plan.local_compute_actions[index + 1][0]
+                for index in range(len(stage_plan.local_compute_actions) - 1)
+            )
+        )
+        for stage_index in stage_plan.stage_indices:
+            for microbatch_index in range(stage_plan.num_microbatches):
+                self.assertTrue(
+                    0
+                    <= stage_plan.slot_for(stage_index, microbatch_index)
+                    < stage_plan.num_slots
+                )
+                self.assertEqual(
+                    microbatch_plan.slot_for(stage_index, microbatch_index),
+                    microbatch_plan.slot_for(0, microbatch_index),
+                )
+
+    def test_pipeline_resource_liveness_rejects_incomplete_backward(self):
+        stage = MockPipelineStage(group_size=1, num_stages=1)
+        stage.stage_index = 0
+        schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+        schedule.pipeline_order = {
+            0: [_Action(0, F, 0), _Action(0, I, 0)],
+        }
+
+        with self.assertRaisesRegex(ValueError, "Backward actions"):
+            _analyze_pipeline_resource_liveness(
+                schedule,
+                physical_rank=0,
+                stage_indices=(0,),
+                granularity="stage_microbatch",
+            )
 
     def test_get_schedule_class(self):
         # List of all expected schedule names
