@@ -3,8 +3,7 @@
     M = {{size("A", 1)}}
     N = {{size("B", 2)}}
     K = {{size("A", 2)}}
-    batch = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)).to(tl.int32)
-    if batch >= BATCH or M == 0 or N == 0:
+    if M == 0 or N == 0:
         return
 
     stride_ab = {{stride("A", 0)}}
@@ -15,31 +14,45 @@
     stride_bk = {{stride("B", 1)}}
     stride_bn = {{stride("B", 2)}}
 
-    a_base = A + batch * stride_ab
-    b_base = B + batch * stride_bb
-
-    # A logical rank-3 BMM is represented by one rank-2 descriptor per batch.
-    # Keeping batch in the launch grid lets us hoist descriptor construction
-    # out of the persistent tile loop and supports zero batch strides, which a
-    # rank-3 TMA descriptor cannot encode.  It also keeps the descriptor-load
-    # shape compatible with today's rank-2 Transform2CTALoads implementation.
+    # Non-broadcast operands use rank-3 descriptors so one persistent worker
+    # can move between logical batches.  A zero batch stride cannot be encoded
+    # by TMA, so broadcast operands retain one shared rank-2 descriptor.
+    {%- if A_BROADCAST_BATCH %}
     a_desc = triton.language.make_tensor_descriptor(
-        base=a_base,
+        base=A,
         shape=[M, K] if A_ROW_MAJOR else [K, M],
         strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
         block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
     )
+    {%- else %}
+    a_desc = triton.language.make_tensor_descriptor(
+        base=A,
+        shape=[BATCH, M, K] if A_ROW_MAJOR else [BATCH, K, M],
+        strides=[stride_ab, stride_am, 1] if A_ROW_MAJOR else [stride_ab, stride_ak, 1],
+        block_shape=[1, BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [1, BLOCK_K, BLOCK_M],
+    )
+    {%- endif %}
+    {%- if B_BROADCAST_BATCH %}
     b_desc = triton.language.make_tensor_descriptor(
-        base=b_base,
+        base=B,
         shape=[K, N] if B_ROW_MAJOR else [N, K],
         strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
     )
+    {%- else %}
+    b_desc = triton.language.make_tensor_descriptor(
+        base=B,
+        shape=[BATCH, K, N] if B_ROW_MAJOR else [BATCH, N, K],
+        strides=[stride_bb, stride_bk, 1] if B_ROW_MAJOR else [stride_bb, stride_bn, 1],
+        block_shape=[1, BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [1, BLOCK_N, BLOCK_K],
+    )
+    {%- endif %}
 
     start_pid = tl.program_id(0)
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
-    num_tiles = grid_m * grid_n
+    num_tiles_per_batch = grid_m * grid_n
+    num_tiles = BATCH * num_tiles_per_batch
     num_pid_in_group = GROUP_M * grid_n
     k_tiles = tl.cdiv(K, BLOCK_K)
     # Track the epilogue tile separately to break its dependency on the
@@ -53,8 +66,10 @@
         flatten=FLATTEN,
         warp_specialize=WARP_SPECIALIZE,
     ):
+        batch = tile_id // num_tiles_per_batch
+        batch_tile_id = tile_id % num_tiles_per_batch
         pid_m, pid_n = _blackwell_bmm_pid(
-            tile_id, num_pid_in_group, grid_m, GROUP_M
+            batch_tile_id, num_pid_in_group, grid_m, GROUP_M
         )
         offs_am = (pid_m * BLOCK_M).to(tl.int32)
         offs_bn = (pid_n * BLOCK_N).to(tl.int32)
@@ -62,11 +77,25 @@
         for ki in range(k_tiles):
             offs_k = (ki * BLOCK_K).to(tl.int32)
             a = a_desc.load(
+                {%- if A_BROADCAST_BATCH %}
                 [offs_am, offs_k] if A_ROW_MAJOR else [offs_k, offs_am],
+                {%- else %}
+                [batch, offs_am, offs_k] if A_ROW_MAJOR else [batch, offs_k, offs_am],
+                {%- endif %}
             )
+            {%- if not A_BROADCAST_BATCH %}
+            a = a.reshape((BLOCK_M, BLOCK_K) if A_ROW_MAJOR else (BLOCK_K, BLOCK_M))
+            {%- endif %}
             b = b_desc.load(
+                {%- if B_BROADCAST_BATCH %}
                 [offs_k, offs_bn] if B_ROW_MAJOR else [offs_bn, offs_k],
+                {%- else %}
+                [batch, offs_k, offs_bn] if B_ROW_MAJOR else [batch, offs_bn, offs_k],
+                {%- endif %}
             )
+            {%- if not B_BROADCAST_BATCH %}
+            b = b.reshape((BLOCK_K, BLOCK_N) if B_ROW_MAJOR else (BLOCK_N, BLOCK_K))
+            {%- endif %}
             accumulator += tl.dot(
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,
@@ -74,8 +103,10 @@
             )
 
         tile_id_c += NUM_SMS
+        batch = tile_id_c // num_tiles_per_batch
+        batch_tile_id = tile_id_c % num_tiles_per_batch
         pid_m, pid_n = _blackwell_bmm_pid(
-            tile_id_c, num_pid_in_group, grid_m, GROUP_M
+            batch_tile_id, num_pid_in_group, grid_m, GROUP_M
         )
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
