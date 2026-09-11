@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import unittest
+import unittest.mock
 
 import torch
 from torch._inductor import config
@@ -10,8 +11,9 @@ from torch._inductor.heuristics.template.triton import (
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
 )
+from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -882,6 +884,118 @@ class TestBlackwellExhaustiveConfigs(TestCase):
             len(addmm_configs),
             "Scaled TMA should use the larger scaled_persistent list, not the small addmm list",
         )
+
+
+class TestBlackwellAutoWSConstraints(TestCase):
+    def test_two_ctas_allows_all_pipeline_depths(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "EPILOGUE_SUBTILE": 2,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": True}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            for num_stages in range(2, 7):
+                kwargs["num_stages"] = num_stages
+                self.assertTrue(
+                    CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                        kwargs, element_size=2
+                    )
+                )
+
+    def test_two_ctas_swizzle_is_dtype_aware(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "EPILOGUE_SUBTILE": 1,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": True}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=2
+                )
+            )
+            self.assertTrue(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=4
+                )
+            )
+
+            kwargs["BLOCK_N"] = 32
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=4
+                )
+            )
+
+    def test_two_ctas_requires_tma_store_for_metaws_template(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "EPILOGUE_SUBTILE": 1,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": False}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=2
+                )
+            )
+
+    def test_two_ctas_odd_num_sms_covers_every_tile(self):
+        with (
+            unittest.mock.patch("torch.xpu.is_available", return_value=False),
+            unittest.mock.patch(
+                "torch._inductor.utils.get_max_num_sms", return_value=149
+            ),
+            unittest.mock.patch.object(
+                torch._C, "_get_sm_carveout_experimental", return_value=None
+            ),
+        ):
+            self.assertEqual(get_num_sms(), 149)
+            num_sms = get_num_sms(two_ctas=True)
+        self.assertEqual(num_sms, 148)
+
+        block_m, block_n = 128, 128
+        m, n = 17 * block_m, 20 * block_n
+        meta = {
+            "BLOCK_M": block_m,
+            "BLOCK_N": block_n,
+            "NUM_SMS": num_sms,
+            "TWO_CTAS": True,
+        }
+        grid_size = blackwell_persistent_mm_grid(m, n, meta)[0]
+        grid_m = ((m + block_m - 1) // block_m + 1) // 2 * 2
+        num_tiles = grid_m * ((n + block_n - 1) // block_n)
+        visited = {
+            tile for pid in range(grid_size) for tile in range(pid, num_tiles, num_sms)
+        }
+        self.assertEqual(visited, set(range(num_tiles)))
 
 
 if __name__ == "__main__":
