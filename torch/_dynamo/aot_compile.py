@@ -69,13 +69,14 @@ class _ProbeState:
     # id(value) -> picklable; without the memo a probe tree is exponential.
     cache: dict[int, bool] = dataclasses.field(default_factory=dict)
     inflight: set[int] = dataclasses.field(default_factory=set)
-    # Values pruned because the probe reached an unmarked nn.Module, so the
-    # warning can name the actual reason.
-    unmarked_modules: set[int] = dataclasses.field(default_factory=set)
-    # id(function) -> its picklable __dict__ entries; a function that closes
-    # over itself is reduced twice, and the second pass must not re-probe or
-    # re-warn.
+    # id(value) -> the unmarked nn.Modules the probe reached inside it, so the
+    # warning can name the actual reason and the offending modules.
+    unmarked_modules: dict[int, list[Any]] = dataclasses.field(default_factory=dict)
+    # id(function) -> its picklable __dict__ entries / its kept __doc__; a
+    # function that closes over itself is reduced twice, and the second pass
+    # must not re-probe or re-warn.
     attributes: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    docs: dict[int, Any] = dataclasses.field(default_factory=dict)
     # Whether a probe short-circuited on an in-flight id; such a verdict is
     # not cached as final but parked (as unpicklable) for the rest of the
     # probe tree.
@@ -121,29 +122,15 @@ class AOTCompilePickler(FunctionPicklerBase):
             return type(self)._unpickle_python_module, (obj.__name__,)
         elif inspect.ismethod(obj):
             receiver = obj.__self__
-            if id(receiver) in self.id_map or isinstance(receiver, torch.nn.Module):
-                # The receiver is served by persistent_id, so it is the LIVE
-                # object at load and pickle's default getattr(receiver, name)
-                # resolves on it; the shared reducer would instead pickle
-                # __func__ (an nn.Module defines __getattr__), rebuilding a
-                # local subclass's method by value and failing on its __class__
-                # cell. pickle's rule is taken only on proof that the probe
-                # hands back a method over THIS receiver and THIS function (a
-                # rebound `a.forward = b.forward` resolves to b's); a probe that
-                # raises anything falls back to the pair, which is always right.
-                name = getattr(obj.__func__, "__name__", None)
-                try:
-                    inner = getattr(receiver, name, None) if name is not None else None
-                except Exception:
-                    inner = None
-                if (
-                    inspect.ismethod(inner)
-                    and inner.__func__ is obj.__func__
-                    and inner.__self__ is receiver
-                ):
-                    return NotImplemented
-                return type(self)._unpickle_bound_method, (obj.__func__, receiver)
-            reduced = self._reduce_bound_method(obj)
+            # A receiver in external_data is served by persistent_id, so it is
+            # the LIVE object at load and pickle's default getattr(receiver,
+            # name) resolves on it; the shared reducer's __getattr__ gate would
+            # instead pickle __func__ (every nn.Module defines __getattr__),
+            # rebuilding a local subclass's method by value and failing on its
+            # __class__ cell. An unmarked nn.Module is recorded in errors and
+            # fails serialize() anyway, so for it this only keeps the dump going.
+            live = id(receiver) in self.id_map or isinstance(receiver, torch.nn.Module)
+            reduced = self._reduce_bound_method(obj, receiver_is_live=live)
             if reduced is not None:
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
@@ -182,10 +169,14 @@ class AOTCompilePickler(FunctionPicklerBase):
         if self._probing:
             return
         code = obj.__code__
-        if id(value) in self._probe_state.unmarked_modules:
-            reason = "it is an nn.Module not marked as external data"
+        modules = self._probe_state.unmarked_modules.get(id(value))
+        if modules is not None:
+            names = ", ".join(type(m).__name__ for m in modules)
+            reason = f"it holds nn.Module(s) not marked as external data ({names})"
         else:
             reason = "it does not pickle"
+        # co_qualname is 3.11+; the bare co_name on 3.10 cannot tell a wraps
+        # wrapper from its wrappee, but __qualname__ could not either.
         log.warning(
             "dropping %s.%s (%s) from the artifact: %s; pass it in external_data to keep it (function defined at %s:%d)",
             getattr(code, "co_qualname", code.co_name),
@@ -200,12 +191,13 @@ class AOTCompilePickler(FunctionPicklerBase):
         # Memoized for the REAL dump only, where every verdict consulted is
         # final, so a function reduced twice (it closes over itself) is neither
         # re-probed nor re-warned. A probe's answer may lean on an in-flight
-        # value and must not be reused.
+        # value and must not be reused. A snapshot of the items: a probe runs
+        # user __reduce__ code that may write back onto the function.
         state = self._probe_state
         if not self._probing and id(obj) in state.attributes:
             return state.attributes[id(obj)]
         attributes = {}
-        for name, value in obj.__dict__.items():
+        for name, value in list(obj.__dict__.items()):
             if self._dumps_cleanly(value):
                 attributes[name] = value
             else:
@@ -218,12 +210,17 @@ class AOTCompilePickler(FunctionPicklerBase):
         # Nothing on the load path forces __doc__ (_apply_function_state
         # assigns it, that is all), so an unpicklable docstring is dropped like
         # a pruned attribute rather than failing the dump. A plain str is not
-        # probed. __kwdefaults__ is never pruned: a function cannot be called
-        # without it.
-        if self._dumps_cleanly(obj.__doc__):
-            return obj.__doc__
-        self._warn_dropped(obj, "__doc__", obj.__doc__)
-        return None
+        # probed. Memoized like the attributes, for the same reason.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.docs:
+            return state.docs[id(obj)]
+        doc = obj.__doc__
+        if not self._dumps_cleanly(doc):
+            self._warn_dropped(obj, "__doc__", doc)
+            doc = None
+        if not self._probing:
+            state.docs[id(obj)] = doc
+        return doc
 
     def _dumps_cleanly(self, value: Any) -> bool:
         # "does it pickle?" has no cheaper predicate than trying. A throwaway
@@ -231,7 +228,7 @@ class AOTCompilePickler(FunctionPicklerBase):
         # identical to the real dump. A recursion overflow counts as unpicklable
         # (the value is pruned) rather than re-raising: a deep-but-finite value
         # in an optional slot must not fail a save that has nothing wrong with it.
-        if value is None or type(value) in (str, int, bytes, bool, float):
+        if self._is_literal(value):
             return True
         state = self._probe_state
         vid = id(value)
@@ -271,7 +268,7 @@ class AOTCompilePickler(FunctionPicklerBase):
             # dump later.
             result = not probe.errors
             if not result:
-                state.unmarked_modules.add(vid)
+                state.unmarked_modules[vid] = list(probe.errors.values())
                 log.debug(
                     "pruning unmarked nn.Module(s) %s from a nested function",
                     list(probe.errors.values()),
@@ -328,8 +325,11 @@ class AOTCompilePickler(FunctionPicklerBase):
         # typing lacks), so drop the whole tuple when any element will not dump:
         # a generic cannot be rebuilt around a missing parameter. Ordinary
         # functions carry (), which dumps and is kept.
+        # A TypeVar the body itself references sits in a closure cell, which is
+        # never pruned (the body needs it), so that shape still fails the dump.
         type_params = getattr(obj, "__type_params__", None)
         if type_params and not all(self._dumps_cleanly(p) for p in type_params):
+            self._warn_dropped(obj, "__type_params__", type_params)
             return None
         return type_params
 
