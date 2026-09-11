@@ -27,8 +27,6 @@ def meta_ws_enabled() -> bool:
 
 @functools.cache
 def has_two_ctas() -> bool:
-    """Whether tl.dot supports two_ctas. It has no knob, so probe the signature
-    directly; the meta-WS knob alone does not imply tl.dot accepts it."""
     try:
         import triton.language as tl
     except ImportError:

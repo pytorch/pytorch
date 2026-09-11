@@ -6,7 +6,6 @@ import torch
 from torch._inductor import config
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
 from torch._inductor.heuristics.template.triton import (
-    _num_sms_for_two_ctas,
     BlackwellGPUGemmConfig,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
@@ -14,7 +13,7 @@ from torch._inductor.heuristics.template.triton import (
 )
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -969,7 +968,17 @@ class TestBlackwellAutoWSConstraints(TestCase):
             )
 
     def test_two_ctas_odd_num_sms_covers_every_tile(self):
-        num_sms = _num_sms_for_two_ctas(149, True)
+        with (
+            unittest.mock.patch("torch.xpu.is_available", return_value=False),
+            unittest.mock.patch(
+                "torch._inductor.utils.get_max_num_sms", return_value=149
+            ),
+            unittest.mock.patch.object(
+                torch._C, "_get_sm_carveout_experimental", return_value=None
+            ),
+        ):
+            self.assertEqual(get_num_sms(), 149)
+            num_sms = get_num_sms(two_ctas=True)
         self.assertEqual(num_sms, 148)
 
         block_m, block_n = 128, 128
