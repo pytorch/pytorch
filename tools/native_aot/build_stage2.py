@@ -537,58 +537,54 @@ def _backend() -> str:
     return "rocm" if _torch_probe("torch.version.hip is not None") else "cuda"
 
 
-def _cache_entries() -> dict[str, tuple[str, str]]:
-    """This build's cache as name -> (TYPE=value, the doc line above it).
+# Written by cmake/EnvVarForwarding.cmake at the end of configure: NAME=<effective value>
+# for every variable it forwarded from the environment.
+ENV_FORWARDED_FILE = "env_forwarded.txt"
 
-    Last assignment wins, as in _cmake_cache_value. The doc line names the source of an
-    entry EnvVarForwarding wrote ("From environment", "From env <NAME>").
+
+def _forwarded_settings() -> dict[str, str] | None:
+    """The forwarded variables' EFFECTIVE values, or None if this build wrote none.
+
+    Effective rather than cached, because CMakeCache.txt does not record what a build
+    used: when a dependent option loses availability CMake keeps the stale value there
+    (retyped INTERNAL) and shadows it with the force value, so comparing cache lines
+    reports a change that did not happen and misses one that did.
     """
-    entries: dict[str, tuple[str, str]] = {}
-    doc = ""
     try:
-        with open(os.path.join(BUILD_DIR, "CMakeCache.txt"), errors="replace") as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if line.startswith("//"):
-                    doc = line[2:]
-                    continue
-                key, sep, value = line.partition("=")
-                if sep and not line.startswith("#") and ":" in key:
-                    name, _, kind = key.partition(":")
-                    entries[name] = (f"{kind}={value}", doc)
-                doc = ""
+        with open(os.path.join(BUILD_DIR, ENV_FORWARDED_FILE), errors="replace") as f:
+            lines = [l.rstrip("\n") for l in f]
     except OSError:
-        return {}
-    return entries
+        return None
+    return {n: v for n, _, v in (l.partition("=") for l in lines if "=" in l)}
 
 
-# The doc lines EnvVarForwarding writes above an entry it sourced from the environment.
-_ENV_SOURCED = ("From environment", "From env ")
+def _refuse_settings_drift(before: dict[str, str] | None) -> None:
+    """Refuse a reconfigure that changed a setting the environment forwards.
 
-
-def _refuse_cache_drift(before: dict[str, tuple[str, str]]) -> None:
-    """Refuse a reconfigure that changed this build's configuration.
-
-    EnvVarForwarding writes every BUILD_*/USE_*/CMAKE_* environment variable (and the
-    names in its alias lists, TORCH_CUDA_ARCH_LIST among them) into the cache when it
-    differs from the cached value, so a stage-2 run in another environment than the
-    build silently relinks torch_cuda against other settings. It CREATES the entry when
-    the build had none, so an added env-sourced one is drift too; additions CMake makes
-    itself are not.
+    EnvVarForwarding FORCEs every BUILD_*/USE_*/CMAKE_* environment variable (and the
+    names in its alias lists, TORCH_CUDA_ARCH_LIST among them) into the cache, so a
+    stage-2 run in another environment than the build silently relinks torch_cuda
+    against other settings. Those variables are the whole surface: nothing else here
+    can change the configuration.
     """
-    drift = []
-    for name, (value, doc) in _cache_entries().items():
-        if name in before:
-            if before[name][0] != value:
-                drift.append((name, before[name][0], value, doc))
-        elif doc.startswith(_ENV_SOURCED):
-            drift.append((name, "absent", value, doc))
+    after = _forwarded_settings()
+    if after is None:
+        raise RuntimeError(
+            f"native-AOT stage 2: reconfiguring {BUILD_DIR} left no "
+            f"{ENV_FORWARDED_FILE}, so the settings it built with cannot be compared "
+            f"with the ones it would relink against. Re-run the build."
+        )
+    if before is None:
+        _report(f"no {ENV_FORWARDED_FILE} from the build; settings drift unchecked")
+        return
+    drift = [
+        (name, before.get(name, "absent"), after.get(name, "absent"))
+        for name in sorted(set(before) | set(after))
+        if before.get(name, "absent") != after.get(name, "absent")
+    ]
     if not drift:
         return
-    changed = "\n".join(
-        f"  {name}: {old} -> {new}" + (f" ({doc})" if doc else "")
-        for name, old, new, doc in drift
-    )
+    changed = "\n".join(f"  {name}: {old} -> {new}" for name, old, new in drift)
     raise RuntimeError(
         f"native-AOT stage 2: reconfiguring {BUILD_DIR} changed this build's "
         f"configuration, so torch_cuda would be relinked against different settings "
@@ -940,9 +936,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     _report("reconfiguring to pick up the generated CMake")
     # The cmake that configured this tree, and its cache as it stands, so the
-    # reconfigure can be held to both (see _refuse_cache_drift).
+    # reconfigure can be held to both (see _refuse_settings_drift).
     cmake_exe = _cmake_for_this_build()
-    cache_before = _cache_entries()
+    settings_before = _forwarded_settings()
     # Captured because CMake prints its failure context on stdout, and the STATUS line
     # the generated file emits is the only pre-relink evidence that it will embed.
     # --log-level, because that marker is a message(STATUS) and a cached
@@ -960,7 +956,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{configure.returncode}, output above)."
         )
     # Ahead of the relink, so a drifting configure cannot reach the installed torch.
-    _refuse_cache_drift(cache_before)
+    _refuse_settings_drift(settings_before)
     from tools.native_aot.gen_aot_lib import EMBED_STATUS
 
     if EMBED_STATUS not in configure.stdout:
