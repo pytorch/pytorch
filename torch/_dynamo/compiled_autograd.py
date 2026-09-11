@@ -1047,7 +1047,7 @@ class AutogradCompilerInstance:
         self, graph: torch.fx.Graph
     ) -> tuple[list[int], torch.device | None]:
         to_move: dict[int, torch.fx.Node] = {}
-        accelerator_devices: set[torch.device] = set()
+        non_cpu_meta_devices: set[torch.device] = set()
         nodes = list(graph.nodes)
         if nodes[0].target != "inputs":
             raise AssertionError(
@@ -1066,8 +1066,8 @@ class AutogradCompilerInstance:
         # getitem nodes on inputs
         for i, node in enumerate(inputs_users):
             device = node.meta["val"].device
-            if _is_compiled_autograd_accelerator_device(device, privateuse1_name):
-                accelerator_devices.add(device)
+            if device.type not in ("cpu", "meta"):
+                non_cpu_meta_devices.add(device)
                 continue
 
             is_cpu = device.type == "cpu"
@@ -1089,10 +1089,14 @@ class AutogradCompilerInstance:
                     # all users are prims/aten, can move safely
                     to_move[i] = node
 
-        # only move cpu scalars when the graph has exactly one accelerator device,
-        # this is to handle cpu-only graphs and mixed-accelerator graphs conservatively
-        if len(accelerator_devices) == 1:
-            target_device = next(iter(accelerator_devices))
+        # only move cpu scalars when the graph has exactly one non-cpu/meta device
+        # and it is cuda or renamed PrivateUse1; mixed-accelerator graphs skip
+        if len(non_cpu_meta_devices) == 1:
+            target_device = next(iter(non_cpu_meta_devices))
+            if not _is_compiled_autograd_accelerator_device(
+                target_device, privateuse1_name
+            ):
+                return [], None
             for node in to_move.values():
                 verbose_log.debug(
                     "Moving node %s from cpu to %s",
