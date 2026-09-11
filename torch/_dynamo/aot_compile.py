@@ -1,4 +1,6 @@
+import builtins
 import dataclasses
+import importlib
 import inspect
 import io
 import logging
@@ -503,6 +505,45 @@ class AOTCompiledFunction:
             guard_scope = self._guard_globals
             if guard_scope is None:
                 guard_scope = self.fn.__globals__
+            else:
+                # Dynamo mints __import_* aliases and a __builtins_dict___N key
+                # into the tracing process's globals and roots guards at them;
+                # a process that only loads never traced, so seed them here.
+                # This diverges from the precompile load path in package.py: it
+                # leaves an already-bound alias in place, whereas install()'s
+                # builtins branch raises on a mismatched binding. The alias
+                # names are deterministic (__import_<dotted module> always holds
+                # that module), a wrong binding fails the guard rather than
+                # passing it, and a caller-supplied guard_scope may legitimately
+                # already carry these -- so keep what is there rather than fight
+                # over it.
+                from .output_graph import get_builtins_dict
+                from .utils import CleanupHook
+
+                import_sources = self._artifacts.runtime_env.import_sources
+                for alias, module_name in import_sources.items():
+                    # A pre-reset compile may still own the alias via a
+                    # CleanupHook; drop it so it can't delete the binding once
+                    # collected, even when we leave an existing value in place.
+                    # See _install_global.
+                    CleanupHook.disown(guard_scope, alias)
+                    if alias not in guard_scope:
+                        guard_scope[alias] = importlib.import_module(module_name)
+                builtins_key = (
+                    guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+                )
+                if builtins_key:
+                    # A pre-reset compile's CleanupHook may still own this name
+                    # even when we leave its value alone; drop it so it can't
+                    # delete the binding once collected.
+                    CleanupHook.disown(guard_scope, builtins_key)
+                    if builtins_key not in guard_scope:
+                        # A caller-supplied f_globals need not carry
+                        # __builtins__; exec would seed it, so fall back to the
+                        # real builtins here.
+                        if "__builtins__" not in guard_scope:
+                            guard_scope["__builtins__"] = builtins.__dict__
+                        guard_scope[builtins_key] = get_builtins_dict(guard_scope)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,

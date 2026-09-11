@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import importlib
 import inspect
 import io
 import multiprocessing as mp
@@ -29,12 +30,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
+from torch._dynamo.aot_compile import (
+    AOTCompiledFunction,
+    AOTCompiledModel,
+    ModelInput,
+    SerializableCallable,
+)
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
-from torch._dynamo.package import DynamoCache
+from torch._dynamo.package import DynamoCache, load_guards_state
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -388,6 +394,22 @@ def _set_pool_mode(mode):
         yield
     finally:
         AOT_POOL_MODE = old
+
+
+class ParentWithChildModule(torch.nn.Module):
+    # Calling a CHILD module routes through nn.Module.__call__, whose hook-dict
+    # guards are rooted at Dynamo's synthetic __import_torch_dot_nn_... alias.
+    # That is the shape a reloaded artifact could not resolve.
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        # isinstance is a builtin: its BUILTIN_MATCH guard is rooted at
+        # G['__builtins_dict___N'], the other name only the tracing process has.
+        if not isinstance(x, torch.Tensor):
+            raise TypeError(type(x))
+        return self.lin(x)
 
 
 def keep_global_guards(guard_entries):
@@ -1532,6 +1554,47 @@ from user code:
                 loaded(x)
         finally:
             globals()["AOT_POOL_MODE"] = saved
+
+    def test_load_seeds_exactly_the_recorded_import_aliases(self):
+        # Loading may add only the aliases the artifact recorded, and must not
+        # overwrite a name the loading process already has.
+        mod = ParentWithChildModule()
+        x = torch.randn(4, 4)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        (result,) = model.forward.compiled_results
+        import_sources = result._artifacts.runtime_env.import_sources
+        self.assertTrue(import_sources)
+        serialized_guards = result._artifacts.guards_state
+        torch._dynamo.reset()
+
+        scope = {
+            k: v
+            for k, v in globals().items()
+            if not k.startswith(("__import_", "__builtins_dict__"))
+        }
+        kept_alias = next(iter(import_sources))
+        sentinel = object()
+        scope[kept_alias] = sentinel
+        before = set(scope)
+        (serialized,) = pickle.loads(data)
+        AOTCompiledFunction.deserialize(serialized, guard_globals=scope)
+        builtins_key = load_guards_state(
+            serialized_guards
+        ).output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertEqual(
+            set(scope) - before, (set(import_sources) - {kept_alias}) | {builtins_key}
+        )
+        self.assertIs(scope[kept_alias], sentinel)
+        for alias, module_name in import_sources.items():
+            if alias != kept_alias:
+                self.assertIs(scope[alias], importlib.import_module(module_name))
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()

@@ -1004,8 +1004,12 @@ def load_compiled_function(
                    are evaluated against this dict by reference, so a global
                    rebound after loading is seen on the next call, and a guarded
                    global the dict lacks fails the guard (there is no fallback to
-                   the values serialized with the artifact). There is a single
-                   compiled graph: a rebound global that fails its guard raises
+                   the values serialized with the artifact). Loading mutates the
+                   dict: the ``__import_*`` module aliases and the
+                   ``__builtins_dict___N`` key recorded at capture are inserted
+                   (plus ``__builtins__`` when the dict lacks it), never
+                   overwriting an existing key. There is a single compiled
+                   graph: a rebound global that fails its guard raises
                    ``RuntimeError: GuardManager check failed`` on the next call
                    rather than selecting a different graph. The bytecode runs
                    against a snapshot built at load time in which ``f_globals``
