@@ -581,7 +581,8 @@ kernel void triangular_solve(
     uint lid [[thread_position_in_threadgroup]],
     uint tg_size [[threads_per_threadgroup]],
     uint sg_lane [[thread_index_in_simdgroup]],
-    uint sg_id [[simdgroup_index_in_threadgroup]]) {
+    uint sg_id [[simdgroup_index_in_threadgroup]],
+    uint nsimd [[simdgroups_per_threadgroup]]) {
   const uint n = p.n;
   const uint k = p.k;
   if (tgid >= p.nbatch * k) {
@@ -597,7 +598,6 @@ kernel void triangular_solve(
   const bool forward = p.upper == p.transpose;
   device const T* b = B + batch * n * k + vec;
   device T* x = X + batch * n * k + vec;
-  const uint nsimd = c10::metal::round_up(tg_size, c10::metal::simdgroup_size);
 
   for (uint step = 0; step < n; ++step) {
     const uint t = forward ? step : n - 1 - step;
@@ -641,7 +641,8 @@ kernel void triangular_solve(
       uint lid [[thread_position_in_threadgroup]],               \
       uint tg_size [[threads_per_threadgroup]],                  \
       uint sg_lane [[thread_index_in_simdgroup]],                \
-      uint sg_id [[simdgroup_index_in_threadgroup]]);
+      uint sg_id [[simdgroup_index_in_threadgroup]],             \
+      uint nsimd [[simdgroups_per_threadgroup]]);
 
 INSTANTIATE_TRIANGULAR_SOLVE(float);
 INSTANTIATE_TRIANGULAR_SOLVE(float2);
