@@ -14,9 +14,14 @@ PySavedVariableHooks::PySavedVariableHooks(
     // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     py::function&& unpack_hook)
     : // steals the reference
-      pack_hook_(std::move(pack_hook).release().ptr(), getPyInterpreter()),
-      unpack_hook_(std::move(unpack_hook).release().ptr(), getPyInterpreter()) {
-}
+      pack_hook_(
+          std::in_place,
+          std::move(pack_hook).release().ptr(),
+          getPyInterpreter()),
+      unpack_hook_(
+          std::in_place,
+          std::move(unpack_hook).release().ptr(),
+          getPyInterpreter()) {}
 
 // We don't use pybind for call_pack_hook and call_unpack_hook to avoid
 // https://github.com/pytorch/pytorch/issues/34172
@@ -24,7 +29,7 @@ void PySavedVariableHooks::call_pack_hook(const at::Tensor& tensor) {
   py::gil_scoped_acquire acquire;
   THPObjectPtr obj(THPVariable_Wrap(tensor));
   THPObjectPtr packed(PyObject_CallFunctionObjArgs(
-      pack_hook_.ptr(getPyInterpreter()), obj.get(), nullptr));
+      pack_hook_->ptr(getPyInterpreter()), obj.get(), nullptr));
   TORCH_CHECK_PYTHON(packed);
   data_.emplace(packed.release(), getPyInterpreter());
   // obj is decrefed on exit, packed's reference is stolen by data_
@@ -33,7 +38,7 @@ void PySavedVariableHooks::call_pack_hook(const at::Tensor& tensor) {
 at::Tensor PySavedVariableHooks::call_unpack_hook() {
   py::gil_scoped_acquire acquire;
   THPObjectPtr res(PyObject_CallFunctionObjArgs(
-      unpack_hook_.ptr(getPyInterpreter()),
+      unpack_hook_->ptr(getPyInterpreter()),
       data().ptr(getPyInterpreter()),
       nullptr));
   TORCH_CHECK_PYTHON(res);
@@ -47,7 +52,12 @@ at::Tensor PySavedVariableHooks::call_unpack_hook() {
 
 std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
 PySavedVariableHooks::retrieve_unpack_hook_data() const {
-  return std::make_pair(unpack_hook_, data());
+  return std::make_pair(*unpack_hook_, data());
+}
+
+std::optional<c10::SafePyObject> PySavedVariableHooks::retrieve_unpack_hook()
+    const {
+  return unpack_hook_;
 }
 
 void PyDefaultSavedVariableHooks::push_hooks(

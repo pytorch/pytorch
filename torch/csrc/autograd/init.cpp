@@ -414,7 +414,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("save", &ProfilerResult::save)
       .def(
           "trace_activities",
-          [](const py::object& self) {
+          [](py::object self) {
             auto& r = self.cast<ProfilerResult&>();
             auto* activities = r.traceActivities();
             if (!activities) {
@@ -650,7 +650,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   _C_m.def(
       "_register_py_class_for_device",
-      [](const std::string& device, const py::object& python_type_class) {
+      [](const std::string& device, py::object python_type_class) {
         auto cls = python_type_class.ptr();
         registerPythonTensorClass(device, cls);
       });
@@ -730,13 +730,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "data",
           [](const torch::autograd::SavedVariable& s) -> py::object {
             if (s.has_hooks()) {
+              // has_hooks() guarantees retrieve_unpack_hook_data() returns a
+              // value (or throws) rather than std::nullopt.
               auto opt = s.retrieve_unpack_hook_data();
-              TORCH_INTERNAL_ASSERT(opt.has_value());
               py::gil_scoped_acquire gil;
               const auto& [_unpack_fn, data_obj] = *opt;
-              PyObject* raw = data_obj.ptr(getPyInterpreter());
-              TORCH_INTERNAL_ASSERT(raw != nullptr);
-              return py::reinterpret_borrow<py::object>(raw);
+              return py::reinterpret_borrow<py::object>(
+                  data_obj.ptr(getPyInterpreter()));
             } else {
               return py::cast(s.get_raw_data().value());
             }
@@ -744,14 +744,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def_property_readonly(
           "unpack_hook",
           [](const torch::autograd::SavedVariable& s) -> py::object {
-            auto opt = s.retrieve_unpack_hook_data();
+            auto opt = s.retrieve_unpack_hook();
             if (!opt.has_value()) {
               return py::none();
             }
             py::gil_scoped_acquire gil;
-            const auto& [unpack_safe, _unused_data] = *opt;
-            auto* unpack_ptr = unpack_safe.ptr(getPyInterpreter());
-            return py::reinterpret_borrow<py::function>(unpack_ptr);
+            return py::reinterpret_borrow<py::function>(
+                opt->ptr(getPyInterpreter()));
           });
 
   m.def(

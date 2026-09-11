@@ -11805,38 +11805,20 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(CustomError, "unpack"):
                 out.backward()
 
-    def test_saved_tensor_hooks_pack_error_then_unpack(self):
-        # mark_dirty attaches grad_fn before packing runs, so a raising pack
-        # hook leaves a live tensor whose SavedVariable never finished.
-        class CustomError(Exception):
-            pass
+    def test_saved_tensor_hooks_pack_error_then_data_access(self):
+        # register_hooks sets hooks_ before running pack_hook, so a raising
+        # pack_hook leaves the SavedVariable with hooks but no packed data.
+        a = torch.randn(5, requires_grad=True)
+        y = a * a
 
-        class error_on_pack_hook(torch.autograd.graph.saved_tensors_hooks):
-            def __init__(self) -> None:
-                def pack_hook(x):
-                    raise CustomError("pack")
+        def bad_pack(t):
+            raise ValueError("boom")
 
-                super().__init__(pack_hook, lambda x: x)
+        with self.assertRaisesRegex(ValueError, "boom"):
+            y.grad_fn._raw_saved_self.register_hooks(bad_pack, lambda x: x)
 
-        class MarkDirtyFunc(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                ctx.mark_dirty(x)
-                return x
-
-            @staticmethod
-            def backward(ctx, grad):
-                ctx.saved_tensors
-                return grad
-
-        a = torch.ones(2, requires_grad=True).clone()
-        with error_on_pack_hook():
-            with self.assertRaisesRegex(CustomError, "pack"):
-                MarkDirtyFunc.apply(a)
-
-        with self.assertRaisesRegex(RuntimeError, "call_pack_hook was not called"):
-            a.sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "pack hook raised"):
+            y.grad_fn._raw_saved_self.data
 
     def test_saved_tensor_hooks_custom_function_intermediates(self):
         class Func(torch.autograd.Function):

@@ -15,21 +15,35 @@ namespace torch::autograd {
 
 struct PySavedVariableHooks : public SavedVariableHooks {
   PySavedVariableHooks(py::function&& pack_hook, py::function&& unpack_hook);
+  PySavedVariableHooks(const PySavedVariableHooks&) = delete;
+  PySavedVariableHooks& operator=(const PySavedVariableHooks&) = delete;
+  PySavedVariableHooks(PySavedVariableHooks&&) = delete;
+  PySavedVariableHooks& operator=(PySavedVariableHooks&&) = delete;
   void call_pack_hook(const at::Tensor& tensor) override;
   at::Tensor call_unpack_hook() override;
-  ~PySavedVariableHooks() override = default;
+  ~PySavedVariableHooks() override {
+    // Each SafePyObject's own destructor routes through
+    // PyInterpreter::decref, which acquires the GIL; batch that into one
+    // acquisition here instead of three independent ones.
+    py::gil_scoped_acquire gil;
+    pack_hook_.reset();
+    unpack_hook_.reset();
+    data_.reset();
+  }
   std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
   retrieve_unpack_hook_data() const override;
+  std::optional<c10::SafePyObject> retrieve_unpack_hook() const override;
 
  private:
   const c10::SafePyObject& data() const {
-    TORCH_CHECK(data_.has_value(), "call_pack_hook was not called");
+    TORCH_CHECK(
+        data_.has_value(),
+        "the pack hook raised before saving data for this tensor");
     return *data_;
   }
 
-  // SafePyObject destructs through PyInterpreter::decref, no manual dtor.
-  c10::SafePyObject pack_hook_;
-  c10::SafePyObject unpack_hook_;
+  std::optional<c10::SafePyObject> pack_hook_;
+  std::optional<c10::SafePyObject> unpack_hook_;
   std::optional<c10::SafePyObject> data_;
 };
 
