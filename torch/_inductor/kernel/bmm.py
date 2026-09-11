@@ -140,10 +140,7 @@ def blackwell_bmm_grid(*args, cdiv, max, min):
     # The BMM template supports both [B, M, N] and flattened [B * M, N]
     # outputs.  Read the logical problem from its compile-time mapping instead
     # of inferring it from the output layout passed before ``meta``.
-    # X supplies at most one SM-wide persistent M/N worker set per matrix;
-    # Y/Z enumerate independent batches, with Z used only when B exceeds the
-    # CUDA grid-Y limit. The rounded Y/Z product can exceed B, so the kernel
-    # must retain its batch guard.
+    # Flatten logical batches and matrix tiles into one global persistent queue.
     meta = args[-1]
     b = meta["BATCH_SIZE"]
     m = meta["LOGICAL_M"]
@@ -151,13 +148,11 @@ def blackwell_bmm_grid(*args, cdiv, max, min):
     grid_m = cdiv(m, meta["BLOCK_M"])
     if meta["TWO_CTAS"]:
         grid_m = cdiv(grid_m, 2) * 2
-    tiles = grid_m * cdiv(n, meta["BLOCK_N"])
+    tiles = b * grid_m * cdiv(n, meta["BLOCK_N"])
     grid_x = min(meta["NUM_SMS"], tiles)
     if meta["TWO_CTAS"]:
         grid_x = grid_x // 2 * 2
-    max_y_grid = get_max_y_grid()
-    grid_z = max(cdiv(b, max_y_grid), 1)
-    return (grid_x, cdiv(b, grid_z), grid_z)
+    return (grid_x, 1, 1)
 
 
 blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
@@ -191,13 +186,14 @@ def is_blackwell_bmm_2cta_compatible(
 ) -> bool:
     """Whether the current paired-CTA output contract is safe.
 
-    The 2CTA template pairs adjacent M tiles.  Its flattened rank-2 output
-    representation is safe only when every physical batch contains complete
-    CTA pairs; otherwise the padded tile aliases the following batch.  The
-    current implementation also relies on TMA output stores for cross-CTA
-    publication and does not support the rank-3 pointer-store fallback.
+    The 2CTA template pairs adjacent M tiles. A flattened rank-2 output is safe
+    only when every physical batch contains complete CTA pairs; otherwise the
+    padded tile aliases the following batch. A rank-3 TMA output keeps the batch
+    boundary explicit and safely suppresses the padded partner tile.
     """
-    return flatten_output and tma_store and output_batch_rows % (2 * block_m) == 0
+    return tma_store and (
+        not flatten_output or output_batch_rows % (2 * block_m) == 0
+    )
 
 
 BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
