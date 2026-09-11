@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <c10/util/Logging.h>
@@ -26,8 +28,6 @@ using torch::profiler::impl::concreteInputsToStrList;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
 using torch::profiler::impl::get_record_concrete_inputs_enabled;
-using torch::profiler::impl::ivalueListToStr;
-using torch::profiler::impl::ivalueToStr;
 using torch::profiler::impl::joinStacks;
 using torch::profiler::impl::parseArgData;
 using torch::profiler::impl::PyExtraFieldsBase;
@@ -44,6 +44,47 @@ namespace {
 
 template <typename>
 inline constexpr bool always_false_v = false;
+
+// Convert the subset of IValue types accepted for dynamic metadata.
+std::optional<libkineto::TypedValue> toTypedMetadataValue(
+    const c10::IValue& value) {
+  if (value.isInt()) {
+    return libkineto::TypedValue{value.toInt()};
+  }
+  if (value.isDouble()) {
+    return libkineto::TypedValue{value.toDouble()};
+  }
+  if (value.isString()) {
+    const std::string& stringValue = value.toStringRef();
+    // Preserve ivalueToStr's fallback until Kineto escapes quotes in typed
+    // string metadata.
+    if (stringValue.find('"') != std::string::npos) {
+      return libkineto::TypedValue{std::string{"None"}};
+    }
+    return libkineto::TypedValue{stringValue};
+  }
+  if (value.isBool()) {
+    return libkineto::TypedValue{value.toBool()};
+  }
+  if (!value.isList()) {
+    return std::nullopt;
+  }
+
+  const c10::ArrayRef<c10::IValue> list = value.toListRef();
+  // Lists expose their elements as IValues, including List[str]. Validate each
+  // element before constructing a vector<string>. As before, an empty list is
+  // accepted because all_of over an empty range is true.
+  if (!std::ranges::all_of(list, &c10::IValue::isString)) {
+    return std::nullopt;
+  }
+
+  std::vector<std::string> strings;
+  strings.reserve(list.size());
+  for (const c10::IValue& item : list) {
+    strings.emplace_back(item.toStringRef());
+  }
+  return libkineto::TypedValue{std::move(strings)};
+}
 
 struct MetadataBase {
   /* implicit */ MetadataBase(const std::shared_ptr<Result>& result)
@@ -63,21 +104,9 @@ struct MetadataBase {
     }
   }
 
-  // Stringly-typed metadata (dynamic keys, string values). Kept for fields
-  // whose key or type is only known at runtime.
-  void addMetadata(
-      const std::string& key,
-      const std::string& value,
-      bool quote = false) {
-    if (kinetoActivity_ && !value.empty() && value != "\"\"") {
-      torch::profiler::impl::kineto::addMetadata(
-          mutableActivity(), key, value, quote);
-    }
-  }
-
   // Typed metadata: the value keeps its declared type all the way into
   // libkineto instead of being pre-stringified. Empty string values are
-  // dropped to match the stringly-typed overload above.
+  // dropped to preserve the existing metadata behavior.
   template <typename T>
   void addMetadata(const libkineto::MetadataField<T>& field, const T& value) {
     if (!kinetoActivity_) {
@@ -89,6 +118,17 @@ struct MetadataBase {
       }
     }
     mutableActivity()->addMetadata(field, value);
+  }
+
+  void addMetadata(const std::string& key, libkineto::TypedValue value) {
+    if (!kinetoActivity_) {
+      return;
+    }
+    const std::string* stringValue = std::get_if<std::string>(&value);
+    if (stringValue && stringValue->empty()) {
+      return;
+    }
+    mutableActivity()->addTypedMetadata(key, std::move(value));
   }
 
   template <typename T>
@@ -216,36 +256,16 @@ struct AddGenericMetadata : public MetadataBase {
         continue;
       }
 
-      // Until needed, let's limit the kwargs to only ints, doubles, strings,
-      // bools, and list of strings
-      bool isValidType =
-          val.isInt() || val.isDouble() || val.isString() || val.isBool();
-      bool isStringList = false;
-
-      if (!isValidType && val.isList()) {
-        // Check if it's a list of strings
-        auto list = val.toListRef();
-        isStringList = std::ranges::all_of(
-            list, [](const c10::IValue& item) { return item.isString(); });
-      }
-
-      if (!isValidType && !isStringList) {
+      std::optional<libkineto::TypedValue> typedValue =
+          toTypedMetadataValue(val);
+      if (!typedValue.has_value()) {
         LOG(WARNING)
             << "Inputted kwarg: " << key
             << " is not an int, double, string, bool, or list of strings for op: "
             << op_event.name_ << " skipping";
         continue;
       }
-
-      if (isStringList) {
-        // For list of strings, use ivalueListToStr
-        auto list = val.toListRef();
-        std::vector<c10::IValue> stringList(list.begin(), list.end());
-        addMetadata(key, ivalueListToStr(stringList));
-      } else {
-        bool isString = val.isString();
-        addMetadata(key, ivalueToStr(val, isString));
-      }
+      addMetadata(key, std::move(*typedValue));
     }
     const auto& metadata = op_event.collective_meta_;
     if (!metadata.empty()) {
@@ -280,7 +300,7 @@ struct AddGenericMetadata : public MetadataBase {
       for (const auto i : c10::irange(op_event.perf_event_counters_->size())) {
         addMetadata(
             event_names[i],
-            std::to_string((*op_event.perf_event_counters_)[i]));
+            libkineto::TypedValue{(*op_event.perf_event_counters_)[i]});
       }
     }
 
