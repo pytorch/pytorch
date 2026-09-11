@@ -1810,8 +1810,10 @@ def _add_unshard_reshard(
     may issue asynchronous all-gathers. Keeping these windows independent lets
     callers stagger prefetch without introducing extra reshard/unshard cycles.
     """
-    if isinstance(unshard_lookahead, bool) or not (
-        1 <= unshard_lookahead <= max_active_stages
+    if (
+        isinstance(unshard_lookahead, bool)
+        or not isinstance(unshard_lookahead, int)
+        or not 1 <= unshard_lookahead <= max_active_stages
     ):
         raise ValueError(
             "unshard_lookahead must be an integer within "
@@ -1884,26 +1886,6 @@ def _add_unshard_reshard(
         _reshard(stage)
 
     return fsdp_aware_actions
-
-
-def _resolve_unshard_lookahead(
-    unshard_lookahead: int | None,
-    max_active_stages: int,
-) -> int:
-    """Resolve the all-gather prefetch distance."""
-    if unshard_lookahead is None:
-        return max_active_stages
-    if isinstance(unshard_lookahead, bool) or not isinstance(unshard_lookahead, int):
-        raise ValueError(
-            f"unshard_lookahead must be an integer or None, got {unshard_lookahead!r}"
-        )
-    if not 1 <= unshard_lookahead <= max_active_stages:
-        raise ValueError(
-            "unshard_lookahead must be within "
-            f"[1, max_active_stages={max_active_stages}], got "
-            f"{unshard_lookahead}"
-        )
-    return unshard_lookahead
 
 
 def _merge_bw(
@@ -2913,10 +2895,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             )
 
             # Perform schedule lowering
+            unshard_lookahead = (
+                self._max_active_stages
+                if self._unshard_lookahead is None
+                else self._unshard_lookahead
+            )
             for rank in actions:
-                unshard_lookahead = _resolve_unshard_lookahead(
-                    self._unshard_lookahead, self._max_active_stages
-                )
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
                     actions[rank],
                     max_active_stages=self._max_active_stages,

@@ -39,7 +39,6 @@ from torch.distributed.pipelining.schedules import (
     _merge_bw,
     _PipelineSchedule,
     _PipelineScheduleRuntime,
-    _resolve_unshard_lookahead,
     _simulate_comms_compute,
     _validate_schedule,
     B,
@@ -1059,12 +1058,12 @@ class TestSchedulePlan(TestCase):
         )
 
     def test_unshard_lookahead_rejects_invalid_values(self):
-        self.assertEqual(_resolve_unshard_lookahead(None, 4), 4)
-        self.assertEqual(_resolve_unshard_lookahead(3, 4), 3)
         for lookahead in (True, False, 0, -1, 5, "auto"):
             with self.subTest(unshard_lookahead=lookahead):
                 with self.assertRaises(ValueError):
-                    _resolve_unshard_lookahead(lookahead, 4)  # type: ignore[arg-type]
+                    self._interleaved_schedule(  # type: ignore[arg-type]
+                        unshard_lookahead=lookahead
+                    )
 
     @parametrize(
         "ScheduleClass",
