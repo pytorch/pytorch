@@ -837,7 +837,7 @@ class CompilePackage:
         self._device_type = _graph_device_type(graph)
 
     def bypass_current_compile(self) -> None:
-        """Drop what the current compile registered on its entry.
+        """Drop the backend ids the current compile registered on its entry.
 
         Only this compile is lost: its guarded code is never recorded
         (convert_frame consults output.package, which bypass_package clears,
