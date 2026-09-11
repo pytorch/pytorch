@@ -55,7 +55,7 @@ index 7106526..6ce345f 100644
 +    if cache_root is not None:
 +        cache_dir = Path(cache_root)
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 1b56f44..d82e05a 100644
+index 1b56f44..46dc637 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -163 +163,2 @@ from typing import NamedTuple, Optional
@@ -64,10 +64,40 @@ index 1b56f44..d82e05a 100644
 +import cutlass
 @@ -164,0 +166 @@ import cutlass.cute as cute
 +from cutlass import Boolean, Float32, const_expr
+@@ -166,2 +168,2 @@ import cutlass.cute as cute
+-from quack.cute_dsl_utils import get_device_capacity, mlir_namedtuple, torch2cute_dtype_map
+-from quack.epilogue.ops import (
++from torch._vendor.quack.cute_dsl_utils import get_device_capacity, mlir_namedtuple, torch2cute_dtype_map
++from torch._vendor.quack.epilogue.ops import (
 @@ -175,0 +178 @@ from quack.epilogue.ops import (
 +    is_floating_dtype,
-@@ -191,0 +195 @@ from quack.gemm_config import (
+@@ -177,3 +180,3 @@ from quack.epilogue.ops import (
+-from quack.epilogue.math import F2, F16Lanes, Pair, pack, unpack  # noqa: F401  (re-exports)
+-from quack.epilogue.visit import _EpiModMixinBase
+-from quack.gemm_runtime.host import (
++from torch._vendor.quack.epilogue.math import F2, F16Lanes, Pair, pack, unpack  # noqa: F401  (re-exports)
++from torch._vendor.quack.epilogue.visit import _EpiModMixinBase
++from torch._vendor.quack.gemm_runtime.host import (
+@@ -184 +187 @@ from quack.gemm_runtime.host import (
+-from quack.gemm_runtime.identity import (
++from torch._vendor.quack.gemm_runtime.identity import (
+@@ -191 +194,2 @@ from quack.gemm_runtime.identity import (
+-from quack.gemm_config import (
++from torch._vendor.quack.gemm_config import (
 +    GemmConfig,
+@@ -197,6 +201,6 @@ from quack.gemm_config import (
+-from quack.gemm_tvm_ffi_utils import tensor_key
+-from quack.gemm_sm80 import GemmSm80
+-from quack.gemm_sm90 import GemmSm90
+-from quack.gemm_sm100 import GemmSm100
+-from quack.gemm_sm120 import GemmSm120
+-from quack.rounding import RoundingMode
++from torch._vendor.quack.gemm_tvm_ffi_utils import tensor_key
++from torch._vendor.quack.gemm_sm80 import GemmSm80
++from torch._vendor.quack.gemm_sm90 import GemmSm90
++from torch._vendor.quack.gemm_sm100 import GemmSm100
++from torch._vendor.quack.gemm_sm120 import GemmSm120
++from torch._vendor.quack.rounding import RoundingMode
 @@ -292,0 +297,111 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
 +def _fragment_apply(op, gemm, pstate):
 +    """Adapt an apply-port op's per-element ``fn_apply`` to a TensorSSA callable."""
@@ -214,6 +244,12 @@ index 1b56f44..d82e05a 100644
 +            ),
 @@ -540,0 +678 @@ class EpiMod:
 +                "_epi_mod_fragmentwise": self.fragmentwise,
+@@ -561 +699 @@ class EpiMod:
+-        from quack.gemm_runtime.autotune import tuned_mod_gemm
++        from torch._vendor.quack.gemm_runtime.autotune import tuned_mod_gemm
+@@ -630 +768 @@ class EpiMod:
+-            from quack.operand_transform.host import as_transform_mod
++            from torch._vendor.quack.operand_transform.host import as_transform_mod
 @@ -660,2 +797,0 @@ class EpiMod:
 -            import torch
 -
@@ -243,6 +279,9 @@ index 1b56f44..d82e05a 100644
 +                if paired_acc
 +                else n_gemm
 +            )
+@@ -1038 +1179 @@ class EpiMod:
+-            from quack.gemm_tvm_ffi_utils import (
++            from torch._vendor.quack.gemm_tvm_ffi_utils import (
 @@ -1183 +1323,0 @@ class EpiMod:
 -        n_store = n // 2 if self.mode == "acc_pair" else n
 @@ -1185,0 +1326,8 @@ class EpiMod:
@@ -270,9 +309,18 @@ index 1b56f44..d82e05a 100644
 @@ -1345 +1498 @@ class EpiMod:
 -                if torch.compiler.is_compiling():
 +                if compile_dispatch and torch.compiler.is_compiling():
+@@ -1350 +1503 @@ class EpiMod:
+-                from quack.operand_transform.host import as_transform_mod
++                from torch._vendor.quack.operand_transform.host import as_transform_mod
+@@ -1361 +1514 @@ class EpiMod:
+-            from quack.operand_transform.transform import TransformAOperand
++            from torch._vendor.quack.operand_transform.transform import TransformAOperand
 @@ -1384 +1537 @@ class EpiMod:
 -        if torch.compiler.is_compiling():
 +        if compile_dispatch and torch.compiler.is_compiling():
+@@ -1389 +1542 @@ class EpiMod:
+-            from quack.gemm_runtime.torch_op import compile_call
++            from torch._vendor.quack.gemm_runtime.torch_op import compile_call
 @@ -1411,0 +1565 @@ class EpiMod:
 +                concat_layout=concat_layout,
 @@ -1439,4 +1593,4 @@ class EpiMod:
@@ -284,6 +332,17 @@ index 1b56f44..d82e05a 100644
 +                # may rebuild an equal config per call (identity keys can
 +                # alias a freed config's address and replay its plan).
 +                config,
+@@ -1493,0 +1648,2 @@ class EpiMod:
++        from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn
++
+@@ -1495,3 +1651 @@ class EpiMod:
+-        # concat reads B (k, n) through per-call views, so it vetoes the b_kn
+-        # trace-time relabel (the interleave lives in mod.gemm).
+-        b_kn = get_device_capacity(A.device)[0] >= 9 and not concat_layout
++        b_kn = mod_b_kn(A.device, concat_layout)
+@@ -1515 +1669 @@ class EpiMod:
+-            from quack.gemm_runtime.autotune import sink_arg_shapes, tuned_mod_gemm
++            from torch._vendor.quack.gemm_runtime.autotune import sink_arg_shapes, tuned_mod_gemm
 @@ -1531 +1685,6 @@ class EpiMod:
 -                        self, lead[-1], n, l=l, device=A.device, num_seqs=num_seqs
 +                        self,
@@ -302,7 +361,7 @@ index 1b56f44..d82e05a 100644
 +                    *self.extra_ops,
 +                )
 +            ):
-+                from quack.gemm_runtime.autotune import _legal_mod_configs, mod_selection_args
++                from torch._vendor.quack.gemm_runtime.autotune import _legal_mod_configs, mod_selection_args
 +
 +                selection_args = mod_selection_args(
 +                    operands,
@@ -325,6 +384,9 @@ index 1b56f44..d82e05a 100644
 +                cfg = _legal_mod_configs(
 +                    self, A.device, selection_args, preferred_config=preferred_config
 +                )[0]
+@@ -1658 +1849 @@ class EpiMod:
+-            from quack.operand_transform.host import as_transform_mod
++            from torch._vendor.quack.operand_transform.host import as_transform_mod
 @@ -1794,0 +1986,16 @@ def gemm_epilogue(
 +def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +    """Decorate a whole-fragment TensorSSA callback using the EpiMod host stack."""
@@ -472,17 +534,109 @@ index b7e4ae2..153717f 100644
 -        return (_callable_config_key(self.epi_tile_fn),)
 +        return (_callable_config_key(self.epi_tile_fn), self.dtype)
 diff --git a/quack/gemm_runtime/autotune.py b/quack/gemm_runtime/autotune.py
-index 2440581..0d260b7 100644
+index 2440581..37e5417 100644
 --- a/quack/gemm_runtime/autotune.py
 +++ b/quack/gemm_runtime/autotune.py
-@@ -82,3 +82,3 @@ def _config_space(mod, device):
+@@ -52,3 +52,3 @@ import torch
+-from quack.autotuner import AutotuneConfig, Autotuner
+-from quack.cute_dsl_utils import get_device_capacity
+-from quack.gemm_config import (
++from torch._vendor.quack.autotuner import AutotuneConfig, Autotuner
++from torch._vendor.quack.cute_dsl_utils import get_device_capacity
++from torch._vendor.quack.gemm_config import (
+@@ -61 +61 @@ from quack.gemm_config import (
+-__all__ = ["tuned_mod_gemm", "sink_arg_shapes", "TunedModGemm"]
++__all__ = ["tuned_mod_gemm", "sink_arg_shapes", "TunedModGemm", "ModProblem", "legal_mod_configs", "mod_b_kn"]
+@@ -73,0 +74,9 @@ def _cdiv(a, b):
++def mod_b_kn(device, concat_layout):
++    """Whether an EpiMod call reads B as (K, N): SM90+ and no concat layout.
++
++    concat reads B (k, n) through per-call views, so it vetoes the b_kn
++    trace-time relabel (the interleave lives in mod.gemm).
++    """
++    return get_device_capacity(device)[0] >= 9 and not concat_layout
++
++
+@@ -82,3 +91,3 @@ def _config_space(mod, device):
 -        # swap_ab rides swap-at-trace (2026-07-14): element-mode sink-less
 -        # mods only, enforced in _prune_for_mod per call.
 -        and not (c.swap_ab and (mod.mode != "element" or mod.sinks))
 +        # Swap-at-trace is admitted only when every orientation-sensitive
 +        # EpiOp owns its transposed physical geometry.
 +        and not (c.swap_ab and not mod.supports_swap_ab())
-@@ -177,0 +178,10 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+@@ -161,0 +171,46 @@ def _slice_sinks(mod, epi_args, config, lead, n_gemm, blockscaled=False, num_seq
++class ModProblem(NamedTuple):
++    """The call metadata EpiMod config pruning reads.
++
++    ``from_args`` extracts it from the tensor argument map; callers that only
++    know shapes (compile-time selection) build it directly.
++    """
++
++    device: torch.device
++    m: int
++    n: int
++    lead: tuple = ()  # (l, m) or (m,), matching EpiMod._lead_shape; read with sink_shapes
++    b_kn: bool = False
++    varlen_m: bool = False
++    gather_A: bool = False
++    blockscaled: bool = False
++    concat: bool = False
++    n_full: int | None = None  # transform_a padded N
++    sink_shapes: dict = {}  # sink name -> caller buffer shape
++
++    @classmethod
++    def from_args(cls, mod, transform_a, named_args):
++        A, B = named_args["A"], named_args["B"]
++        A_idx = named_args.get("A_idx")
++        m_gemm, n_gemm = _gemm_mn(A, B, named_args.get("b_kn", False))
++        if A_idx is not None:
++            m_gemm = A_idx.shape[0]
++        sink_shapes = {
++            name: tuple(named_args[name].shape)
++            for name, op in mod.sinks.items()
++            if getattr(op, "sink_alloc_shape", None) is not None and named_args.get(name) is not None
++        }
++        return cls(
++            device=A.device,
++            m=m_gemm,
++            n=n_gemm,
++            lead=_lead(A, A_idx, m_gemm),
++            b_kn=named_args.get("b_kn", False),
++            varlen_m=named_args.get("cu_seqlens_m") is not None,
++            gather_A=A_idx is not None,
++            blockscaled=named_args.get("SFA") is not None,
++            concat=bool(named_args.get("concat_layout")),
++            n_full=transform_a.padded_n(B) if transform_a is not None else None,
++            sink_shapes=sink_shapes,
++        )
++
++
+@@ -163,8 +218,9 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-    kwargs = named_args | kwargs
+-    A, B = kwargs["A"], kwargs["B"]
+-    n_full = transform_a.padded_n(B) if transform_a is not None else None
+-    cap = get_device_capacity(A.device)[0]
+-    A_idx = kwargs.get("A_idx")
+-    m_gemm, n_gemm = _gemm_mn(A, B, kwargs.get("b_kn", False))
+-    if A_idx is not None:
+-        m_gemm = A_idx.shape[0]
++    return prune_mod_configs(
++        mod, transform_a, configs, ModProblem.from_args(mod, transform_a, named_args | kwargs)
++    )
++
++
++def prune_mod_configs(mod, transform_a, configs, problem):
++    """Keep the ``configs`` (AutotuneConfig) legal for ``mod`` on ``problem``."""
++    cap = get_device_capacity(problem.device)[0]
++    m_gemm, n_gemm, n_full = problem.m, problem.n, problem.n_full
+@@ -173,5 +229,12 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-    b_kn_call = kwargs.get("b_kn", False)
+-    varlen_m = kwargs.get("cu_seqlens_m") is not None
+-    varlen_or_gather = varlen_m or A_idx is not None
+-    blockscaled = kwargs.get("SFA") is not None
+-    has_concat = bool(kwargs.get("concat_layout"))
++    varlen_or_gather = problem.varlen_m or problem.gather_A
++    blockscaled = problem.blockscaled
 +    epi_ops = tuple(
 +        dict.fromkeys(
 +            (
@@ -493,7 +647,10 @@ index 2440581..0d260b7 100644
 +            )
 +        )
 +    )
-@@ -188,0 +199,12 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+@@ -182 +245 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-        if not config_supports(c, gather_A=A_idx is not None, varlen_m=varlen_m):
++        if not config_supports(c, gather_A=problem.gather_A, varlen_m=problem.varlen_m):
+@@ -188,0 +252,12 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
 +        if any(
 +            not supports(c)
 +            for op in epi_ops
@@ -506,14 +663,24 @@ index 2440581..0d260b7 100644
 +            if (supports := getattr(op, "supports_problem", None)) is not None
 +        ):
 +            continue
-@@ -192 +214,5 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+@@ -192 +267,5 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
 -            not b_kn_call or varlen_or_gather or has_concat or mod.mode != "element" or mod.sinks
-+            not b_kn_call
++            not problem.b_kn
 +            or n_gemm % 8
 +            or varlen_or_gather
-+            or has_concat
++            or problem.concat
 +            or not mod.supports_swap_ab()
-@@ -214,0 +241,13 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+@@ -207 +286 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-            buf = kwargs.get(name)
++            buf_shape = problem.sink_shapes.get(name)
+@@ -209,3 +288,3 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-            if buf is not None and alloc is not None:
+-                need = alloc(_lead(A, A_idx, m_gemm), n_gemm, cta_tile_m, c.tile_n)
+-                if any(b < s for b, s in zip(buf.shape, need)):
++            if buf_shape is not None and alloc is not None:
++                need = alloc(problem.lead, n_gemm, cta_tile_m, c.tile_n)
++                if any(b < s for b, s in zip(buf_shape, need)):
+@@ -214,0 +294,13 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
 +    if not survivors:
 +        raw_configs = tuple(conf.kwargs["config"] for conf in configs)
 +        unsupported_ops = [
@@ -527,7 +694,7 @@ index 2440581..0d260b7 100644
 +                f"no supported GemmConfig: {unsupported_ops[0].config_support_error(raw_configs)}"
 +            )
 +        raise ValueError("no supported GemmConfig for this epilogue and call")
-@@ -381,0 +421,36 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
+@@ -381,0 +474,44 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
 +def mod_selection_args(
 +    operands,
 +    outputs,
@@ -556,14 +723,25 @@ index 2440581..0d260b7 100644
 +
 +def _legal_mod_configs(mod, device, named_args, *, preferred_config=None, transform_a=None):
 +    """Return every supported native config, with the preferred one first when legal."""
++    problem = ModProblem.from_args(mod, transform_a, named_args)
++    return legal_mod_configs(
++        mod, device, problem, preferred_config=preferred_config, transform_a=transform_a
++    )
++
++
++def legal_mod_configs(mod, device, problem, *, preferred_config=None, transform_a=None):
++    """``_legal_mod_configs`` from a ``ModProblem`` instead of tensors."""
 +    configs = _config_space(mod, device)
 +    if preferred_config in configs:
 +        configs = [preferred_config, *(config for config in configs if config != preferred_config)]
 +    candidates = [AutotuneConfig(config=config) for config in configs]
-+    survivors = _prune_for_mod(mod, transform_a, candidates, named_args)
++    survivors = prune_mod_configs(mod, transform_a, candidates, problem)
 +    return [candidate.kwargs["config"] for candidate in survivors]
 +
 +
+@@ -413 +549 @@ def tuned_mod_gemm(
+-        from quack.operand_transform.host import as_transform_mod
++        from torch._vendor.quack.operand_transform.host import as_transform_mod
 diff --git a/quack/gemm_runtime/torch_op.py b/quack/gemm_runtime/torch_op.py
 index 3c89e3d..3cd074d 100644
 --- a/quack/gemm_runtime/torch_op.py

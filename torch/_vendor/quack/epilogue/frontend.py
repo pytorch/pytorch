@@ -1661,10 +1661,10 @@ class EpiMod:
                     result[name] = self._finalize_sink(name, buf, cu_seqlens_m, plan)
                 return result
 
+        from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn
+
         varlen_m = cu_seqlens_m is not None
-        # concat reads B (k, n) through per-call views, so it vetoes the b_kn
-        # trace-time relabel (the interleave lives in mod.gemm).
-        b_kn = get_device_capacity(A.device)[0] >= 9 and not concat_layout
+        b_kn = mod_b_kn(A.device, concat_layout)
         B_d = B if (b_kn or owned_fmt is not None) else B.mT
         n_override = transform_a.padded_n(B) if transform_a is not None else None
         provided_out = frozenset(k for k, v in (out or {}).items() if v is not None)

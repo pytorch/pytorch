@@ -256,7 +256,6 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
     atomic_counter = at::zeros({1}, opts.dtype(at::kInt));
   }
 
-  hipError_t err; // TODO: Error handling
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
@@ -292,9 +291,8 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   params.varlen_type = VarlenType::None;
   params.window_left = window_left;
   params.window_right = window_right;
-  err = aotriton::v3::flash::attn_fwd(params,
-                                      aotriton::v3::flash::attn_fwd_params::kVersion,
-                                      stream);
+  AT_CUDA_CHECK(aotriton::v3::flash::attn_fwd(
+      params, aotriton::v3::flash::attn_fwd_params::kVersion, stream));
   // Note: These are propagated up to the return of mha_fwd(). comments
   //       represent the assignments at that level
   return {out,          // output
@@ -446,7 +444,6 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     prepare_philox_arguments(p_dropout, batch_size * num_heads * 32);
 
   if (max_seqlen_k > 0) {
-    hipError_t err; // TODO: Error handling
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
@@ -503,9 +500,8 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     }
     params.window_left = window_left;
     params.window_right = window_right;
-    err = aotriton::v3::flash::attn_fwd(params,
-                                        aotriton::v3::flash::attn_fwd_params::kVersion,
-                                        stream);
+    AT_CUDA_CHECK(aotriton::v3::flash::attn_fwd(
+        params, aotriton::v3::flash::attn_fwd_params::kVersion, stream));
   } else {
     // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
     out.zero_();
@@ -643,7 +639,6 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
 
   int d_head = head_size_og;
   bool use_fused_bwd = d_head <= 192 && d_head * seqlen_q < 64 * 512;
-  hipError_t err; // TODO: Error handling
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   // Fused BWD does not support SWA
@@ -680,10 +675,11 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
   aotriton::v3::flash::attn_options options;
   options.deterministic = deterministic;
-  err = aotriton::v3::flash::attn_bwd(params,
-                                      aotriton::v3::flash::attn_bwd_params::kVersion,
-                                      stream,
-                                      &options);
+  AT_CUDA_CHECK(aotriton::v3::flash::attn_bwd(
+      params,
+      aotriton::v3::flash::attn_bwd_params::kVersion,
+      stream,
+      &options));
 
   return { dq, dk, dv, softmax_d };
 }
@@ -847,7 +843,6 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     }
   }
   if (max_seqlen_q > 0) {
-    hipError_t err; // TODO: Error handling
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using aotriton::v3::flash::CausalType;
@@ -885,10 +880,11 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
     aotriton::v3::flash::attn_options options;
     options.deterministic = deterministic;
-    err = aotriton::v3::flash::attn_bwd(params,
-                                        aotriton::v3::flash::attn_bwd_params::kVersion,
-                                        stream,
-                                        &options);
+    AT_CUDA_CHECK(aotriton::v3::flash::attn_bwd(
+        params,
+        aotriton::v3::flash::attn_bwd_params::kVersion,
+        stream,
+        &options));
   } else {
     // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
     dq.zero_();
