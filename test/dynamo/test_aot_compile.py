@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import dataclasses
 import functools
 import importlib
 import inspect
@@ -42,7 +43,12 @@ from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.output_graph import get_builtins_dict
-from torch._dynamo.package import DynamoCache, load_guards_state, SystemInfo
+from torch._dynamo.package import (
+    _current_cpu_codegen_target,
+    DynamoCache,
+    load_guards_state,
+    SystemInfo,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -2693,6 +2699,116 @@ from user code:
         actual = loaded_fn(x)
         self.assertEqual(expected[0], actual[0])
         self.assertEqual(expected[1], actual[1])
+
+    def test_check_compatibility_compares_artifact_against_current_machine(self):
+        # CompileArtifacts.check_compatibility must invoke the CACHED
+        # SystemInfo's method with the current machine as `other`, the way
+        # _DynamoCacheEntry.check_versions does. Reversed, the "artifact
+        # predates cpu_codegen_target" skip is evaluated against the current
+        # machine -- never None -- so every old artifact is rejected, and every
+        # mismatch message reports the two sides the wrong way round.
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_type, "cpu")
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
+
+        # An eager artifact holds no generated code, so there is no baked vector
+        # width to protect and the comparison must not run at all -- otherwise
+        # capture-here/serve-there, which is the whole point of the feature,
+        # rejects an artifact over a target it never used. Arm the capture-time
+        # flag so the exemption pinned here is the backend NAME's.
+        self.assertEqual(artifacts.backend_name, "eager")
+        self.assertFalse(artifacts.requires_native_backend_compatibility)
+        artifacts.requires_native_backend_compatibility = True
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        artifacts.check_compatibility()
+
+        # The rest is about the receiver order, which only a native backend
+        # (name and capture-time flag) reaches.
+        artifacts.backend_name = "inductor"
+        current_target = _current_cpu_codegen_target()
+        if current_target is None:
+            # No usable C++ compiler, so there is no current target to compare
+            # against and the skew arms below have nothing to assert. Skipping
+            # rather than failing is the point of the lazy probe.
+            self.skipTest("no CPU codegen target on this host")
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=None
+        )
+        artifacts.check_compatibility()
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            artifacts.check_compatibility()
+        message = str(ctx.exception)
+        self.assertIn(f"cached={stale}", message)
+        self.assertIn(f"current={current_target}", message)
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=None, torch_version="0.0.0-fake"
+        )
+        with self.assertRaisesRegex(RuntimeError, "0.0.0-fake"):
+            artifacts.check_compatibility()
+
+    def test_aot_compile_backend_declaring_no_native_code_skips_the_isa_gate(self):
+        # A user backend that emits no native code declares emits_native_code =
+        # False: the artifact records no CPU codegen target and loads on a host
+        # whose ISA differs (or that has no toolchain at all), while a backend
+        # without the declaration is fingerprinted like inductor.
+        from torch._dynamo.aot_compile_types import GraphModuleSerializableCallable
+
+        def python_backend(gm, example_inputs):
+            return GraphModuleSerializableCallable(gm)
+
+        python_backend.emits_native_code = False
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        target = ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None)
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target", return_value=target
+        ):
+            compiled = torch.compile(
+                fn, fullgraph=True, backend=python_backend
+            ).aot_compile(((x,), {}))
+        artifacts = compiled._artifacts
+        self.assertFalse(artifacts.requires_native_backend_compatibility)
+        self.assertIsNone(artifacts.system_info.cpu_codegen_target)
+        # A host that resolves no codegen target at all still loads it, from
+        # the in-memory artifact and from disk alike.
+        compiled.save_compiled_function(self.path())
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target", return_value=None
+        ):
+            artifacts.check_compatibility()
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(loaded(x), fn(x))
+
+        def undeclared_backend(gm, example_inputs):
+            return GraphModuleSerializableCallable(gm)
+
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target", return_value=target
+        ):
+            native = torch.compile(
+                fn, fullgraph=True, backend=undeclared_backend
+            ).aot_compile(((x,), {}))
+        self.assertTrue(native._artifacts.requires_native_backend_compatibility)
+        self.assertEqual(native._artifacts.system_info.cpu_codegen_target, target)
 
     def test_check_compatibility_triton_and_gpu_exempt_off_artifact(self):
         # The Triton/GPU checks must exempt off the ARTIFACT (self), not the
