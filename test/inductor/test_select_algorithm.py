@@ -42,7 +42,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
     skipIfRocmArch,
-    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import (
@@ -1454,12 +1453,10 @@ class TestTemplateRender(TestCase):
                 (large_capture,),
             )
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
-    )
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
     def test_external_template_prologue_epilogue_fusion(self):
         """
         Tests prologue fusion, epilogue fusion, and extra inputs through the
