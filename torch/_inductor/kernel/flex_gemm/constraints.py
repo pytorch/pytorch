@@ -33,6 +33,7 @@ LOCAL_REDUCE_FINALIZE_KEY_SUFFIX: Final = ":local_reduce_finalize"
 # compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
 # fragment lower as plain generated TensorSSA without a feed plan.
 LOCAL_REDUCE_FRAGMENT_WIDTH = GEMM_REDUCTION_FRAGMENT_WIDTH
+SM120_LOCAL_REDUCE_FRAGMENT_WIDTH = 16
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
@@ -335,8 +336,8 @@ def validate_flex_gemm_local_reduce_config(
 
     This matches ``GemmConfig`` fields against layout families covered by forced
     kernel tests; tile divisibility alone is not sufficient. Axis-1 groups within
-    one 32-value epilogue fragment need no cross-fragment combine. Some SM100
-    two-CTA layouts expose only 16 contiguous N values, reducing that local limit.
+    one epilogue fragment need no cross-fragment combine. SM120 and some SM100
+    two-CTA layouts expose only 16 contiguous N values.
 
     Non-SM100 devices retain the conservative single-CTA families because the
     expanded fragment and clustered layouts have only been validated on SM100.
@@ -370,7 +371,11 @@ def validate_flex_gemm_local_reduce_config(
     if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
 
-    fragment_width = LOCAL_REDUCE_FRAGMENT_WIDTH
+    fragment_width = (
+        SM120_LOCAL_REDUCE_FRAGMENT_WIDTH
+        if config.device_capacity == 12
+        else LOCAL_REDUCE_FRAGMENT_WIDTH
+    )
     has_half_n_fragment = (
         axis == 1
         and config.tile_m == 128

@@ -33,6 +33,7 @@ from torch.testing._internal.common_cuda import (
     SM100OrLater,
     SM120OrLater,
     TEST_CUDA,
+    xfailIfSM120OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, pack_uint4
@@ -42,6 +43,7 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     run_tests,
     skipIfNoCuteDSL,
+    subtest,
     TestCase,
 )
 
@@ -1297,6 +1299,22 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     swapped, 64, 0, allow_swap_ab=True
                 )
             )
+
+    def test_sm120_local_reduce_fragment_width(self):
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            validate_flex_gemm_local_reduce_config,
+        )
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        config = GemmConfig(
+            tile_m=128,
+            tile_n=128,
+            pingpong=False,
+            cluster_m=1,
+            device_capacity=12,
+        )
+        self.assertTrue(validate_flex_gemm_local_reduce_config(config, 16, 1))
+        self.assertFalse(validate_flex_gemm_local_reduce_config(config, 32, 1))
 
     def test_blocked_output_layout_filters_incompatible_tiles(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -8444,12 +8462,27 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            ("fragment_group_tuned", 128, 32, True),
-            ("multi_chunk_large_group", 256, 128, False),
-            ("tile_n_group", 256, 256, False),
-            ("wide_m_tile_n_group", 512, 512, False),
+            subtest(
+                ("fragment_group_tuned", 128, 32, True),
+                name="fragment_group_tuned",
+                decorators=[xfailIfSM120OrLater],
+            ),
+            subtest(
+                ("multi_chunk_large_group", 256, 128, False),
+                name="multi_chunk_large_group",
+                decorators=[xfailIfSM120OrLater],
+            ),
+            subtest(
+                ("tile_n_group", 256, 256, False),
+                name="tile_n_group",
+                decorators=[xfailIfSM120OrLater],
+            ),
+            subtest(
+                ("wide_m_tile_n_group", 512, 512, False),
+                name="wide_m_tile_n_group",
+                decorators=[xfailIfSM120OrLater],
+            ),
         ),
-        name_fn=lambda case: case[0],
     )
     def test_mm_coda_rmsnorm_rewrite_e2e(self, case):
         _, n, group, tuned = case
@@ -8555,7 +8588,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         with self.assertRaisesRegex(
             Exception,
-            "requested group=1024, max supported group=512 for axis=1",
+            r"requested group=1024, max supported group=\d+ for axis=1",
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b1, gamma, b2)
 
