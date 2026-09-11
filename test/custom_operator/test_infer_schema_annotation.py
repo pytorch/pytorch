@@ -6,7 +6,12 @@ import unittest
 
 import torch
 from torch import Tensor, types
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 if typing.TYPE_CHECKING:
@@ -18,6 +23,8 @@ mutates_args = {}
 
 @skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestInferSchemaWithAnnotation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tensor(self):
         def foo_op(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
