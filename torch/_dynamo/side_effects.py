@@ -835,7 +835,7 @@ class SideEffects:
         elif issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
-            variable_cls = variables.DefaultDictVariable
+            variable_cls = variables.UserDefinedDefaultDictVariable
         elif issubclass(user_cls, collections.OrderedDict):
             # OrderedDict-backed store + move_to_end / popitem(last=).
             variable_cls = variables.UserDefinedOrderedDictVariable
@@ -1655,7 +1655,13 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
     # composite attribute handler instead.
     and not isinstance(
         ctx.var,
-        (variables.UserDefinedDictVariable, variables.UserDefinedSetVariable),
+        (
+            variables.UserDefinedDictVariable,
+            variables.UserDefinedSetVariable,
+            # defaultdict has a settable member (default_factory) alongside its
+            # contents, so it needs the composite handler.
+            variables.DefaultDictVariable,
+        ),
     ),
     priority=70,
 )
@@ -1972,6 +1978,8 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
         _codegen_user_defined_dict_mutation(ctx)
     elif isinstance(var, variables.UserDefinedSetVariable) and var.has_new_items():
         _codegen_user_defined_set_mutation(ctx)
+    elif isinstance(var, variables.DefaultDictVariable) and var.has_new_items():
+        _codegen_const_dict_or_set_mutation(ctx)
     else:
         mt = var.mutation_type
         if isinstance(mt, AttributeMutationNew):

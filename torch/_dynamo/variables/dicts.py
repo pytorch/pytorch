@@ -364,7 +364,11 @@ class ConstDictVariable(VariableTracker):
         codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self._contains_self_reference():
+        # A dict built through the side effects new-object path is materialized
+        # and cached before its contents are codegen'd, so the self-referencing
+        # value already has an object to load. Emitting the placeholder below
+        # would shadow that cache entry with a plain dict.
+        if self._contains_self_reference() and self not in codegen.tempvars:
             codegen.extend_output(
                 [
                     create_instruction("BUILD_MAP", arg=0),
@@ -1007,7 +1011,11 @@ class OrderedDictVariable(ConstDictVariable):
                 ]
             )
         )
-        if self._contains_self_reference():
+        # An object built through the side effects new-object path is already
+        # materialized and cached, so the self-referencing item has something to
+        # load. Emitting the placeholder below would rebind that cache entry to
+        # the placeholder instead of the real object.
+        if self._contains_self_reference() and self not in codegen.tempvars:
             codegen.extend_output(
                 [
                     *create_call_function(0, False),

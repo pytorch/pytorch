@@ -237,6 +237,7 @@ from .functions import (
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
     MethodWrapperVariable,
+    PropertyVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -335,6 +336,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDefaultDictVariable,
     UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
@@ -1258,14 +1260,15 @@ class VariableBuilder:
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
-                    value,
+                    result,  # type: ignore[arg-type]
                     default_factory=VariableBuilder(self.tx, factory_source)(
                         value.default_factory
                     ),
-                    items=result,  # type: ignore[arg-type]
                     source=self.source,
                 )
-                return self.tx.output.side_effects.track_object_existing(value, result)
+                return self.tx.output.side_effects.track_object_existing(
+                    value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+                )
             elif istype(value, collections.OrderedDict):
                 result = OrderedDictVariable(
                     result,  # type: ignore[arg-type]
@@ -1962,6 +1965,10 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MemberDescriptorType):
             return MemberDescriptorVariable(value)
+        elif type(value) is property:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = PropertyVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
@@ -2204,12 +2211,23 @@ class VariableBuilder:
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            udf_cls = (
-                UserDefinedOrderedDictVariable
-                if isinstance(value, collections.OrderedDict)
-                else UserDefinedDictVariable
-            )
-            result = udf_cls(value, items=kv_items, source=self.source)
+            if isinstance(value, collections.defaultdict):
+                factory_source = AttrSource(self.source, "default_factory")
+                result = UserDefinedDefaultDictVariable(
+                    value,
+                    default_factory=VariableBuilder(self.tx, factory_source)(
+                        value.default_factory
+                    ),
+                    items=kv_items,
+                    source=self.source,
+                )
+            else:
+                udf_cls = (
+                    UserDefinedOrderedDictVariable
+                    if isinstance(value, collections.OrderedDict)
+                    else UserDefinedDictVariable
+                )
+                result = udf_cls(value, items=kv_items, source=self.source)
             return self.tx.output.side_effects.track_object_existing(
                 value, result, mutation_type_cls=ValueAndAttributeMutationExisting
             )
@@ -5504,6 +5522,7 @@ class SourcelessBuilder:
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)
         )
+        handlers[property] = lambda tx, value: PropertyVariable(value)
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
             value, mutation_type=ValueMutationNew()
         )

@@ -298,6 +298,22 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(sd1, sd2)
         self.assertEqual(dict(sd2), {6: 15, 9: 3})
 
+    def test_defaultdict_input_key_mutation(self):
+        # A defaultdict input is a DefaultDictVariable, built on a different
+        # path than the dict-subclass one, so it needs the same replay.
+        def fn(d, x):
+            d["a"] += 1
+            return x * len(d)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        d1, d2 = defaultdict(int), defaultdict(int)
+
+        self.assertEqual(fn(d1, x), opt_fn(d2, x))
+        self.assertEqual(d1, d2)
+        self.assertEqual(dict(d2), {"a": 1})
+
     def test_dict_subclass_setitem(self):
         class SetItemDict(dict):
             def __setitem__(self, key, value):

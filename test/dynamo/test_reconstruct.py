@@ -634,6 +634,66 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         out = fn2(torch.ones(3), construct_defaultdict)
         self.assertIs(out[0], out)
 
+    def test_self_referential_subclass_sourceless(self):
+        # A container subclass built inside the graph is materialized and cached
+        # before its contents are emitted, so the self-reference must resolve to
+        # that object rather than to a fresh placeholder.
+        class ListSub(list):
+            pass
+
+        class DequeSub(collections.deque):
+            pass
+
+        class DictSub(dict):
+            pass
+
+        class OrderedDictSub(collections.OrderedDict):
+            pass
+
+        def fn(x, construct_fn):
+            obj = construct_fn()
+            x += 1
+            return obj
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        def construct_list_sub():
+            obj = ListSub()
+            obj.append(obj)
+            return obj
+
+        def construct_deque_sub():
+            obj = DequeSub()
+            obj.append(obj)
+            return obj
+
+        def construct_dict_sub():
+            obj = DictSub()
+            obj[0] = obj
+            return obj
+
+        def construct_ordered_dict_sub():
+            obj = OrderedDictSub()
+            obj[0] = obj
+            return obj
+
+        def construct_counter():
+            obj = collections.Counter()
+            obj[0] = obj
+            return obj
+
+        for construct_fn in (
+            construct_list_sub,
+            construct_deque_sub,
+            construct_dict_sub,
+            construct_ordered_dict_sub,
+            construct_counter,
+        ):
+            out = fn(torch.ones(3), construct_fn)
+            self.assertIs(out[0], out)
+            out = opt_fn(torch.ones(3), construct_fn)
+            self.assertIs(out[0], out)
+
     def test_non_self_referential_list_is_not_stored(self):
         # Non-self referential list should not be stored as a temporary variable.
         def fn(x):

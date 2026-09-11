@@ -78,6 +78,7 @@ from ..utils import (
     check_constant_args,
     check_positional,
     cmp_name_to_op_mapping,
+    defaultdict_methods,
     deque_iterator,
     deque_methods,
     deque_rev_iterator,
@@ -4028,7 +4029,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             *graph_break_hints.USER_ERROR,
                         ],
                     )
-                return result.as_python_constant(), False
+                # Normalize int subclasses to a plain int (mirrors CPython's
+                # own PyLong_AsSsize_t-style coercion in slot_tp_hash), since
+                # `ConstantVariable` only holds plain literal types.
+                return int(result.as_python_constant()), False
             try:
                 in_allowlist = type_hash in _safe_c_tp_hash_funcs()
             except TypeError:
@@ -4832,7 +4836,7 @@ class UserDefinedOrderedDictVariable(UserDefinedDictVariable, OrderedDictVariabl
 
 # TODO: move to dicts.py alongside ConstDictVariable.
 # Currently blocked by circular imports (dicts.py ↔ user_defined.py).
-class DefaultDictVariable(UserDefinedDictVariable):
+class DefaultDictVariable(ConstDictVariable):
     """
     Represents collections.defaultdict instances.
 
@@ -4847,12 +4851,11 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def __init__(
         self,
-        value: object,
-        default_factory: VariableTracker | None = None,
         items: dict[VariableTracker, VariableTracker] | None = None,
+        default_factory: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(value, items=items, **kwargs)
+        super().__init__(items or {}, **kwargs)
         if default_factory is None:
             from .constant import ConstantVariable
 
@@ -4905,10 +4908,13 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2373-L2405
+        # defdict_repr calls PyDict_Type.tp_repr directly, so use the base impl
+        # instead of generic_repr: the cycle guard already holds this object and
+        # would report a false cycle.
+        base = super().tp_repr_impl(tx).as_python_constant()
         return VariableTracker.build(
             tx,
-            f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, "
-            f"{tracked_repr(tx, self)})",
+            f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, {base})",
         )
 
     def _set_default_factory(
@@ -4960,7 +4966,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
         if key in self:
             return self.getitem_const(tx, key)
-        return self._missing_impl(tx, key)
+        return self.call_method(tx, "__missing__", [key], {})
 
     def nb_or_impl(
         self,
@@ -5107,6 +5113,30 @@ class DefaultDictVariable(UserDefinedDictVariable):
         "copy": Method(_copy),
         "__copy__": Method(_copy),
     }
+
+
+class UserDefinedDefaultDictVariable(UserDefinedDictVariable, DefaultDictVariable):
+    """
+    defaultdict subclasses, and defaultdicts constructed inside the graph.
+
+    The exact builtin is DefaultDictVariable (a ConstDictVariable); this tier
+    adds the instance __dict__ compartment that a heap type has.
+    """
+
+    _cpython_type = collections.defaultdict
+
+    def __init__(
+        self,
+        value: object,
+        default_factory: VariableTracker | None = None,
+        items: dict[VariableTracker, VariableTracker] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        UserDefinedDictVariable.__init__(self, value, items=items, **kwargs)
+        self._base_methods = defaultdict_methods
+        if default_factory is None:
+            default_factory = variables.ConstantVariable.create(None)
+        self.default_factory = default_factory
 
 
 class UserDefinedSetVariable(UserDefinedObjectVariable, SetVariable):
