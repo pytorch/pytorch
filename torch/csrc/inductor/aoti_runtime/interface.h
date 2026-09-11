@@ -150,6 +150,36 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
+// Thread-aware variant of AOTInductorModelContainerRun. Runs on the model
+// instance pinned at model_idx (indexed directly, bypassing the
+// available-models queue) so that instance's captured cuda graphs and private
+// graph pool stay warm across requests. Callers map each worker thread to a fixed instance,
+// e.g. model_idx = worker_index % num_models. Concurrent calls with the same
+// model_idx are serialized internally, so oversubscription cannot corrupt
+// execution -- but under cuda graph it can still corrupt RESULTS. Outputs are
+// non-owning views that the next call on the instance overwrites, and that call
+// may begin as soon as this one returns, before the caller has consumed them.
+// Copy outputs out before letting another request reach the same model_idx.
+// See OUTPUT CONTRACT in aoti_runtime/cudagraph_runtime.h.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRunPinned(
+    AOTInductorModelContainerHandle container_handle,
+    size_t model_idx,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
+    size_t num_inputs,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle);
+
+// Retrieves the number of model instances (runtimes) held by the container.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetNumModels(
+    AOTInductorModelContainerHandle container_handle,
+    size_t* ret_num_models);
+
 // Retrieves the number of constants for the model.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
     AOTInductorModelContainerHandle container_handle,
