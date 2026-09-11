@@ -246,7 +246,7 @@ class TestReversed(CPythonTestCase, PickleTest):
         self.assertRaises(TypeError, reversed)
         self.assertRaises(TypeError, reversed, [], 'extra')
 
-    @unittest.skip("Tests CPython reference counting")
+    @unittest.skipUnless(hasattr(sys, 'getrefcount'), 'test needs sys.getrefcount()')
     def test_bug1229429(self):
         # this bug was never in reversed, it was in
         # PyObject_CallMethod, and reversed_new calls that sometimes.

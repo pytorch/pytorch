@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_enumerate.py b/test/cpython/v3_13/test_enumerate.py
-index 5cb54cff9b76fdd588e08116f35a7777bbfa3385..36313cf0ab56a8692b9f98d9094839bc070ae94d 100644
+index 5cb54cff9b76fdd588e08116f35a7777bbfa3385..146abf151868c8392c9afd8c66188c12053886a7 100644
 --- a/test/cpython/v3_13/test_enumerate.py
 +++ b/test/cpython/v3_13/test_enumerate.py
 @@ -1,3 +1,21 @@
@@ -42,15 +42,6 @@ index 5cb54cff9b76fdd588e08116f35a7777bbfa3385..36313cf0ab56a8692b9f98d9094839bc
  
      def test_simple(self):
          class A:
-@@ -228,7 +246,7 @@ class TestReversed(unittest.TestCase, PickleTest):
-         self.assertRaises(TypeError, reversed)
-         self.assertRaises(TypeError, reversed, [], 'extra')
- 
--    @unittest.skipUnless(hasattr(sys, 'getrefcount'), 'test needs sys.getrefcount()')
-+    @unittest.skip("Tests CPython reference counting")
-     def test_bug1229429(self):
-         # this bug was never in reversed, it was in
-         # PyObject_CallMethod, and reversed_new calls that sometimes.
 @@ -293,4 +311,4 @@ class TestLongStart(EnumerateStartTestCase):
  
  
