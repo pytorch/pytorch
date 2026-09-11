@@ -205,6 +205,183 @@ class TestKernelRowTile(TestCase):
 
         return T.SumOps(acc=cutlass.Float32)
 
+    def test_narrow_row_one_thread_per_row(self):
+        # tpr=1 assigns each row to one thread without lane merging.
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile, traits as T
+
+        x = torch.randn(8192, 16, device="cuda")
+        (out,) = kernel_rowtile.reduce_row_tile(
+            T.SumOps(acc=cutlass.Float32),
+            "narrow",
+            x,
+            [torch.float32],
+            tpr=1,
+            use_tma=False,
+        )
+        self.assertEqual(out, x.sum(dim=1), atol=1e-3, rtol=1e-3)
+
+    def test_tma_staged_narrow_row_argmax(self):
+        # TMA rotates smem reads to avoid bank conflicts; an index trait verifies that
+        # rotated values retain their logical columns.
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile, traits as T
+
+        if not kernel_rowtile.tma_ok(32, 4, 65536, torch.device("cuda")):
+            self.skipTest("TMA path not applicable on this device")
+        x = torch.randn(65536, 32, device="cuda")
+        (idx,) = kernel_rowtile.reduce_row_tile(
+            T.ArgMaxOps(acc=cutlass.Float32),
+            "narrow_tma",
+            x,
+            [torch.int32],
+            tpr=1,
+            use_tma=True,
+        )
+        self.assertEqual(idx, x.argmax(dim=1).to(torch.int32))
+
+    def test_narrow_row_and_tma_gates(self):
+        # Pin the measured narrow-row tiers and TMA's direct-load stride cliff.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        # Width ceiling applies at any M.
+        self.assertFalse(rt.narrow_row(rt._MAX_NARROW_N + 1, 4, 1 << 20))
+        # Larger M permits larger per-thread chunk budgets.
+        self.assertFalse(
+            rt.narrow_row(128, 4, 1024)
+        )  # below the smallest rung's row count
+        self.assertTrue(rt.narrow_row(16, 4, 1 << 20))  # 4 chunks, plenty of rows
+        for min_rows, budget in rt._CHUNK_LADDER:
+            n = budget * 4  # fp32: vec=4, so chunks == n // 4 == budget exactly
+            with self.subTest(min_rows=min_rows, budget=budget):
+                self.assertTrue(rt.narrow_row(n, 4, min_rows))
+                self.assertFalse(
+                    rt.narrow_row(n + 4, 4, min_rows), "budget did not bite"
+                )
+        # TMA requires fp32, power-of-two N, and a lane stride of at least 128 bytes.
+        self.assertFalse(
+            rt.tma_ok(16, 4, 1 << 20)
+        )  # 64B lane stride: direct load is at SOL
+        self.assertTrue(rt.tma_ok(32, 4, 1 << 20))  # 128B: the cliff
+        self.assertFalse(rt.tma_ok(48, 4, 1 << 20))  # not a power of two
+        self.assertFalse(
+            rt.tma_ok(32, 2, 1 << 20)
+        )  # bf16 does not map one element per 4-byte bank
+
+    def test_narrow_row_scalar_vec(self):
+        # Exercise scalar and short-vector narrow loads.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        for n in (1, 2, 3, 5, 7):
+            x = torch.randn(1 << 16, n, device="cuda")
+            with self.subTest(n=n):
+                # fp32 vec=gcd(N, 4), so these loads are one or two elements wide.
+                self.assertLess(rt.tile.vec_size(n, 4), 4)
+                (out,) = rt.reduce_row_tile(
+                    self._sum_trait(), f"narrow_vec{n}", x, [torch.float32], tpr=1
+                )
+                self.assertEqual(
+                    out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
+                )
+
+    def test_narrow_row_ragged_m(self):
+        # Nonmultiple M exercises the partial tile and TMA zero-fill.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        for m in (1, 3, 8191, 65537):
+            for n in (16, 32):
+                x = torch.randn(m, n, device="cuda")
+                with self.subTest(m=m, n=n):
+                    (out,) = rt.reduce_row_tile(
+                        self._sum_trait(), f"ragged_m{n}", x, [torch.float32], tpr=1
+                    )
+                    self.assertEqual(
+                        out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
+                    )
+
+    def test_tma_second_call_rebinds_the_descriptor(self):
+        # A cached plan excludes M, but each call must bind TMA to its new pointer and row count.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        n = 32
+        self.assertTrue(rt.tma_ok(n, 4, 1 << 20), "shape no longer takes the TMA path")
+        first = torch.randn(4096, n, device="cuda")
+        (a,) = rt.reduce_row_tile(
+            self._sum_trait(), "tma_rebind", first, [torch.float32], tpr=1, use_tma=True
+        )
+        self.assertEqual(a, first.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
+        second = torch.randn(4097, n, device="cuda")  # new pointer AND a new M
+        (b,) = rt.reduce_row_tile(
+            self._sum_trait(),
+            "tma_rebind",
+            second,
+            [torch.float32],
+            tpr=1,
+            use_tma=True,
+        )
+        self.assertEqual(b, second.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
+
+    def test_one_thread_per_row_is_trait_agnostic(self):
+        # No lane merge lets tpr=1 serve three-field and two-output traits.
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
+
+        x = torch.randn(1 << 16, 16, device="cuda")
+        (var,) = rt.reduce_row_tile(
+            T.WelfordOps(correction=1, acc=cutlass.Float32),
+            "tpr1_welford",
+            x,
+            [torch.float32],
+            tpr=1,
+        )
+        self.assertEqual(var, x.var(dim=1), atol=1e-4, rtol=1e-4)
+        lo, hi = rt.reduce_row_tile(
+            T.AMinMaxOps(acc=cutlass.Float32),
+            "tpr1_aminmax",
+            x,
+            [torch.float32, torch.float32],
+            nouts=2,
+            tpr=1,
+        )
+        want = torch.aminmax(x, dim=1)
+        self.assertEqual(lo, want.min)
+        self.assertEqual(hi, want.max)
+
+    def test_use_tma_rejects_a_non_power_of_two_row(self):
+        # The rotation mask requires power-of-two N; forced N=24 silently erred by 13.2,
+        # so validate it even when caller-set use_tma bypasses tma_ok.
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
+
+        self.assertFalse(rt.tma_ok(24, 4, 256), "the gate should decline this N")
+        x = torch.randn(256, 24, device="cuda")
+        with self.assertRaisesRegex(ValueError, "power-of-two"):
+            rt.reduce_row_tile(
+                T.SumOps(acc=cutlass.Float32),
+                "tma_nonpo2",
+                x,
+                [torch.float32],
+                tpr=1,
+                use_tma=True,
+            )
+
+    def test_tma_gate_does_not_requery_the_device(self):
+        # Per-launch tma_ok must use memoized capabilities; raw lookup costs ~1.3us.
+        from unittest.mock import patch
+
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        dev = torch.device("cuda")
+        self.assertTrue(rt.tma_ok(32, 4, 1 << 20, dev))  # warms the caps cache
+        with patch("torch.cuda.get_device_properties") as props:
+            for _ in range(4):
+                rt.tma_ok(32, 4, 1 << 20, dev)
+        self.assertEqual(props.call_count, 0)
+
     def test_gapped_rows_are_addressed_at_runtime(self):
         # Dynamic extents must handle unit inner stride with a gapped row pitch.
         import cutlass
