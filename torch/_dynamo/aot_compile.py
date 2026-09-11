@@ -1,5 +1,4 @@
 import dataclasses
-import importlib
 import inspect
 import io
 import logging
@@ -16,7 +15,7 @@ import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
 from torch._dynamo.graph_utils import _graph_device_type
-from torch._dynamo.package import SystemInfo
+from torch._dynamo.package import FunctionPicklerBase, SerializedCode, SystemInfo
 
 from . import convert_frame
 from .aot_compile_types import (
@@ -28,7 +27,7 @@ from .hooks import Hooks
 
 if TYPE_CHECKING:
     from .guards import GuardManagerWrapper
-    from .package import SerializedCode, SourceInfo
+    from .package import SourceInfo
 
 
 log = logging.getLogger(__name__)
@@ -61,7 +60,7 @@ class CompileArtifacts:
         current_system.check_compatibility(self.system_info, self.device_type)
 
 
-class AOTCompilePickler(pickle.Pickler):
+class AOTCompilePickler(FunctionPicklerBase):
     def __init__(self, external_data: dict[str, object], buf: io.BytesIO) -> None:
         super().__init__(buf)
         self.external_data = external_data
@@ -79,76 +78,59 @@ class AOTCompilePickler(pickle.Pickler):
         else:
             return None
 
-    @classmethod
-    def _unpickle_cell(cls, val: object) -> object:
-        def _() -> object:
-            return val
-
-        if _.__closure__ is None:
-            raise AssertionError("closure must not be None")
-        return _.__closure__[0]
-
-    @classmethod
-    # pyrefly: ignore [implicit-any]
-    def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
-        return types.MethodType(func, base)
-
-    @classmethod
-    def _unpickle_module(cls, name: str) -> types.ModuleType:
-        return importlib.import_module(name)
-
-    @classmethod
-    def _unpickle_code(cls, serialized_code: "SerializedCode") -> types.CodeType:
-        from torch._dynamo.package import SerializedCode
-
-        return SerializedCode.to_code_object(serialized_code)
-
-    @classmethod
-    def _unpickle_nested_function(
-        cls,
-        code: types.CodeType,
-        module: str,
-        qualname: str,
-        argdefs: tuple[object, ...] | None,
-        closure: tuple[types.CellType, ...] | None,
-    ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
-
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
-        if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+        if isinstance(obj, types.CellType):
+            return self._reduce_cell(obj)
         elif inspect.iscode(obj):
-            from torch._dynamo.package import SerializedCode
-
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
-
         elif inspect.ismodule(obj):
-            return type(self)._unpickle_module, (obj.__name__,)
+            return type(self)._unpickle_python_module, (obj.__name__,)
         elif inspect.ismethod(obj):
-            """
-            By default, pickle will call getattr() directly on the self object
-            for pickling bounded methods, this is not what we want, instead we
-            always want to serialize the original function and the self object
-            in their original form.
-            """
-            func = obj.__func__
-            method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
-            if inspect.ismethod(inner_func):
-                inner_func = inner_func.__func__
-            if func is not inner_func:
-                return type(self)._unpickle_bound_method, (func, method_self)
-        elif inspect.isfunction(obj):
-            if "<locals>" in obj.__qualname__:
-                return type(self)._unpickle_nested_function, (
-                    obj.__code__,
-                    obj.__module__,
-                    obj.__qualname__,
-                    obj.__defaults__,
-                    obj.__closure__,
-                )
+            receiver = obj.__self__
+            if id(receiver) in self.id_map or isinstance(receiver, torch.nn.Module):
+                # The receiver is served by persistent_id, so it is the LIVE
+                # object at load and pickle's default getattr(receiver, name)
+                # resolves on it; the shared reducer would instead pickle
+                # __func__ (an nn.Module defines __getattr__), rebuilding a
+                # local subclass's method by value and failing on its __class__
+                # cell. pickle's rule is taken only on proof that the probe
+                # hands back a method over THIS receiver and THIS function (a
+                # rebound `a.forward = b.forward` resolves to b's); a probe that
+                # raises anything falls back to the pair, which is always right.
+                name = getattr(obj.__func__, "__name__", None)
+                try:
+                    inner = getattr(receiver, name, None) if name is not None else None
+                except Exception:
+                    inner = None
+                if (
+                    inspect.ismethod(inner)
+                    and inner.__func__ is obj.__func__
+                    and inner.__self__ is receiver
+                ):
+                    return NotImplemented
+                return type(self)._unpickle_bound_method, (obj.__func__, receiver)
+            reduced = self._reduce_bound_method(obj)
+            if reduced is not None:
+                return reduced
+        elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
+            # The runtime env has to RUN this function, so it carries what a
+            # call needs -- defaults, keyword defaults, closure and __doc__ --
+            # with none of them pruned: a keyword default that will not pickle
+            # fails the save rather than vanishing (the old reduce dropped
+            # __kwdefaults__ outright). __dict__, annotations and type params
+            # follow in later commits, each pruned per value.
+            return self._reduce_function(
+                obj,
+                defaults=obj.__defaults__,
+                kwdefaults=obj.__kwdefaults__,
+                closure=obj.__closure__,
+                attributes={},
+                annotations={},
+                doc=obj.__doc__,
+                type_params=None,
+                globals_snapshot=None,
+            )
 
         return NotImplemented
 
@@ -257,8 +239,6 @@ class AOTCompiledFunction:
     def serialize(
         cls, fn: "AOTCompiledFunction", external_data: dict[str, Any] | None = None
     ) -> AOTCompileSaveResult:
-        from torch._dynamo.package import SerializedCode
-
         state = fn._artifacts.__dict__.copy()
         state["guard_manager"] = None
         state["runtime_env"] = dataclasses.replace(
@@ -288,8 +268,6 @@ class AOTCompiledFunction:
         f_globals: dict[str, object] | None = None,
         external_closure_data: dict[str, Any] | None = None,
     ) -> "AOTCompiledFunction":
-        from torch._dynamo.package import SerializedCode
-
         f = io.BytesIO(data)
         f.seek(0)
         unpickler = AOTCompileUnpickler(external_closure_data or {}, f)

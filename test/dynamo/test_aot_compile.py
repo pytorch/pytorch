@@ -4,10 +4,14 @@ import contextlib
 import copy
 import functools
 import inspect
+import io
 import multiprocessing as mp
 import os
 import pickle
+import sys
 import tempfile
+import threading
+import types
 import unittest
 from collections import namedtuple
 from collections.abc import Callable
@@ -571,6 +575,23 @@ def wrap_forward_function(fn: Callable):
     return wrapped
 
 
+def _aot_wraps_deco(f):
+    @functools.wraps(f)
+    def wrapper(x):
+        return f(x) * 2
+
+    return wrapper
+
+
+def _aot_wraps_base(x):
+    return x + 1
+
+
+# functools.wraps gives the wrapper _aot_wraps_base's qualname: no "<locals>"
+# marker, yet module + qualname resolve to the base, not to the wrapper.
+_aot_wraps_helper = _aot_wraps_deco(_aot_wraps_base)
+
+
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
@@ -585,6 +606,67 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         torch._dynamo.utils.counters.clear()
         DynamoCache.clear()
         PrecompileContext.clear()
+
+    def test_aot_compile_rebuilds_a_wraps_wrapper_of_a_module_level_function(self):
+        # Pickling the wrapper by reference finds the base function instead
+        # ("not the same object"), so it is rebuilt from its code object, the
+        # same fqn-mismatch rule the guard pickler applies.
+        def outer():
+            h = _aot_wraps_helper
+
+            def fn(x):
+                return h(x) + 1
+
+            return fn
+
+        fn = outer()
+        x = torch.randn(3)
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager").aot_compile(
+            ((x,), {})
+        )
+        compiled.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(x), fn(x))
+
+    def test_aot_compile_rebuilt_wrapper_keeps_its_own_module_scope(self):
+        # functools.wraps copies __module__ from the wrappee, but the wrapper's
+        # code was compiled against the decorator's module: an escaped wrapper
+        # must reload with THAT scope, not the wrappee's (same-named globals
+        # would otherwise read the wrong value silently).
+        deco_mod = types.ModuleType("_aot_deco_mod_for_scope_test")
+        deco_mod.SCALE = 100
+        exec(
+            "import functools\n"
+            "def deco(f):\n"
+            "    @functools.wraps(f)\n"
+            "    def wrapper(x):\n"
+            "        return f(x) * SCALE\n"
+            "    return wrapper\n",
+            deco_mod.__dict__,
+        )
+        sys.modules[deco_mod.__name__] = deco_mod
+        self.addCleanup(sys.modules.pop, deco_mod.__name__, None)
+        helper = deco_mod.deco(_aot_wraps_base)
+        self.assertEqual(helper.__module__, __name__)
+
+        def outer():
+            def fn(x):
+                return x + 1, helper
+
+            return fn
+
+        fn = outer()
+        x = torch.randn(3)
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager").aot_compile(
+            ((x,), {})
+        )
+        compiled.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(x)[1](1), (1 + 1) * 100)
 
     def test_aot_compile_basic_fn(self):
         def fn(x, y):
@@ -1807,6 +1889,72 @@ from user code:
                     )
         finally:
             c10d.destroy_process_group()
+
+
+class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
+    def test_pickler_carries_a_docstring(self):
+        # A native docstring lives in the code object, one assigned after
+        # definition does not; both travel in the pickle state, so neither is
+        # lost on reload (a rebuild that passed doc=None lost both).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                """native"""
+                return x
+
+            def assigned(x):
+                return x
+
+            assigned.__doc__ = "assigned by a decorator"
+            return inner, assigned
+
+        fns = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fns)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(
+            [f.__doc__ for f in out], ["native", "assigned by a decorator"]
+        )
+
+    def test_pickler_keeps_an_external_modules_method_by_reference(self):
+        # The receiver is external data, so it is the live object at load and
+        # pickle's default getattr(receiver, name) resolves the method on it.
+        # The shared bound-method reducer would instead carry __func__ (an
+        # nn.Module defines __getattr__) and rebuild it by value, which for a
+        # local subclass fails on the __class__ cell of its super() call.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def make():
+            class LocalMod(torch.nn.Linear):
+                def forward(self, x):
+                    return super().forward(x) + 1
+
+            return LocalMod(2, 2)
+
+        mod = make()
+        buf = io.BytesIO()
+        AOTCompilePickler({"mod": mod}, buf).dump(mod.forward)
+        out = AOTCompileUnpickler({"mod": mod}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.__func__, type(mod).forward)
+        self.assertIs(out.__self__, mod)
+
+    def test_pickler_does_not_prune_an_unpicklable_kwdefault(self):
+        # Unlike __doc__/annotations, __kwdefaults__ is never pruned: a function
+        # cannot be called without it, so an unpicklable kwdefault fails loudly.
+        from torch._dynamo.aot_compile import AOTCompilePickler
+
+        def outer():
+            def inner(*, k=threading.Lock()):
+                return k
+
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertIn("cannot pickle", str(cm.exception))
 
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
