@@ -12,6 +12,7 @@ from torch._guards import detect_fake_mode
 from torch._logging import LazyString
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import disable_fake_tensor_cache
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._decompositions import DecompShardingStrategy
@@ -531,8 +532,15 @@ class ShardingPropagator:
         # NOTE: We must call the tracing in fake tensor mode so that it avoids
         # materializing memory.
         # NOTE: Use _fake_mode_lock to serialize access when running in
-        # multi-threaded tests (lock must be set to threading.Lock()).
-        # This is a nullcontext by default.
+        # multi-threaded tests (lock must be set to threading.Lock()); it is a
+        # nullcontext by default. An engaged lock is our signal that we are in a
+        # multi-threaded test, where each rank is a thread with a distinct
+        # current device. The FakeTensorMode dispatch cache is process-global,
+        # but the fake args built below use the mesh's index-less device type
+        # (e.g. "xpu"), which fake mode resolves to the calling thread's current
+        # device. A cache entry populated by one thread would then hand another
+        # thread a fake tensor on the wrong device index, yielding a spurious
+        # cross-device mismatch, so we bypass the cache in that mode.
         # NOTE: disable_proxy_modes_tracing() prevents make_fx from tracing
         # into shard propagation. This op runs purely to derive output
         # metadata (global shape/stride/dtype); it is not part of the real
@@ -542,9 +550,18 @@ class ShardingPropagator:
         # on empty_strided placeholders that no real output consumes.
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
-        with ShardingPropagator._fake_mode_lock:
+        fake_mode_lock = ShardingPropagator._fake_mode_lock
+        in_multi_threaded_test = not isinstance(fake_mode_lock, nullcontext)
+        with fake_mode_lock:
             fake_mode = detect_fake_mode() or FakeTensorMode()
-            with fake_mode, disable_proxy_modes_tracing():
+        
+            cache_ctx = (
+                disable_fake_tensor_cache(fake_mode)
+                if in_multi_threaded_test
+                else nullcontext()
+            )
+
+            with fake_mode, cache_ctx, disable_proxy_modes_tracing():
                 fake_args = op_schema.gen_fake_args()
                 fake_kwargs = op_schema.gen_fake_kwargs()
                 fake_out = op_schema.op(*fake_args, **fake_kwargs)
@@ -1117,3 +1134,4 @@ class ShardingPropagator:
             if existing_dims == target_dims:
                 return None
         return OpSchema(dims_variant, (input_spec, target_dims), {})
+
