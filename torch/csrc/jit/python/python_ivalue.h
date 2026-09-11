@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/ivalue.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
@@ -92,8 +93,10 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
   // Py_XDECREF(NULL) underlying.
   // https://docs.python.org/3/c-api/refcounting.html#c.Py_XDECREF
   ~ConcretePyObjectHolder() override {
-    pybind11::gil_scoped_acquire ag;
-    py_obj_.dec_ref();
+    torch::detail::SafeGilScopedAcquire ag;
+    if (ag) {
+      py_obj_.dec_ref();
+    }
     // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
     // decref on the PyObject again.
     py_obj_.ptr() = nullptr;
