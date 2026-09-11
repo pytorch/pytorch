@@ -2204,6 +2204,86 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
             cells["unset"].cell_contents
         self.assertIsNone(cells["scale"].cell_contents)
 
+    def test_pickler_does_not_persist_a_wrong_false_across_an_inflight_seed(self):
+        # An in-flight probe must not leave a wrong False in the shared cache.
+        # f is unpicklable via an UNPRUNED slot (a Lock kwdefault); f and g
+        # reference each other, and h carries g. Probing f seeds an optimistic
+        # in-flight state, g re-enters f mid-probe, keeps g.f, dumps f, hits the
+        # lock and raises -- which an earlier version cached as g being
+        # unpicklable, so an UNRELATED h silently lost its .g and died at call
+        # time. The in-flight result is no longer cached, so h keeps g.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            lock = threading.Lock()
+
+            def f(*, k=lock):
+                return k
+
+            def g():
+                return "g!"
+
+            def h():
+                return "h!"
+
+            f.g = g
+            g.f = f
+            h.g = g
+
+            def top(x):
+                return x
+
+            top.f = f  # inserted before h, so f probes (and taints) g first
+            top.h = h
+            return top
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertTrue(hasattr(out.h, "g"))
+        self.assertEqual(out.h.g(), "g!")
+
+    def test_pickler_probes_a_cyclic_cluster_in_bounded_time(self):
+        # Eight nested functions fully connected through __dict__, one of them
+        # unpicklable through a kwdefault. Parking the leaned verdicts and
+        # caching the outermost probe's keeps this to a few dozen probe dumps;
+        # re-deriving a leaned False on every re-entry is exponential (hundreds
+        # of thousands of dumps for this graph).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        dumps = [0]
+        real_dump = AOTCompilePickler.dump
+
+        def counting_dump(self, obj):
+            dumps[0] += 1
+            return real_dump(self, obj)
+
+        def outer():
+            fns = [(lambda x, i=i: x + i) for i in range(8)]
+            for f in fns:
+                for i, g in enumerate(fns):
+                    setattr(f, f"f{i}", g)
+            fns[0].__kwdefaults__ = {"k": threading.Lock()}
+
+            def top(x):
+                return x
+
+            for i, f in enumerate(fns):
+                setattr(top, f"f{i}", f)
+            return top
+
+        top = outer()
+        buf = io.BytesIO()
+        with patch.object(AOTCompilePickler, "dump", counting_dump):
+            AOTCompilePickler({}, buf).dump(top)
+        self.assertLess(dumps[0], 100)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "f0"))
+        self.assertFalse(hasattr(out.f1, "f0"))
+        self.assertIs(out.f1.f2, out.f2)
+        self.assertIs(out.f7.f1, out.f1)
+
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
     """Tests for triton kernel side table serialization."""

@@ -75,6 +75,11 @@ class _ProbeState:
     # over itself is reduced twice, and the second pass must not re-probe or
     # re-warn.
     attributes: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    # Whether a probe short-circuited on an in-flight id; such a verdict is
+    # not cached as final but parked (as unpicklable) for the rest of the
+    # probe tree.
+    leaned: bool = False
+    parked: set[int] = dataclasses.field(default_factory=set)
 
 
 class AOTCompilePickler(FunctionPicklerBase):
@@ -228,18 +233,22 @@ class AOTCompilePickler(FunctionPicklerBase):
         cached = state.cache.get(vid)
         if cached is not None:
             return cached
+        if vid in state.parked:
+            return False
         if vid in state.inflight:
             # Re-entered mid-probe (a value whose attributes reach back to
-            # itself). Say picklable to break the cycle rather than re-probing
-            # the ancestor forever; the child probe re-serializes the ancestor
-            # inline in its own memo, so an unpicklable slot on it still fails
-            # the child.
+            # itself). Say picklable to break the cycle -- pickle's memo handles
+            # the reference -- and record the lean so a verdict computed on top
+            # of it is not cached as final.
+            state.leaned = True
             return True
         # Every probed value is reachable from the function being pickled, which
         # pickle keeps alive until dump() returns, so an id is not reused within
         # one dump; the cache lives as long as this pickler, one per serialize().
         probe = type(self)(self.external_data, io.BytesIO(), probe_state=state)
         state.inflight.add(vid)
+        leaned_before = state.leaned
+        state.leaned = False
         try:
             probe.dump(value)
         except Exception as exc:
@@ -264,7 +273,24 @@ class AOTCompilePickler(FunctionPicklerBase):
                 )
         finally:
             state.inflight.discard(vid)
-        state.cache[vid] = result
+        leaned = state.leaned
+        state.leaned = leaned_before or leaned
+        # A False that leaned on an in-flight True may be a false negative, so
+        # it is not cached as final. It is parked for the rest of this probe
+        # tree -- re-deriving it is exponential on a cyclic cluster -- and
+        # dropped when the tree finishes, so the real dump never consults it
+        # (a stale park can only over-prune inside a probe, which never flips a
+        # probe verdict). A True, or a False that leaned on nothing, is final.
+        # So is the OUTERMOST probe's verdict, leaned or not: the only in-flight
+        # id it can lean on is its own, and that lean is exact because pickle's
+        # memo resolves the back-reference; the caller acts on it irrevocably.
+        if result or not leaned or not state.inflight:
+            state.cache[vid] = result
+        else:
+            state.parked.add(vid)
+        if not state.inflight:
+            state.parked.clear()
+            state.leaned = False
         return result
 
 
