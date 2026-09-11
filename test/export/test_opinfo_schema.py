@@ -9,7 +9,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 from torch.utils._pytree import tree_map
 
 
@@ -90,6 +90,8 @@ class PreDispatchSchemaCheckMode(SchemaCheckMode):
 
 
 class TestOpInfo(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(op_db, allowed_dtypes=(torch.float, torch.int))
     def test_schema_check_op(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
