@@ -48,9 +48,12 @@ from torch.distributed.pipelining.schedules import (
     REDUCE_GRAD,
     RESHARD,
     SEND_B,
+    SEND_F,
     UNSHARD,
     W,
     WAIT_REDUCE_GRAD,
+    WAIT_SEND_B,
+    WAIT_SEND_F,
 )
 from torch.distributed.pipelining.stage import (
     _PipelineStageBase,
@@ -712,6 +715,36 @@ class TestSchedulePlan(TestCase):
         action = _Action(3, WAIT_REDUCE_GRAD, None)
         self.assertEqual(str(action), "3WAIT_REDUCE_GRAD")
         self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_wait_send_round_trip(self):
+        for action in (
+            _Action(1, WAIT_SEND_F, 2),
+            _Action(3, WAIT_SEND_B, 4),
+        ):
+            self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_wait_send_simulation(self):
+        actions = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, RECV_B, 0),
+                _Action(0, B, 0),
+            ],
+            1: [
+                _Action(1, RECV_F, 0),
+                _Action(1, F, 0),
+                _Action(1, B, 0),
+                _Action(1, SEND_B, 0),
+                _Action(1, WAIT_SEND_B, 0),
+            ],
+        }
+        _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
+
+        actions[0][1:3] = reversed(actions[0][1:3])
+        with self.assertRaisesRegex(ValueError, "Schedule is not progressing"):
+            _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
 
     def test_defer_reduce_grad_wait_lowering(self):
         actions = [
