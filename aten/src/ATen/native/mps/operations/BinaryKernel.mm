@@ -168,18 +168,14 @@ static void complex_mps_kernel(TensorIterator& iter) {
 
 // `sub_out` routes through `add_stub` with a negated alpha, same as CPU/CUDA/XPU
 static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
-  // `sub_out` reaches this stub with a negated alpha, so `alpha == -1` is a plain subtraction.
-  // Spelling it as one matters: an alpha-carrying kernel is not eligible for the ILP variants.
-  // Bool is excluded because it has no representable -1: the alpha converts to `true` there,
-  // making `a + alpha * b` an `or` rather than a subtraction.
-  if (!alpha.isComplex() && alpha.toDouble() == -1.0 && iter.common_dtype() != kBool) {
+  const auto alpha_val = alpha.toComplexDouble();
+  if (alpha_val == 1.0) {
+    return lib.exec_binary_kernel(iter, "add");
+  }
+  if (alpha_val == -1.0 && iter.common_dtype() != kBool) {
     return lib.exec_binary_kernel(iter, "sub");
   }
-  if (alpha.isComplex() || alpha.toDouble() != 1.0) {
-    lib.exec_binary_kernel(iter, "add_alpha", alpha);
-  } else {
-    lib.exec_binary_kernel(iter, "add");
-  }
+  lib.exec_binary_kernel(iter, "add_alpha", alpha);
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {

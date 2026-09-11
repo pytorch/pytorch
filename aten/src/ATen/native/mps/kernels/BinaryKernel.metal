@@ -11,17 +11,17 @@ struct add_functor {
   }
 };
 
-struct add_alpha_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a + c10::metal::mul(alpha, b));
-  }
-};
-
 struct sub_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     return static_cast<T>(a - b);
+  }
+};
+
+struct add_alpha_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T alpha) {
+    return static_cast<T>(a + c10::metal::mul(alpha, b));
   }
 };
 
@@ -674,10 +674,10 @@ REGISTER_BINARY_OP(pow, float2, float2);
 REGISTER_OPMATH_BINARY_OP(pow, half2, half2);
 REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
-REGISTER_OPMATH_FLOAT_BINARY_OP(sub);
-REGISTER_INTEGER_BINARY_OP(sub);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
 REGISTER_INTEGER_BINARY_OP(mul);
+REGISTER_FLOAT_BINARY_OP(sub);
+REGISTER_INTEGER_BINARY_OP(sub);
 REGISTER_OPMATH_FLOAT_BINARY_OP(div_floor);
 REGISTER_INTEGER_BINARY_OP(div_floor);
 REGISTER_FLOAT_BINARY_OP(div_trunc);
