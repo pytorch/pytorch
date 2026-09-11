@@ -3680,9 +3680,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 self.assertEqual(actual, expected)
 
 
-instantiate_parametrized_tests(TestVmapOperators)
-
-
 def construct_v(output, batch_size, contig=False):
     if contig:
         return torch.randn(
@@ -6802,38 +6799,40 @@ class TestVmapNestedTensorDevice(Namespace.TestVmapBase):
             vmap(vmap(vmap(f)))(x)
 
 
+instantiate_parametrized_tests(TestVmapOperators)
+
+
+only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
     TestVmapAPIDevice,
     globals(),
-    only_for=("cpu", "cuda", "mps", "xpu"),
+    only_for=only_for + ("mps",),
     allow_mps=True,
     allow_xpu=True,
 )
-
-only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
     TestVmapBatchedGradientDevice,
     globals(),
-    only_for=only_for + ("xpu",),
+    only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestVmapOperatorsOpInfoDevice,
     globals(),
-    only_for=only_for + ("xpu",),
+    only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestRandomnessDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
+    TestRandomnessDevice, globals(), only_for=only_for, allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestTransformFailureDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
+    TestTransformFailureDevice, globals(), only_for=only_for, allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestVmapDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
+    TestVmapDevice, globals(), only_for=only_for, allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestVmapNestedTensorDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
+    TestVmapNestedTensorDevice, globals(), only_for=only_for, allow_xpu=True
 )
 
 
