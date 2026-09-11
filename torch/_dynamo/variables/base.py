@@ -487,6 +487,19 @@ def unmodeled_setter(
     )
 
 
+def type_qualified_name(type_: type) -> str:
+    """Equivalent to _PyType_GetFullyQualifiedName, for a raw type object.
+
+    See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
+    """
+    mod = type_.__module__
+    qn = type_.__qualname__
+    if mod not in ("__main__", "builtins"):
+        return f"{mod}.{qn}"
+    else:
+        return qn
+
+
 def getset_build(
     accessor: Callable[[Any], Any],
 ) -> Getter:
@@ -502,6 +515,7 @@ def store_attr_mutation(
 ) -> None:
     """Store an attribute mutation in the side effects tracker."""
     se = tx.output.side_effects
+    item = item.realize()
     if not se.is_attribute_mutation(item):
         if item.source is not None:
             raise AssertionError(
@@ -1933,12 +1947,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return "<unknown type>"
         # Direct attribute access is safe here because type objects use the getset protocol, which will only return str
         # (and not execute user code)
-        mod = type_.__module__
-        qn = type_.__qualname__
-        if mod not in ("__main__", "builtins"):
-            return f"{mod}.{qn}"
-        else:
-            return qn
+        return type_qualified_name(type_)
 
     def as_python_constant(self) -> Any:
         """For constants"""
