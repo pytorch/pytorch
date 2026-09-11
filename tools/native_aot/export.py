@@ -36,7 +36,6 @@ Usage (from the repo root, in a venv with torch built and the DSL wheel active):
 """
 
 import argparse
-import contextlib
 import importlib
 import json
 import os
@@ -69,18 +68,27 @@ OPS_DIR = os.path.join(REPO, "torch", "_native", "ops")
 SIDECAR_VERSION = 1
 
 # forkserver, never "fork": a fork parent that has initialized CUDA gives workers a
-# dead context, silently. forkserver is as safe as spawn and pays the torch import
-# once rather than per worker.
+# dead context, silently. Forkserver is as safe as spawn and, on Python versions
+# with correct preload path handling, pays the torch import once rather than per worker.
 # TODO(native-aot): forkserver does not exist on Windows; fall back to "spawn" when
 # Windows CUDA builds start exporting.
 POOL_START_METHOD = "forkserver"
 
-# Preloaded in the forkserver's server process, so workers inherit torch imported.
-# The helper keeps the checkout root from shadowing the installed wheel. Only modules
-# safe in a fork PARENT belong here: importing torch neither initializes CUDA nor
-# builds DSL state.
-POOL_PRELOAD = ("tools.native_aot.forkserver_preload",)
-_FORKSERVER_TORCH_PARENT_ENV = "TORCH_NATIVE_AOT_FORKSERVER_TORCH_PARENT"
+
+# CPython gh-117378 fixed forkserver preload's sys.path inheritance in 3.12.8 and
+# 3.13.1. On older versions, skip preloading so workers import torch after their
+# parent sys.path is restored. Importing torch is otherwise safe in a fork parent:
+# it initializes neither CUDA nor DSL state.
+def _pool_preload(version: tuple[int, ...]) -> tuple[str, ...]:
+    fixed = (
+        version >= (3, 14)
+        or (version[:2] == (3, 13) and version >= (3, 13, 1))
+        or (version[:2] == (3, 12) and version >= (3, 12, 8))
+    )
+    return ("torch",) if fixed else ()
+
+
+POOL_PRELOAD = _pool_preload(sys.version_info[:3])
 
 
 def load_builder(op: str, kernel_module: str):
@@ -88,24 +96,6 @@ def load_builder(op: str, kernel_module: str):
     # torch machinery.
     name = f"torch._native.ops.{op}.{kernel_module.removesuffix('.py')}"
     return importlib.import_module(name).build
-
-
-@contextlib.contextmanager
-def _forkserver_torch_env():
-    """Tell the preload helper which torch package this process selected."""
-    torch_spec = importlib.util.find_spec("torch")
-    if torch_spec is None or torch_spec.origin is None:
-        raise RuntimeError("native-AOT export cannot find the installed torch")
-    torch_parent = os.path.dirname(os.path.dirname(torch_spec.origin))
-    old_torch_parent = os.environ.get(_FORKSERVER_TORCH_PARENT_ENV)
-    os.environ[_FORKSERVER_TORCH_PARENT_ENV] = torch_parent
-    try:
-        yield
-    finally:
-        if old_torch_parent is None:
-            os.environ.pop(_FORKSERVER_TORCH_PARENT_ENV, None)
-        else:
-            os.environ[_FORKSERVER_TORCH_PARENT_ENV] = old_torch_parent
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -127,9 +117,7 @@ _CLOSURE_PREFIXES = ("torch._native", "torch._vendor", "torchgen.native_aot")
 # Tool sources that cannot change what an artifact means, so hashing them would
 # re-export every kernel for nothing: gen_aot_lib.py only consumes sidecars, and
 # build_stage2.py passes no kernel-affecting option.
-_CLOSURE_EXCLUDED = frozenset(
-    {"gen_aot_lib.py", "build_stage2.py", "forkserver_preload.py"}
-)
+_CLOSURE_EXCLUDED = frozenset({"gen_aot_lib.py", "build_stage2.py"})
 
 
 def source_closure(decl_path: str | None = None) -> dict[str, str]:
@@ -743,19 +731,16 @@ def main(argv: list[str] | None = None) -> None:
         from concurrent.futures import as_completed, ProcessPoolExecutor
 
         ctx = multiprocessing.get_context(POOL_START_METHOD)
-        # Import torch once in the server; workers inherit it by fork.
+        # Fixed Pythons import torch once in the server; affected ones import per worker.
         ctx.set_forkserver_preload(list(POOL_PRELOAD))
         n = min(args.jobs, len(todo))
-        with _forkserver_torch_env():
-            with ProcessPoolExecutor(max_workers=n, mp_context=ctx) as pool:
-                futs = {pool.submit(_run_job, job): job for job in todo}
-                for fut in as_completed(futs):
-                    prefix = fut.result()  # re-raises worker failures
-                    arch = futs[fut][4]
-                    print(
-                        f"  {prefix}{f' [{arch}]' if len(archs) > 1 else ''}: exported"
-                    )
-                    total += 1
+        with ProcessPoolExecutor(max_workers=n, mp_context=ctx) as pool:
+            futs = {pool.submit(_run_job, job): job for job in todo}
+            for fut in as_completed(futs):
+                prefix = fut.result()  # re-raises worker failures
+                arch = futs[fut][4]
+                print(f"  {prefix}{f' [{arch}]' if len(archs) > 1 else ''}: exported")
+                total += 1
 
     print(f"exported {total} kernels")
 
