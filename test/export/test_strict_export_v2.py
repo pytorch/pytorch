@@ -8,6 +8,7 @@ except ImportError:
 
 from torch._export import config
 from torch.export import export
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 test_classes = {}
@@ -46,6 +47,12 @@ tests = [
 for test in tests:
     make_dynamic_cls(test)
 del test
+
+for cls, instantiate_kwargs in test_export.DEVICE_EXPORT_TEST_CLASSES:
+    instantiate_device_type_tests(
+        make_dynamic_cls(cls), globals(), **instantiate_kwargs
+    )
+del cls, instantiate_kwargs
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
