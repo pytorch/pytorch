@@ -43,7 +43,9 @@ control (e.g. resolving once before remapping several graphs).
 
 from __future__ import annotations
 
+import ctypes
 import importlib.metadata
+import os
 import threading
 import warnings
 from collections.abc import Mapping
@@ -146,14 +148,12 @@ def _set_annotations_enabled(enabled: bool) -> None:
     to scope annotations to a capture; not a public API."""
     global _annotations_enabled, _capture_root_graph_id
     _annotations_enabled = enabled
-    if enabled:
-        # A previous capture that raised before its ids were taken must not leak them
-        # into this one.
-        _body_graph_ids.clear()
     if not enabled:
         _capture_root_graph_id = None
         # A capture that raised mid-scope would otherwise leak its scopes into the next one.
         _active_scopes.clear()
+        # Likewise the body ids, though capture end normally takes them first.
+        _body_graph_ids.clear()
 
 
 def _set_annotation_backend(backend: str) -> None:
@@ -307,18 +307,50 @@ def _probe_tools_id() -> bool:
     return True
 
 
+# The CUPTI ABI that first reports sourceGraphNodeId, and the driver that first populates
+# it. Both ends have to be new enough: the field is only in 13.4 headers, and an older
+# user-mode driver leaves it unset.
+_MIN_SOURCE_NODE_CUPTI_VERSION = 130400
+_MIN_SOURCE_NODE_DRIVER_VERSION = 13040
+
+
+def _loaded_cupti_version() -> int | None:
+    """CUPTI's version if libcupti is already in this process, else ``None``.
+
+    RTLD_NOLOAD so the probe never pulls CUPTI in: loading it is a side effect a capture
+    should not have, and a process that has not loaded it has no consumer of source node
+    ids to be wrong about yet. ``torch`` front-loads the CUPTI wheel at import (see
+    ``_preload_cuda_deps``), so in practice the check does run. Not a public API."""
+    try:
+        lib = ctypes.CDLL("libcupti.so.13", mode=os.RTLD_NOLOAD)
+    except OSError:
+        return None
+    try:
+        version = ctypes.c_uint32()
+        lib.cuptiGetVersion.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+        if lib.cuptiGetVersion(ctypes.byref(version)) != 0:  # CUPTI_SUCCESS
+            return None
+    except AttributeError:
+        return None
+    return version.value
+
+
 def source_node_ids_available() -> bool:
-    """Whether the driver reports a node's source (capture-time) graph node on replayed
-    work, which is what lets annotations stay keyed to the capture graph instead of being
-    rekeyed to each exec graph. CUPTI surfaces it as ``sourceGraphNodeId``, added in the
-    13.4 ABI and only populated by a 13.4 user-mode driver, so the driver version is the
-    gate. Not a public API."""
+    """Whether a node's source (capture-time) graph node is reported on replayed work,
+    which is what lets annotations stay keyed to the capture graph instead of being rekeyed
+    to each exec graph. CUPTI surfaces it as ``sourceGraphNodeId``: the field arrived in the
+    13.4 ABI and only a 13.4 user-mode driver fills it in, so both are checked. A CUPTI too
+    old to have the field is the quiet failure worth catching -- a 13.4 driver with a 13.3
+    CUPTI reports nothing and the annotations resolve to nothing. Not a public API."""
     if not _HAS_CUDA_BINDINGS:
+        return False
+    cupti_version = _loaded_cupti_version()
+    if cupti_version is not None and cupti_version < _MIN_SOURCE_NODE_CUPTI_VERSION:
         return False
     rt = _cuda_runtime
     ok = rt.cudaError_t.cudaSuccess  # pyrefly: ignore[missing-attribute]
     err, version = rt.cudaDriverGetVersion()  # pyrefly: ignore[missing-attribute]
-    return err == ok and version >= 13040
+    return err == ok and version >= _MIN_SOURCE_NODE_DRIVER_VERSION
 
 
 def _is_tools_id_unavailable() -> bool:
@@ -491,15 +523,11 @@ def annotation_for(tools_id: int) -> dict[str, Any] | None:
 # Node types we annotate (kernels, memcpys, memsets, batch mem ops, event
 # record/wait nodes, and host nodes), as driver node-type enums. Event and host
 # nodes are stream-ordered but do not occupy the device; annotating them lets the
-# profiler place their spans on the intended stream lane. Initialized lazily to
-# avoid touching cuda.bindings at import time.
+# profiler place their spans on the intended stream lane. The enums are int subclasses, so
+# membership also answers for the runtime enum the edge walk has and for the plain int
+# CUPTI reports as ``GraphData.node_type``. Initialized lazily to avoid touching
+# cuda.bindings at import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
-
-# The same set as raw driver enum values, for callers handed a plain int rather than a
-# CUgraphNodeType (CUPTI reports ``GraphData.node_type`` that way). Derived from
-# _get_annotatable_types so the membership is defined in exactly one place; cached because
-# the CUPTI backend consults it once per node created.
-_ANNOTATABLE_TYPE_VALUES: frozenset[int] | None = None
 
 
 def _get_annotatable_types() -> set[Any]:
@@ -516,14 +544,6 @@ def _get_annotatable_types() -> set[Any]:
             node_types.CU_GRAPH_NODE_TYPE_HOST,
         }
     return _ANNOTATABLE_TYPES
-
-
-def _get_annotatable_type_values() -> frozenset[int]:
-    """:func:`_get_annotatable_types` as raw driver enum values."""
-    global _ANNOTATABLE_TYPE_VALUES
-    if _ANNOTATABLE_TYPE_VALUES is None:
-        _ANNOTATABLE_TYPE_VALUES = frozenset(int(t) for t in _get_annotatable_types())
-    return _ANNOTATABLE_TYPE_VALUES
 
 
 # Node types whose work lives in a separate cudaGraph_t (child graphs, conditional
@@ -556,24 +576,12 @@ def _get_sourceless_node_types() -> set[Any]:
     return _SOURCELESS_NODE_TYPES
 
 
-_SOURCELESS_TYPE_VALUES: frozenset[int] | None = None
-
-
-def _get_sourceless_type_values() -> frozenset[int]:
-    """:func:`_get_sourceless_node_types` as raw driver enum values."""
-    global _SOURCELESS_TYPE_VALUES
-    if _SOURCELESS_TYPE_VALUES is None:
-        _SOURCELESS_TYPE_VALUES = frozenset(
-            int(t) for t in _get_sourceless_node_types()
-        )
-    return _SOURCELESS_TYPE_VALUES
-
-
 def node_type_has_source_id(node_type: Any) -> bool:
     """Whether CUPTI reports a source (capture-graph) node id for this node type, i.e.
-    whether an annotation kept on the capture graph can name it. Takes the driver enum or
-    its raw value. Not a public API."""
-    return int(node_type) not in _get_sourceless_type_values()
+    whether an annotation kept on the capture graph can name it. The driver enums are int
+    subclasses, so this takes the runtime enum the walk has or the plain int CUPTI reports
+    just as well. Not a public API."""
+    return node_type not in _get_sourceless_node_types()
 
 
 def _get_nested_graph_types() -> set[Any]:

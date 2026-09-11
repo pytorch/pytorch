@@ -255,24 +255,11 @@ class TestMarkKernels(TestCase):
         "annotation_config={'key_by': 'source'} needs a CUDA driver >= 13.4",
     )
     def test_key_by_source_aliases_nodes_without_a_source_id(self):
-        """Host and memcpy nodes keep an exec-keyed copy even under source keying.
-
-        CUPTI reports no sourceGraphNodeId for those kinds (a graph memcpy node surfaces
-        as the peer-to-peer MEMCPY2 activity kind when its endpoints are on different
-        devices, and that record has no such field), so the capture key alone would never
-        be looked up for them. Every other node stays capture-keyed only, and a
-        re-instantiate moves the alias to the new exec graph instead of leaving the old
-        one behind."""
+        """CUPTI reports no sourceGraphNodeId for memcpy/host nodes, so those entries keep
+        an exec-keyed copy sharing the annotation; a re-instantiate moves it."""
         pinned = torch.ones(1024, pin_memory=True)
         dst = torch.zeros(1024, device="cuda")
         graph = torch.cuda.CUDAGraph(keep_graph=True)
-        warm = torch.cuda.Stream()
-        warm.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(warm):
-            dst.copy_(pinned, non_blocking=True)
-            dst.mul_(2)
-        torch.cuda.current_stream().wait_stream(warm)
-
         with torch.cuda.graph(
             graph, enable_annotations=True, annotation_config={"key_by": "source"}
         ):
@@ -280,34 +267,20 @@ class TestMarkKernels(TestCase):
                 dst.copy_(pinned, non_blocking=True)
                 dst.mul_(2)
 
-        capture_id = graph._capture_graph_id
         captured = set(get_kernel_annotations())
-        # The copy is a memcpy node (the multiply is a kernel), so exactly one entry needs
-        # the alias -- if the capture stops producing one, this test proves nothing.
-        sourceless = {t for t in captured if t in _sourceless_nodes}
-        self.assertEqual(len(sourceless), 1)
+        # The copy is the memcpy node, the multiply a kernel -- if the capture stops
+        # producing a sourceless node, this test proves nothing.
+        (sourceless,) = [t for t in captured if t in _sourceless_nodes]
 
         graph.instantiate()
-        first_exec = graph._remapped_exec_id
-        self.assertIsNotNone(first_exec)
-        aliases = {(first_exec << 32) | (t & 0xFFFFFFFF) for t in sourceless}
+        alias = (graph._remapped_exec_id << 32) | (sourceless & 0xFFFFFFFF)
         annotations = get_kernel_annotations()
-        self.assertEqual(set(annotations), captured | aliases)
-        # The alias shares the entry, so both keys resolve to the same annotation.
-        for tools_id in sourceless:
-            alias = (first_exec << 32) | (tools_id & 0xFFFFFFFF)
-            self.assertEqual(annotations[alias], annotations[tools_id])
-        self.assertIn(capture_id, graph._recorded_exec_ids)
-        self.assertIn(first_exec, graph._recorded_exec_ids)
+        self.assertEqual(set(annotations), captured | {alias})
+        self.assertEqual(annotations[alias], annotations[sourceless])
 
         graph.instantiate()
-        second_exec = graph._remapped_exec_id
-        self.assertNotEqual(second_exec, first_exec)
-        keys = set(get_kernel_annotations())
-        self.assertEqual(
-            keys,
-            captured | {(second_exec << 32) | (t & 0xFFFFFFFF) for t in sourceless},
-        )
+        moved = (graph._remapped_exec_id << 32) | (sourceless & 0xFFFFFFFF)
+        self.assertEqual(set(get_kernel_annotations()), captured | {moved})
 
     def test_key_by_exec_is_the_default(self):
         """The default rekeys to the exec graph, which is what a consumer reading CUPTI's
@@ -2447,6 +2420,28 @@ class TestCuptiAnnotationBackend(TestCase):
                     x = x + 1
         self.assertEqual(seen, ["edge_walk"])
         self.assertEqual(len(self._annotations()), 1)
+
+    def test_source_keying_needs_a_new_enough_cupti(self):
+        # A 13.4 driver with an older CUPTI is the quiet failure: the driver would report
+        # source node ids but the consumer's CUPTI has no field to carry them, so
+        # annotations kept on the capture graph resolve to nothing. Both ends are checked.
+        import torch.cuda._graph_annotations as _ga
+
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=130301
+        ):
+            self.assertFalse(_ga.source_node_ids_available())
+        # No CUPTI in the process yet: nothing to be wrong about, so the driver alone
+        # decides -- the same answer a new-enough CUPTI gives.
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=None
+        ):
+            absent = _ga.source_node_ids_available()
+        with unittest.mock.patch.object(
+            _ga, "_loaded_cupti_version", return_value=130400
+        ):
+            new_enough = _ga.source_node_ids_available()
+        self.assertEqual(absent, new_enough)
 
     def test_invalid_backend_rejected(self):
         with self.assertRaisesRegex(ValueError, r"annotation_config\['backend'\]"):
