@@ -3526,13 +3526,12 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget_require_full_coverage": False})
     def test_region_activation_memory_budget_partial_coverage_graph_break_cache(
         self,
     ):
         def fn(x):
-            with torch.autograd.graph.region_activation_memory_budget(
-                0.3, require_full_coverage=False
-            ):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
                 x = (x + 1).relu()
                 torch._dynamo.graph_break()
                 x = (x * 2).relu()
@@ -3685,31 +3684,24 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertNotEqual(low, high)
         self.assertEqual(low, low_again)
 
-    def test_region_activation_memory_budget_coverage_cache_key(self):
-        def full_coverage(require_full_coverage):
-            def fn(x):
-                with torch.autograd.graph.region_activation_memory_budget(
-                    0.2, require_full_coverage=require_full_coverage
-                ):
-                    return x.sin().cos()
-
-            return fn
-
-        def partial_coverage(x):
+    def test_region_activation_memory_budget_coverage_config_cache_key(self):
+        def fn(x):
             x = x.sin()
-            with torch.autograd.graph.region_activation_memory_budget(
-                0.2, require_full_coverage=False
-            ):
+            with torch.autograd.graph.region_activation_memory_budget(0.2):
                 return x.cos()
 
         config = self.default_config()
-        strict = self.gen_cache_key(full_coverage(True), config)
-        permissive = self.gen_cache_key(full_coverage(False), config)
-        partial = self.gen_cache_key(partial_coverage, config)
-        partial_again = self.gen_cache_key(partial_coverage, config)
+        with functorch_config.patch(
+            activation_memory_budget_require_full_coverage=True
+        ):
+            strict = self.gen_cache_key(fn, config)
+        with functorch_config.patch(
+            activation_memory_budget_require_full_coverage=False
+        ):
+            permissive = self.gen_cache_key(fn, config)
+            permissive_again = self.gen_cache_key(fn, config)
         self.assertNotEqual(strict, permissive)
-        self.assertNotEqual(permissive, partial)
-        self.assertEqual(partial, partial_again)
+        self.assertEqual(permissive, permissive_again)
 
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):

@@ -201,6 +201,11 @@ remat_using_tags_for_fwd_loss_bwd_graph = True
 # NOTE: This *cannot* be treated as
 activation_memory_budget = 1.0
 
+# By default, a regional activation memory budget must cover every forward
+# operation in its compiled graph. Disable this check to allow an annotation on
+# part of a graph to select the budget for the whole graph.
+activation_memory_budget_require_full_coverage = True
+
 # This controls how we estimate the runtime when deciding what the cheapest
 # operators to recompute are. The 3 options are
 # "flops": Bases it off of the flop count provided by torch.utils.flop_counter
