@@ -390,9 +390,10 @@ def compute_memory_timeline(
         end_step = -1
         if buf_name not in graph_outputs:
             end_step, end_step_snode = _get_end_step_and_snode(input_buf)
-            if end_step_snode is None:
-                raise AssertionError("expected end_step_snode to be set")
-            buf_to_snode_last_use[input_buf] = end_step_snode
+            # Inputs referenced only by fake WeakDeps have no memory-liveness
+            # successor, so end_step remains -1 to keep them live conservatively.
+            if end_step_snode is not None:
+                buf_to_snode_last_use[input_buf] = end_step_snode
 
         buf_info_list.append(
             BufferInfo(
