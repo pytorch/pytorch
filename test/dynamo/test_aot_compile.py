@@ -709,6 +709,93 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_reloads_a_runtime_env_helper_faithfully(self):
+        # A nested helper the compiled function closes over travels in the
+        # runtime env and is rebuilt from its code object at load. Its cells,
+        # __defaults__, __kwdefaults__ and __dict__ have to survive: an EMPTY
+        # cell failed the old pickler and __kwdefaults__ and __dict__ were
+        # dropped; the None cell is asserted so the empty/None distinction stays
+        # pinned; see FunctionPicklerBase. (The
+        # compiled function itself cannot have an empty cell: capture reads all
+        # of its cells up front.)
+        def outer():
+            scale = None
+
+            def helper(x, y=3, *, k=2):
+                if x is None:
+                    return unset
+                if scale is None:
+                    x = x + 1
+                return x * k + y
+
+            helper.tag = 2.0
+            if helper is None:
+                unset = 1  # never runs, so the cell helper closes over stays empty
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) * 2
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend=backend).aot_compile(
+            (inputs, {})
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            self.assertEqual(expected, compiled_fn(*inputs))
+        (cell,) = compiled_fn._artifacts.runtime_env.closure
+        loaded = cell.cell_contents
+        cells = dict(zip(loaded.__code__.co_freevars, loaded.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        self.assertIsNone(cells["scale"].cell_contents)
+        self.assertEqual(loaded.__kwdefaults__, {"k": 2})
+        self.assertEqual(loaded.__defaults__, (3,))
+        self.assertEqual(loaded.tag, 2.0)
+
+    def test_aot_compile_prunes_a_helpers_unpicklable_attribute(self):
+        # A helper's __dict__ travels with it, but an entry that cannot pickle
+        # is dropped per-entry rather than failing the whole save -- the runtime
+        # never forces it, so the save succeeds, the reload runs, and the
+        # picklable sibling entry survives.
+        def outer():
+            def helper(x):
+                return x * 2
+
+            helper.lock = threading.Lock()
+            helper.tag = 2.0
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            compiled_fn.save_compiled_function(self.path())
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("helper.lock (lock) from the artifact", line)
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            self.assertEqual(loaded(*inputs), expected)
+        (cell,) = loaded._artifacts.runtime_env.closure
+        self.assertEqual(cell.cell_contents.__dict__, {"tag": 2.0})
+
     def test_aot_compile_prunes_a_lock_behind_functools_wraps_wrapped(self):
         # functools.wraps writes __wrapped__ into the wrapper's __dict__ and
         # copies the wrappee's __dict__ too, so a helper that merely decorates
