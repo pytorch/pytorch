@@ -13,6 +13,7 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -47,6 +48,16 @@ def sin(x: torch.Tensor, result: torch.Tensor) -> None:
 def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> None:
     out_sin.copy_(x.sin())
     out_cos.copy_(x.cos())
+
+
+@torch.library.custom_op("_reinplacing::opaque_clone", mutates_args=())
+def opaque_clone(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
+@opaque_clone.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return torch.empty_like(x)
 
 
 if HAS_GPU:
@@ -523,6 +534,90 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         expected = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
+
+    def test_slice_scatter_fallback_output_partial_range(self):
+        def fn(x, src):
+            base = opaque_clone(x)
+            return aten.slice_scatter(base, src, 1, 0, 2)
+
+        # This is a device-independent post-grad decision.  Keep the focused
+        # graph-shape test on CPU so it does not require a GPU test worker.
+        x = torch.randn(10, 8)
+        src = torch.randn(10, 2)
+        expected = fn(x, src)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True, backend="inductor"), x, src
+            )
+
+        self.assertEqual(actual, expected)
+        post_grad_graph = log_stream.getvalue()
+        self.assertIn("torch.ops.aten.slice.Tensor", post_grad_graph)
+        self.assertIn("torch.ops.aten.copy_.default", post_grad_graph)
+        self.assertNotIn("torch.ops.aten.slice_scatter.default", post_grad_graph)
+        # The generated mutation iterates over only the 10x2 destination view,
+        # rather than selecting and rewriting all 10x8 elements.
+        self.assertIn("x1<static_cast<int64_t>(2L)", code)
+        self.assertNotIn("x1<static_cast<int64_t>(8L)", code)
+
+    def test_slice_scatter_aliasing_source_not_reinplaced(self):
+        def fn(x):
+            base = opaque_clone(x)
+            src = base[:, :2]
+            # Source and destination overlap.  Functional slice_scatter reads
+            # from an unmodified snapshot; a direct copy_ does not.
+            return aten.slice_scatter(base, src, 1, 1, 3)
+
+        x = torch.randn(10, 8)
+        expected = fn(x)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            actual = torch.compile(fn, fullgraph=True, backend="inductor")(x)
+
+        self.assertEqual(actual, expected)
+        post_grad_graph = log_stream.getvalue()
+        self.assertIn("torch.ops.aten.slice_scatter.default", post_grad_graph)
+
+    def test_slice_scatter_fallback_output_with_other_user_not_reinplaced(self):
+        def fn(x, src):
+            base = opaque_clone(x)
+            updated = aten.slice_scatter(base, src, 1, 0, 2)
+            return updated, base + 1
+
+        x = torch.randn(10, 8)
+        src = torch.randn(10, 2)
+        expected = fn(x, src)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            actual = torch.compile(fn, fullgraph=True, backend="inductor")(x, src)
+
+        self.assertEqual(actual, expected)
+        post_grad_graph = log_stream.getvalue()
+        self.assertIn("torch.ops.aten.slice_scatter.default", post_grad_graph)
+
+    def test_slice_scatter_partial_range_noncontiguous_step(self):
+        def fn(x, src):
+            base = opaque_clone(x)
+            return aten.slice_scatter(base, src, 1, 1, 5, 2)
+
+        x = torch.randn(8, 10).t()
+        self.assertFalse(x.is_contiguous())
+        src = torch.randn(10, 2)
+        expected = fn(x, src)
+        actual = torch.compile(fn, fullgraph=True, backend="inductor")(x, src)
+
+        self.assertEqual(actual, expected, exact_dtype=True)
+        self.assertEqual(actual.stride(), expected.stride())
 
     @parametrize(
         "factory_op",
