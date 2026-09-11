@@ -5,7 +5,6 @@ from collections import defaultdict
 
 import torch
 import torch.distributed as dist
-from torch._dynamo.device_interface import get_interface_for_device
 from torch.distributed import distributed_c10d
 from torch.utils._typing_utils import not_none
 
@@ -628,12 +627,8 @@ def powerSGD_hook(
                 for i, original_tensor in enumerate(original_tensors):
                     original_tensor.copy_(tensor[i])
 
-        try:
-            device_interface = get_interface_for_device(device.type)
-            if device_interface.is_available():
-                device_interface.synchronize(device)
-        except NotImplementedError:
-            pass
+        if torch.accelerator.is_available():
+            torch.accelerator.synchronize(device)
 
         if state.use_error_feedback:
             # Memorize the local errors.
@@ -856,12 +851,8 @@ def batched_powerSGD_hook(
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838
-        try:
-            device_interface = get_interface_for_device(device.type)
-            if device_interface.is_available():
-                device_interface.synchronize(device)
-        except NotImplementedError:
-            pass
+        if torch.accelerator.is_available():
+            torch.accelerator.synchronize(device)
         if not state.warm_start:
             state.p_memory_dict.clear()
             state.q_memory_dict.clear()
