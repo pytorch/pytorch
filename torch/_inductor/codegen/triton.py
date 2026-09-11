@@ -1328,6 +1328,15 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     return decorator  # type: ignore[return-value]
 
 
+# Float dtypes for which numerics="strict" applies eager-matching pointwise fixups.
+_STRICT_FLOAT = (
+    torch.float16,
+    torch.bfloat16,
+    torch.float32,
+    torch.float64,
+)
+
+
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton e.g., ops.to_dtype(x,...) -> x.to(...)"""
 
@@ -1595,13 +1604,39 @@ class TritonOverrides(OpOverrides):
             )
 
     @staticmethod
+    def _strict_nan_payload(a):
+        # Limit this payload rule to NVIDIA CUDA. CPU eager canonicalizes min/max
+        # NaNs, and TritonOverrides is shared across backends.
+        return (
+            config.numerics == "strict"
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and getattr(a, "dtype", None) in _STRICT_FLOAT
+        )
+
+    @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
+        if TritonOverrides._strict_nan_payload(a):
+            # Eager min returns the NaN operand unchanged (first operand wins when both
+            # are NaN), preserving its payload; Triton's PropagateNan canonicalizes NaN to
+            # 0x7fffffff. Select the NaN operand explicitly and fall back to a plain min
+            # otherwise (which already matches eager on the +-0.0 tie).
+            return (
+                f"tl.where({a} != {a}, {a}, "
+                f"tl.where({b} != {b}, {b}, tl.minimum({a}, {b})))"
+            )
         return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
+        if TritonOverrides._strict_nan_payload(a):
+            # See minimum: match eager's NaN-payload propagation (first operand wins).
+            return (
+                f"tl.where({a} != {a}, {a}, "
+                f"tl.where({b} != {b}, {b}, tl.maximum({a}, {b})))"
+            )
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
