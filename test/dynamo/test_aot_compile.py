@@ -690,6 +690,54 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_prunes_a_lock_behind_functools_wraps_wrapped(self):
+        # functools.wraps writes __wrapped__ into the wrapper's __dict__ and
+        # copies the wrappee's __dict__ too, so a helper that merely decorates
+        # another function drags the wrapped one (and anything hanging off it)
+        # into the artifact. The lock is pruned from both, __wrapped__ itself is
+        # kept, and the save succeeds. With __dict__ carried verbatim the save
+        # fails on the lock.
+        def build():
+            def base(x):
+                return x * 3
+
+            base.lock = threading.Lock()
+
+            @functools.wraps(base)
+            def helper(x):
+                return x * 2
+
+            return helper
+
+        helper = build()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        # One warning per dropped entry, from the real dump only (the probe
+        # picklers reach both functions too) and named by the code object, since
+        # wraps gave helper base's __qualname__.
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            compiled_fn.save_compiled_function(self.path())
+        self.assertEqual(len(logs.output), 2)
+        self.assertTrue(
+            any("build.<locals>.helper.lock (lock)" in l for l in logs.output)
+        )
+        self.assertTrue(
+            any("build.<locals>.base.lock (lock)" in l for l in logs.output)
+        )
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(*inputs), expected)
+        (cell,) = loaded._artifacts.runtime_env.closure
+        rebuilt = cell.cell_contents
+        self.assertFalse(hasattr(rebuilt.__wrapped__, "lock"))
+        self.assertEqual(set(rebuilt.__dict__), {"__wrapped__"})
+
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
             return x + 1 * x
@@ -1955,6 +2003,101 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
             AOTCompilePickler({}, buf).dump(fn)
         self.assertIn("cannot pickle", str(cm.exception))
+
+    def test_pickler_breaks_a_dict_cycle_between_nested_functions(self):
+        # Nested functions whose __dict__ entries point at themselves and each
+        # other re-enter _dumps_cleanly mid-probe. Without the in-flight
+        # short-circuit the probe recurses until RecursionError, which it reads
+        # as "unpicklable", and the pair loses picklable entries (here `g` and
+        # `f.g` vanish); with it the cycle terminates, only the lock is pruned,
+        # and the rebuilt pair still refers to itself.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def f(x):
+                return x + 1
+
+            def g(x):
+                return x + 2
+
+            def top(x):
+                return x
+
+            f.f, f.g, g.g, g.f, g.lock = f, g, g, f, threading.Lock()
+            top.f, top.g = f, g
+            return top
+
+        top = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(top)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.g.f, out.f)
+        self.assertIs(out.f.g, out.g)
+        self.assertIs(out.f.f, out.f)
+        self.assertFalse(hasattr(out.g, "lock"))
+        self.assertEqual((out.f(1), out.g(1)), (2, 3))
+
+    def test_pickler_prunes_an_unmarked_module_from_a_nested_functions_dict(self):
+        # persistent_id records an nn.Module rather than raising, so a Module
+        # reached through a nested function's __dict__ would dump here and then
+        # poison serialize(); _dumps_cleanly prunes it instead -- unless the user
+        # marked it as external data, in which case it is kept by reference.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        mod = torch.nn.Linear(1, 1)
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.mod = mod
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        pickler = AOTCompilePickler({}, buf)
+        pickler.dump(fn)
+        self.assertEqual(pickler.errors, {})
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "mod"))
+        buf = io.BytesIO()
+        AOTCompilePickler({"mod": mod}, buf).dump(fn)
+        out = AOTCompileUnpickler({"mod": mod}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.mod, mod)
+
+    def test_pickler_rebuilds_a_nested_function_faithfully(self):
+        # The full set of function state a rebuilt helper carries once __dict__
+        # lands: __name__ vs __qualname__ and the empty cell (fixed by the shared
+        # base), __kwdefaults__ (the subclass swap) and a __dict__ entry (here).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            scale = None
+
+            def inner(*, k=1):
+                return unset, scale
+
+            inner.__name__ = "renamed"
+            inner.tag = 2.0
+            if inner is None:
+                unset = 1  # never runs, so the cell inner closes over stays empty
+            return inner
+
+        fn = outer()
+        cells = dict(zip(fn.__code__.co_freevars, fn.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__name__, "renamed")
+        self.assertEqual(out.__qualname__, fn.__qualname__)
+        self.assertEqual(out.__kwdefaults__, {"k": 1})
+        self.assertEqual(out.tag, 2.0)
+        cells = dict(zip(out.__code__.co_freevars, out.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        self.assertIsNone(cells["scale"].cell_contents)
 
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
