@@ -316,18 +316,22 @@ class FunctionPicklerBase(pickle.Pickler):
         return resolved is fn
 
     @staticmethod
-    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+    def _read_raw_annotations(obj: Any, *, evaluate: bool = False) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the
         # FORWARDREF format instead: it evaluates what it can and falls back to
         # proxies only for names that do not resolve, returning a COPY either
         # way. A ForwardRef proxy carries its owner and may not pickle (it does
         # not for a local function), so the caller prunes any it does not need.
+        # `evaluate` asks for the VALUE format instead, for a caller that has to
+        # serialize the values and cannot carry a proxy; that read raises for a
+        # name that does not resolve.
         if sys.version_info >= (3, 14):
             import annotationlib
 
+            fmt = annotationlib.Format
             return annotationlib.get_annotations(
-                obj, format=annotationlib.Format.FORWARDREF
+                obj, format=fmt.VALUE if evaluate else fmt.FORWARDREF
             )
         return obj.__annotations__
 
