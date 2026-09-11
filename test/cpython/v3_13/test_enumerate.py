@@ -158,14 +158,14 @@ class EnumerateTestCase(CPythonTestCase, PickleTest):
         self.assertRaises(TypeError, self.enum, x=0, y=3)
         self.assertRaises(TypeError, self.enum, x=0)
 
-    @unittest.skip("Tests CPython implementation detail")
+    @support.cpython_only
     def test_tuple_reuse(self):
         # Tests an implementation detail where tuple is reused
         # whenever nothing else holds a reference to it
         self.assertEqual(len(set(map(id, list(enumerate(self.seq))))), len(self.seq))
         self.assertEqual(len(set(map(id, enumerate(self.seq)))), min(1,len(self.seq)))
 
-    @unittest.skip("Tests CPython GC behavior")
+    @support.cpython_only
     def test_enumerate_result_gc(self):
         # bpo-42536: enumerate's tuple-reuse speed trick breaks the GC's
         # assumptions about what can be untracked. Make sure we re-track result
