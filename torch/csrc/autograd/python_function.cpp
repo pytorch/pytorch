@@ -1389,6 +1389,49 @@ PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_input_grad_buffers(PyObject* self, void* unused) {
+  HANDLE_TH_ERRORS
+  auto* py_fn = reinterpret_cast<THPFunction*>(self);
+  auto node = py_fn->cdata;
+  check_legacy_fn_attr_access(node, "input_grad_buffers");
+  TORCH_CHECK(
+      node->post_hooks().empty(),
+      "input_grad_buffers does not support hooks registered on the producing "
+      "autograd node");
+
+  variable_list buffers;
+  {
+    pybind11::gil_scoped_release no_gil;
+    buffers = get_current_input_grad_buffers(node.get());
+  }
+
+  THPObjectPtr result(
+      PyTuple_New(static_cast<Py_ssize_t>(py_fn->is_variable_input.size())));
+  if (!result) {
+    return nullptr;
+  }
+
+  size_t variable_idx = 0;
+  for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
+    PyObject* item = nullptr;
+    if (!py_fn->is_variable_input[i] || !buffers[variable_idx].defined()) {
+      item = Py_NewRef(Py_None);
+    } else {
+      item = THPVariable_Wrap(buffers[variable_idx]);
+      if (!item) {
+        return nullptr;
+      }
+    }
+    if (py_fn->is_variable_input[i]) {
+      ++variable_idx;
+    }
+    PyTuple_SET_ITEM(result.get(), i, item);
+  }
+  TORCH_INTERNAL_ASSERT(variable_idx == buffers.size());
+  return result.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -2269,6 +2312,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
     {"_input_metadata",
      (getter)THPFunction_input_metadata,
+     nullptr,
+     nullptr,
+     nullptr},
+    {"_input_grad_buffers",
+     (getter)THPFunction_input_grad_buffers,
      nullptr,
      nullptr,
      nullptr},

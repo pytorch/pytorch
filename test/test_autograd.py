@@ -18364,6 +18364,544 @@ class TestFunctionAssertMessages(TestCase):
             F.apply(torch.randn(2, requires_grad=True))
 
 
+class _InputGradBufferProducer(Function):
+    @staticmethod
+    def forward(ctx, x, scale, direct, callback):
+        ctx.scale = scale
+        ctx.direct = direct
+        ctx.callback = callback
+        return x.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        buffers = None
+        if ctx.direct:
+            buffers = ctx.input_grad_buffers
+            buffer = buffers[0]
+            if buffer is not None:
+                if ctx.callback is not None:
+                    ctx.callback(buffers, None)
+                buffer.add_(grad_output, alpha=ctx.scale)
+                return None, None, None, None
+
+        grad_input = grad_output * ctx.scale
+        if ctx.callback is not None:
+            ctx.callback(buffers, grad_input)
+        return grad_input, None, None, None
+
+
+@skipIfTorchDynamo("input_grad_buffers requires eager autograd engine state")
+class TestInputGradBuffers(TestCase):
+    def test_first_producer_falls_back(self, device):
+        observed_buffers = []
+
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x, unused, scale):
+                ctx.scale = scale
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                buffers = ctx.input_grad_buffers
+                observed_buffers.append(buffers)
+                return grad_output * ctx.scale, None, None
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        unused = torch.randn(4, device=device)
+        Producer.apply(x, unused, 2).sum().backward()
+
+        self.assertEqual(observed_buffers, [(None, None, None)])
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @parametrize("intermediate", (False, True))
+    def test_mixed_direct_and_returned_gradients(self, device, intermediate):
+        used_buffer = []
+
+        def observe(buffers, _grad_input):
+            buffer, scale_buffer, direct_buffer, callback_buffer = buffers
+            self.assertIsNone(scale_buffer)
+            self.assertIsNone(direct_buffer)
+            self.assertIsNone(callback_buffer)
+            used_buffer.append(buffer is not None)
+
+        leaf = torch.randn(4, device=device, requires_grad=True)
+        x = leaf * 2 if intermediate else leaf
+
+        # Higher sequence numbers execute first, so build the branches in
+        # reverse execution order.
+        last = _InputGradBufferProducer.apply(x, 1, False, None)
+        direct = _InputGradBufferProducer.apply(x, 2, True, observe)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        grad_outputs = tuple(torch.ones_like(out) for out in (last, direct, first))
+        torch.autograd.backward((last, direct, first), grad_outputs)
+
+        self.assertEqual(used_buffer, [True])
+        expected = 12 if intermediate else 6
+        self.assertEqual(leaf.grad, torch.full_like(leaf, expected))
+
+    def test_multiple_direct_producers(self, device):
+        used_buffer = []
+
+        def observe(buffers, _grad_input):
+            used_buffer.append(buffers[0] is not None)
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        outputs = tuple(
+            _InputGradBufferProducer.apply(x, scale, True, observe)
+            for scale in (1, 2, 3)
+        )
+        torch.autograd.backward(outputs, (torch.ones_like(x),) * 3)
+
+        self.assertEqual(used_buffer, [False, True, True])
+        self.assertEqual(x.grad, torch.full_like(x, 6))
+
+    def test_direct_input_grad_and_returned_weight_grad(self, device):
+        observed_buffers = []
+
+        class Multiply(Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                return x * weight
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, weight = ctx.saved_tensors
+                input_buffer, weight_buffer = ctx.input_grad_buffers
+                observed_buffers.append((input_buffer is not None, weight_buffer))
+                grad_weight = grad_output * x
+                if input_buffer is not None:
+                    input_buffer.addcmul_(grad_output, weight)
+                    return None, grad_weight
+                return grad_output * weight, grad_weight
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        weight = torch.randn(4, device=device, requires_grad=True)
+        fused = Multiply.apply(x, weight)
+        first = x * 3
+        torch.autograd.backward((fused, first), (torch.ones_like(x),) * 2)
+
+        self.assertEqual(observed_buffers, [(True, None)])
+        self.assertEqual(x.grad, weight + 3)
+        self.assertEqual(weight.grad, x)
+
+    def test_retained_buffer_may_become_stale(self, device):
+        retained_buffers = []
+        reexposed_buffers = []
+
+        def retain(buffers, _grad_input):
+            self.assertIsNotNone(buffers[0])
+            retained_buffers.append(buffers[0])
+
+        def observe(buffers, _grad_input):
+            reexposed_buffers.append(buffers[0])
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        last = _InputGradBufferProducer.apply(x, 1, True, observe)
+        direct = _InputGradBufferProducer.apply(x, 2, True, retain)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        grad_outputs = tuple(torch.ones_like(out) for out in (last, direct, first))
+        torch.autograd.backward((last, direct, first), grad_outputs)
+
+        self.assertEqual(x.grad, torch.full_like(x, 6))
+        self.assertEqual(retained_buffers, [torch.full_like(x, 5)])
+        self.assertEqual(reexposed_buffers, [None])
+
+    def test_aliased_buffer_is_not_exposed(self, device):
+        producer_grad = []
+        observed_buffer = []
+
+        def retain_grad(_buffers, grad_input):
+            producer_grad.append(grad_input)
+
+        def observe(buffers, _grad_input):
+            observed_buffer.append(buffers[0])
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        direct = _InputGradBufferProducer.apply(x, 2, True, observe)
+        first = _InputGradBufferProducer.apply(x, 3, False, retain_grad)
+        torch.autograd.backward((direct, first), (torch.ones_like(x),) * 2)
+
+        self.assertEqual(observed_buffer, [None])
+        self.assertEqual(x.grad, torch.full_like(x, 5))
+
+    def test_target_hooks_see_accumulated_gradient(self, device):
+        tensor_hook_grads = []
+        node_prehook_grads = []
+        node_posthook_grads = []
+        post_accumulate_grads = []
+
+        def tensor_hook(grad):
+            tensor_hook_grads.append(grad.clone())
+            return grad
+
+        def post_accumulate_hook(tensor):
+            post_accumulate_grads.append(tensor.grad.clone())
+
+        def node_prehook(grads):
+            node_prehook_grads.append(grads[0].clone())
+            return grads
+
+        def node_posthook(grad_inputs, grad_outputs):
+            node_posthook_grads.append(grad_outputs[0].clone())
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        x.register_hook(tensor_hook)
+        x.register_post_accumulate_grad_hook(post_accumulate_hook)
+        accumulate_grad = torch.autograd.graph.get_gradient_edge(x).node
+        accumulate_grad.register_prehook(node_prehook)
+        accumulate_grad.register_hook(node_posthook)
+        direct = _InputGradBufferProducer.apply(x, 2, True, None)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        torch.autograd.backward((direct, first), (torch.ones_like(x),) * 2)
+
+        expected = torch.full_like(x, 5)
+        self.assertEqual(x.grad, expected)
+        self.assertEqual(tensor_hook_grads, [expected])
+        self.assertEqual(node_prehook_grads, [expected])
+        self.assertEqual(node_posthook_grads, [expected])
+        self.assertEqual(post_accumulate_grads, [expected])
+
+    def test_leaf_grad_is_separate_from_input_buffer(self, device):
+        observed_leaf_grads = []
+        shares_storage = []
+
+        def observe(buffers, _grad_input):
+            buffer = buffers[0]
+            self.assertIsNotNone(buffer)
+            observed_leaf_grads.append(x.grad.clone())
+            shares_storage.append(buffer.data_ptr() == x.grad.data_ptr())
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        x.grad = torch.full_like(x, 7)
+        direct = _InputGradBufferProducer.apply(x, 2, True, observe)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        torch.autograd.backward((direct, first), (torch.ones_like(x),) * 2)
+
+        self.assertEqual(observed_leaf_grads, [torch.full_like(x, 7)])
+        self.assertEqual(shares_storage, [False])
+        self.assertEqual(x.grad, torch.full_like(x, 12))
+
+    def test_access_outside_backward_errors(self, device):
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        out = Producer.apply(x)
+        with self.assertRaisesRegex(RuntimeError, "while autograd is executing"):
+            out.grad_fn.input_grad_buffers
+
+    @parametrize("mode", ("grad", "create_graph", "anomaly", "post_hook"))
+    def test_unsupported_execution_modes_error(self, device, mode):
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                ctx.input_grad_buffers
+                return grad_output
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        out = Producer.apply(x)
+        if mode == "post_hook":
+            out.grad_fn.register_hook(lambda grad_inputs, grad_outputs: None)
+
+        with self.assertRaisesRegex(RuntimeError, "input_grad_buffers"):
+            if mode == "grad":
+                torch.autograd.grad(out.sum(), x)
+            elif mode == "create_graph":
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    out.sum().backward(create_graph=True)
+            elif mode == "anomaly":
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    with torch.autograd.detect_anomaly():
+                        out.sum().backward()
+            else:
+                out.sum().backward()
+
+    def test_create_graph_cannot_be_masked(self, device):
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, grad_output):
+                ctx.input_grad_buffers
+                return grad_output
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with self.assertRaisesRegex(RuntimeError, "create_graph=True"):
+                Producer.apply(x).sum().backward(create_graph=True)
+
+    @onlyCUDA
+    def test_user_stream_switch_does_not_change_execution_stream(self, device):
+        observed_buffers = []
+        other_stream = torch.cuda.Stream()
+
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x, direct):
+                ctx.direct = direct
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                if ctx.direct:
+                    with torch.cuda.stream(other_stream):
+                        buffer = ctx.input_grad_buffers[0]
+                    observed_buffers.append(buffer is not None)
+                    if buffer is not None:
+                        buffer.add_(grad_output)
+                        return None, None
+                return grad_output.clone(), None
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        direct = Producer.apply(x, True)
+        first = Producer.apply(x, False)
+        torch.autograd.backward((direct, first), (torch.ones_like(x),) * 2)
+
+        self.assertEqual(observed_buffers, [True])
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @onlyCUDA
+    def test_different_stream_errors(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            direct = _InputGradBufferProducer.apply(x, 1, True, None)
+        first = _InputGradBufferProducer.apply(x, 1, False, None)
+        torch.cuda.synchronize()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with self.assertRaisesRegex(RuntimeError, "same stream"):
+                torch.autograd.backward((direct, first), (torch.ones_like(x),) * 2)
+
+    @onlyCUDA
+    def test_later_producer_on_different_stream_errors(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+        accumulate_grad = torch.autograd.graph.get_gradient_edge(x).node
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            last = _InputGradBufferProducer.apply(x, 1, False, None)
+        direct = _InputGradBufferProducer.apply(x, 1, True, None)
+        first = _InputGradBufferProducer.apply(x, 1, False, None)
+        torch.cuda.synchronize()
+
+        with self.assertRaisesRegex(RuntimeError, "same stream"):
+            torch.autograd.backward((last, direct, first), (torch.ones_like(x),) * 3)
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_different_device_errors(self, devices):
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x, direct):
+                ctx.direct = direct
+                return x.to(devices[1])
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                if ctx.direct:
+                    ctx.input_grad_buffers
+                return grad_output.to(devices[0]).clone(), None
+
+        x = torch.randn(4, device=devices[0], requires_grad=True)
+        direct = Producer.apply(x, True)
+        first = Producer.apply(x, False)
+        torch.cuda.synchronize()
+
+        with self.assertRaisesRegex(RuntimeError, "same stream"):
+            torch.autograd.backward(
+                (direct, first), (torch.ones_like(direct), torch.ones_like(first))
+            )
+
+    @onlyCPU
+    def test_concurrent_graph_tasks_are_isolated(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+        direct = _InputGradBufferProducer.apply(x, 2, True, None)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        errors = []
+
+        def run_backward():
+            try:
+                torch.autograd.backward(
+                    (direct, first),
+                    (torch.ones_like(direct), torch.ones_like(first)),
+                    retain_graph=True,
+                )
+            except Exception as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=run_backward) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(x.grad, torch.full_like(x, 10))
+
+    @onlyCPU
+    def test_access_from_reentrant_final_callback_errors(self, device):
+        script = """
+import torch
+from torch.autograd import Function
+
+callback = None
+
+class Inner(Function):
+    @staticmethod
+    def forward(ctx, value):
+        return value.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        torch.autograd.graph.queue_callback(callback)
+        return grad_output
+
+class Outer(Function):
+    @staticmethod
+    def forward(ctx, value):
+        return value.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        global callback
+
+        def check_access():
+            try:
+                ctx.input_grad_buffers
+            except RuntimeError as error:
+                if "post-processing" not in str(error):
+                    raise
+            else:
+                raise RuntimeError("input_grad_buffers access unexpectedly succeeded")
+
+        callback = check_access
+        with torch.enable_grad():
+            inner_input = torch.ones((), requires_grad=True)
+            inner_output = Inner.apply(inner_input)
+        inner_output.backward()
+        return grad_output
+
+x = torch.ones((), requires_grad=True)
+Outer.apply(x).backward()
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("input_grad_buffers access during post-processing deadlocked")
+        except subprocess.CalledProcessError as error:
+            self.fail(error.output.decode("utf-8"))
+
+    @onlyCUDA
+    def test_lookup_does_not_deadlock_with_python_dispatch(self, device):
+        script = """
+import sys
+import threading
+
+import torch
+from torch.autograd import Function
+from torch.utils._pytree import tree_map
+
+dispatch_entered = threading.Event()
+getter_entering_lookup = threading.Event()
+sys.setswitchinterval(10)
+
+class DispatchTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            elem.shape,
+            strides=elem.stride(),
+            storage_offset=elem.storage_offset(),
+            dtype=elem.dtype,
+            layout=elem.layout,
+            device=elem.device,
+            requires_grad=False,
+        )
+
+    def __init__(self, elem):
+        self.elem = elem
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        dispatch_entered.set()
+        if not getter_entering_lookup.wait(timeout=5):
+            raise RuntimeError("timed out waiting for InputBuffer lookup")
+        kwargs = {} if kwargs is None else kwargs
+        unwrap = lambda value: value.elem if isinstance(value, cls) else value
+        return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
+
+class Getter(Function):
+    @staticmethod
+    def forward(ctx, value):
+        return value.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if not dispatch_entered.wait(timeout=5):
+            raise RuntimeError("timed out waiting for Python dispatch")
+        getter_entering_lookup.set()
+        ctx.input_grad_buffers
+        return grad_output
+
+class Fanout(Function):
+    @staticmethod
+    def forward(ctx, getter_output, duplicated_a, duplicated_b):
+        return duplicated_a.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return (
+            grad_output.cpu(),
+            grad_output.clone(),
+            DispatchTensor(grad_output.clone()),
+        )
+
+seed = torch.ones((), requires_grad=True)
+getter_output = Getter.apply(seed)
+source = torch.ones((), device="cuda", requires_grad=True)
+duplicated = source.clone()
+Fanout.apply(getter_output, duplicated, duplicated).backward()
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("input_grad_buffers lookup deadlocked")
+        except subprocess.CalledProcessError as error:
+            self.fail(error.output.decode("utf-8"))
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -18385,6 +18923,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
+instantiate_device_type_tests(TestInputGradBuffers, globals(), only_for=("cpu", "cuda"))
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
