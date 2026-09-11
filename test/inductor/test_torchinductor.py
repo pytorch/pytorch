@@ -19459,7 +19459,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             code = run_and_get_triton_code(compiled, x)
             self.assertEqual(code.count("@triton_heuristics."), 1)
-            self.assertEqual(code.count("triton_helpers.max_with_index"), 1)
+            self.assertEqual(code.count("triton_helpers.max_with_"), 1)
 
     @skip_if_halide
     @requires_gpu_and_triton
@@ -19511,7 +19511,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(code.count("@triton_heuristics."), 1)
         # Equivalent value/index pairs merge; the distinct mapping does not.
-        self.assertEqual(code.count("triton_helpers.max_with_index"), 2)
+        self.assertEqual(code.count("triton_helpers.max_with_"), 2)
 
     @skip_if_halide
     @requires_gpu_and_triton
