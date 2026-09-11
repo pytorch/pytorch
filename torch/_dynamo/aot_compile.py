@@ -88,29 +88,15 @@ class AOTCompilePickler(FunctionPicklerBase):
             return type(self)._unpickle_python_module, (obj.__name__,)
         elif inspect.ismethod(obj):
             receiver = obj.__self__
-            if id(receiver) in self.id_map or isinstance(receiver, torch.nn.Module):
-                # The receiver is served by persistent_id, so it is the LIVE
-                # object at load and pickle's default getattr(receiver, name)
-                # resolves on it; the shared reducer would instead pickle
-                # __func__ (an nn.Module defines __getattr__), rebuilding a
-                # local subclass's method by value and failing on its __class__
-                # cell. pickle's rule is taken only on proof that the probe
-                # hands back a method over THIS receiver and THIS function (a
-                # rebound `a.forward = b.forward` resolves to b's); a probe that
-                # raises anything falls back to the pair, which is always right.
-                name = getattr(obj.__func__, "__name__", None)
-                try:
-                    inner = getattr(receiver, name, None) if name is not None else None
-                except Exception:
-                    inner = None
-                if (
-                    inspect.ismethod(inner)
-                    and inner.__func__ is obj.__func__
-                    and inner.__self__ is receiver
-                ):
-                    return NotImplemented
-                return type(self)._unpickle_bound_method, (obj.__func__, receiver)
-            reduced = self._reduce_bound_method(obj)
+            # A receiver in external_data is served by persistent_id, so it is
+            # the LIVE object at load and pickle's default getattr(receiver,
+            # name) resolves on it; the shared reducer's __getattr__ gate would
+            # instead pickle __func__ (every nn.Module defines __getattr__),
+            # rebuilding a local subclass's method by value and failing on its
+            # __class__ cell. An unmarked nn.Module is recorded in errors and
+            # fails serialize() anyway, so for it this only keeps the dump going.
+            live = id(receiver) in self.id_map or isinstance(receiver, torch.nn.Module)
+            reduced = self._reduce_bound_method(obj, receiver_is_live=live)
             if reduced is not None:
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):

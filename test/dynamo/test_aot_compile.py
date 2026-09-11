@@ -1956,6 +1956,42 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
             AOTCompilePickler({}, buf).dump(fn)
         self.assertIn("cannot pickle", str(cm.exception))
 
+    def test_pickler_rebuilds_a_nested_function_faithfully(self):
+        # The old rebuild passed __qualname__ where FunctionType wants __name__,
+        # raised on an EMPTY cell, and dropped __kwdefaults__ (a reloaded
+        # `def f(x, *, k=2)` failed with TypeError when called without k).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            scale = None
+
+            def inner(*, k=1):
+                return unset, scale
+
+            def scaled(x, *, k=2):
+                return x * k
+
+            inner.__name__ = "renamed"
+            if inner is None:
+                unset = 1  # never runs, so the cell inner closes over stays empty
+            return inner, scaled
+
+        fn, scaled = outer()
+        cells = dict(zip(fn.__code__.co_freevars, fn.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump((fn, scaled))
+        out, out_scaled = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__name__, "renamed")
+        self.assertEqual(out.__qualname__, fn.__qualname__)
+        self.assertEqual(out.__kwdefaults__, {"k": 1})
+        self.assertEqual(out_scaled(3), 6)
+        cells = dict(zip(out.__code__.co_freevars, out.__closure__))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
+        self.assertIsNone(cells["scale"].cell_contents)
+
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
     """Tests for triton kernel side table serialization."""
