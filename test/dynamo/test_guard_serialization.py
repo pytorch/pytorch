@@ -764,6 +764,37 @@ class RaisingProbes:
         raise RuntimeError(f"probed {name}")
 
 
+class RaisingNameProxy:
+    # A callable whose __name__ lookup raises something other than
+    # AttributeError, as a proxy might.
+    def __getattr__(self, name):
+        if name == "__name__":
+            raise RuntimeError("proxy has no __name__")
+        raise AttributeError(name)
+
+    def __call__(self, obj, x):
+        return x
+
+
+def _shared_cell_wrappers():
+    shared = torch.zeros(2)
+
+    @functools.wraps(global_func)
+    def a(x):
+        return shared
+
+    @functools.wraps(global_func)
+    def b(x):
+        return shared
+
+    return a, b
+
+
+# wraps gives both global_func's qualname (no "<locals>"), so they are
+# fqn-mismatched and rebuilt by value only when a guard registers them.
+SHARED_CELL_WRAPPED_A, SHARED_CELL_WRAPPED_B = _shared_cell_wrappers()
+
+
 class PlainMethods:
     def add(self, x):
         return x
@@ -1240,20 +1271,11 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out.__kwdefaults__["a"], Inputs)
 
     def test_rebuilt_functions_keep_a_shared_closure_cell_shared(self):
-        # Two functions closing over one variable must still share the cell
-        # after reload; rebuilding every cell silently unshares them.
-        def outer():
-            shared = torch.zeros(2)
-
-            def a():
-                return shared
-
-            def b():
-                return shared
-
-            return a, b
-
-        a, b = outer()
+        # Two fqn-mismatched functions (wraps wrappers, so the guard_tree_values
+        # gate is what carries them; a <locals> pair never consults it) closing
+        # over one variable must still share the cell after reload; rebuilding
+        # every cell silently unshares them.
+        a, b = SHARED_CELL_WRAPPED_A, SHARED_CELL_WRAPPED_B
         self.assertIs(a.__closure__[0], b.__closure__[0])
         buf = io.BytesIO()
         cell = a.__closure__[0]
@@ -1262,6 +1284,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler.dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
+        self.assertIsNot(out["a"], a)  # rebuilt by value, not by reference
 
     def test_rebuilt_locals_function_keeps_its_name(self):
         # The old <locals> rebuild passed __qualname__ where FunctionType wants
@@ -1757,11 +1780,34 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(mod): mod}, {}, {}, {}, buf).dump({"m": mod.forward})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(type(out.__self__), torch.nn.Module)
-        # The code object's name, not __qualname__: at this commit the <locals>
-        # rebuild passes __qualname__ as the function's NAME, and on 3.10
-        # FunctionType then reports the bare co_name as __qualname__.
+        self.assertEqual(out.__func__.__name__, "forward")
         self.assertEqual(out.__func__.__code__.co_name, "forward")
         self.assertEqual(out(torch.ones(1)), torch.ones(1) + 1)
+
+    def test_bound_method_monkeypatched_onto_a_plain_instance(self):
+        # A method stored in the instance __dict__ (a plain receiver: an
+        # nn.Module takes the __getattr__ gate first) resolves only after self
+        # is restored, so pickle's getattr() reconstruction would miss it; the
+        # pair carries it.
+        obj = PlainMethods()
+        obj.global_add = types.MethodType(global_add, obj)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump({"m": obj.global_add})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIs(type(out.__self__), PlainMethods)
+        self.assertEqual(out(1), 2)
+
+    def test_bound_method_whose_func_raises_on_name_takes_the_pair(self):
+        # __func__ is an arbitrary callable; a proxy whose __getattr__ raises
+        # something other than AttributeError for __name__ must not escape the
+        # reducer.
+        method = types.MethodType(RaisingNameProxy(), PlainMethods())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": method})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(type(out.__func__), RaisingNameProxy)
+        self.assertEqual(out(3), 3)
 
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
