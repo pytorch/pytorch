@@ -5326,7 +5326,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         total_time = 0.0
 
-        for i in range(nruns):
+        for _ in range(nruns):
             torch.cuda.synchronize()
 
             start_evt = torch.cuda.Event(enable_timing=True)
