@@ -2034,6 +2034,31 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
             AOTCompilePickler({}, buf).dump(fn)
         self.assertIn("cannot pickle", str(cm.exception))
 
+    def test_pickler_breaks_a_dict_cycle_between_nested_functions(self):
+        # Two nested functions whose __dict__ entries point at each other
+        # re-enter _dumps_cleanly mid-probe: the in-flight short-circuit breaks
+        # the cycle, the unpicklable sibling is still pruned, and the rebuilt
+        # pair still refers to itself.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def g(x):
+                return x + 1
+
+            def h(x):
+                return x + 2
+
+            g.h, h.g, g.lock = h, g, threading.Lock()
+            return g
+
+        g = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(g)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.h.g, out)
+        self.assertFalse(hasattr(out, "lock"))
+        self.assertEqual((out(1), out.h(1)), (2, 3))
+
     def test_pickler_rebuilds_a_nested_function_faithfully(self):
         # The pickler passed __qualname__ where FunctionType wants __name__, so
         # a reloaded function reported the dotted qualname as its __name__; it
@@ -2068,6 +2093,46 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "empty"):
             cells["unset"].cell_contents
         self.assertIsNone(cells["scale"].cell_contents)
+
+    def test_pickler_does_not_persist_a_wrong_false_across_an_inflight_seed(self):
+        # An in-flight probe must not leave a wrong False in the shared cache.
+        # f is unpicklable via an UNPRUNED slot (a Lock kwdefault); f and g
+        # reference each other, and h carries g. Probing f seeds an optimistic
+        # in-flight state, g re-enters f mid-probe, keeps g.f, dumps f, hits the
+        # lock and raises -- which an earlier version cached as g being
+        # unpicklable, so an UNRELATED h silently lost its .g and died at call
+        # time. The in-flight result is no longer cached, so h keeps g.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            lock = threading.Lock()
+
+            def f(*, k=lock):
+                return k
+
+            def g():
+                return "g!"
+
+            def h():
+                return "h!"
+
+            f.g = g
+            g.f = f
+            h.g = g
+
+            def top(x):
+                return x
+
+            top.f = f  # inserted before h, so f probes (and taints) g first
+            top.h = h
+            return top
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertTrue(hasattr(out.h, "g"))
+        self.assertEqual(out.h.g(), "g!")
 
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
