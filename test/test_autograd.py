@@ -18705,7 +18705,7 @@ class TestInputGradBuffers(TestCase):
         first = _InputGradBufferProducer.apply(x, 1, False, None)
         torch.cuda.synchronize()
 
-        with self.assertRaisesRegex(RuntimeError, "engine thread, device, and stream"):
+        with self.assertRaisesRegex(RuntimeError, "same stream"):
             torch.autograd.backward((last, direct, first), (torch.ones_like(x),) * 3)
 
     @onlyCUDA

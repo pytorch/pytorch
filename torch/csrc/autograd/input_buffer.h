@@ -98,7 +98,8 @@ struct InputBuffer {
       size_t pos,
       const at::Device& device,
       const std::optional<c10::Stream>& opt_producer_stream,
-      const std::optional<c10::Stream>& opt_consumer_stream) const;
+      const std::optional<c10::Stream>& opt_consumer_stream,
+      std::thread::id expected_thread) const;
 
   // add() validates later producers before they touch an exposed buffer.
   // Keep the per-slot state out of the common allocation path.
