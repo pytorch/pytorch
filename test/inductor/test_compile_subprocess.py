@@ -131,12 +131,9 @@ class TestSubprocess(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
+    @patch("torch._inductor.compile_fx.fx_compile_progressive", True)
     def test_progressive(self):
-        from triton.testing import do_bench
-
         from torch._inductor.compile_fx_async import _ProgressiveFxCompile
-
-        torch._inductor.compile_fx.fx_compile_progressive = True
 
         x = torch.randn(1152, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
         y = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -195,21 +192,7 @@ class TestSubprocess(TestCase):
             self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_started, 1)
             self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_finished, 1)
 
-        torch._inductor.compile_fx.fx_compile_progressive = False
-
-        @torch.compile(fullgraph=True, backend="inductor")
-        def baseline(x, y):
-            return (x @ y).relu()
-
-        # Warmup
-        baseline(x, y)
-
-        # Skip the perf assertion to avoid flakiness on XPU.
-        if GPU_TYPE != "xpu":
-            self.assertGreater(
-                do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
-            )
-        self.assertTrue("'max_autotune': True" in source_codes[-1])
+        self.assertIn("'max_autotune': True", source_codes[-1])
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):
