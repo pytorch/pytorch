@@ -1349,20 +1349,23 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         odd = types.FunctionType(global_func.__code__, globals(), "global_func")
         odd.__module__ = ["not", "a", "module"]  # unhashable: must not TypeError
         # The oracle is pickle itself: every False case fails a by-reference
-        # dump (the C pickler raises a bare AttributeError for a <locals> name).
+        # dump. save_global replaces the import/lookup failure with a
+        # PicklingError; the C pickler raises a bare AttributeError for a
+        # <locals> name below 3.14 and PicklingError from 3.14 on.
+        locals_exc = (
+            pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
+        )
         cases = {
-            "locals": local_fn,
-            "wraps_wrapper": wrapper,
-            "bad_qualname": renamed,
-            "module_not_imported": exec_fn,
-            "unhashable_module": odd,
+            "locals": (local_fn, locals_exc),
+            "wraps_wrapper": (wrapper, pickle.PicklingError),
+            "bad_qualname": (renamed, pickle.PicklingError),
+            "module_not_imported": (exec_fn, pickle.PicklingError),
+            "unhashable_module": (odd, pickle.PicklingError),
         }
-        for case, fn in cases.items():
+        for case, (fn, exc) in cases.items():
             with self.subTest(case=case):
                 self.assertFalse(resolves(fn))
-                with self.assertRaises(
-                    (pickle.PicklingError, AttributeError, TypeError)
-                ):
+                with self.assertRaises(exc):
                     pickle.dumps(fn)
 
     def test_pruned_shared_closure_cell_stays_shared(self):
@@ -1781,8 +1784,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_guard_through_globals_of_a_wrapper_from_another_module(self):
         # A guard reads through wrapper.__globals__, so the dict it read travels
-        # as a snapshot rather than being re-imported at load; __module__ is
-        # the wrapped function's and is restored as an attribute.
+        # as a snapshot; __module__ is the wrapped function's and is restored as
+        # an attribute. The wrapper lives in this module, so an import of its
+        # compile scope would land on the same live dict; what only the snapshot
+        # provides is pinned by test_snapshot_keeps_the_save_time_value_of_a_guarded_global.
         global OTHER_MODULE_CONST
         wrapper = WRAPPED_FROM_OTHER_MODULE
         self.assertEqual(wrapper.__module__, torch._dynamo.testing.__name__)
