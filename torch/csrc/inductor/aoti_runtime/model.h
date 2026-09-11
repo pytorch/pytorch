@@ -90,6 +90,16 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   // for models built without cuda graph. Destroyed with the model (no leak).
   // See cudagraph_runtime.h.
   std::unique_ptr<AOTICUDAGraphManager> cudagraph_mgr_;
+  // Per-instance slab cache for regional cuda graph, keyed by a packed pool id.
+  // Each value owns a persistent slab whose base address captured partitions
+  // bake into their reinterpret_tensor views, so the address stays stable across
+  // forwards; the slab is sized to the dynamic-shape upper bounds and shared
+  // across shapes. Per AOTInductorModel instance (NOT process-static) so
+  // concurrent instances in a container have isolated slabs, and the RAII
+  // handles free them at model destruction. Populated by the generated
+  // memory_planning codegen; unused in whole-graph mode, whose intermediates
+  // live in the graph pool instead.
+  std::unordered_map<int64_t, RAIIAtenTensorHandle> cudagraph_slabs_;
 #endif
 };
 

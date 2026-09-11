@@ -1278,6 +1278,10 @@ class CppWrapperGpu(CppWrapperCpu):
             f"{config.aot_inductor.cudagraph_max_captures});"
         )
         code.writeline("}")
+        # Per-forward boundary: releases the previous forward's uncaptured
+        # outputs. Must be per-forward rather than per-capture, since regional
+        # mode issues several run_graph calls per forward.
+        code.writeline("this->cudagraph_mgr_->begin_forward();")
 
         # Key on every input dim plus every scalar input value: two calls share a
         # capture exactly when their inputs have identical shapes and scalars,
