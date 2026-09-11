@@ -515,7 +515,14 @@ class AOTCompiledFunction:
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
-            raise RuntimeError(f"GuardManager check failed, reason: {reason}")
+            msg = f"GuardManager check failed, reason: {reason}"
+            if self._guard_globals is None and "KeyError on G[" in reason:
+                msg += (
+                    " -- a guarded global is missing from this process; define "
+                    "it (or load with an f_globals carrying it) so the guard "
+                    "can resolve it."
+                )
+            raise RuntimeError(msg)
         return self.fn(*args, **kwargs)
 
     def source_info(self) -> "SourceInfo":
