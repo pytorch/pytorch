@@ -395,17 +395,13 @@ def _get_param_all_gather_inputs(
         )
 
     param_all_gather_inputs: list[list[torch.Tensor]] = [[] for _ in fsdp_params]
-    foreach_copy_indices: list[int] = []
-    foreach_copy_inputs: list[torch.Tensor] = []
-    foreach_copy_input_numels: list[int] = []
-    foreach_copy_dtype_pair: tuple[torch.dtype, torch.dtype] | None = None
-    foreach_copy_dtypes_are_uniform = True
+    copy_groups: dict[
+        tuple[torch.dtype, torch.dtype],
+        tuple[list[int], list[torch.Tensor]],
+    ] = {}
 
-    # 1st pass: for foreach-copy parameters, get inputs and metadata for the
-    # foreach copy, and for the others, actually get their all-gather inputs
     for i, fsdp_param in enumerate(fsdp_params):
         if use_foreach_copy(fsdp_param):
-            foreach_copy_indices.append(i)
             all_gather_input = (
                 fsdp_param._sharded_param_data
                 if fsdp_param.sharded_state == ShardedState.SHARDED
@@ -414,52 +410,25 @@ def _get_param_all_gather_inputs(
             param_dtype = fsdp_param.param_dtype
             if param_dtype is None:
                 raise AssertionError("Expected param_dtype to not be None")
-            foreach_copy_inputs.append(all_gather_input)
-            foreach_copy_input_numels.append(all_gather_input.numel())
-            dtype_pair = (all_gather_input.dtype, param_dtype)
-            if foreach_copy_dtype_pair is None:
-                foreach_copy_dtype_pair = dtype_pair
-            elif dtype_pair != foreach_copy_dtype_pair:
-                foreach_copy_dtypes_are_uniform = False
+            indices, inputs = copy_groups.setdefault(
+                (all_gather_input.dtype, param_dtype), ([], [])
+            )
+            indices.append(i)
+            inputs.append(all_gather_input)
         else:
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
-    # 2nd pass: use foreach copy to compute the remaining all-gather inputs
-    if foreach_copy_inputs and foreach_copy_dtypes_are_uniform:
-        fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
-        param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
+    for (_, target_dtype), (indices, inputs) in copy_groups.items():
+        input_numels = [t.numel() for t in inputs]
         flat_foreach_copy_input = torch.empty(
-            (sum(foreach_copy_input_numels),), device=device, dtype=param_dtype
+            (sum(input_numels),),
+            device=inputs[0].device,
+            dtype=target_dtype,
         )
-        splits = torch.split(flat_foreach_copy_input, foreach_copy_input_numels)
-        torch._foreach_copy_(splits, foreach_copy_inputs)
-        for i, split in zip(foreach_copy_indices, splits):
+        splits = torch.split(flat_foreach_copy_input, input_numels)
+        torch._foreach_copy_(splits, inputs)
+        for i, split in zip(indices, splits):
             param_all_gather_inputs[i] = [split]
-    elif foreach_copy_inputs:
-        copy_groups: dict[
-            tuple[torch.dtype, torch.dtype],
-            tuple[list[int], list[torch.Tensor]],
-        ] = {}
-        for i, inp in zip(foreach_copy_indices, foreach_copy_inputs):
-            target_dtype = fsdp_params[i].param_dtype
-            if target_dtype is None:
-                raise AssertionError("Expected param_dtype to not be None")
-            indices, inputs = copy_groups.setdefault(
-                (inp.dtype, target_dtype), ([], [])
-            )
-            indices.append(i)
-            inputs.append(inp)
-        for (_, target_dtype), (indices, inputs) in copy_groups.items():
-            input_numels = [t.numel() for t in inputs]
-            flat_foreach_copy_input = torch.empty(
-                (sum(input_numels),),
-                device=inputs[0].device,
-                dtype=target_dtype,
-            )
-            splits = torch.split(flat_foreach_copy_input, input_numels)
-            torch._foreach_copy_(splits, inputs)
-            for i, split in zip(indices, splits):
-                param_all_gather_inputs[i] = [split]
 
     return param_all_gather_inputs
 
@@ -559,7 +528,7 @@ def foreach_all_gather_copy_out(
 def foreach_reduce(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
-    reduce_scatter_group: dist.ProcessGroup,
+    reduce_scatter_group: dist.ProcessGroup | None,
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
     orig_dtype: torch.dtype | None,
@@ -658,7 +627,7 @@ def foreach_reduce(
             device=device,
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        if world_size > 1:
+        if reduce_scatter_group is not None and world_size > 1:
             reduce_scatter_comm(
                 output_tensor=reduce_output,
                 input_tensor=reduce_scatter_input,

@@ -32,7 +32,9 @@ from torch.testing._internal.common_fsdp import (
     reduce_scatter_with_assert,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     MI300_ARCH,
+    parametrize,
     run_tests,
     skipIfRocmArch,
     skipIfRocmVersionLessThan,
@@ -80,6 +82,7 @@ class KDAStyleTransformer(Transformer):
         return (self.output_norm(output) * decay).flatten(-2).clone()
 
 
+@instantiate_parametrized_tests
 class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @property
     def world_size(self) -> int:
@@ -215,6 +218,64 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @parametrize("reshard_after_forward", [True, 2])
+    def test_all_gather_mixed_compute_dtypes(self, reshard_after_forward: bool | int):
+        if reshard_after_forward == 2 and self.world_size != 4:
+            self.skipTest("Partial resharding requires four devices")
+        param_dtypes = (
+            torch.bfloat16,
+            torch.float32,
+            torch.float16,
+            torch.bfloat16,
+            torch.float16,
+        )
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = nn.ParameterList(
+                    nn.Parameter(
+                        torch.arange(8 * (i + 1), dtype=torch.float32).view(8, -1) / 32
+                        + i
+                    )
+                    for i in range(len(param_dtypes))
+                )
+
+            def forward(self):
+                return tuple(param.square() for param in self.params)
+
+        model = Model().to(device_type)
+        param_to_dtype = dict(zip(model.parameters(), param_dtypes, strict=True))
+        ref_params = [
+            param.detach().to(dtype).clone().requires_grad_()
+            for param, dtype in param_to_dtype.items()
+        ]
+        fully_shard(
+            model,
+            reshard_after_forward=reshard_after_forward,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+                param_dtype_fn=param_to_dtype.get,
+            ),
+        )
+
+        outputs = model()
+        ref_outputs = tuple(param.square() for param in ref_params)
+        self.assertEqual(tuple(output.dtype for output in outputs), param_dtypes)
+        self.assertEqual(outputs, ref_outputs)
+        sum(output.float().sum() for output in outputs).backward()
+        sum(output.float().sum() for output in ref_outputs).backward()
+        for param, ref_param in zip(model.parameters(), ref_params, strict=True):
+            self.assertIsNotNone(param.grad)
+            self.assertIsNotNone(ref_param.grad)
+            self.assertEqual(
+                param.grad.to_local(),
+                ref_param.grad.float().chunk(self.world_size)[self.rank],
+            )
 
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
