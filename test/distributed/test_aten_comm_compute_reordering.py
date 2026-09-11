@@ -2078,6 +2078,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
     )
     def test_manual_bucketing_ag_late_input_repairs_wait_consumer(self):
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_wait_users_after_latest_inputs,
             ManualOverlapPreservingBucketer,
         )
         from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
@@ -2174,7 +2175,10 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                 OrderedSet(gm.graph.nodes),
                 bucket_mode="custom_ops",
             )
-            bucketer._bucket_group([ag1, ag2])
+            replacements, replaced_users = bucketer._bucket_group([ag1, ag2])
+            _move_wait_users_after_latest_inputs(
+                gm.graph, replacements, replaced_users
+            )
             gm.graph.lint()
 
             (

@@ -2010,6 +2010,84 @@ class TestOverlapSchedulingFixes(InductorTestCase):
 
 
 class TestManualOverlapSchedulingUnit(TestCase):
+    def test_wait_user_repair_runs_once_after_all_bucket_groups(self):
+        from torch._dynamo import graph_deduplication
+        from torch._inductor.fx_passes import overlap_manual_scheduling
+        from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
+
+        def func(a, b, c, d):
+            all_reduce = torch.ops._c10d_functional.all_reduce
+            wait = torch.ops._c10d_functional.wait_tensor
+            first0 = wait(all_reduce(a, "sum", "0"))
+            early_user = -first0
+            first1 = wait(all_reduce(b + 1, "sum", "0"))
+            second0 = wait(all_reduce(first0 + c, "sum", "0"))
+            second1 = wait(all_reduce(first1 + d, "sum", "0"))
+            return early_user.sum() + second0.sum() + second1.sum()
+
+        with FakeTensorMode():
+            inputs = [torch.ones(4, 4) for _ in range(4)]
+            traced = make_fx(func)(*inputs)
+
+        collective_info = {}
+        for wait in traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.wait_tensor.default,
+        ):
+            start = wait.args[0]
+            if isinstance(start, fx.Node):
+                collective_info[start] = CollectiveInfo(start, wait, 0, 0, 0)
+
+        bucketer = overlap_manual_scheduling.ManualOverlapPreservingBucketer(
+            traced.graph, collective_info, OrderedSet(traced.graph.nodes)
+        )
+        bucket_group = bucketer._bucket_group
+        bucket_group_calls = 0
+
+        def bucket_group_and_check(coll_nodes):
+            nonlocal bucket_group_calls
+            result = bucket_group(coll_nodes)
+            bucket_group_calls += 1
+            if bucket_group_calls == 1:
+                with self.assertRaisesRegex(
+                    RuntimeError, "used before it has been defined"
+                ):
+                    traced.graph.lint()
+            return result
+
+        with (
+            patch.object(
+                bucketer, "_bucket_group", side_effect=bucket_group_and_check
+            ),
+            patch.object(
+                overlap_manual_scheduling,
+                "_move_wait_users_after_latest_inputs",
+                wraps=overlap_manual_scheduling._move_wait_users_after_latest_inputs,
+            ) as repair,
+            patch.object(
+                graph_deduplication,
+                "_stable_topological_sort",
+                wraps=graph_deduplication._stable_topological_sort,
+            ) as stable_sort,
+        ):
+            bucketer.manual_bucket_collectives(list(traced.graph.nodes))
+
+        self.assertEqual(bucket_group_calls, 2)
+        self.assertEqual(repair.call_count, 1)
+        self.assertEqual(stable_sort.call_count, 1)
+        self.assertEqual(len(repair.call_args.args[1]), 4)
+        self.assertEqual(len(repair.call_args.args[2]), 4)
+        self.assertEqual(
+            len(
+                traced.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops._c10d_functional.all_reduce.default,
+                )
+            ),
+            2,
+        )
+        traced.graph.lint()
+
     def test_late_wait_user_repair_is_linear_for_high_fan_in(self):
         """Ensure reverse-ordered replacement inputs are each visited only once."""
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
