@@ -84,6 +84,9 @@ class _ProbeState:
     docs: dict[int, Any] = dataclasses.field(default_factory=dict)
     # id(function) -> its kept annotations, for the same warn-once reason.
     annotations: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    type_params: dict[int, tuple[Any, ...] | None] = dataclasses.field(
+        default_factory=dict
+    )
     # Whether a probe short-circuited on an in-flight id; such a verdict is
     # not cached as final but parked (as unpicklable) for the rest of the
     # probe tree.
@@ -143,15 +146,16 @@ class AOTCompilePickler(FunctionPicklerBase):
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so what a call needs
             # (defaults, keyword defaults, closure) is carried verbatim, while
-            # annotations, __dict__ entries and __doc__ are pruned per value: the
-            # runtime assigns those back and never forces a pruned one, so a
-            # value this pickler cannot serialize (a <locals> annotation class,
-            # or a __dict__ entry like the __wrapped__ functools.wraps stashes,
-            # which can drag an unrelated lock/Module in) is dropped rather than
-            # left to fail the whole dump. Known limitation: the top-level
-            # function's own annotations ride on CompileArtifacts.signature,
-            # which serialize() dumps unpruned, so this only protects the nested
-            # functions reached here. Type params follow in a later commit.
+            # annotations, type params, __dict__ entries and __doc__ are pruned
+            # per value: the runtime assigns those back and never forces a pruned
+            # one, so a value this pickler cannot serialize (a <locals>
+            # annotation class, a PEP 695 function-scoped TypeVar, or a __dict__
+            # entry like the __wrapped__ functools.wraps stashes, which can drag
+            # an unrelated lock/Module in) is dropped rather than left to fail
+            # the whole dump. Known limitation: the top-level function's own
+            # annotations ride on CompileArtifacts.signature, which serialize()
+            # dumps unpruned, so this only protects the nested functions reached
+            # here.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
@@ -160,7 +164,7 @@ class AOTCompilePickler(FunctionPicklerBase):
                 attributes=self._pickleable_attributes(obj),
                 annotations=self._pickleable_annotations(obj),
                 doc=self._pickleable_doc(obj),
-                type_params=None,
+                type_params=self._pickleable_type_params(obj),
                 globals_snapshot=None,
             )
 
@@ -382,6 +386,34 @@ class AOTCompilePickler(FunctionPicklerBase):
             state.parked.clear()
             state.leaned = False
         return result
+
+    def _pickleable_type_params(self, obj: Any) -> tuple[Any, ...] | None:
+        # A PEP 695 function-scoped TypeVar pickles by name as typing.<name> and
+        # fails pickle's identity check against it (or the lookup, for a name
+        # typing lacks), so drop the whole tuple when any element will not dump:
+        # a generic cannot be rebuilt around a missing parameter. Ordinary
+        # functions carry (), which dumps and is kept.
+        # A TypeVar the body itself references sits in a closure cell, which is
+        # never pruned (the body needs it), so that shape still fails the dump.
+        # Memoized for the real dump like the other slots, so a function reduced
+        # twice warns once; below 3.12 the tuple lives in __dict__ and the
+        # attributes pass has already reported it, so this pass stays quiet.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.type_params:
+            return state.type_params[id(obj)]
+        type_params = getattr(obj, "__type_params__", None)
+        kept = type_params
+        if type_params:
+            # next() short-circuits: every probe serializes the reachable graph
+            # into a throwaway buffer, and only the first failure is reported.
+            bad = next((p for p in type_params if not self._dumps_cleanly(p)), None)
+            if bad is not None:
+                if "__type_params__" not in obj.__dict__:
+                    self._warn_dropped(obj, "__type_params__", bad)
+                kept = None
+        if not self._probing:
+            state.type_params[id(obj)] = kept
+        return kept
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
