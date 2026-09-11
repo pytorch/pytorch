@@ -14,8 +14,7 @@ class TestKernelColTile(TestCase):
     def test_reduce_col_tile_single_stage(self):
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_coltile as ct
+        from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
         x = torch.randn(32, 512, device="cuda")
         out = ct.reduce_col_tile(
@@ -27,8 +26,7 @@ class TestKernelColTile(TestCase):
         # Exercise a ragged reduced-axis split and stage-2 partial combination.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_coltile as ct
+        from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
         x = torch.randn(4097, 256, device="cuda")
         out = ct.reduce_col_tile(
@@ -42,8 +40,11 @@ class TestKernelColTile(TestCase):
 
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_coltile as ct, tile as tl
+        from torch._native.ops.reductions import (
+            kernel_coltile as ct,
+            tile as tl,
+            traits as T,
+        )
 
         c = ct._C_THREAD_STAGE2 + 256  # over the thread-per-column crossover
         x = torch.randn(4096, c, device="cuda")  # tall enough that _split_p splits it
@@ -65,8 +66,7 @@ class TestKernelColTile(TestCase):
         # Verify absolute reduced indices and ATen's first-wins tie-break.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_coltile as ct
+        from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
         x = torch.randn(2048, 256, device="cuda")
         x[100, :] = 5.0  # the winner
@@ -88,8 +88,7 @@ class TestKernelColTile(TestCase):
         # Three fields select the otherwise untested high-register-pressure launch.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_coltile as ct
+        from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
         x = torch.randn(4096, 256, device="cuda")
         out = ct.reduce_col_tile(
@@ -106,10 +105,10 @@ class TestKernelColTile(TestCase):
 
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             kernel_coltile as ct,
             kernel_general as kg,
+            traits as T,
         )
 
         trait = T.SumOps(acc=cutlass.Float32)
@@ -132,8 +131,7 @@ class TestColTileHost(TestCase):
         # Driver-supplied column vec needs no tile; requesting one must fail clearly.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import tile
+        from torch._native.ops.reductions import tile, traits as T
 
         trait = T.SumOps(acc=cutlass.Float32)
         row = tile.TileReduce(trait, cutlass.Float32, "row", 1024, tpr=32)
@@ -148,8 +146,7 @@ class TestColTileHost(TestCase):
         # A capped split can leave blocks empty; they must load nothing and combine identities.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_coltile as ct
+        from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
         r = ct._P_MAX * ct._Q_TARGET + 1  # the smallest R whose split over-reports
         self.assertEqual(ct._split_p(r), ct._P_MAX, "shape no longer over-reports")
@@ -168,8 +165,7 @@ class TestColTileHost(TestCase):
         # Explicit vec must divide C or trailing outputs remain uninitialized.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_coltile as ct
+        from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
         x = torch.randn(64, 30, device="cuda")
         with self.assertRaisesRegex(AssertionError, "vec must divide"):
