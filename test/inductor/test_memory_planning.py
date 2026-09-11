@@ -17,6 +17,7 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
+import sympy
 import torch
 from torch._C import FileCheck
 from torch._dynamo.utils import same
@@ -104,6 +105,103 @@ class TestMemoryPlanningOutputGroups(TestCase):
         group = self.compute_single_group(scheduler_buffers=scheduler_buffers)
         self.assertEqual(group.names, ["buf16", "buf48"])
         self.assertTrue(group.is_output)
+
+
+class TestCudagraphSlabGuard(TestCase):
+    """Pure-Python unit tests for the single-max-slab compile-time backstop
+    (guard #1) in AllocationPool._codegen_create_cudagraph_cached. On real
+    inputs the backstop is tautological -- the slab is sized to Max(leaf
+    extents) by construction, so it always covers every leaf -- so these tests
+    INJECT a pool-vs-leaf sizing divergence (a leaf whose finalized offset+size
+    reaches past the frozen slab) to prove the backstop fires, and confirm it
+    stays silent when the slab covers every leaf. Also covers the
+    finite-upper-bound requirement for freezing the slab.
+    """
+
+    class _StopAfterGuard(Exception):
+        """Raised by the fake wrapper's first post-guard call so that a passing
+        (non-firing) guard is observable without a real cpp wrapper."""
+
+    class _FakeWrapper:
+        subgraph_name = None
+
+        def codegen_device(self, device):
+            raise TestCudagraphSlabGuard._StopAfterGuard
+
+    @staticmethod
+    def _make_pool(sym):
+        # One leaf whose byte-size is 4*sym; with sym in [1, 2048] its extent
+        # upper-bounds to 8192 bytes. finalize() assigns it offset 0.
+        from torch._inductor.codegen.memory_planning import (
+            Allocation,
+            AllocationPool,
+            LiveRange,
+            TemporalSplit,
+        )
+
+        node = SimpleNamespace(
+            get_layout=lambda: SimpleNamespace(size=[sym]),
+            get_name=lambda: "buf_test",
+        )
+        leaf = Allocation(
+            node=node,
+            live_range=LiveRange(0, 1),
+            size_hint=64,
+            symbolic_size=sym * 4,
+        )
+        pool = AllocationPool(device=torch.device("cuda"), root=TemporalSplit([leaf]))
+        pool.finalize("pool0")
+        return pool, leaf
+
+    def _run_guard(self, pool, var_to_range, shape, stride):
+        from torch._inductor.utils import IndentedBuffer
+        from torch._inductor.virtualized import V
+
+        fake_graph = SimpleNamespace(
+            sizevars=SimpleNamespace(
+                shape_env=SimpleNamespace(var_to_range=var_to_range)
+            )
+        )
+        with V.set_graph_handler(fake_graph):
+            pool._codegen_create_cudagraph_cached(
+                self._FakeWrapper(),
+                IndentedBuffer(),
+                dtype=torch.uint8,
+                shape=shape,
+                stride=stride,
+            )
+
+    def test_slab_guard_fires_on_leaf_overrun(self):
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+        pool, leaf = self._make_pool(s0)
+        # Inject the divergence: push the finalized leaf offset one slab past 0
+        # so its offset+size (8192 + 8192) overruns the frozen slab (8192).
+        leaf.offset = sympy.Integer(8192)
+        with self.assertRaisesRegex(RuntimeError, "would overrun the slab"):
+            self._run_guard(pool, {s0: ValueRanges(1, 2048)}, (s0,), (1,))
+
+    def test_slab_guard_silent_when_slab_covers_leaves(self):
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+        pool, _ = self._make_pool(s0)
+        # No injection: the slab (8192) covers the single leaf (offset 0 + 8192),
+        # so the backstop must NOT fire -- codegen proceeds until the fake
+        # wrapper's first post-guard call raises the sentinel.
+        with self.assertRaises(self._StopAfterGuard):
+            self._run_guard(pool, {s0: ValueRanges(1, 2048)}, (s0,), (1,))
+
+    def test_slab_freeze_requires_finite_upper_bound(self):
+        from torch.utils._sympy.numbers import int_oo
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+        pool, _ = self._make_pool(s0)
+        # An unbounded slab dim cannot yield a fixed max slab -> hard error.
+        with self.assertRaisesRegex(RuntimeError, "finite dynamic-shape upper"):
+            self._run_guard(pool, {s0: ValueRanges(1, int_oo)}, (s0,), (1,))
 
 
 @requires_gpu()

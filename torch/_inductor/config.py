@@ -2507,6 +2507,33 @@ class aot_inductor:
         os.environ.get("AOT_INDUCTOR_CUDAGRAPH_CROSS_PARTITION_MEMORY", "0") == "1"
     )
 
+    # Hold the SHARED replay lock across eager (non-captured) partition regions
+    # in the generated run_impl. Root cause of a multi-instance serving IMA:
+    # during one instance's EXCLUSIVE capture, another instance's EAGER
+    # partitions run under NO lock and issue a real unguarded cudaMalloc/cudaFree
+    # (the allocator routes by the CALLING thread's capture status, and
+    # thread-local capture mode does not restrict other threads), which corrupts
+    # the captured graph. Replays already take the lock shared and captures take
+    # it exclusive; only eager regions were unprotected. Steady state stays fully
+    # concurrent -- all readers -- and only a rare new-shape capture stalls eager
+    # regions at a boundary. Regional-only: whole-graph mode has no eager regions.
+    cudagraph_lock_eager_during_capture: bool = (
+        os.environ.get("AOT_INDUCTOR_CUDAGRAPH_LOCK_EAGER_DURING_CAPTURE", "1") == "1"
+    )
+
+    # Reject, at run_impl entry, any input whose dynamic dim exceeds the compiled
+    # upper bound the max slab was frozen for, instead of silently overrunning it.
+    # The compiled .so is only valid for inputs within the ranges it was built
+    # for; a served value above the frozen max corrupts GPU memory and yields
+    # wrong predictions with no error. This turns that whole class -- a stale or
+    # under-sampled dynamic range, e.g. a batch dim compiled to a too-small max --
+    # into an immediate named error. Cost is a few integer compares once per
+    # forward, off the kernel path. Regional-only: it guards the frozen max slab,
+    # which whole-graph does not use. Independent of AOTI_RUNTIME_CHECK_INPUTS.
+    cudagraph_runtime_input_bounds_check: bool = (
+        os.environ.get("AOT_INDUCTOR_CUDAGRAPH_RUNTIME_INPUT_BOUNDS_CHECK", "1") == "1"
+    )
+
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False

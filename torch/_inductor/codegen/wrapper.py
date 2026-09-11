@@ -4982,6 +4982,13 @@ class PythonWrapperCodegen(CodeGen):
         finally:
             self.pop_codegened_graph()
 
+    def codegen_cudagraph_eager_replay_lock_prologue(self) -> None:
+        """Hook to emit, at the top of the partition sequence in run_impl, the
+        guard that holds the SHARED regional-cuda-graph replay lock across eager
+        (non-captured) partition regions. Default no-op; only the AOTI GPU
+        wrapper emits, and only when regional cuda-graph is on. See
+        cpp_wrapper_gpu.py and config.aot_inductor.cudagraph_lock_eager_during_capture."""
+
     def codegen_partition_call(
         self,
         partition_id: int,

@@ -1213,6 +1213,32 @@ class CppWrapperGpu(CppWrapperCpu):
                 """
             )
 
+        if (
+            self._cudagraph_regional_enabled()
+            and config.aot_inductor.cudagraph_lock_eager_during_capture
+        ):
+            # Only regional has eager regions to protect. The guard holds the
+            # SHARED replay lock across run_impl so eager partitions are
+            # "readers", which a concurrent instance's EXCLUSIVE capture then
+            # excludes -- otherwise an unguarded eager cudaMalloc can corrupt
+            # that capture. The Release guard temporarily drops it around each
+            # run_graph, which takes its own lock, avoiding a same-thread
+            # recursive-shared / upgrade deadlock. Both RAII, so exception-safe.
+            self.header.splice(
+                """
+                namespace {
+                struct AOTIEagerReplayLockGuard {
+                  AOTIEagerReplayLockGuard() { aoti_torch_cuda_graph_replay_lock(); }
+                  ~AOTIEagerReplayLockGuard() { aoti_torch_cuda_graph_replay_unlock(); }
+                };
+                struct AOTIEagerReplayLockRelease {
+                  AOTIEagerReplayLockRelease() { aoti_torch_cuda_graph_replay_unlock(); }
+                  ~AOTIEagerReplayLockRelease() { aoti_torch_cuda_graph_replay_lock(); }
+                };
+                } // namespace
+                """
+            )
+
     def _cudagraph_any_enabled(self) -> bool:
         """True when either cuda-graph mode emits calls into the runtime, so the
         runtime header must be included. Const graphs (`_const_run_impl`) run
@@ -1223,11 +1249,17 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def _cudagraph_regional_enabled(self) -> bool:
         """True when this wrapper emits per-partition captures."""
-        return (
-            config.aot_inductor.cudagraph_mode == "regional"
-            and V.graph.aot_mode
-            and not V.graph.is_const_graph
-        )
+        if config.aot_inductor.cudagraph_mode != "regional":
+            return False
+        if not V.graph.aot_mode or V.graph.is_const_graph:
+            return False
+        if V.graph.is_dual_wrapper_mode:
+            raise RuntimeError(
+                'config.aot_inductor.cudagraph_mode="regional" is not supported '
+                "in dual-wrapper mode, which emits a JIT entry point alongside "
+                "the AOTI one; only the AOTI body can be captured."
+            )
+        return True
 
     def _cudagraph_whole_enabled(self) -> bool:
         """True when this wrapper should capture its whole body as one cuda graph.
@@ -1700,6 +1732,21 @@ class CppWrapperGpu(CppWrapperCpu):
                     f"AOTI_TORCH_ERROR_CODE_CHECK("
                     f"{get_stream}({device_idx}, (void**)&{name}));"
                 )
+
+    def codegen_cudagraph_eager_replay_lock_prologue(self) -> None:
+        # FIX B: emitted (via scheduler _codegen_partitions) at the top of the
+        # partition sequence in run_impl. Holds the SHARED regional-cudagraph
+        # replay lock for the whole forward so eager (non-captured) partition
+        # regions are 'readers' -> a concurrent instance's EXCLUSIVE capture
+        # excludes them, preventing unguarded eager cudaMalloc from corrupting
+        # the capture. Released around each run_graph (see
+        # codegen_partition_call). Gated + AOTI-only; no-op otherwise.
+        if (
+            config.aot_inductor.cudagraph_mode == "regional"
+            and V.graph.aot_mode
+            and config.aot_inductor.cudagraph_lock_eager_during_capture
+        ):
+            self.writeline("AOTIEagerReplayLockGuard __aoti_eager_replay_lock_guard;")
 
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
@@ -2278,6 +2325,16 @@ static inline void ensure_triton_kernel_compiles_started() {{
         def _vec_i32(xs: list[int]) -> str:
             return "std::vector<int32_t>{" + ", ".join(str(x) for x in xs) + "}"
 
+        # FIX B: drop the run_impl-scope shared replay lock around run_graph.
+        # run_graph takes its own lock (EXCLUSIVE to record / SHARED to
+        # replay); holding the shared lock here would self-deadlock (same-thread
+        # recursive-shared on record's upgrade to exclusive). RAII, so a throw in
+        # run_graph re-acquires the shared lock before unwinding.
+        lock_eager = config.aot_inductor.cudagraph_lock_eager_during_capture
+        if lock_eager:
+            self.writeline(
+                "{ AOTIEagerReplayLockRelease __aoti_eager_replay_lock_release;"
+            )
         self.writeline(
             f"this->cudagraph_mgr_->run_graph({shape_key}, "
             f"p{partition_id}_inputs, {num_tensor_inputs}, "
@@ -2294,6 +2351,8 @@ static inline void ensure_triton_kernel_compiles_started() {{
         )
         self.writeline(f"  stream = p{partition_id}_saved;")
         self.writeline("});")
+        if lock_eager:
+            self.writeline("}")
 
         # Unpack outputs. Every output (model or internal) hands off a stable
         # non-owning view of its recorded output address -- no clone. For a
@@ -2310,7 +2369,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
         self._outer_scope_vars.update(input_deallocation.keys())
         passthrough_names = set(input_deallocation.keys())
         # Passthrough outputs (output name == one of this partition's input
-        # names): run_partition returned a NON-OWNING view at output_meta[i],
+        # names): run_graph returned a NON-OWNING view at output_meta[i],
         # which for an eager-copied input is THIS partition's static_inputs[i]
         # address. When THIS partition is the EARLIEST captured passthrough
         # emitter for `name`, reassign outer-scope `name` to that stable

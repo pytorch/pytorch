@@ -12192,6 +12192,10 @@ class Scheduler:
             cudagraph_partition.plan_cudagraph_scratch_slab()
 
         with self.use_default_device_context(partitions, signatures):
+            # Hold the shared replay lock across the eager partition regions, so
+            # a concurrent instance's exclusive capture excludes them. No-op
+            # unless AOTI GPU + regional mode + the gating flag.
+            V.graph.wrapper_code.codegen_cudagraph_eager_replay_lock_prologue()
             for partition, signature in zip(partitions, signatures):
                 if len(partition) < 1:
                     raise AssertionError(
