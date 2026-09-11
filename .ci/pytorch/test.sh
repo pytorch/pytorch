@@ -434,19 +434,29 @@ test_python_shard() {
     exit 1
   fi
 
-  # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
-  # shellcheck disable=SC2086
-
-  # modify LD_LIBRARY_PATH to ensure it has the conda env.
-  # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-
-  assert_git_not_dirty
+  test_python --shard "$1" "$NUM_TEST_SHARDS" --upload-artifacts-while-running
 }
 
 test_python() {
+  # ROCm shards can share a node without CPU isolation. Use the shard count
+  # as a concurrency estimate, keeping the cap local to non-distributed tests
+  # so distributed launchers can still choose their own thread defaults.
+  if [[ "${BUILD_ENVIRONMENT:-}" == *rocm* ]] && [[ -z "${OMP_NUM_THREADS:-}" ]]; then
+    local omp_divisor=4
+    if [[ "${NUM_TEST_SHARDS:-1}" -gt 4 ]]; then
+      omp_divisor="$NUM_TEST_SHARDS"
+    fi
+    local OMP_NUM_THREADS
+    OMP_NUM_THREADS=$(( $(nproc) / omp_divisor ))
+    # Keep the ARC floor for floating-point reduction-order-sensitive tests.
+    if [[ "$OMP_NUM_THREADS" -lt 4 ]]; then
+      OMP_NUM_THREADS=4
+    fi
+    export OMP_NUM_THREADS
+  fi
+
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE "$@" --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
