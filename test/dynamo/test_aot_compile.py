@@ -1627,6 +1627,51 @@ from user code:
             with _set_pooling(mode):
                 self.assertEqual(reloaded(x), expected[mode])
 
+    def test_aot_compile_module_no_match_error(self):
+        # Two inputs, so the message has to account for both rather than
+        # reporting only the first one's guard failure. Vary dtype rather than
+        # shape: aot_compile_module does not forward `dynamic`, so a second
+        # shape goes automatic-dynamic and would subsume the unmatched input.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float32),),
+                    kwargs={},
+                    contexts=[],
+                ),
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float64),),
+                    kwargs={},
+                    contexts=[],
+                ),
+            ]
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3, dtype=torch.float16))
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        self.assertIn("Tried 2 compiled input(s)", message)
+        self.assertIn("[0]", message)
+        self.assertIn("[1]", message)
+        # One line per input, not a multi-line GuardDebugInfo repr per input.
+        self.assertEqual(len(message.splitlines()), 4)
+        self.assertIn("Add a ModelInput", message)
+
+    def test_aot_compile_module_wrong_arity_raises_type_error(self):
+        # A call the signature cannot bind is a caller error, not a guard miss:
+        # it surfaces as the TypeError the plain module would raise, not as a
+        # no-match report telling the user to add a ModelInput.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        x = torch.randn(3, 3)
+        with self.assertRaisesRegex(TypeError, "too many positional arguments"):
+            model(x, x)
+        with self.assertRaisesRegex(TypeError, "missing a required argument: 'x'"):
+            model()
+
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
         # Module._wrapped_call_impl, whose globals are torch/nn/modules/module.py.

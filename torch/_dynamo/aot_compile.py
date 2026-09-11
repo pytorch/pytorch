@@ -868,11 +868,55 @@ class AOTCompiledModel:
     compiled_results: list[AOTCompiledFunction]
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # guard_check() evaluates guards regardless of _guard_check_enabled, so
+        # scan EVERY result for a real match first -- skipping opted-out results
+        # here would, when all of them opted out, fall through to the first
+        # result below and silently serve the wrong graph.
         for result in self.compiled_results:
+            # A call the signature cannot bind is a caller error no ModelInput
+            # could fix: let bind_locals' TypeError propagate as the plain module
+            # call would.
             if result.guard_check(self.model, *args, **kwargs):
+                # guard_check already passed; call fn directly so result()
+                # does not re-run the guard eval on this hot dispatch path.
+                return result.fn(self.model, *args, **kwargs)
+        # A result that opted out via disable_guard_check() accepts anything,
+        # but only after a real match has been sought.
+        for result in self.compiled_results:
+            if not result._guard_check_enabled:
                 return result(self.model, *args, **kwargs)
-        # All guards failed, just run one of them and throw the guard check error.
-        return self.compiled_results[0](self.model, *args, **kwargs)
+        raise RuntimeError(self._no_match_message(*args, **kwargs))
+
+    def _no_match_message(self, *args: Any, **kwargs: Any) -> str:
+        lines = [
+            f"No AOT compiled graph matched this call. Tried "
+            f"{len(self.compiled_results)} compiled input(s):"
+        ]
+        missing_global = False
+        for i, result in enumerate(self.compiled_results):
+            # __post_init__ always leaves a live artifact with a populated
+            # guard_manager (only serialize() nulls it, on a copy).
+            guard_manager = result._artifacts.guard_manager
+            if guard_manager is None:
+                raise AssertionError("live artifact must have a guard_manager")
+            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+            reason = guard_manager.check_verbose(f_locals)
+            parts = reason.verbose_code_parts or [str(reason)]
+            joined = "; ".join(str(p) for p in parts).replace("\n", " ")
+            if "KeyError on G[" in joined:
+                missing_global = True
+            lines.append(f"  [{i}] {joined}")
+        if missing_global:
+            lines.append(
+                "A guarded global is missing from this process; define it (or "
+                "load with an f_globals carrying it) so the guard can resolve it."
+            )
+        else:
+            lines.append(
+                "Add a ModelInput covering this call, or check whether a guard "
+                "that distinguishes it was dropped by guard_filter_fn."
+            )
+        return "\n".join(lines)
 
     def serialize(self) -> bytes:
         # Nothing threads external_data down this path (_save_aot_compiled_module
