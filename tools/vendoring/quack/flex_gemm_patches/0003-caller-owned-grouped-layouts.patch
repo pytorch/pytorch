@@ -1,0 +1,223 @@
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index a9cf4be..3282e6e 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -1100,0 +1101 @@ class EpiMod:
++                        swap_ab=swap_ab,
+@@ -1133,0 +1135 @@ class EpiMod:
++                    swap_ab=swap_ab,
+@@ -1182,0 +1185 @@ class EpiMod:
++                        swap_ab=swap_ab,
+diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index ea24697..75f2e18 100644
+--- a/quack/epilogue/ops.py
++++ b/quack/epilogue/ops.py
+@@ -2568 +2568 @@ class GroupedColStatsOut(EpiOp):
+-    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args):
++    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
+@@ -2972 +2972 @@ class ColVecSelect(EpiOp):
+-    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args):
++    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
+diff --git a/quack/gemm_base.py b/quack/gemm_base.py
+index dbc9a17..cb87afc 100644
+--- a/quack/gemm_base.py
++++ b/quack/gemm_base.py
+@@ -174,0 +175,5 @@ class GemmBase:
++        if const_expr(mA is not None and mB is not None):
++            kernel_m, kernel_n = cute.size(mA, mode=[0]), cute.size(mB, mode=[0])
++            self.caller_m, self.caller_n = (
++                (kernel_n, kernel_m) if const_expr(self.a_transposed) else (kernel_m, kernel_n)
++            )
+diff --git a/quack/gemm_runtime/identity.py b/quack/gemm_runtime/identity.py
+index 14bb369..f9861a1 100644
+--- a/quack/gemm_runtime/identity.py
++++ b/quack/gemm_runtime/identity.py
+@@ -36 +36 @@ from typing import NamedTuple, Optional
+-def semantic_value_key(value, seen):
++def semantic_value_key(value, seen, *, force_source=False):
+@@ -44,3 +44,5 @@ def semantic_value_key(value, seen):
+-    keyer). Everything else raises: a value we cannot fingerprint must never
+-    reach the compile cache, because a too-coarse key silently reuses the
+-    wrong kernel.
++    keyer). ``force_source`` fingerprints an installed external callback root
++    by source too, for caller-authored code outside the QuACK package; its
++    dependencies retain the stable installed-function policy. Everything else
++    raises: a value we cannot fingerprint must never reach the compile
++    cache, because a too-coarse key silently reuses the wrong kernel.
+@@ -60 +62 @@ def semantic_value_key(value, seen):
+-            semantic_value_key(qsk(value), seen),
++            semantic_value_key(qsk(value), seen, force_source=force_source),
+@@ -65 +67,4 @@ def semantic_value_key(value, seen):
+-        return ("tuple", tuple(semantic_value_key(v, seen) for v in value))
++        return (
++            "tuple",
++            tuple(semantic_value_key(v, seen, force_source=force_source) for v in value),
++        )
+@@ -67 +72,4 @@ def semantic_value_key(value, seen):
+-        return ("list", tuple(semantic_value_key(v, seen) for v in value))
++        return (
++            "list",
++            tuple(semantic_value_key(v, seen, force_source=force_source) for v in value),
++        )
+@@ -71 +79,9 @@ def semantic_value_key(value, seen):
+-            tuple(sorted((repr(k), semantic_value_key(v, seen)) for k, v in value.items())),
++            tuple(
++                sorted(
++                    (
++                        repr(k),
++                        semantic_value_key(v, seen, force_source=force_source),
++                    )
++                    for k, v in value.items()
++                )
++            ),
+@@ -74 +90,6 @@ def semantic_value_key(value, seen):
+-        return ("set", tuple(sorted(repr(semantic_value_key(v, seen)) for v in value)))
++        return (
++            "set",
++            tuple(
++                sorted(repr(semantic_value_key(v, seen, force_source=force_source)) for v in value)
++            ),
++        )
+@@ -77,2 +97,0 @@ def semantic_value_key(value, seen):
+-    if inspect.isfunction(value):
+-        return function_semantic_key(value, seen)
+@@ -82,2 +101,2 @@ def semantic_value_key(value, seen):
+-            function_semantic_key(value.__func__, seen),
+-            semantic_value_key(value.__self__, seen),
++            function_semantic_key(value.__func__, seen, force_source=force_source),
++            semantic_value_key(value.__self__, seen, force_source=force_source),
+@@ -85,2 +104,2 @@ def semantic_value_key(value, seen):
+-    if isinstance(value, (types.BuiltinFunctionType, types.MethodWrapperType)):
+-        return ("builtin", getattr(value, "__module__", None), value.__qualname__)
++    if inspect.isfunction(value):
++        return function_semantic_key(value, seen, force_source=force_source)
+@@ -89,3 +108,6 @@ def semantic_value_key(value, seen):
+-        # Decorator wrappers (functools.wraps chains: lru_cache, dsl_user_op,
+-        # cute.jit): the semantics live in the wrapped function.
+-        return ("wrapped", semantic_value_key(wrapped, seen))
++        raise TypeError(
++            f"cannot fingerprint decorated callable object {value!r}; use a "
++            "function/method wrapper or implement __quack_semantic_key__"
++        )
++    if isinstance(value, (types.BuiltinFunctionType, types.MethodWrapperType)):
++        return ("builtin", getattr(value, "__module__", None), value.__qualname__)
+@@ -95,3 +117,3 @@ def semantic_value_key(value, seen):
+-            semantic_value_key(value.func, seen),
+-            semantic_value_key(value.args, seen),
+-            semantic_value_key(value.keywords, seen),
++            semantic_value_key(value.func, seen, force_source=force_source),
++            semantic_value_key(value.args, seen, force_source=force_source),
++            semantic_value_key(value.keywords, seen, force_source=force_source),
+@@ -111 +133,4 @@ def semantic_value_key(value, seen):
+-                (f.name, semantic_value_key(getattr(value, f.name), seen))
++                (
++                    f.name,
++                    semantic_value_key(getattr(value, f.name), seen, force_source=force_source),
++                )
+@@ -156,9 +181,28 @@ def _is_extern_function(fn) -> bool:
+-def function_semantic_key(fn, seen=None):
+-    """Fingerprint source plus the globals/closures that can change its math."""
+-    seen = set() if seen is None else seen
+-    ident = (fn.__module__, fn.__qualname__)
+-    if ident in seen:
+-        return ("function_ref", *ident)
+-    seen.add(ident)
+-    if _is_extern_function(fn):
+-        return ("extern_function", *ident)
++def _force_source_dependency(owner, value, force_source):
++    """Whether a caller callback dependency belongs to the same source package."""
++    if not force_source:
++        return False
++    if inspect.ismethod(value):
++        value = value.__func__
++    elif isinstance(value, functools.partial):
++        value = value.func
++    if not inspect.isfunction(value):
++        return False
++    owner_package = (getattr(owner, "__module__", None) or "").partition(".")[0]
++    value_package = (getattr(value, "__module__", None) or "").partition(".")[0]
++    return bool(owner_package and owner_package == value_package and owner_package != "quack")
++
++
++def _dependency_semantic_key(owner, value, seen, force_source):
++    """Fingerprint one dependency under the caller-package source policy."""
++    return semantic_value_key(
++        value,
++        seen,
++        force_source=_force_source_dependency(owner, value, force_source),
++    )
++
++
++def _function_source_digest(fn, *, exact: bool = False) -> str:
++    """Hash one function body, optionally bypassing ``inspect`` unwrapping."""
++    code = getattr(fn, "__code__", None)
++    source_target = code if exact and code is not None else fn
+@@ -166 +210 @@ def function_semantic_key(fn, seen=None):
+-        source = inspect.getsource(fn).encode()
++        source = inspect.getsource(source_target).encode()
+@@ -168 +211,0 @@ def function_semantic_key(fn, seen=None):
+-        code = getattr(fn, "__code__", None)
+@@ -171,0 +215,53 @@ def function_semantic_key(fn, seen=None):
++    return hashlib.sha256(source).hexdigest()
++
++
++def function_semantic_key(fn, seen=None, *, force_source=False):
++    """Fingerprint a function root plus stable semantic keys for dependencies."""
++    seen = set() if seen is None else seen
++    ident = (fn.__module__, fn.__qualname__)
++    marker = ("function_id", id(fn))
++    if marker in seen:
++        return ("function_ref", *ident)
++    seen.add(marker)
++    if not force_source and _is_extern_function(fn):
++        return ("extern_function", *ident)
++
++    wrapped = getattr(fn, "__wrapped__", None)
++    if wrapped is not None:
++        try:
++            closure_vars = inspect.getclosurevars(fn)
++            nonlocals = closure_vars.nonlocals
++            globals_ = closure_vars.globals
++        except TypeError:
++            nonlocals = {}
++            globals_ = {}
++        wrapper_deps = tuple(
++            (
++                name,
++                ("wrapper_ref",)
++                if value is fn
++                else (
++                    ("wrapped_ref",)
++                    if value is wrapped
++                    else _dependency_semantic_key(fn, value, seen, force_source)
++                ),
++            )
++            for name, value in sorted(nonlocals.items())
++            if not name.startswith("__")
++        )
++        wrapper_globals = tuple(
++            (name, _dependency_semantic_key(fn, value, seen, force_source))
++            for name, value in sorted(globals_.items())
++            if not name.startswith("__")
++        )
++        return (
++            "decorated_function",
++            *ident,
++            _function_source_digest(fn, exact=True),
++            semantic_value_key(fn.__defaults__, seen, force_source=False),
++            semantic_value_key(fn.__kwdefaults__, seen, force_source=False),
++            wrapper_deps,
++            wrapper_globals,
++            semantic_value_key(wrapped, seen, force_source=force_source),
++        )
++
+@@ -181 +277 @@ def function_semantic_key(fn, seen=None):
+-        (name, semantic_value_key(value, seen))
++        (name, _dependency_semantic_key(fn, value, seen, force_source))
+@@ -188,3 +284,3 @@ def function_semantic_key(fn, seen=None):
+-        hashlib.sha256(source).hexdigest(),
+-        semantic_value_key(fn.__defaults__, seen),
+-        semantic_value_key(fn.__kwdefaults__, seen),
++        _function_source_digest(fn),
++        semantic_value_key(fn.__defaults__, seen, force_source=False),
++        semantic_value_key(fn.__kwdefaults__, seen, force_source=False),
