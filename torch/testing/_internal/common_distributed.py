@@ -300,6 +300,10 @@ def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
 def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     """Skip if fewer than x accelerators available.
 
+    NOTE: The naming retains "gpu" for backward compatibility, but the logic
+    is hardware-agnostic and works for any accelerator supported by
+    torch.accelerator (e.g., CUDA, XPU, HPU, and PrivateUse1-based backends).
+
     Args:
         x: Minimum number of accelerators required.
         allow_cpu: If True, run the test on CPU-only machines (no accelerators).
@@ -308,14 +312,28 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if (
-                torch.accelerator.is_available()
-                and torch.accelerator.device_count() >= x
-            ):
+            # Use check_available=True because current_accelerator() defaults to
+            # compile-time detection. On builds compiled with an accelerator but
+            # with no runtime device available, it would still return that
+            # accelerator, causing allow_cpu=True tests to be skipped instead of
+            # taking the CPU fallback.
+            acc = torch.accelerator.current_accelerator(check_available=True)
+            if acc is not None:
+                device_type = acc.type
+                device_module = torch.get_device_module(device_type)
+                if device_module.device_count() >= x:
+                    return func(*args, **kwargs)
+
+            # CPU path: allow running a degenerate version if explicitly requested
+            if allow_cpu and acc is None:
                 return func(*args, **kwargs)
-            if allow_cpu and not torch.accelerator.is_available():
-                return func(*args, **kwargs)
+
+            # NOTE: TEST_SKIPS uses "multi-device-{x}" naming for historical/
+            # backward-compatibility reasons only. The skip logic itself is
+            # hardware-agnostic and does not assume CUDA/GPU.
             test_skip = TEST_SKIPS[f"multi-device-{x}"]
+            # NOTE: _maybe_handle_skip_if_lt_x_gpu retains "gpu" in its name
+            # for backward compatibility; it is hardware-agnostic.
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
