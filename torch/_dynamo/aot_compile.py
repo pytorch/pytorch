@@ -102,12 +102,12 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except __dict__ entries that
-            # will not pickle. The runtime assigns those back and never forces
-            # the pruned ones, so a value this pickler cannot serialize (a
-            # __dict__ entry like the __wrapped__ functools.wraps stashes, which
-            # can drag an unrelated lock/Module in) is dropped rather than left
-            # to fail the whole dump.
+            # pickler nothing it holds is pruned -- except __doc__ and __dict__
+            # entries that will not pickle. The runtime assigns those back and
+            # never forces the pruned ones, so a value this pickler cannot
+            # serialize (a __dict__ entry like the __wrapped__ functools.wraps
+            # stashes, which can drag an unrelated lock/Module in) is dropped
+            # rather than left to fail the whole dump.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
@@ -117,7 +117,12 @@ class AOTCompilePickler(FunctionPicklerBase):
                     k: v for k, v in obj.__dict__.items() if self._dumps_cleanly(v)
                 },
                 annotations={},
-                doc=None,
+                # __doc__ is the one reduced value the runtime never reads back
+                # (_apply_function_state assigns it, nothing forces it), so an
+                # unpicklable docstring must not fail the whole dump -- drop it
+                # like the pruned attributes above. __kwdefaults__ stays unpruned:
+                # a function cannot be called without it.
+                doc=obj.__doc__ if self._dumps_cleanly(obj.__doc__) else None,
                 type_params=None,
                 globals_snapshot=None,
             )
