@@ -1,5 +1,6 @@
 import builtins
 import dataclasses
+import functools
 import importlib
 import inspect
 import io
@@ -59,7 +60,9 @@ class CompileArtifacts:
     source_info: "SourceInfo"
     device_type: str
     backend_name: str
-    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    system_info: SystemInfo = dataclasses.field(
+        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
+    )
 
     def check_compatibility(self) -> None:
         # The cached info is the receiver so mismatch messages label self

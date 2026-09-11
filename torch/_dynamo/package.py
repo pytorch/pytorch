@@ -764,10 +764,47 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
+_CpuCodegenTarget = tuple[str, str, int, tuple[str, ...], int | None, str | None]
+
+
+def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
+    """(machine, vec_isa, vec_isa_width, vec_isa_macro, simdlen, march): the CPU codegen context.
+
+    ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
+    only when the artifact can hold native CPU code. None means the host has no
+    usable CPU codegen target: the probe raised, or it picked no valid vector
+    ISA (``pick_vec_isa`` never raises for a missing compiler; it returns
+    ``invalid_vec_isa``), so it can neither produce nor run a vectorized
+    inductor CPU kernel.
+    """
+    from torch._inductor import config as inductor_config, cpu_vec_isa
+
+    try:
+        vec_isa = cpu_vec_isa.pick_vec_isa()
+    except Exception:
+        logger.warning(
+            "Could not determine the CPU vector ISA, so no CPU codegen target "
+            "is recorded and none will be checked.",
+            exc_info=True,
+        )
+        return None
+    if isinstance(vec_isa, cpu_vec_isa.InvalidVecISA):
+        return None
+
+    return (
+        platform.machine(),
+        str(vec_isa),
+        vec_isa.bit_width(),
+        tuple(vec_isa.build_macro()),
+        inductor_config.cpp.simdlen,
+        inductor_config.cpp.march,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
-    System information including Python, PyTorch, and GPU details.
+    System information including Python, PyTorch, CPU codegen, and GPU details.
     This information is used to ensure compiled artifacts can only be loaded
     with compatible system configurations.
     """
@@ -777,13 +814,16 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    cpu_codegen_target: _CpuCodegenTarget | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
-    def current(cls) -> "SystemInfo":
-        """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
+    def current(cls, *, cpu_codegen: bool = True) -> "SystemInfo":
+        """Create a SystemInfo instance with current system information.
+
+        ``cpu_codegen=False`` skips the C++ toolchain probe behind
+        ``cpu_codegen_target``.
+        """
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
@@ -802,6 +842,7 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            cpu_codegen_target=_current_cpu_codegen_target() if cpu_codegen else None,
         )
 
     def check_compatibility(
@@ -854,7 +895,9 @@ class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
     source_info: SourceInfo
     device_type: str
-    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    system_info: SystemInfo = dataclasses.field(
+        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
+    )
     fn_name: str | None = None
     fn_first_lineno: str | None = None
 
@@ -1422,6 +1465,9 @@ class CompilePackage:
             codes=list(self._codes.values()),
             source_info=self._source_info,
             device_type=self._device_type,
+            # The codegen probe runs the C++ toolchain; only pay for it when the
+            # artifact can hold native CPU code.
+            system_info=SystemInfo.current(cpu_codegen=(self._device_type == "cpu")),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
