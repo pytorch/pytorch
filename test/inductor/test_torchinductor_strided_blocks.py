@@ -1609,7 +1609,22 @@ class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
 test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
 
 
-@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
+def _triton_cpu_supports_tensor_descriptor() -> bool:
+    # A CPU backend existing does not imply tensor descriptor support; older
+    # builds register the backend without the driver API.
+    # Internal-only: stable is an old (3.5-era) frontend with a retrofitted
+    # 3.8-based CPU backend; drop this once stable is upgraded to 3.8.
+    try:
+        from triton.backends.cpu.driver import CPUDriver
+    except ImportError:
+        return False
+    return hasattr(CPUDriver, "tensor_descriptor")
+
+
+@unittest.skipIf(
+    not TRITON_HAS_CPU or not _triton_cpu_supports_tensor_descriptor(),
+    "requires triton CPU backend with tensor descriptor support",
+)
 @config.patch({"triton.use_tensor_descriptor": True, "cpu_backend": "triton"})
 @instantiate_parametrized_tests
 class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
