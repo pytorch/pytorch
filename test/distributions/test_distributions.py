@@ -118,6 +118,7 @@ from torch.testing._internal.common_device_type import (
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
+    device_rng_seed,
     gradcheck,
     load_tests,
     run_tests,
@@ -2604,8 +2605,8 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0, xpu=2)  # see note [Randomized statistical tests]
     def test_logisticnormal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         means = map(np.asarray, [(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)])
         covs = map(np.diag, [(0.1, 0.1), (1.0, 1.0), (10.0, 10.0)])
         for mean, cov in product(means, covs):
