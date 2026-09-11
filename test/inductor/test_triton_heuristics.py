@@ -258,7 +258,7 @@ class TestTritonHeuristics(TestCase):
             ),
         ],
     )
-    def test_scalar_online_softmax_reduction_configs(
+    def test_scalar_accumulator_reduction_configs(
         self, major, cc, expected_baseline_configs, expected_scalar_configs
     ):
         device = self._fake_cuda_device_properties()._replace(major=major, cc=cc)
@@ -307,14 +307,12 @@ class TestTritonHeuristics(TestCase):
             expected_baseline_configs,
         )
         self.assertEqual(
-            config_values({AutotuneHint.SCALAR_ONLINE_SOFTMAX}),
+            config_values({AutotuneHint.SCALAR_ACCUMULATORS}),
             expected_scalar_configs,
         )
         baseline_rblock = expected_baseline_configs[0][1]
         self.assertEqual(tiled_block_products(set())[0], baseline_rblock)
-        scalar_tiled_products = tiled_block_products(
-            {AutotuneHint.SCALAR_ONLINE_SOFTMAX}
-        )
+        scalar_tiled_products = tiled_block_products({AutotuneHint.SCALAR_ACCUMULATORS})
         self.assertEqual(scalar_tiled_products[0], 4096)
         self.assertIn(baseline_rblock, scalar_tiled_products)
 
@@ -498,7 +496,12 @@ class TestTritonHeuristics(TestCase):
             tl.store(out_ptr0 + (x0), tmp1, xmask)
 
         triton_meta = {
-            "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
+            "signature": {
+                "in_ptr0": "*fp32",
+                "out_ptr0": "*fp32",
+                "xnumel": "i32",
+                "XBLOCK": "constexpr",
+            },
             "device": DeviceProperties.create(torch.device(GPU_TYPE)),
             "constants": {},
             "configs": [
@@ -574,7 +577,7 @@ class TestTritonHeuristics(TestCase):
         self.assertTrue(8 in seen_num_elements_per_warp)
         self.assertEqual(
             autotune_hints_to_configs(
-                {AutotuneHint.SCALAR_ONLINE_SOFTMAX},
+                {AutotuneHint.SCALAR_ACCUMULATORS},
                 size_hints,
                 block_size,
                 device_props,
@@ -604,6 +607,58 @@ class TestTritonHeuristics(TestCase):
             configs = mock_cached_autotune.call_args[0][1]
             self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
+
+    @parametrize(
+        "hip_version, tlx_options, expected_kwargs",
+        [
+            (
+                "7.2",
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                },
+            ),
+            ("7.2", (), {}),
+            (
+                None,
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                {},
+            ),
+        ],
+    )
+    def test_template_function_preserves_tlx_hip_options(
+        self, hip_version, tlx_options, expected_kwargs
+    ):
+        triton_meta = {
+            "device": MagicMock(),
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 0,
+            "kpack": 1,
+        }
+
+        def capture_configs(_size_hints, configs, **_kwargs):
+            return configs
+
+        with (
+            patch.object(torch.version, "hip", hip_version),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.tlx_only_hip_options",
+                return_value=tlx_options,
+            ),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.cached_autotune",
+                side_effect=capture_configs,
+            ),
+        ):
+            configs = template(
+                num_stages=1,
+                num_warps=4,
+                triton_meta=triton_meta,
+            )
+
+        self.assertEqual(configs[0].kwargs, expected_kwargs)
 
     @runOnRocm
     def test_amd_special_config_args(self):
@@ -826,10 +881,6 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
         self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
-# Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
-# attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
-# used by these tests. CUDA paths are unaffected.
-@skipIfRocm
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
