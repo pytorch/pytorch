@@ -283,7 +283,12 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
         # Run the foreach reduce-scatter (including copy-in and view-out)
         torch.manual_seed(42)
-        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        # Keep sums exact in fp16 across the 128 threaded ranks.
+        unsharded_grads = [
+            torch.full_like(param, self.rank % 2, dtype=reduce_scatter_dtype)
+            for param in orig_params
+        ]
+        reduced_grads = [grad.clone() for grad in unsharded_grads]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
@@ -302,7 +307,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             group,
             reduce_scatter_stream,
             comm,
-            orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
             gradient_divide_factor=None,
@@ -323,7 +327,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             _,
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, reduce_scatter_dtype)
-        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
             _div_if_needed(grad, predivide_factor)
             dist.all_reduce(
@@ -335,7 +338,10 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         for fsdp_param, reduced_grad in zip(fsdp_params, reduced_grads):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
-            self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
+            self.assertEqual(
+                sharded_grad.full_tensor(),
+                reduced_grad.to(fsdp_param.sharded_grad_dtype),
+            )
 
 
 class TestFullyShardCommunication(FSDPTest):
