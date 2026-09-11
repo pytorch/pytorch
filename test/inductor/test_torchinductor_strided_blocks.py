@@ -2513,16 +2513,15 @@ if GPU_TYPE == "cuda":
 
     # Known TMA API limitations: these cases also fail for device-side TMA (they
     # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
-    # different (still-correct) codegen that breaks the device-specific code asserts,
-    # or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
-    # test_reduction_padded_output_tiling).
+    # different (still-correct) codegen that breaks the device-specific code asserts.
+    # test_reduction_padded_output_tiling is intentionally not listed: its
+    # device-TMA reduction-store regression is covered as a passing test.
     _HOST_TMA_EXPECTED_FAILURES = [
         "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
         "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",
         "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False_cuda",
         "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True_cuda",
         "test_pointwise_index_order_cuda",
-        "test_reduction_padded_output_tiling_cuda",
     ]
     for _name in _HOST_TMA_EXPECTED_FAILURES:
         setattr(
