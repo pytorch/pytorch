@@ -62,8 +62,13 @@ class CompileArtifacts:
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
-        current_system = SystemInfo.current()
-        current_system.check_compatibility(self.system_info, self.device_type)
+        # The cached info is the receiver so mismatch messages label self
+        # "cached", matching _DynamoCacheEntry.check_versions. It also sets
+        # which side the triton_version/gpu_name checks exempt off: with the
+        # cached info as receiver they skip only when the artifact itself
+        # recorded no Triton/GPU, requiring a match otherwise -- the correct
+        # direction for a compatibility check.
+        self.system_info.check_compatibility(SystemInfo.current(), self.device_type)
 
 
 @dataclasses.dataclass
