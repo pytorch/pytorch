@@ -36,11 +36,9 @@ kernel void histogramdd(
     constant size_t& num_dims [[buffer(4)]],
     constant T* bin_seq [[buffer(5)]],
     constant int64_t* num_bin_edges [[buffer(6)]],
-    constant T* leftmost_edge [[buffer(7)]],
-    constant T* rightmost_edge [[buffer(8)]],
-    constant int64_t* local_out_strides [[buffer(9)]],
-    constant uint8_t& algorithm [[buffer(10)]],
-    constant int64_t& weight_stride [[buffer(11)]],
+    constant int64_t* local_out_strides [[buffer(7)]],
+    constant uint8_t& algorithm [[buffer(8)]],
+    constant int64_t& weight_stride [[buffer(9)]],
     uint tid [[thread_position_in_grid]]) {
   constexpr auto eps = T(4e-6);
   bool skip_element = false;
@@ -49,13 +47,15 @@ kernel void histogramdd(
 
   for (size_t dim = 0; dim < num_dims; dim++) {
     T element = input_[offsets[tid * num_dims + dim]];
+    const T leftmost_edge = bin_seq[bin_seq_offset];
+    const T rightmost_edge = bin_seq[bin_seq_offset + num_bin_edges[dim] - 1];
 
     // Skips elements which fall outside the specified bins and NaN elements
     // Adding an eps to the edges to eliminate precision issues that cause
     // elements accidentally skipped, this is likely due to the minuscule
     // implementation differences between the CPU and MPS's linspace.
-    if (!(element >= (leftmost_edge[dim] - eps) &&
-          element <= (rightmost_edge[dim] + eps))) {
+    if (!(element >= (leftmost_edge - eps) &&
+          element <= (rightmost_edge + eps))) {
       skip_element = true;
       break;
     }
@@ -69,8 +69,8 @@ kernel void histogramdd(
         algorithm ==
             BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
       pos = static_cast<int64_t>(
-          (element - leftmost_edge[dim]) * (num_bin_edges[dim] - 1) /
-          (rightmost_edge[dim] - leftmost_edge[dim]));
+          (element - leftmost_edge) * (num_bin_edges[dim] - 1) /
+          (rightmost_edge - leftmost_edge));
       if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
         int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
         int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
@@ -94,21 +94,19 @@ kernel void histogramdd(
   }
 }
 
-#define REGISTER_HISTOGRAMDD_OP(DTYPE)                          \
-  template [[host_name("histogramdd_" #DTYPE)]] kernel void     \
-  histogramdd<DTYPE>(                                           \
-      constant DTYPE * input_ [[buffer(0)]],                    \
-      constant DTYPE * weight [[buffer(1)]],                    \
-      device DTYPE * local_out [[buffer(2)]],                   \
-      constant uint * offsets [[buffer(3)]],                    \
-      constant size_t& num_dims [[buffer(4)]],                  \
-      constant DTYPE* bin_seq [[buffer(5)]],                    \
-      constant int64_t* num_bin_edges [[buffer(6)]],            \
-      constant DTYPE* leftmost_edge [[buffer(7)]],              \
-      constant DTYPE* rightmost_edge [[buffer(8)]],             \
-      constant int64_t* local_out_strides [[buffer(9)]],        \
-      constant uint8_t& bin_selection_algorithm [[buffer(10)]], \
-      constant int64_t& weight_stride [[buffer(11)]],           \
+#define REGISTER_HISTOGRAMDD_OP(DTYPE)                         \
+  template [[host_name("histogramdd_" #DTYPE)]] kernel void    \
+  histogramdd<DTYPE>(                                          \
+      constant DTYPE * input_ [[buffer(0)]],                   \
+      constant DTYPE * weight [[buffer(1)]],                   \
+      device DTYPE * local_out [[buffer(2)]],                  \
+      constant uint * offsets [[buffer(3)]],                   \
+      constant size_t& num_dims [[buffer(4)]],                 \
+      constant DTYPE* bin_seq [[buffer(5)]],                   \
+      constant int64_t* num_bin_edges [[buffer(6)]],           \
+      constant int64_t* local_out_strides [[buffer(7)]],       \
+      constant uint8_t& bin_selection_algorithm [[buffer(8)]], \
+      constant int64_t& weight_stride [[buffer(9)]],           \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_HISTOGRAMDD_OP(float);
