@@ -16,6 +16,7 @@ from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.fx_passes.replace_random import replace_random_passes
+from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -905,6 +906,711 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_reuse_dtype_conversion_across_views(self):
+        def fn(x, lhs, lhs_t):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [0, 2, 1]), torch.bfloat16
+            )
+            out = aten.bmm.default(
+                lhs,
+                aten.expand.default(x_bf16, list(x_bf16.shape)),
+            )
+            out_t = aten.bmm.default(
+                lhs_t,
+                aten.expand.default(x_t_bf16, list(x_t_bf16.shape)),
+            )
+            return out, out_t
+
+        args = (
+            torch.randn(4, 5, 7, device=GPU_TYPE),
+            torch.randn(4, 3, 5, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        expected = fn(*args)
+        gm = make_fx(fn)(*args)
+        counters.clear()
+
+        with inductor_config.patch(emulate_precision_casts=True):
+            torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+                gm.graph
+            )
+        gm.recompile()
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(
+            sum(node.target is convert for node in gm.graph.nodes),
+            1,
+        )
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+        conversion = next(node for node in gm.graph.nodes if node.target is convert)
+        replacement = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is aten.permute.default and node.args[0] is conversion
+        )
+        self.assertEqual(get_node_storage(replacement), get_node_storage(conversion))
+        torch.testing.assert_close(gm(*args), expected)
+
+    def test_reuse_dtype_conversion_across_views_accepts_keyword_dtype(self):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            return aten.sum.default(x_bf16), aten.sum.default(x_t_bf16)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        convert = torch.ops.prims.convert_element_type.default
+        for node in gm.graph.nodes:
+            if node.target is convert:
+                node.args, node.kwargs = (node.args[0],), {"dtype": node.args[1]}
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+
+    def test_reuse_dtype_conversion_across_views_is_order_independent(self):
+        def fn(x, lhs, lhs_t):
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [0, 2, 1]), torch.bfloat16
+            )
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            return torch.bmm(lhs_t, x_t_bf16), torch.bmm(lhs, x_bf16)
+
+        args = (
+            torch.randn(4, 5, 7, device=GPU_TYPE),
+            torch.randn(4, 3, 5, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        gm = make_fx(fn)(*args)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+
+    def test_reuse_dtype_conversion_across_views_reuses_conversion_group(self):
+        def fn(x):
+            first = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            duplicate = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            permuted = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            return (
+                aten.sum.default(first),
+                aten.sum.default(duplicate),
+                aten.sum.default(permuted),
+            )
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    @parametrize("use", ["written", "returned"])
+    def test_reuse_dtype_conversion_across_views_preserves_observable_duplicate(
+        self, use
+    ):
+        def fn(x):
+            first = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            duplicate = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            permuted = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            if use == "written":
+                aten.copy_.default(duplicate, torch.zeros_like(duplicate))
+                duplicate_result = aten.sum.default(duplicate)
+            else:
+                duplicate_result = duplicate
+            return aten.sum.default(first), duplicate_result, aten.sum.default(permuted)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+
+    def test_reuse_dtype_conversion_across_views_rejects_storage_observation(self):
+        def fn(x):
+            first = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            viewed = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            aten.is_set_to.default(first, viewed)
+            return aten.sum.default(first), aten.sum.default(viewed)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        self.assertTrue(
+            any(node.target is aten.is_set_to.default for node in gm.graph.nodes)
+        )
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    def test_reuse_dtype_conversion_across_views_rejects_derived_view_write(self):
+        def fn(x):
+            first = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            viewed = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            derived_view = aten.transpose.int(viewed, 0, 1)
+            aten.copy_.default(derived_view, torch.zeros_like(derived_view))
+            return aten.sum.default(first), aten.sum.default(viewed)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    def test_reuse_dtype_conversion_across_views_selects_safe_sibling(self):
+        def fn(x):
+            safe = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            unsafe = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            permuted = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            aten.copy_.default(unsafe, torch.zeros_like(unsafe))
+            return aten.sum.default(safe), aten.sum.default(permuted)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+
+    def test_reuse_dtype_conversion_across_views_requires_matching_layout(self):
+        def fn(x, lhs, lhs_t):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [0, 2, 1]), torch.bfloat16
+            )
+            return torch.bmm(lhs, x_bf16), torch.bmm(lhs_t, x_t_bf16)
+
+        args = (
+            torch.randn(4, 5, 7, device=GPU_TYPE),
+            torch.randn(4, 3, 5, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        gm = make_fx(fn)(*args)
+        convert = torch.ops.prims.convert_element_type.default
+        permuted_convert = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is convert
+            and isinstance(node.args[0], torch.fx.Node)
+            and node.args[0].target is aten.permute.default
+        )
+        permuted_convert.meta["val"] = torch.empty_strided(
+            (4, 7, 5),
+            (35, 5, 1),
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+        )
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    def test_reuse_dtype_conversion_across_views_requires_internal_value(self):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [0, 2, 1]), torch.bfloat16
+            )
+            return x_bf16, x_t_bf16
+
+        x = torch.randn(4, 5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(
+            sum(node.target is convert for node in gm.graph.nodes),
+            2,
+        )
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    @parametrize(
+        "view,input_shape",
+        [
+            subtest(
+                (lambda x: aten.permute.default(x, [1, 0]), (5, 7)),
+                name="permute",
+            ),
+            subtest(
+                (lambda x: aten.transpose.int(x, 0, 1), (5, 7)),
+                name="transpose",
+            ),
+            subtest((lambda x: aten.t.default(x), (5, 7)), name="t"),
+            subtest(
+                (lambda x: aten.view.default(x, [6, 4]), (2, 3, 4)),
+                name="view",
+            ),
+            subtest(
+                (lambda x: aten.squeeze.dim(x, 0), (1, 5, 7)),
+                name="squeeze",
+            ),
+            subtest(
+                (lambda x: aten.unsqueeze.default(x, 0), (5, 7)),
+                name="unsqueeze",
+            ),
+        ],
+    )
+    def test_reuse_dtype_conversion_across_views_full_coverage(self, view, input_shape):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            viewed_bf16 = torch.ops.prims.convert_element_type.default(
+                view(x), torch.bfloat16
+            )
+            return aten.sum.default(x_bf16), aten.sum.default(viewed_bf16)
+
+        x = torch.randn(*input_shape, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    @parametrize("is_copy", [False, True])
+    def test_reuse_dtype_conversion_across_views_rejects_reshape(self, is_copy):
+        shape = [3, 8] if is_copy else [6, 4]
+
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            viewed_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.reshape.default(x, shape), torch.bfloat16
+            )
+            return aten.sum.default(x_bf16), aten.sum.default(viewed_bf16)
+
+        x = torch.randn(2, 3, 4, device=GPU_TYPE)
+        if is_copy:
+            x = x.permute(1, 0, 2)
+        expected = fn(x)
+        gm = make_fx(fn, pre_dispatch=True)(x)
+        self.assertTrue(
+            any(node.target is aten.reshape.default for node in gm.graph.nodes)
+        )
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    @parametrize(
+        "view,input_shape",
+        [
+            subtest(
+                (lambda x: aten.slice.Tensor(x, 0, 0, 1), (2, 3, 4)),
+                name="partial_slice",
+            ),
+            subtest(
+                (
+                    lambda x: aten.as_strided.default(x, [2, 3, 4], [0, 4, 1], 0),
+                    (30,),
+                ),
+                name="overlapping_as_strided",
+            ),
+            subtest(
+                (
+                    lambda x: aten.as_strided.default(x, [2, 3, 4], [13, 4, 1], 0),
+                    (30,),
+                ),
+                name="gapped_as_strided",
+            ),
+            subtest(
+                (
+                    lambda x: aten.as_strided.default(x, [2, 3, 4], [12, 4, 1], 1),
+                    (25,),
+                ),
+                name="offset_as_strided",
+            ),
+            subtest(
+                (lambda x: aten.expand.default(x, [2, 3, 4]), (1, 3, 4)),
+                name="expand",
+            ),
+        ],
+    )
+    def test_reuse_dtype_conversion_across_views_requires_full_coverage(
+        self, view, input_shape
+    ):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            viewed_bf16 = torch.ops.prims.convert_element_type.default(
+                view(x), torch.bfloat16
+            )
+            return aten.sum.default(x_bf16), aten.sum.default(viewed_bf16)
+
+        x = torch.randn(*input_shape, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    def test_reuse_dtype_conversion_across_views_rejects_as_strided(self):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            viewed_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.as_strided.default(x, [24], [1], 0), torch.bfloat16
+            )
+            return aten.sum.default(x_bf16), aten.sum.default(viewed_bf16)
+
+        x = torch.randn(2, 3, 4, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    def test_reuse_dtype_conversion_across_views_zero_numel(self):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            viewed_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.view.default(x, [0, 6]), torch.bfloat16
+            )
+            return aten.sum.default(x_bf16), aten.sum.default(viewed_bf16)
+
+        x = torch.randn(0, 2, 3, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    def test_reuse_dtype_conversion_across_views_general_consumers(self):
+        def fn(x):
+            x_f64 = torch.ops.prims.convert_element_type.default(x, torch.float64)
+            x_t_f64 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.float64
+            )
+            return aten.sum.default(aten.sin.default(x_f64)), aten.sum.default(
+                aten.select.int(x_t_f64, 0, 0)
+            )
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    def test_reuse_dtype_conversion_across_views_symbolic_shapes(self):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            return aten.sum.default(x_bf16), aten.sum.default(x_t_bf16)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn, tracing_mode="symbolic")(x)
+        convert = torch.ops.prims.convert_element_type.default
+        converted_permute = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is convert
+            and isinstance(node.args[0], torch.fx.Node)
+            and node.args[0].target is aten.permute.default
+        )
+        self.assertTrue(
+            any(
+                isinstance(size, torch.SymInt)
+                for size in converted_permute.meta["val"].size()
+            )
+        )
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+
+    def test_reuse_dtype_conversion_across_views_rejects_writable_use(self):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            aten.copy_.default(x_t_bf16, torch.zeros_like(x_t_bf16))
+            return aten.sum.default(x_bf16), aten.sum.default(x_t_bf16)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    def test_reuse_dtype_conversion_across_views_allows_read_only_mutable_arg(self):
+        def fn(x, dst):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            copied = aten.copy_.default(dst, x_t_bf16)
+            return aten.sum.default(x_bf16), copied
+
+        args = (
+            torch.randn(5, 7, device=GPU_TYPE),
+            torch.empty(7, 5, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        expected = fn(args[0], args[1].clone())
+        gm = make_fx(fn)(*args)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+        actual = gm(args[0], args[1].clone())
+        torch.testing.assert_close(actual, expected)
+
+    def test_reuse_dtype_conversion_across_views_rejects_mutation_region(self):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            mutated = aten.add_.Tensor(x, 1)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(mutated, [1, 0]), torch.bfloat16
+            )
+            return aten.sum.default(x_bf16), aten.sum.default(x_t_bf16)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        placeholder = next(node for node in gm.graph.nodes if node.op == "placeholder")
+        permute = next(
+            node for node in gm.graph.nodes if node.target is aten.permute.default
+        )
+        permute.replace_input_with(permute.args[0], placeholder)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    def test_reuse_dtype_conversion_across_views_rejects_wildcard_alias(self):
+        def fn(x):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [1, 0]), torch.bfloat16
+            )
+            pieces = aten.unbind.int(x_t_bf16, 0)
+            return aten.sum.default(x_bf16), aten.sum.default(pieces[0])
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn)(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+
+        convert = torch.ops.prims.convert_element_type.default
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+
+    def test_reuse_dtype_conversion_across_views_codegen(self):
+        def fn(x, lhs, lhs_t):
+            x_bf16 = torch.ops.prims.convert_element_type.default(x, torch.bfloat16)
+            x_t_bf16 = torch.ops.prims.convert_element_type.default(
+                aten.permute.default(x, [0, 2, 1]), torch.bfloat16
+            )
+            return (
+                torch.bmm(lhs, x_bf16),
+                torch.bmm(lhs_t, x_t_bf16),
+            )
+
+        args = (
+            torch.randn(4, 5, 7, device=GPU_TYPE),
+            torch.randn(4, 3, 5, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        expected = fn(*args)
+        counters.clear()
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
+        FileCheck().check_count("extern_kernels.bmm", 2, exactly=True).run(code)
+        FileCheck().check_count(
+            "triton_poi_fused_convert_element_type_0.run", 1, exactly=True
+        ).run(code)
+        FileCheck().check("reinterpret_tensor").run(code)
 
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
@@ -1927,7 +2633,9 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(
                     pattern_pp,
                     PatternPrettyPrinter.run(precompiled.search_fn_pattern),
-                    msg=lambda msg: f"{msg}\nFound mismatched pattern {precompiled.search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
+                    msg=lambda msg: (
+                        f"{msg}\nFound mismatched pattern {precompiled.search_fn.__name__}. Run torchgen/fuse/gen_patterns.py"
+                    ),
                 )
 
                 # Since we've already checked that the serialized patterns match
@@ -2750,8 +3458,10 @@ class TestPatternMatcher(TestCase):
         self.assertGreaterEqual(
             view_count_skip_noop,
             view_count_default,
-            lambda msg: f"{msg}\nExpected view count with remove_noop disabled ({view_count_skip_noop}) "
-            f"to be >= view count with remove_noop enabled ({view_count_default})",
+            lambda msg: (
+                f"{msg}\nExpected view count with remove_noop disabled ({view_count_skip_noop}) "
+                f"to be >= view count with remove_noop enabled ({view_count_default})"
+            ),
         )
 
     def test_bound_method_pattern_matcher(self):
