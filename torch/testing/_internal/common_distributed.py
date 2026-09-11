@@ -1847,6 +1847,16 @@ class MultiProcContinuousTest(TestCase):
     # Flag for lazy process spawning (to support instantiate_device_type_tests)
     _processes_spawned: bool = False
 
+    def _resolve_injected_device(self, device):
+        # Called by instantiate_device_type_tests' wrapper when present: rewrite
+        # the injected device to this worker's per-rank device. Returns a string
+        # (the injected `device` arg is a str) so the param keeps its type. CPU
+        # has no per-rank split, so it passes through unchanged.
+        dev = torch.device(device)
+        if dev.type == "cpu":
+            return device
+        return f"{dev.type}:{self.rank}"
+
     @classmethod
     def backend_str(cls) -> str | None:
         """
