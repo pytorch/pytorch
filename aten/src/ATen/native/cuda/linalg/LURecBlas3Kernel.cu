@@ -838,9 +838,19 @@ auto abs(const scalar_t& v) {
   }
 }
 
+template <typename scalar_t>
+__device__ __forceinline__
+auto real(const scalar_t& v) {
+  if constexpr (c10::is_complex<scalar_t>::value) {
+    return v.real();
+  } else {
+    return v;
+  }
+}
+
 template <typename real_t, int BS>
 __device__ __forceinline__
-std::tuple<int, int> block_max(
+std::tuple<real_t, int> block_max(
   real_t my_max, int my_idx,
   real_t* sdata, int* sidx, int tid
 ) {
@@ -871,7 +881,7 @@ std::tuple<int, int> block_max(
 
 template <typename scalar_t, int BS>
 __device__ __forceinline__
-std::tuple<int, int> find_pivot_row(
+std::tuple<typename c10::scalar_value_type<scalar_t>::type, int> find_pivot_row(
   scalar_t* __restrict__ dA, int lda, int n,
   int row_offset, int col_offset,
   // index to exclude -- relevant when deciding for a 2x2 pivot,
@@ -912,6 +922,8 @@ ldl_diagonal_panel_fused_kernel(
   using real_t = c10::scalar_value_type<scalar_t>::type;
   const real_t ALPHA = (1 + std::sqrt(17)) / 8;
   const auto tid = threadIdx.x;
+
+  scalar_t D[2][2];
 
   // The processed block will factor nb or nb-1 rows/cols
   while (curr_step < nb - 1) {
@@ -983,6 +995,38 @@ ldl_diagonal_panel_fused_kernel(
       }
     }
     __syncthreads();
+    // }
+
+
+    // Update L21 {
+    // L21 = dLD[curr_step + pivot_rank:, curr_step:curr_step + pivot_rank]
+    // L21 = L21 @ inv(D)
+    if (pivot_rank == 1) {
+      double D11 = ldl::real(dLD[LinOff(curr_step, curr_step, lda)]);
+      for (int i = curr_step + pivot_rank; i < n; i += BS) {
+        dLD[LinOff(i, curr_step, lda)] /= D11;
+      }
+    } else {
+      // NOTE: D stores inv(D) * det(D)
+      D[1][1] = dLD[LinOff(curr_step, curr_step, lda)];
+      D[0][1] = -dLD[LinOff(curr_step + 1, curr_step, lda)];
+      D[1][0] = -dLD[LinOff(curr_step, curr_step + 1, lda)];
+      D[0][0] = dLD[LinOff(curr_step + 1, curr_step + 1, lda)];
+
+      // scale by det(D)
+      double det = ldl::real(D[0][0] * D[1][1] - D[0][1] * D[1][0]);
+      D[1][1] /= det;
+      D[0][0] /= det;
+      D[0][1] /= det;
+      D[1][0] /= det;
+
+      for (int i = curr_step + pivot_rank; i < n; i += BS) {
+        auto l0 = dLD[LinOff(i, curr_step + 0, lda)];
+        auto l1 = dLD[LinOff(i, curr_step + 1, lda)];
+        dLD[LinOff(i, curr_step + 0, lda)] = l0 * D[0][0] + l1 * D[1][0];
+        dLD[LinOff(i, curr_step + 1, lda)] = l0 * D[0][1] + l1 * D[1][1];
+      }
+    }
     // }
 
     // Finish iteration
