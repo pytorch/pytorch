@@ -111,6 +111,59 @@ class SerializedCode:
         )
 
 
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers for objects pickle cannot rebuild by reference: code objects,
+    closure cells, python modules, and bound methods.
+
+    GuardsStatePickler is the one subclass today. AOTCompilePickler keeps its
+    own copies of these reducers until it is moved onto this base separately;
+    once both share it, a fix to how an object is rebuilt cannot be missed in
+    one pickler.
+    """
+
+    # The reducers stay classmethods: pickle reduces a bound classmethod to
+    # getattr(owner, name), so an artifact names the subclass and resolves the
+    # reducer through its MRO. A staticmethod would pickle by __qualname__ and
+    # change the artifact.
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @classmethod
+    def _set_cell_contents(cls, cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
+
+
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
     """
@@ -224,7 +277,13 @@ class _DynamoCodeCacheEntry:
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.
       9. A boolean flag indicating whether the function has a compile id.
-      10. Whether or not this code entry was bypassed
+      10. Whether the entry currently has nothing installable: every compile of
+         it was bypassed (its guards could not be serialized), or a backend
+         artifact was missing when the package was saved. install() then leaves
+         the frame to be traced fresh rather than skipping it as trivial.
+         Cleared once a compile records a guarded code. (The save-time writer,
+         PrecompileCacheEntry.from_cache_entry, still flags the whole entry and
+         keeps the stale guarded codes.)
     """
 
     python_code: SerializedCode
@@ -636,6 +695,10 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
+        # Backend ids the compile inside the current code_context NEWLY added
+        # to the entry, so a bypass drops exactly those and never a backend an
+        # earlier, installed variant of the same code object still needs.
+        self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
         self._device_type = "cpu"
@@ -764,11 +827,13 @@ class CompilePackage:
 
         entry = self._codes[code]
         self._current_entry = entry
+        self._current_backend_ids = []
         try:
             yield
         finally:
             entry.has_compile_id = True
             self._current_entry = None
+            self._current_backend_ids = []
 
     def add_guarded_code(
         self,
@@ -777,21 +842,18 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_guarded_code")
-        if self._current_entry.bypassed:
-            return
         guarded_code_entry = _GuardedCodeCacheEntry(
             guards_state=guards_state,
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
+        self._current_entry.bypassed = False
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_inlined_source")
-        if self._current_entry.bypassed:
-            return
         for code in sources:
             if code in self._resume_codes:
                 continue
@@ -800,10 +862,25 @@ class CompilePackage:
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         self._device_type = _graph_device_type(graph)
 
-    def bypass_current_entry(self) -> None:
+    def bypass_current_compile(self) -> None:
+        """Drop the backend ids the current compile registered on its entry.
+
+        Only this compile is lost: its guarded code is never recorded
+        (convert_frame consults output.package, which bypass_package clears,
+        before add_guarded_code) and the backend ids it registered go with it. Guarded
+        codes an earlier compile of the same code object recorded stay
+        installable, so a reload keeps them and only re-traces the inputs that
+        would have matched the dropped one. An entry left with no guarded code
+        is marked bypassed so install() re-traces the frame instead of skipping
+        it as trivial.
+        """
         if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in bypass_current_entry")
-        self._current_entry.bypassed = True
+            raise AssertionError("_current_entry is not set in bypass_current_compile")
+        for backend_id in self._current_backend_ids:
+            self._current_entry.backend_ids.remove(backend_id)
+            self._cached_backends.pop(backend_id, None)
+        self._current_backend_ids = []
+        self._current_entry.bypassed = not self._current_entry.guarded_codes
 
     def add_resume_function(
         self,
@@ -831,6 +908,7 @@ class CompilePackage:
             raise AssertionError("_current_entry is not set in add_backend_id")
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
+            self._current_backend_ids.append(backend_id)
         if backend is not None:
             self._cached_backends[backend_id] = backend
 
