@@ -82,7 +82,10 @@ def vt_identity_compare(
     # Objects created during tracing: VT identity = Python identity. Exception
     # instances are mutable objects built during tracing, so two distinct VTs
     # (already known not to be `left is right`) are distinct Python objects.
+    # A bound method is materialized afresh by every attribute access, so it
+    # behaves the same way: `obj.m is obj.m` is False in CPython.
     from .dicts import ConstDictVariable
+    from .functions import UserMethodVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
     from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
@@ -97,6 +100,7 @@ def vt_identity_compare(
             DictKeySetVariable,
             TracebackVariable,
             ExceptionVariable,
+            UserMethodVariable,
         ),
     ):
         return ConstantVariable.create(False)
@@ -2150,7 +2154,13 @@ def _resolve_descriptor_get(
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
-        return variables.UserMethodVariable(type_attr, obj, source=source)
+        return variables.UserMethodVariable(
+            variables.UserFunctionVariable(
+                type_attr, source=source and AttrSource(source, "__func__")
+            ),
+            obj,
+            source=source,
+        )
 
     return None
 

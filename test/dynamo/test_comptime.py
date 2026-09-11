@@ -442,6 +442,31 @@ def forward(self, L_x_ : torch.Tensor):
     add = y + 4;  y = add = None""",
         )
 
+    def test_comptime_bound_method(self):
+        # A bound method must be called with its receiver bound. Calling the
+        # underlying function instead would pass the ComptimeContext as `self`.
+        class Probe:
+            def __init__(self):
+                self.calls = 0
+                self.ctx_type = None
+
+            def cb(self, ctx):
+                self.calls += 1
+                self.ctx_type = type(ctx).__name__
+
+        probe = Probe()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            comptime(probe.cb)
+            return x + 1
+
+        f(torch.randn(3))
+        # The mutation landed on `probe`, so `self` was bound correctly, and
+        # the context arrived as the argument rather than as `self`.
+        self.assertEqual(probe.calls, 1)
+        self.assertEqual(probe.ctx_type, "ComptimeContext")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

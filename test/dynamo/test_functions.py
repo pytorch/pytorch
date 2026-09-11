@@ -5418,6 +5418,230 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    def test_method_vt_not_a_function_vt(self):
+        """Methods must not subclass UserFunctionVariable (CPython parity).
+
+        In CPython, MethodType is not a subclass of FunctionType, and
+        PyMethodObject composes im_func/im_self rather than extending the
+        function type. The VTs mirror that.
+        """
+        from torch._dynamo.variables.functions import (
+            BaseUserFunctionVariable,
+            UserFunctionVariable,
+            UserMethodVariable,
+        )
+
+        self.assertFalse(issubclass(types.MethodType, types.FunctionType))
+        self.assertFalse(issubclass(UserMethodVariable, UserFunctionVariable))
+        self.assertTrue(issubclass(UserMethodVariable, BaseUserFunctionVariable))
+        self.assertTrue(issubclass(UserFunctionVariable, BaseUserFunctionVariable))
+
+    def test_method_vt_composes_im_func_im_self(self):
+        """UserMethodVariable holds im_func/im_self, mirroring PyMethodObject."""
+        from torch._dynamo.variables.functions import (
+            UserFunctionVariable,
+            UserMethodVariable,
+        )
+
+        def f(self, x):
+            return x
+
+        im_self = ConstantVariable.create(1)
+        im_func = UserFunctionVariable(f)
+        method = UserMethodVariable(im_func, im_self)
+
+        self.assertIs(method.im_func, im_func)
+        self.assertIs(method.im_self, im_self)
+        self.assertIs(method.get_function(), f)
+        self.assertIs(method.get_code(), f.__code__)
+        self.assertEqual(method.self_args(), [im_self])
+        # the function VT carries the source, so the method needs no source_fn
+        self.assertFalse(hasattr(method, "source_fn"))
+        self.assertIs(method.get_source(), im_func.get_source())
+
+    def test_method_vt_reconstruct_pycode(self):
+        """A bound method live across a graph break must be codegen-able."""
+
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                return x + self.bias
+
+        obj = Counter(10)
+
+        def fn(x):
+            bound = obj.m
+            torch._dynamo.graph_break()
+            return bound(x)
+
+        x = torch.randn(3)
+        with torch._dynamo.config.patch(generate_pycode=True):
+            res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(res, fn(x))
+
+    def test_method_vt_identity_and_dunder_dict(self):
+        """A bound method is not its function, but proxies __dict__ to it."""
+
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+        obj = Counter()
+
+        def fn(x):
+            return (obj.m is Counter.m), (obj.m.__dict__ == Counter.m.__dict__), x + 1
+
+        x = torch.randn(3)
+        is_same, dict_eq, _ = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertFalse(is_same)
+        self.assertTrue(dict_eq)
+
+    def test_method_vt_richcompare(self):
+        """method_richcompare: == on func+receiver, ordering is a TypeError."""
+
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+            def n(self, x):
+                return x + 2
+
+        a, b = Counter(), Counter()
+
+        def fn(x):
+            return (
+                a.m == a.m,  # same func, same receiver
+                a.m is a.m,  # distinct objects every access
+                a.m == b.m,  # same func, different receiver
+                a.m == a.n,  # different func, same receiver
+                a.m != a.m,
+                x + 1,
+            )
+
+        x = torch.randn(3)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(got[:5], fn(x)[:5])
+        self.assertEqual(got[:5], (True, False, False, False, False))
+
+    def test_method_vt_richcompare_ordering_is_type_error(self):
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+        c = Counter()
+
+        def fn(x):
+            return c.m < c.m
+
+        with self.assertRaises(TypeError):
+            fn(torch.randn(3))
+        # Ordering is NotImplemented on both operands, so Python raises. Dynamo
+        # surfaces it as an observed exception, which becomes a TypeError again
+        # once the graph break lets the comparison run in eager.
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_fn(torch.randn(3))
+
+    def test_dunder_method_source_does_not_recompile(self):
+        """The corrected dunder source must be stable across calls.
+
+        AttrSource(TypeSource(src), "__len__") denotes type(obj).__len__, which
+        is a stable function. The previous obj.__len__ source denoted a bound
+        method rebuilt on every access, so guarding it could never match.
+        """
+
+        class Sized:
+            def __init__(self, n):
+                self.n = n
+
+            def __len__(self):
+                return self.n
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, obj):
+            return x + len(obj)
+
+        x = torch.randn(3)
+        obj = Sized(2)
+        fn(x, obj)
+        self.assertEqual(cnt.frame_count, 1)
+        # Same type, same __len__ function: must reuse the compiled code.
+        for _ in range(3):
+            fn(x, Sized(2))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_method_vt_dunder_get_returns_self(self):
+        """method.__get__ returns the method unchanged; it does not re-bind.
+
+        True on 3.10 and 3.13+, which have method.__get__. 3.12 lacks it, so
+        the attribute forwards to __func__ there and does re-bind.
+        """
+
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+        c = Counter()
+        other = Counter()
+
+        def fn(x):
+            g = c.m.__get__(other)
+            return (g.__self__ is c), g(x)
+
+        x = torch.randn(3)
+        same, out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertTrue(same)
+        self.assertEqual(out, x + 1)
+
+    def test_method_still_inlines_after_vt_split(self):
+        """Method calls, attribute access and reconstruction survive the split."""
+
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def add(self, x):
+                return x + self.bias
+
+        obj = Counter(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            m = obj.add
+            return m(x), m.__name__, isinstance(m, types.MethodType)
+
+        x = torch.ones(3)
+        out, name, is_method = fn(x)
+        self.assertEqual(out, x + 3)
+        self.assertEqual(name, "add")
+        self.assertTrue(is_method)
+
+    def test_disable_on_method_still_graph_breaks(self):
+        """`torch.compiler.disable` on a method must keep skipping inlining.
+
+        This reached its gate in symbolic_convert only because UserMethodVariable
+        used to be a UserFunctionVariable subclass.
+        """
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class M(torch.nn.Module):
+            @torch.compiler.disable
+            def helper(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return self.helper(x) + 1
+
+        m = M()
+        x = torch.ones(3)
+        self.assertEqual(torch.compile(m, backend=cnt)(x), m(x))
+        with self.assertRaises(Unsupported):
+            torch.compile(m, backend="eager", fullgraph=True)(x)
+
 
 def udf_mul(x, y):
     return x * y

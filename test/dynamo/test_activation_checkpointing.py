@@ -2762,6 +2762,28 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
     """Checkpointing the same module at two sibling call sites. See
     https://github.com/pytorch/pytorch/issues/193194."""
 
+    def test_sac_with_bound_method_context_fn(self):
+        # A bound method is a valid context_fn; extracting the underlying
+        # function instead would call it with the receiver missing.
+        class Ctxs:
+            def make(self):
+                return create_selective_checkpoint_contexts([torch.ops.aten.mm.default])
+
+        ctxs = Ctxs()
+
+        def f(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                f, x, y, use_reentrant=False, context_fn=ctxs.make
+            )
+
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        a = torch.randn(4, 4, requires_grad=True, device="cpu")
+        b = torch.randn(4, 4, requires_grad=True, device="cpu")
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
     def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
         # An unspecialized plain-float module attribute (self.eps), read
         # inside a torch.utils.checkpoint region that's entered from two

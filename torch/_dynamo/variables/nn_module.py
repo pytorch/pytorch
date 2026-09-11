@@ -404,7 +404,17 @@ class NNModuleVariable(VariableTracker):
             )
             try:
                 return variables.UserMethodVariable(
-                    getattribute_fn,
+                    # Keep this off VariableTracker.build. The builder installs
+                    # a guard on the accessor eagerly, which made the module's
+                    # guard manager tag-unsafe
+                    # (test/dynamo/test_guard_manager.py,
+                    # test_nn_module_tag_overridden_getattr_safe).
+                    # Constructing directly records the source and leaves the
+                    # guard to whoever consumes it.
+                    variables.UserFunctionVariable(
+                        getattribute_fn,
+                        source=new_source and AttrSource(new_source, "__func__"),
+                    ),
                     self,
                     source=new_source,
                 ).call_function(tx, [variables.ConstantVariable.create(name)], {})
@@ -446,11 +456,17 @@ class NNModuleVariable(VariableTracker):
                 ],
             )
 
-        options = {"source": AttrSource(obj_source, "__getattr__")}
+        source = AttrSource(obj_source, "__getattr__")
 
-        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
-            tx, [VariableTracker.build(tx, name)], {}
-        )
+        return variables.UserMethodVariable(
+            # See the note in _custom_getattr_fallback above: off the builder
+            # so the accessor guard is not installed eagerly.
+            variables.UserFunctionVariable(
+                getattr_fn, source=AttrSource(source, "__func__")
+            ),
+            self,
+            source=source,
+        ).call_function(tx, [VariableTracker.build(tx, name)], {})
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -533,20 +549,21 @@ class NNModuleVariable(VariableTracker):
                     source = AttrSource(AttrSource(self.source, "__class__"), name)
                     # Get the getter function
                     source = AttrSource(source, "fget")
-                return variables.UserFunctionVariable(
-                    subobj.fget,  # pyrefly: ignore[bad-argument-type]
-                    source=source,
+                return variables.UserFunctionVariable(  # pyrefly: ignore[bad-argument-type]
+                    subobj.fget, source=source
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
-                    subobj.__func__,
+                    variables.UserFunctionVariable(
+                        subobj.__func__,
+                        source=source and AttrSource(source, "__func__"),
+                    ),
                     variables.UserDefinedObjectVariable(type(base)),
                     source=source,
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
-                    subobj.__get__(base),
-                    source=source,
+                    subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
                 if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
@@ -556,7 +573,13 @@ class NNModuleVariable(VariableTracker):
                         self,
                         source=AttrSource(source, "__func__"),
                     )
-                return variables.UserMethodVariable(subobj, self, source=source)
+                return variables.UserMethodVariable(
+                    variables.UserFunctionVariable(
+                        subobj, source=source and AttrSource(source, "__func__")
+                    ),
+                    self,
+                    source=source,
+                )
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]

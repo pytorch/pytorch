@@ -177,6 +177,7 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
@@ -6048,7 +6049,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+        if isinstance(
+            func, (UserFunctionVariable, UserMethodVariable)
+        ) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
             msg = inspect.getattr_static(
@@ -6113,12 +6116,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func,
             (
                 UserFunctionVariable,
+                UserMethodVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
             ),
         ):
             raise AssertionError(
-                "expected isinstance( func, ( UserFunctionVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
+                "expected isinstance( func, ( UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
             )
         code: types.CodeType = func.get_code()
         result = None
