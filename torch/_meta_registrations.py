@@ -8142,12 +8142,16 @@ def meta_pixel_shuffle(self, upscale_factor):
         upscale_factor > 0,
         lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
     )
-    upscale_factor_squared = upscale_factor * upscale_factor
-    torch._check(
-        upscale_factor_squared <= torch.iinfo(torch.int64).max,
-        lambda: f"pixel_shuffle expects upscale_factor^2 to fit in int64, but got "
+    # Eager guards the square against int64 overflow with TORCH_CHECK_VALUE, i.e. a
+    # ValueError, and phrases the bound as a division so the product is never formed.
+    # Mirror both: a torch._check here would raise RuntimeError and swap one
+    # eager/meta divergence for another.
+    torch._check_value(
+        upscale_factor <= torch.iinfo(torch.int64).max // upscale_factor,
+        lambda: f"upscale factor is too large, (upscale_factor)^2 overflowed: "
         f"upscale_factor={upscale_factor}",
     )
+    upscale_factor_squared = upscale_factor * upscale_factor
     torch._check(
         len(self.shape) > 2,
         lambda: f"Invalid input shape for pixel_shuffle: {self.shape}",
