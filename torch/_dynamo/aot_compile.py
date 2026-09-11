@@ -107,16 +107,16 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except annotations, __doc__,
-            # and __dict__ entries that will not pickle. The runtime assigns
-            # those back and never forces the pruned ones, so a value this
-            # pickler cannot serialize (a <locals> annotation class, or a
-            # __dict__ entry like the __wrapped__ functools.wraps stashes, which
-            # can drag an unrelated lock/Module in) is dropped rather than left
-            # to fail the whole dump. Known limitation: the top-level function's
-            # own annotations ride on CompileArtifacts.signature, which
-            # serialize() dumps unpruned, so this only protects the nested
-            # functions reached here.
+            # pickler nothing it holds is pruned -- except annotations, type
+            # params, __doc__, and __dict__ entries that will not pickle. The runtime
+            # assigns those back and never forces the pruned ones, so a value
+            # this pickler cannot serialize (a <locals> annotation class, a PEP
+            # 695 function-scoped TypeVar, or a __dict__ entry like the
+            # __wrapped__ functools.wraps stashes, which can drag an unrelated
+            # lock/Module in) is dropped rather than left to fail the whole
+            # dump. Known limitation: the top-level function's own annotations
+            # ride on CompileArtifacts.signature, which serialize() dumps
+            # unpruned, so this only protects the nested functions reached here.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
@@ -132,7 +132,7 @@ class AOTCompilePickler(FunctionPicklerBase):
                 # like the pruned attributes above. __kwdefaults__ stays unpruned:
                 # a function cannot be called without it.
                 doc=obj.__doc__ if self._dumps_cleanly(obj.__doc__) else None,
-                type_params=None,
+                type_params=self._pickleable_type_params(obj),
                 globals_snapshot=None,
             )
 
@@ -210,6 +210,15 @@ class AOTCompilePickler(FunctionPicklerBase):
             for name, value in self._read_raw_annotations(obj, resolve=True).items()
             if self._dumps_cleanly(value)
         }
+
+    def _pickleable_type_params(self, obj: Any) -> tuple[Any, ...] | None:
+        # A PEP 695 function-scoped TypeVar pickles to its bare name and then
+        # fails the module lookup, so drop the whole tuple when any element will
+        # not dump. Ordinary functions carry (), which dumps and is kept.
+        type_params = getattr(obj, "__type_params__", None)
+        if type_params and not all(self._dumps_cleanly(p) for p in type_params):
+            return None
+        return type_params
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
