@@ -120,6 +120,10 @@ class UnpicklableGuardedDefault:
         raise RuntimeError("guarded default cannot pickle")
 
 
+def global_add(obj, x):
+    return x + 1
+
+
 class ModuleNotSerializable(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -159,6 +163,45 @@ class Inputs:
     def __init__(self, x, unused):
         self.x = x
         self.unused = unused
+
+
+class SlottedByName:
+    # A slot named for the function it will hold: a method bound under that name
+    # has a class-level member descriptor but no instance __dict__ to inspect.
+    __slots__ = ("global_add",)
+
+
+class StaticHolder:
+    # getattr(self, "global_add") returns the raw function, not a bound method.
+    global_add = staticmethod(global_add)
+
+
+class GetattrProxy:
+    # __getattr__ dynamically serves the bound function's name; probing
+    # getattr(self, name) to check resolution would run user code (and recurse).
+    probed: list[str] = []
+
+    def __getattr__(self, name):
+        GetattrProxy.probed.append(name)
+        if name == "global_add":
+            return global_add
+        raise AttributeError(name)
+
+
+class RaisingProbes:
+    # Any attribute probe of the instance raises something other than
+    # AttributeError; the reducer must not read the instance outside its try.
+    def __getattribute__(self, name):
+        raise RuntimeError(f"probed {name}")
+
+
+class PlainMethods:
+    def add(self, x):
+        return x
+
+    @classmethod
+    def make(cls):
+        return cls()
 
 
 def _global_func_wrong_fqn(x):
@@ -576,6 +619,108 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.__closure__[0].cell_contents, out)
         self.assertEqual(out(5), 120)
 
+    def test_bound_method_under_a_name_self_lacks(self):
+        # types.MethodType can bind a function under a name self has no
+        # attribute for. _reduce_bound_method looked that name up unguarded,
+        # and the AttributeError bypassed the package instead of carrying the
+        # function and self explicitly.
+        m = types.MethodType(global_add, Inputs(1, 2))
+        self.assertFalse(hasattr(m.__self__, "global_add"))
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, Inputs)
+
+    def test_bound_method_under_a_slot_name(self):
+        # A method bound under a __slots__ member-descriptor name: getattr(self,
+        # name) hands back the raw function stored in the slot, not a bound
+        # method, so pickle's default reconstruction would load a function where
+        # a method was. _reduce_bound_method carries the function and self
+        # explicitly; that also covers a slot holding a self-bound method, whose
+        # cycle means the slot is restored only after the method is rebuilt.
+        obj = SlottedByName()
+        obj.global_add = global_add
+        m = types.MethodType(global_add, obj)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, SlottedByName)
+
+    def test_bound_method_on_a_getattr_proxy_is_not_probed(self):
+        # self defines __getattr__, so probing getattr(self, name) to check
+        # resolution would run user code and can recurse. _reduce_bound_method
+        # carries the function and self explicitly without reading the instance.
+        m = types.MethodType(global_add, GetattrProxy())
+        buf = io.BytesIO()
+        GetattrProxy.probed.clear()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        # pickle itself may look protocol names up on the instance (3.10 probes
+        # __getstate__), so pin only that the METHOD name was never probed.
+        self.assertNotIn("global_add", GetattrProxy.probed)
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, GetattrProxy)
+
+    def test_bound_method_whose_probe_raises_is_carried_explicitly(self):
+        # A __getattribute__ override (or a property, or a metaclass
+        # __getattr__) can raise anything from the resolution probe; that must
+        # fall back to the explicit reduce, not escape the reducer.
+        m = types.MethodType(global_add, RaisingProbes())
+        pickler = GuardsStatePickler({}, {}, {}, io.BytesIO())
+        reduced = pickler._reduce_bound_method(m)
+        self.assertIsNotNone(reduced)
+        self.assertIs(reduced[1][0], global_add)
+
+    def test_bound_method_the_class_resolves_falls_through(self):
+        # A method the class MRO resolves back to, and a classmethod, take
+        # pickle's default getattr() reconstruction.
+        pickler = GuardsStatePickler({}, {}, {}, io.BytesIO())
+        self.assertIsNone(pickler._reduce_bound_method(PlainMethods().add))
+        self.assertIsNone(pickler._reduce_bound_method(PlainMethods.make))
+
+    def test_bound_method_over_a_staticmethod_name(self):
+        # getattr(self, name) resolves, but to the raw function: pickle's default
+        # reconstruction would load a function where a bound method was.
+        m = types.MethodType(global_add, StaticHolder())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIsInstance(out, types.MethodType)
+        self.assertIs(out.__func__, global_add)
+
+    def test_bound_method_of_a_partial(self):
+        # MethodType accepts any callable; a functools.partial has no __name__,
+        # so there is nothing to probe and the method is carried explicitly.
+        m = types.MethodType(functools.partial(global_add), Inputs(1, 2))
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__.func, global_add)
+        self.assertIsInstance(out.__self__, Inputs)
+
+    def test_bound_method_of_a_module_keeps_its_function(self):
+        # nn.Module defines __getattr__, so every module method is carried
+        # explicitly. That is also what keeps the right function: a module whose
+        # class cannot be pickled by reference is rebuilt as a bare nn.Module, on
+        # which a getattr() reconstruction would resolve "forward" to
+        # nn.Module's own placeholder.
+        class Local(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        mod = Local()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(mod): mod}, {}, {}, buf).dump({"m": mod.forward})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(type(out.__self__), torch.nn.Module)
+        # The code object's name, not __qualname__: at this commit the <locals>
+        # rebuild passes __qualname__ as the function's NAME, and on 3.10
+        # FunctionType then reports the bare co_name as __qualname__.
+        self.assertEqual(out.__func__.__code__.co_name, "forward")
+        self.assertEqual(out(torch.ones(1)), torch.ones(1) + 1)
+
 
 @torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerialization(TestGuardSerializationBase):
@@ -638,6 +783,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         with self.assertRaisesRegex(PackageError, "exceeded the recursion limit"):
             self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+
+    def test_guard_rooted_at_bound_method_under_a_name_self_lacks(self):
+        # See TestGuardsStatePickler.test_bound_method_under_a_name_self_lacks.
+        bound = types.MethodType(global_add, Inputs(1, 2))
+
+        def fn(f, x):
+            if callable(f):
+                x = x + 1
+            return f(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, bound, x)
+        self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
+        self._test_check_fn(ref, loaded, {"f": global_add, "x": x}, False)
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
