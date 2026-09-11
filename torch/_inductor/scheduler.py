@@ -403,19 +403,12 @@ class MixOrderReduction:
             ):
                 return False
 
-            # We require more more row than columns since
-            # 1, we prefer doing persistent reduction for each row
-            # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, ncol * 2),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
-                return False
+            # Don't gate on the nrow/ncol ratio: mix-order reduction can also
+            # be helpful on relatively flat inputs, and a `nrow >= ncol * 2`
+            # gate would reject profitable shapes.
 
-            # When nrow is small, ncol should also be small (due to the check
-            # above). Thus the entire tensor should be well cached in L2.
-            # Mix order reduction is less beneficial.
+            # Need enough rows to split the other reduction across; too few
+            # gives insufficient parallelism to justify the fusion overhead.
             if not V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow, 4096),
                 size_oblivious=True,
@@ -655,6 +648,51 @@ class NestedReduction:
         )
 
     @classmethod
+    def _mutations_survive_hoisting(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        group: Sequence[BaseSchedulerNode] | None = None,
+    ) -> bool:
+        """Whether ``nodes``' aliasing and mutation survive sub-parent hoisting.
+
+        Hoisting an epilogue into the parent kernel moves its stores relative to
+        the rest of the group, so a mutation is only safe when no other node
+        there touches that storage. ``group`` defaults to ``nodes`` and must
+        cover everything sharing the fused kernel, since a node outside the
+        hoisted set observes the reordering just the same; ordering against
+        nodes outside the kernel is already carried by dependency edges.
+
+        Both names for the storage are claimed. The mutator keeps the
+        pre-mutation one -- its own StarDep self-edge and any read-modify-write
+        hoist along with it, so only another node reading that name is a
+        hazard -- while later nodes see the post-mutation name via
+        Scheduler.mutation_renames. In practice functionalization leaves one
+        mutator per buffer and no post-mutation reader, so only the
+        pre-mutation read rejects today; the rest keep this conservative rather
+        than wrong if that ever changes. Aliasing stays rejected outright: the
+        lane index math assumes each store owns its destination.
+        """
+        owners: dict[str, BaseSchedulerNode] = {}
+        for node in nodes:
+            for buf in node.get_outputs():
+                if buf.get_aliases():
+                    return False
+                if not buf.get_mutations():
+                    continue
+                for name in (*buf.get_mutations(), buf.get_name()):
+                    # A second node on the same storage makes their relative
+                    # order load-bearing, which hoisting does not preserve.
+                    if owners.setdefault(name, node) is not node:
+                        return False
+        if not owners:
+            return True
+        return all(
+            owners.get(dep.name, node) is node
+            for node in (nodes if group is None else group)
+            for dep in node.read_writes.reads_and_writes()
+        )
+
+    @classmethod
     def sub_parent_epilogue_plan(
         cls,
         nodes: Sequence[BaseSchedulerNode],
@@ -668,8 +706,7 @@ class NestedReduction:
         [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
-        # TODO: No fundamental limitation; track aliases and mutation versions here.
-        if any(node.has_aliasing_or_mutation() for node in nodes):
+        if not cls._mutations_survive_hoisting(nodes):
             return None
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return None
@@ -1804,8 +1841,8 @@ class NestedReduction:
         )
         if not sub_parent_nodes:
             return None
-        # TODO: No fundamental limitation; track aliases and mutation versions here.
-        if any(node.has_aliasing_or_mutation() for node in sub_parent_nodes):
+        kernel_nodes = (outer_node, *grouped_nodes)
+        if not cls._mutations_survive_hoisting(sub_parent_nodes, kernel_nodes):
             return None
 
         candidates: list[SubParentEpilogueCandidate] = []

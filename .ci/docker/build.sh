@@ -216,9 +216,9 @@ case "$tag" in
   pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=10.1.0a20260821
-    THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
-    USE_MSLK=0
+    ROCM_VERSION=10.1.0a20260903
+    THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
+    USE_MSLK=1
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx950"
@@ -358,10 +358,10 @@ case "$tag" in
   ;;
 esac
 
-# The ubuntu and ubuntu-rocm images provision Python from a deadsnakes venv
-# keyed on PYTHON_VERSION, while the xpu image still expresses it as
-# ANACONDA_PYTHON_VERSION (it keeps conda). Mirror the value so every flavor
-# gets what it expects.
+# ubuntu/Dockerfile provisions Python from a deadsnakes venv keyed on
+# PYTHON_VERSION, while the rocm/xpu images still express it as
+# ANACONDA_PYTHON_VERSION (they keep conda). Mirror the value so both flavors
+# get what they expect.
 if [ -z "${PYTHON_VERSION}" ]; then
   PYTHON_VERSION="${ANACONDA_PYTHON_VERSION}"
 fi
