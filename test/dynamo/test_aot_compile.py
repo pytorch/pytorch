@@ -600,6 +600,17 @@ class BottomlessReduce:
         return (BottomlessReduce, (BottomlessReduce(),))
 
 
+class WritesBackOnReduce:
+    # Reducing it writes onto the function it is stashed on, while that
+    # function's __dict__ is being walked.
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __reduce__(self):
+        self.fn.added = 1
+        raise TypeError("cannot pickle WritesBackOnReduce")
+
+
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
@@ -700,10 +711,11 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
 
     def test_aot_compile_reloads_a_runtime_env_helper_faithfully(self):
         # A nested helper the compiled function closes over travels in the
-        # runtime env and is rebuilt from its code object at load. Everything
-        # it holds has to survive: an EMPTY cell failed the old pickler and
-        # __kwdefaults__ and __dict__ were dropped; the None cell is asserted so
-        # the empty/None distinction stays pinned; see FunctionPicklerBase. (The
+        # runtime env and is rebuilt from its code object at load. Its cells,
+        # __defaults__, __kwdefaults__ and __dict__ have to survive: an EMPTY
+        # cell failed the old pickler and __kwdefaults__ and __dict__ were
+        # dropped; the None cell is asserted so the empty/None distinction stays
+        # pinned; see FunctionPicklerBase. (The
         # compiled function itself cannot have an empty cell: capture reads all
         # of its cells up front.)
         def outer():
@@ -718,7 +730,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
 
             helper.tag = 2.0
             if helper is None:
-                unset = 1
+                unset = 1  # never runs, so the cell helper closes over stays empty
             return helper
 
         helper = outer()
@@ -774,8 +786,8 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         compiled_fn = compiled_fn.aot_compile((inputs, {}))
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             compiled_fn.save_compiled_function(self.path())
-        self.assertEqual(len(logs.output), 1)
-        self.assertIn("helper.lock (lock) from the artifact", logs.output[0])
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("helper.lock (lock) from the artifact", line)
         torch._dynamo.reset()
         with torch.compiler.set_stance("fail_on_recompile"):
             with open(self.path(), "rb") as f:
@@ -783,6 +795,27 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             self.assertEqual(loaded(*inputs), expected)
         (cell,) = loaded._artifacts.runtime_env.closure
         self.assertEqual(cell.cell_contents.__dict__, {"tag": 2.0})
+
+    def test_aot_compile_top_level_annotations_ride_unpruned(self):
+        # Known limitation, pinned so a change to it is noticed: the compiled
+        # function's OWN annotations travel on CompileArtifacts.signature, which
+        # serialize() dumps whole, so a <locals> class there still fails the
+        # save; the nested-helper prune does not reach it.
+        def outer():
+            class Cfg:
+                pass
+
+            def fn(x: Cfg):
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((AttributeError, pickle.PicklingError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        self.assertIn("Cfg", str(cm.exception))
 
     def test_aot_compile_reloads_a_helpers_annotations(self):
         # The shipping path: an annotated helper reached through
@@ -2069,8 +2102,10 @@ from user code:
 class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
     def test_pickler_carries_a_docstring(self):
         # A native docstring lives in the code object, one assigned after
-        # definition does not; both travel in the pickle state, so neither is
-        # lost on reload (a rebuild that passed doc=None lost both).
+        # definition does not; both travel in the pickle state. The old rebuild
+        # (types.FunctionType over the code object) kept the native one and
+        # dropped an assigned one; on this base a doc=None would drop both,
+        # since _apply_function_state assigns __doc__ unconditionally.
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
@@ -2110,8 +2145,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             AOTCompilePickler({}, buf).dump(fn)
-        self.assertEqual(len([l for l in logs.output if "dropping" in l]), 1)
-        self.assertIn("inner.__doc__ (lock) from the artifact", logs.output[0])
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("inner.__doc__ (lock) from the artifact", line)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertIsNone(out.__doc__)
         self.assertEqual(out(5), 5)
@@ -2151,9 +2186,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         fn = outer()
         buf = io.BytesIO()
-        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
+        with self.assertRaisesRegex((TypeError, pickle.PicklingError), "cannot pickle"):
             AOTCompilePickler({}, buf).dump(fn)
-        self.assertIn("cannot pickle", str(cm.exception))
 
     def test_pickler_breaks_a_dict_cycle_between_nested_functions(self):
         # Nested functions whose __dict__ entries point at themselves and each
@@ -2235,6 +2269,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
                 return x * k
 
             inner.__name__ = "renamed"
+            inner.__qualname__ = "reassigned.qualname"  # differs from co_qualname
             if inner is None:
                 unset = 1  # never runs, so the cell inner closes over stays empty
             return inner, scaled
@@ -2247,7 +2282,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         AOTCompilePickler({}, buf).dump((fn, scaled))
         out, out_scaled = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.__name__, "renamed")
-        self.assertEqual(out.__qualname__, fn.__qualname__)
+        self.assertEqual(out.__qualname__, "reassigned.qualname")
         self.assertEqual(out.__kwdefaults__, {"k": 1})
         self.assertEqual(out_scaled(3), 6)
         cells = dict(zip(out.__code__.co_freevars, out.__closure__))
@@ -2300,10 +2335,73 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             AOTCompilePickler({}, buf).dump(fn)
-        self.assertEqual(len([l for l in logs.output if "dropping" in l]), 1)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn(
+            "inner.lock (lock) from the artifact: it does not pickle (TypeError); pass it in external_data to keep it (function defined at",
+            line,
+        )
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertFalse(hasattr(out, "lock"))
         self.assertEqual(out(5), 5)
+
+    def test_pickler_survives_a_reduce_that_writes_back_an_attribute(self):
+        # A probe runs user __reduce__ code; one that writes onto the function's
+        # __dict__ while it is being walked must not raise "dictionary changed
+        # size during iteration" out of the dump. The walk is over a snapshot,
+        # so the written entry is not carried either.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                return x
+
+            inner.hostile = WritesBackOnReduce(inner)
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING"):
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertEqual(fn.added, 1)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__dict__, {})
+        self.assertEqual(out(5), 5)
+
+    def test_pickler_never_reuses_a_probes_attribute_set(self):
+        # An attribute set computed inside a probe may be over-pruned, so only
+        # the real dump's sets are memoized. a is unpicklable through a
+        # kwdefault; probing a walks b, whose probe of c fails because c reaches
+        # the in-flight a, so b's PROBE set is empty. The real dump computes b's
+        # set afresh, after a is final: c re-probes clean (it drops only a), so
+        # b keeps c. Reusing the probe's set would lose b.c silently.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def a(*, k=threading.Lock()):
+                return k
+
+            def b():
+                return "b!"
+
+            def c():
+                return "c!"
+
+            a.b, b.c, c.a = b, c, a
+
+            def top(x):
+                return x
+
+            top.a, top.b = a, b  # a first: its probe is what over-prunes b
+            return top
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING"):
+            AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "a"))
+        self.assertEqual(out.b.c(), "c!")
+        self.assertFalse(hasattr(out.b.c, "a"))
 
     def test_pickler_prunes_an_entry_that_overflows_the_probe(self):
         # A recursion overflow inside the probe counts as unpicklable: the entry
@@ -2325,6 +2423,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
             AOTCompilePickler({}, buf).dump(fn)
         (line,) = [l for l in logs.output if "dropping" in l]
         self.assertIn("helper.deep (BottomlessReduce)", line)
+        self.assertIn("it does not pickle (RecursionError)", line)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertFalse(hasattr(out, "deep"))
         self.assertEqual(out(5), 5)
@@ -2399,7 +2498,9 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
     def test_pickler_survives_a_reduce_that_writes_back_an_annotation(self):
         # A probe runs user __reduce__ code; one that writes onto the function's
         # __annotations__ while they are being walked must not raise
-        # "dictionary changed size during iteration" out of the dump.
+        # "dictionary changed size during iteration" out of the dump. The hazard
+        # is pre-3.14 only (the 3.14 read returns a copy); there this checks no
+        # more than that the write-back is harmless.
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
