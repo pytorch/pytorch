@@ -447,7 +447,6 @@ class FSDPModule:
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.reduce_grads = requires_gradient_sync
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
-                    fsdp_param_group._set_unsharded_grad_dtype()
 
     def set_requires_all_reduce(
         self, requires_all_reduce: bool, *, recurse: bool = True
@@ -464,7 +463,6 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
-                    fsdp_param_group._set_unsharded_grad_dtype()
 
     def set_reshard_after_forward(
         self, reshard_after_forward: bool, recurse: bool = True

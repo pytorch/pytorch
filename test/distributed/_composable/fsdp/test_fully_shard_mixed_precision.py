@@ -465,7 +465,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("grouped", [False, True])
     @parametrize("all_reduce_only", [False, True])
-    def test_grad_dtype_fused_copy(self, grouped: bool, all_reduce_only: bool):
+    def test_grad_dtype_copy_in(self, grouped: bool, all_reduce_only: bool):
         if all_reduce_only and self.world_size != 4:
             self.skipTest("HSDP requires four devices")
         mesh = init_device_mesh(
@@ -539,12 +539,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                     self.assertEqual(model.first.weight.grad.dtype, torch.float32)
                     self.assertEqual(model.first.weight.grad.to_local(), local_grad)
                     continue
-                source_dtype = (
-                    torch.float32
-                    if iteration == 11 and not all_reduce_only
-                    else torch.bfloat16
-                )
-                self.assertEqual(copy_dtypes, [(source_dtype, source_dtype)])
+                self.assertEqual(copy_dtypes, [(torch.float32, torch.float32)])
                 for index, param in enumerate(model.parameters()):
                     factor = 2 if iteration == 11 and index == 0 else 1
                     self.assertEqual(param.grad.dtype, torch.float32)

@@ -303,25 +303,6 @@ class FSDPParamGroup:
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
 
-    def _set_unsharded_grad_dtype(self) -> None:
-        params = [p for p in self.fsdp_params if hasattr(p, "_unsharded_param")]
-        accumulate = (
-            not self.reduce_grads
-            or not self.all_reduce_grads
-            or any(
-                p.unsharded_param.grad is not None
-                or (p._grad_is_partial and p.sharded_param.grad is not None)
-                for p in params
-            )
-        )
-        # Fresh synchronized gradients are cast together during copy-in. Keep
-        # the entire group in reduce_dtype if any member is still accumulating.
-        for p in params:
-            param = p.unsharded_param
-            grad_dtype = p.unsharded_grad_dtype if accumulate else param.dtype
-            if param.grad_dtype != grad_dtype:
-                param.grad_dtype = grad_dtype
-
     def lazy_init(self):
         # Lazy init should be idempotent
         # Users may change or register parameters after construction time.
@@ -583,7 +564,6 @@ class FSDPParamGroup:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.restore_unsharded_grad()
                 fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
-            self._set_unsharded_grad_dtype()
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
@@ -623,7 +603,6 @@ class FSDPParamGroup:
             self.wait_for_unshard()
             for fsdp_param in self.fsdp_params:
                 fsdp_param.restore_unsharded_grad()
-            self._set_unsharded_grad_dtype()
             if default_prefetch:
                 self._backward_prefetch()
 
