@@ -466,6 +466,186 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent(device="cpu"))
         self.assertEqual(res, torch.ones(2))
 
+    def test_event_record_after_input_mutation_escapes_via_list(self):
+        def fn(x, holder):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            holder.append(e)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), []
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_attr(self):
+        class Holder:
+            pass
+
+        def fn(x, h):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            h.evt = e
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), Holder()
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_set(self):
+        def fn(x, holder):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            holder.add(e)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), set()
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_return_set(self):
+        # The event is inside a newly-built set returned from the
+        # compiled region.  The set is not in id_to_variable, so the
+        # event is reachable only through all_stack_values -- and only
+        # if the traversal follows HashableTracker dict keys.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            return {e}
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_generator_finally(self):
+        # Same as above, but the finally block appends the event to a
+        # pre-existing list argument -- it does escape and must error.
+        def gen(s, holder):
+            try:
+                yield
+            finally:
+                e = torch.Event(device="cpu")
+                e.record(s)
+                holder.append(e)
+
+        def fn(x, holder):
+            s = torch.Stream(device="cpu")
+            with s:
+                x.add_(1)
+                g = gen(s, holder)
+                next(g)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), []
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_generator_finally_deferred(
+        self,
+    ):
+        # The event is created and recorded in the main function body, so
+        # it is pending but not escaping at the first escape scan (before
+        # close_local_generators runs). It only escapes afterward, when
+        # the generator's finally block appends it to a pre-existing list
+        # -- this must be caught by the second scan, not silently dropped
+        # by the first.
+        def gen(holder, e):
+            try:
+                yield
+            finally:
+                holder.append(e)
+
+        def fn(x, holder):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+                g = gen(holder, e)
+                next(g)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), []
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_save_for_backward(self):
+        # Verifies the save_for_backward root: the event is created and
+        # recorded inside a resumed forward, then saved for backward.
+        # Dynamo's own tracking (track_save_for_backward) fires
+        # unconditionally on these args, regardless of requires_grad, so
+        # without this root the escape scan misses the event and Dynamo's
+        # diagnostic RuntimeError doesn't fire.  save_for_backward only
+        # accepts Tensors, so this isn't a retrievable miscompile either
+        # way: the REAL eager ctx.save_for_backward would neutralize the
+        # event itself, by raising its own unrelated TypeError (Event
+        # isn't a Tensor) if requires_grad=True, or by silently dropping
+        # it if requires_grad=False (its is_executable gate is then
+        # false).  This root is a conservative completeness measure, not
+        # a rescue for that path.  Use requires_grad=False so the test
+        # observes this root's own diagnostic rather than the unrelated
+        # TypeError.
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                torch._dynamo.graph_break()
+                s = torch.Stream(device="cpu")
+                e = torch.Event(device="cpu")
+                with s:
+                    x.add_(1)
+                    e.record()
+                ctx.save_for_backward(x, e)
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        def fn(y):
+            return Fn.apply(y)
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager")(
+                torch.ones(2, 2, device="cpu", requires_grad=False)
+            )
+
+    @torch._dynamo.config.patch(reorderable_logging_functions={print})
+    def test_event_record_after_input_mutation_escapes_via_debug_locals(self):
+        # Verifies the tx.debug_locals root: passing the event to a
+        # reorderable logging call (print) is a real escape, because
+        # codegen_suffix always codegens debug_locals as an actual call
+        # at subgraph exit, handing the event to user code at runtime.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            print("{}".format(e))  # noqa: UP032 (needs .format() to trace as StringFormatVariable)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
@@ -2154,72 +2334,6 @@ class GraphModule(torch.nn.Module):
             "wait_event op not found in graph",
         )
 
-    def test_event_record_after_input_mutation_escapes_via_list(self, device):
-        def fn(x, holder):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-            holder.append(e)
-            return x + 1
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device), []
-            )
-
-    def test_event_record_after_input_mutation_escapes_via_attr(self, device):
-        class Holder:
-            pass
-
-        def fn(x, h):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-            h.evt = e
-            return x + 1
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device), Holder()
-            )
-
-    def test_event_record_after_input_mutation_escapes_via_set(self, device):
-        def fn(x, holder):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-            holder.add(e)
-            return x + 1
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device), set()
-            )
-
-    def test_event_record_after_input_mutation_escapes_via_return_set(self, device):
-        # The event is inside a newly-built set returned from the
-        # compiled region.  The set is not in id_to_variable, so the
-        # event is reachable only through all_stack_values -- and only
-        # if the traversal follows HashableTracker dict keys.
-        def fn(x):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-            return {e}
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device)
-            )
-
     def test_event_record_event_after_input_mutation_non_escaping_no_error(
         self, device
     ):
@@ -2322,82 +2436,6 @@ class GraphModule(torch.nn.Module):
             any(node.target is torch.ops.streams.record_event for node in nodes),
             "record_event op not found in graph",
         )
-
-    def test_event_record_after_input_mutation_escapes_via_generator_finally(
-        self, device
-    ):
-        # Same as above, but the finally block appends the event to a
-        # pre-existing list argument -- it does escape and must error.
-        def gen(s, holder):
-            try:
-                yield
-            finally:
-                e = torch.Event(device=device)
-                e.record(s)
-                holder.append(e)
-
-        def fn(x, holder):
-            s = torch.Stream(device=device)
-            with s:
-                x.add_(1)
-                g = gen(s, holder)
-                next(g)
-            return x + 1
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device), []
-            )
-
-    def test_event_record_after_input_mutation_escapes_via_generator_finally_deferred(
-        self, device
-    ):
-        # The event is created and recorded in the main function body, so
-        # it is pending but not escaping at the first escape scan (before
-        # close_local_generators runs). It only escapes afterward, when
-        # the generator's finally block appends it to a pre-existing list
-        # -- this must be caught by the second scan, not silently dropped
-        # by the first.
-        def gen(holder, e):
-            try:
-                yield
-            finally:
-                holder.append(e)
-
-        def fn(x, holder):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-                g = gen(holder, e)
-                next(g)
-            return x + 1
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device), []
-            )
-
-    @torch._dynamo.config.patch(reorderable_logging_functions={print})
-    def test_event_record_after_input_mutation_escapes_via_debug_locals(self, device):
-        # Verifies the tx.debug_locals root: passing the event to a
-        # reorderable logging call (print) is a real escape, because
-        # codegen_suffix always codegens debug_locals as an actual call
-        # at subgraph exit, handing the event to user code at runtime.
-        def fn(x):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-            print("{}".format(e))  # noqa: UP032 (needs .format() to trace as StringFormatVariable)
-            return x + 1
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device)
-            )
 
     def test_event_record_before_input_mutation_no_error(self, device):
         def fn(x):

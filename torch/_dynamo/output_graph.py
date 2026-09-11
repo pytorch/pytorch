@@ -1442,31 +1442,38 @@ class OutputGraph(OutputGraphCommon):
         # pending event reachable from either is observable outside.
         roots.extend(self.side_effects.store_attr_mutations.keys())
         roots.extend(self.side_effects._get_modified_vars())
-        # backward_state and tensor_hooks can also keep objects alive
-        # across the subgraph boundary; include them so the escape scan
-        # sees any event reachable from them.  local_generators is
-        # excluded: a returned generator is rewritten to a
-        # ListIteratorVariable before compile_subgraph (so its items are
-        # already in all_stack_values), and one surviving a graph break
-        # is itself in all_stack_values with remaining_items populated by
-        # codegen_suffix before the second (post-codegen_suffix) call to
-        # this method in compile_subgraph -- see the comment there.
+        # backward_state, tensor_hooks, and save_for_backward can also
+        # keep objects alive across the subgraph boundary; include them
+        # so the escape scan sees any event reachable from them.
         #
-        # side_effects.save_for_backward is excluded too: ctx.save_for_backward()
-        # itself rejects a non-Tensor argument with a TypeError (both in
-        # eager and here, since Dynamo traces the real call), so an event
-        # can never actually land there.
+        # Escaping through the save_for_backward root specifically requires
+        # the event to be created inside a resumed forward -- see
+        # test_event_record_after_input_mutation_escapes_via_save_for_backward.
+        # save_for_backward only accepts Tensors, so a real caller can't
+        # get the event back out this way; this root is a conservative
+        # completeness measure -- it doesn't rely on that downstream
+        # check to neutralize a non-Tensor arg.
+        #
+        # local_generators is excluded: a returned generator
+        # is rewritten to a ListIteratorVariable before compile_subgraph
+        # (so its items are already in all_stack_values), and one
+        # surviving a graph break is itself in all_stack_values with
+        # remaining_items populated by codegen_suffix before the second
+        # (post-codegen_suffix) call to this method in compile_subgraph
+        # -- see the comment there.
         roots.append(self.backward_state)
         roots.append(self.side_effects.tensor_hooks)
+        roots.extend(args for _, args in self.side_effects.save_for_backward)
         # tx.debug_locals holds args to reorderable logging calls (e.g.
-        # print) that codegen_suffix always codegens as a real call at
-        # subgraph exit, so an event reachable only from there is
-        # genuinely handed to user code -- a real root.  A *nested*
-        # inlined call's own debug_locals (e.g. a generator's finally
-        # block) is not: it lives on that call's own
-        # InliningInstructionTranslator, and every codegen_suffix call
-        # site passes tx itself, never a nested tracer, so that list is
-        # never drained -- only tx's own list is walked here.
+        # print).  This method and codegen_suffix are always called with
+        # the same tx within one compile_subgraph invocation, and
+        # codegen_suffix drains exactly tx.debug_locals -- with the fast
+        # path that skips codegen_suffix entirely gated on
+        # `not tx.debug_locals` -- so this root always matches what
+        # actually gets emitted.  A different frame's own debug_locals
+        # (relevant only under nested_graph_breaks) is a separate,
+        # pre-existing gap: see the TODO on the codegen_suffix loop
+        # below.
         roots.extend(args for _, args in tx.debug_locals)
         # visit_keys=True so events stored as set elements or dict
         # keys (wrapped in HashableTracker) are reached; the default
