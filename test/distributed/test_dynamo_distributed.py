@@ -23,6 +23,7 @@ import torch.optim as optim
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo import config
+from torch._dynamo.backends.registry import lookup_backend
 from torch._dynamo.backends.distributed import DDPOptimizer
 from torch._dynamo.comptime import comptime
 from torch._dynamo.device_interface import CudaInterface, DeviceGuard
@@ -1275,6 +1276,122 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch.distributed.all_gather_object(res, len(metrics))
             for r in res[1:]:
                 self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not HAS_GPU, "compiler collectives need multiple GPUs")
+    @config.patch(automatic_dynamic_shapes=True)
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_first_backend_compile_is_dynamic(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            backend_compile_count = 0
+            backend_symbolic_inputs = []
+            inductor_backend = lookup_backend("inductor")
+
+            def recording_backend(gm, example_inputs):
+                nonlocal backend_compile_count
+                backend_compile_count += 1
+                backend_symbolic_inputs.append(
+                    any(
+                        isinstance(example, torch.SymInt)
+                        or (
+                            isinstance(example, torch.Tensor)
+                            and example.ndim == 2
+                            and any(
+                                isinstance(dim, torch.SymInt)
+                                for dim in example.shape
+                            )
+                        )
+                        for example in example_inputs
+                    )
+                )
+                return inductor_backend(gm, example_inputs)
+
+            @torch.compiler.disable
+            def eager_regroup(x):
+                return x[x[:, 0] > 0]
+
+            @torch.compile(backend=recording_backend)
+            def f(x):
+                regrouped = eager_regroup(x.sin())
+                return (regrouped.cos() + 1).sum(dim=1)
+
+            def make_input(batch_size, regrouped_size):
+                # Citrine C3: create tensors directly on the target GPU.
+                x = -torch.ones(batch_size, 10, device=self.rank)
+                x[:regrouped_size, 0] = 1
+                return x
+
+            first_input = make_input(5 + 2 * self.rank, 3 + 2 * self.rank)
+            expected = (eager_regroup(first_input.sin()).cos() + 1).sum(dim=1)
+            self.assertEqual(f(first_input), expected)
+            self.assertEqual(backend_compile_count, 2)
+            self.assertEqual(backend_symbolic_inputs, [True, True])
+
+            second_input = make_input(8 + 2 * self.rank, 4 + 2 * self.rank)
+            expected = (eager_regroup(second_input.sin()).cos() + 1).sum(dim=1)
+            self.assertEqual(f(second_input), expected)
+            self.assertEqual(backend_compile_count, 2)
+
+    @unittest.skipIf(not HAS_GPU, "compiler collectives need multiple GPUs")
+    @config.patch(automatic_dynamic_shapes=True)
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_many_graph_breaks_first_compile_dynamic(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            backend_compile_count = 0
+            backend_symbolic_inputs = []
+            inductor_backend = lookup_backend("inductor")
+
+            def recording_backend(gm, example_inputs):
+                nonlocal backend_compile_count
+                backend_compile_count += 1
+                backend_symbolic_inputs.append(
+                    any(
+                        isinstance(example, torch.SymInt)
+                        or (
+                            isinstance(example, torch.Tensor)
+                            and any(
+                                isinstance(dim, torch.SymInt)
+                                for dim in example.shape
+                            )
+                        )
+                        for example in example_inputs
+                    )
+                )
+                return inductor_backend(gm, example_inputs)
+
+            @torch.compiler.disable
+            def eager_trim(x):
+                return x[:-1]
+
+            def model(x):
+                x = eager_trim((x + 1).sin())
+                x = eager_trim((x + 2).cos())
+                x = eager_trim((x + 3).tanh())
+                x = eager_trim((x + 4).sigmoid())
+                x = eager_trim((x + 5).relu())
+                x = eager_trim((x + 6).square())
+                x = eager_trim((x + 7).sqrt())
+                x = eager_trim((x + 8).log1p())
+                return (x + 9).sum(dim=1)
+
+            compiled_model = torch.compile(model, backend=recording_backend)
+
+            # Citrine C3: create inputs directly on the target GPU.
+            first_input = torch.rand(
+                20 + 4 * self.rank,
+                10,
+                device=self.rank,
+            )
+            self.assertEqual(compiled_model(first_input), model(first_input))
+            self.assertEqual(backend_compile_count, 9)
+            self.assertEqual(backend_symbolic_inputs, [True] * 9)
+
+            second_input = torch.rand(
+                28 + 4 * self.rank,
+                10,
+                device=self.rank,
+            )
+            self.assertEqual(compiled_model(second_input), model(second_input))
+            self.assertEqual(backend_compile_count, 9)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
