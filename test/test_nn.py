@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, MI300_ARCH, MI350_ARCH, skipIfRocmArch, \
     TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version, has_device_side_assert
@@ -16669,13 +16669,13 @@ class TestNNCUDA(NNTestCase):
                 hx_val, grad_hy, cx_val, grad_cy)
             compare_cpu_device(outputs_cpu, outputs_device)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/182790")
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH + MI350_ARCH)
     @skipCUDAIfNoCudnn
     def test_RNN_cpu_vs_device_no_dropout(self, device):
         dtype = torch.double
         self._test_RNN_cpu_vs_device(device, 0, dtype)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/182666")
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH + MI350_ARCH)
     @skipCUDAIfNoCudnn
     def test_RNN_cpu_vs_device_with_dropout(self, device):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
