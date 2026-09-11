@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest import main, TestCase
-
-import re
 
 from tools.alerts.create_alerts import filter_job_names, JobStatus
 

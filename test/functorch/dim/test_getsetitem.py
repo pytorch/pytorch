@@ -1,6 +1,6 @@
 # Owner(s): ["module: functorch"]
 import torch
-from functorch.dim import Dim, DimList, DimensionBindError, dims, Tensor
+from functorch.dim import Dim, DimensionBindError, DimList, dims, Tensor
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
