@@ -1163,5 +1163,10 @@ class TestCAPI(CPythonTestCase):
         self.assertEqual(PyCFunction_Call(func, "arg", num=5), (("arg",), {'num': 5}))
 
 
+# pytest collects module-level `test*` callables; these two are C-API helper
+# callables from the pristine file, not tests.
+testfunction.__test__ = False  # type: ignore[attr-defined]
+testfunction_kw.__test__ = False  # type: ignore[attr-defined]
+
 if __name__ == "__main__":
     run_tests()

@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_call.py b/test/cpython/v3_13/test_call.py
-index 7ea27929138da3c424aec976e0a97b4f4b85be02..295360a2e2b57710a5d8a6237dd97b4e1d2fa9c9 100644
+index 7ea27929138da3c424aec976e0a97b4f4b85be02..7050db57ce3c837e6977f80de7e3db988063c155 100644
 --- a/test/cpython/v3_13/test_call.py
 +++ b/test/cpython/v3_13/test_call.py
 @@ -1,3 +1,57 @@
@@ -198,9 +198,15 @@ index 7ea27929138da3c424aec976e0a97b4f4b85be02..295360a2e2b57710a5d8a6237dd97b4e
      def test_cfunction_call(self):
          def func(*args, **kwargs):
              return (args, kwargs)
-@@ -1097,4 +1164,4 @@ class TestCAPI(unittest.TestCase):
+@@ -1096,5 +1163,10 @@ class TestCAPI(unittest.TestCase):
+         self.assertEqual(PyCFunction_Call(func, "arg", num=5), (("arg",), {'num': 5}))
  
  
++# pytest collects module-level `test*` callables; these two are C-API helper
++# callables from the pristine file, not tests.
++testfunction.__test__ = False  # type: ignore[attr-defined]
++testfunction_kw.__test__ = False  # type: ignore[attr-defined]
++
  if __name__ == "__main__":
 -    unittest.main()
 +    run_tests()
