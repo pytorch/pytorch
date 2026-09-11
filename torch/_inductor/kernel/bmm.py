@@ -137,6 +137,10 @@ def _bmm_shared_a_configs(dtype):
 
 @SymbolicGridFn
 def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
+    # Keep the persistent M/N tile loop local to one logical batch.  grid_x
+    # supplies at most one SM-wide wave of workers for that matrix, while
+    # grid_y/grid_z enumerate independent batches.  The z split is needed only
+    # when the batch count would exceed CUDA's grid_y limit.
     grid_m = cdiv(m, meta["BLOCK_M"])
     if meta["TWO_CTAS"]:
         grid_m = cdiv(grid_m, 2) * 2
