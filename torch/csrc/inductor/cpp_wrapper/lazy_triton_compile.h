@@ -76,6 +76,35 @@ static inline std::vector<int> getIntListAttr(PyObject* obj, const char* attr) {
   return result;
 }
 
+static inline bool getBoolAttr(PyObject* obj, const char* attr) {
+  RAIIPyObject val = PyObject_GetAttrString(obj, attr);
+  AOTI_TORCH_CHECK(val, "Failed to get attribute");
+  int result = PyObject_IsTrue(val.get());
+  AOTI_TORCH_CHECK(result >= 0, "Failed to convert attribute to bool");
+  return result != 0;
+}
+
+static inline std::vector<LazyTmaDescriptorMetadata>
+getTmaDescriptorMetadataListAttr(PyObject* obj, const char* attr) {
+  RAIIPyObject val = PyObject_GetAttrString(obj, attr);
+  AOTI_TORCH_CHECK(val && PyList_Check(val.get()), "Expected list attribute");
+  Py_ssize_t size = PyList_Size(val);
+  std::vector<LazyTmaDescriptorMetadata> result;
+  result.reserve(size);
+  for (Py_ssize_t i = 0; i < size; i++) {
+    PyObject* item = PyList_GetItem(val, i);
+    AOTI_TORCH_CHECK(item, "Failed to get TMA descriptor metadata");
+    result.push_back({
+        getIntListAttr(item, "block_size"),
+        getIntAttr(item, "elem_size"),
+        getIntAttr(item, "elem_type"),
+        getIntAttr(item, "swizzle"),
+        getBoolAttr(item, "fp4_padded"),
+    });
+  }
+  return result;
+}
+
 static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
   LazyKernelCompileResult compile_result;
   compile_result.cubin_path = getStringAttr(result, "cubin_path");
@@ -92,6 +121,8 @@ static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
   compile_result.global_scratch = getOptionalIntAttr(result, "global_scratch");
   compile_result.profile_scratch =
       getOptionalIntAttr(result, "profile_scratch");
+  compile_result.tensordesc_meta =
+      getTmaDescriptorMetadataListAttr(result, "tensordesc_meta");
   return compile_result;
 }
 

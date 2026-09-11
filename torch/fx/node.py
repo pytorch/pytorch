@@ -112,6 +112,8 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.profiler._record_function_exit._RecordFunction,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
+    torch.autograd.grad_mode._enter_inference_mode,
+    torch.autograd.grad_mode._exit_inference_mode,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
 }
 
@@ -675,6 +677,7 @@ class Node(_NodeBase):
                 maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
             return f"return {self.args[0]}"
         else:
+            from torch._subclasses.meta_utils import is_sparse_compressed_layout
 
             def stringify_shape(shape: Iterable[Any]) -> str:
                 return f"[{', '.join([str(x) for x in shape])}]"
@@ -687,11 +690,7 @@ class Node(_NodeBase):
             if (
                 include_tensor_metadata
                 and isinstance(meta_val, torch.Tensor)
-                and meta_val.layout
-                not in (
-                    torch.sparse_csc,
-                    torch.sparse_csr,
-                )
+                and not is_sparse_compressed_layout(meta_val.layout)
             ):
                 stride_annotation = f"{stringify_shape(meta_val.stride())}"
                 device_annotation = _device_annotation(meta_val.device)

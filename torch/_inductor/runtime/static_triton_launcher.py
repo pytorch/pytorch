@@ -1,4 +1,5 @@
 import functools
+import inspect
 import os
 from functools import cached_property
 from typing import Any
@@ -12,13 +13,22 @@ from .triton_helpers import get_constexprs
 @functools.lru_cache(None)
 def _tma_arg_helpers():
     """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
-    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]; the nvidia
-    backend's make_tensordesc_arg ignores its third arg, so we pass None."""
+    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]."""
     from triton.backends.nvidia.driver import make_tensordesc_arg
     from triton.tools.tensor_descriptor import TensorDescriptor
 
-    def make_arg(arg, metadata):
-        return make_tensordesc_arg(arg, metadata, None)
+    # triton 3.5.0 and earlier take (arg, metadata); 3.8.0 added a third
+    # argument the nvidia backend ignores. Resolve the arity once, not per
+    # launch.
+    if len(inspect.signature(make_tensordesc_arg).parameters) >= 3:
+
+        def make_arg(arg, metadata):
+            return make_tensordesc_arg(arg, metadata, None)
+
+    else:
+
+        def make_arg(arg, metadata):
+            return make_tensordesc_arg(arg, metadata)
 
     return make_arg, TensorDescriptor
 
@@ -28,6 +38,42 @@ def _triton_allocator_var():
     from triton.runtime._allocation import _allocator
 
     return _allocator
+
+
+def make_host_tma_expander():
+    """Bind the TMA arg helpers once, so the launcher does not resolve them per call.
+
+    Returns expand_host_tma_descriptor, which builds the expanded kernel params
+    ([CUtensorMap, *shape, *strides]) for one descriptor and caches them per
+    descriptor position.
+
+    On a cache hit (same base address) it returns the previously-encoded
+    CUtensorMap, skipping both the TensorDescriptor construction/validation and
+    cuTensorMapEncodeTiled. The descriptor only encodes addressing (not buffer
+    contents), so reuse is safe whenever the address/shape/strides match.
+
+    `tensor` must already be TMA-aligned; the launcher calls _host_tma_aligned
+    and keeps the (possibly cloned) result alive across the launch, since the
+    CUtensorMap stores only a raw device address. `cacheable` is False when that
+    call cloned, because the clone is transient.
+    """
+    make_tensordesc_arg, TensorDescriptor = _tma_arg_helpers()
+
+    def expand_host_tma_descriptor(
+        cache, pos, tensor, cacheable, shape, strides, block, meta
+    ):
+        data_ptr = tensor.data_ptr()
+        if cacheable:
+            cached = cache.get(pos)
+            if cached is not None and cached[0] == data_ptr:
+                return cached[1]
+        desc = TensorDescriptor(tensor, shape, strides, block)
+        expanded = tuple(make_tensordesc_arg(desc, meta))
+        if cacheable:
+            cache[pos] = (data_ptr, expanded)
+        return expanded
+
+    return expand_host_tma_descriptor
 
 
 class StaticallyLaunchedTritonKernel:
@@ -133,6 +179,8 @@ class StaticallyLaunchedTritonKernel:
 
         self.tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
         self._has_tensordesc = False
+        # tensordesc<> arg names in signature order; filled by arg_ty_from_signature
+        self.tensordesc_arg_names: list[str] = []
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
@@ -332,6 +380,7 @@ class StaticallyLaunchedTritonKernel:
         # So we can ignore them here too
         params = []
         self._tensordesc_idx = 0
+        self.tensordesc_arg_names = []
 
         for i in sorted(signature.keys()):
             ty = signature[i]
@@ -342,6 +391,7 @@ class StaticallyLaunchedTritonKernel:
                 pass
             elif isinstance(ty, str) and ty.startswith("tensordesc<"):
                 self._has_tensordesc = True
+                self.tensordesc_arg_names.append(self.arg_names[i])
                 params.append(self._expand_tensordesc_type(ty))
             else:
                 # pyrefly: ignore [bad-argument-type]
@@ -361,8 +411,13 @@ class StaticallyLaunchedTritonKernel:
         return state
 
     def _expand_tma_args(self, args: tuple[object, ...]) -> tuple[object, ...]:
-        """Expand host-side TMA TensorDescriptor args into the flat kernel params
-        (CUtensorMap + shape + strides) so they match the expanded type string."""
+        """Fallback expansion of host-side TMA TensorDescriptor args into the
+        flat kernel params (CUtensorMap + shape + strides). The static launcher
+        normally pre-expands (with caching) in the generated launcher via
+        expand_host_tma_descriptor, so by the time run() is reached the args are
+        already expanded and this is a no-op; it only fires if a TensorDescriptor
+        reaches run() directly.
+        """
         make_tensordesc_arg, TensorDescriptor = _tma_arg_helpers()
 
         meta = self.tensordesc_meta

@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
+import cmath
 import collections
 import collections.abc
 import contextlib
@@ -3161,6 +3162,74 @@ partial_fn = functools.partial(fn, scale=2)
         torch.testing.assert_close(output_tensors, expected_tensors)
         if cnt2.frame_count != 1:
             raise AssertionError(f"Expected frame_count 1, got {cnt2.frame_count}")
+
+    @parametrize(
+        "name",
+        (
+            "acos",
+            "acosh",
+            "asin",
+            "asinh",
+            "atan",
+            "atanh",
+            "cos",
+            "cosh",
+            "exp",
+            "isclose",
+            "isfinite",
+            "isinf",
+            "isnan",
+            "log",
+            "log10",
+            "phase",
+            "polar",
+            "rect",
+            "sin",
+            "sinh",
+            "sqrt",
+            "tan",
+            "tanh",
+        ),
+        name_fn=lambda name: name,
+    )
+    def test_cmath_constant_fold(self, name):
+        args = {
+            "acos": (0.3 + 0.4j,),
+            "acosh": (0.3 + 0.4j,),
+            "asin": (0.3 + 0.4j,),
+            "asinh": (0.3 + 0.4j,),
+            "atan": (0.3 + 0.4j,),
+            "atanh": (0.3 + 0.4j,),
+            "cos": (0.3 + 0.4j,),
+            "cosh": (0.3 + 0.4j,),
+            "exp": (0.3 + 0.4j,),
+            "isclose": (0.3 + 0.4j, 0.3 + 0.4j),
+            "isfinite": (0.3 + 0.4j,),
+            "isinf": (0.3 + 0.4j,),
+            "isnan": (0.3 + 0.4j,),
+            "log": (0.3 + 0.4j,),
+            "log10": (0.3 + 0.4j,),
+            "phase": (0.3 + 0.4j,),
+            "polar": (0.3 + 0.4j,),
+            "rect": (1.0, 0.5),
+            "sin": (0.3 + 0.4j,),
+            "sinh": (0.3 + 0.4j,),
+            "sqrt": (0.3 + 0.4j,),
+            "tan": (0.3 + 0.4j,),
+            "tanh": (0.3 + 0.4j,),
+        }[name]
+        fn = getattr(cmath, name)
+
+        def call():
+            return fn(*args)
+
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_call = torch._dynamo.optimize_assert(cnt)(call)
+        expected = fn(*args)
+        actual = opt_call()
+        self.assertEqual(actual, expected)
+        self.assertEqual(cnt.frame_count, 0)
 
     @make_test
     def test_numpy_meshgrid(x, y):

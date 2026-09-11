@@ -119,6 +119,9 @@ torch_string_c_str(StringHandle handle, const char** data);
 
 #ifdef USE_CUDA
 
+// The returned handle uses cuBLAS's default workspace unless ATen workspace
+// caching is explicitly enabled. Internal ATen operations restore the default
+// workspace before releasing their eager workspace allocations.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_current_cuda_blas_handle(void** ret_handle);
 

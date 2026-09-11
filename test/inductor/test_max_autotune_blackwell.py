@@ -6,11 +6,13 @@ import torch
 from torch._inductor import config
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
 from torch._inductor.heuristics.template.triton import (
+    _num_sms_for_two_ctas,
     BlackwellGPUGemmConfig,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
 )
+from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
@@ -59,6 +61,7 @@ class TestMaxAutotuneBlackwell(TestCase):
     @parametrize("dynamic", (False, True))
     @parametrize("tma_store", (False, True))
     @parametrize("epilogue_subtile", (1, 2, 4))
+    @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_regular_mm_persistent_tma(
         self,
         a_transposed: bool,
@@ -66,6 +69,7 @@ class TestMaxAutotuneBlackwell(TestCase):
         dynamic: bool,
         tma_store: bool,
         epilogue_subtile: int,
+        host_side_tma: bool,
     ):
         def mm(a, b):
             # TMA requires 16-byte alignment: here we repeat the dims
@@ -98,7 +102,8 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
-                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                "triton.enable_host_side_tma": host_side_tma,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 "test_configs.autotune_choice_desc_regex": epilogue_subtile_regex,
             }
         ):
@@ -113,9 +118,128 @@ class TestMaxAutotuneBlackwell(TestCase):
             write_api = "tma_descriptor0.store"
         else:
             write_api = "tl.store"
-        FileCheck().check("triton_tem_fused_mm").check(
-            "triton.language.make_tensor_descriptor"
-        ).check("tl.load_tensor_descriptor").check(write_api).run(code[0])
+        fc = FileCheck().check("triton_tem_fused_mm")
+        if host_side_tma:
+            fc.check("host_tma_descriptor_args")
+            if not tma_store:
+                fc.check_not("tl.make_tensor_descriptor")
+        else:
+            fc.check("tl.make_tensor_descriptor")
+        fc.check(write_api).run(code[0])
+        if host_side_tma and tma_store:
+            # Loads are host-side, so the TMA store is the only descriptor
+            # still built in-kernel.
+            FileCheck().check_count("tl.make_tensor_descriptor", 1, exactly=True).run(
+                code[0]
+            )
+            FileCheck().check("tl.make_tensor_descriptor(out_ptr0").run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("host_side_tma", (False, True))
+    def test_blackwell_square_operand_dim_order(
+        self, a_transposed: bool, b_transposed: bool, host_side_tma: bool
+    ):
+        # A square operand has the same descriptor shape under either dim_order,
+        # so only the strides distinguish row-major from transposed. Picking the
+        # wrong order is invisible in the shape and shows up as a wrong result.
+        S = 512
+        a = torch.randn(S, S).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(S, S).to(torch.float16).to(GPU_TYPE)
+
+        def mm(a, b):
+            return torch.mm(a.T if a_transposed else a, b.T if b_transposed else b)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": host_side_tma,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(mm), a, b)
+        torch.testing.assert_close(actual, mm(a, b), atol=1e-2, rtol=1e-2)
+        fc = FileCheck().check("triton_tem_fused")
+        if host_side_tma:
+            fc.check("host_tma_descriptor_args").check_not("tl.make_tensor_descriptor")
+        else:
+            fc.check("tl.make_tensor_descriptor")
+        fc.run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("mm", "addmm"))
+    def test_blackwell_host_side_tma_transposed_b(self, op: str):
+        # Regression test for host-side TMA with a column-major / transposed B
+        # operand (B_ROW_MAJOR=False, the nn.Linear `x @ W.t()` case).
+        # Previously the host launcher re-permuted the runtime tensor's own
+        # dims -- which are in base layout for a transposed operand -- producing
+        # an incorrect result. Also covers addmm host-side TMA, previously
+        # untested.
+        M, N, K = 512, 256, 512
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        # b is [N, K]; b.t() is the [K, N] column-major operand.
+        b = torch.randn(N, K).to(torch.float16).to(GPU_TYPE)
+        bias = torch.randn(N).to(torch.float16).to(GPU_TYPE)
+
+        def fn(a, b, bias):
+            if op == "addmm":
+                return torch.addmm(bias, a, b.t())
+            return torch.mm(a, b.t())
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(fn), a, b, bias)
+        c_expected = fn(a, b, bias)
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+        # host-side TMA: descriptors come from the launcher, none built in-kernel
+        FileCheck().check("triton_tem_fused").check_not(
+            "tl.make_tensor_descriptor"
+        ).run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("host_side_tma", (False, True))
+    def test_blackwell_size_one_dim_persistent_tma(self, host_side_tma: bool):
+        # A contiguous [1, K] operand is reported transposed by
+        # Layout.is_transposed(), which skips size-1 dims, so the descriptor was
+        # built with a non-unit trailing stride.
+        M, N, K = 1, 512, 1024
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": host_side_tma,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
+        torch.testing.assert_close(c_actual, torch.mm(a, b), atol=1e-2, rtol=1e-2)
+        fc = FileCheck().check("triton_tem_fused_mm")
+        if host_side_tma:
+            fc.check("host_tma_descriptor_args")
+            fc.check_not("tl.make_tensor_descriptor(base=")
+        else:
+            fc.check("tl.make_tensor_descriptor(base=")
+        fc.run(code[0])
 
     # NOTE: the current Inductor template verifies that the scaling mode is either per-tensor or per-row
     # TODO: support additional scaling modes for Blackwell
@@ -125,10 +249,12 @@ class TestMaxAutotuneBlackwell(TestCase):
     )
     @parametrize("dynamic", (False, True))
     @parametrize("tma_store", (False, True))
+    @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_scaled_mm_per_tensor_persistent_tma(
         self,
         dynamic: bool,
         tma_store: bool,
+        host_side_tma: bool,
     ):
         def scaled_mm(a, b, scale_a, scale_b):
             # NOTE: Inductor constrains a to be row_major and b to be col_major
@@ -157,7 +283,8 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
-                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                "triton.enable_host_side_tma": host_side_tma,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
             }
         ):
             c_actual, code = run_and_get_code(
@@ -173,9 +300,12 @@ class TestMaxAutotuneBlackwell(TestCase):
             write_api = "tma_descriptor0.store"
         else:
             write_api = "tl.store"
-        FileCheck().check("triton_tem_fused__scaled_mm").check(
-            "triton.language.make_tensor_descriptor"
-        ).check("tl.load_tensor_descriptor").check(write_api).run(code[0])
+        fc = FileCheck().check("triton_tem_fused__scaled_mm")
+        if host_side_tma:
+            fc.check("host_tma_descriptor_args")
+        else:
+            fc.check("tl.make_tensor_descriptor(base=")
+        fc.check("_desc.load(").check(write_api).run(code[0])
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
@@ -183,10 +313,12 @@ class TestMaxAutotuneBlackwell(TestCase):
     )
     @parametrize("dynamic", (False, True))
     @parametrize("tma_store", (False, True))
+    @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_scaled_mm_per_row_persistent_tma(
         self,
         dynamic: bool,
         tma_store: bool,
+        host_side_tma: bool,
     ):
         def scaled_mm(a, b, scale_a, scale_b):
             # NOTE: Inductor constrains a to be row_major and b to be col_majo
@@ -223,7 +355,8 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
-                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                "triton.enable_host_side_tma": host_side_tma,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
             }
         ):
             c_actual, code = run_and_get_code(
@@ -239,9 +372,12 @@ class TestMaxAutotuneBlackwell(TestCase):
             write_api = "tma_descriptor0.store"
         else:
             write_api = "tl.store"
-        FileCheck().check("triton_tem_fused__scaled_mm").check(
-            "triton.language.make_tensor_descriptor"
-        ).check("tl.load_tensor_descriptor").check(write_api).run(code[0])
+        fc = FileCheck().check("triton_tem_fused__scaled_mm")
+        if host_side_tma:
+            fc.check("host_tma_descriptor_args")
+        else:
+            fc.check("tl.make_tensor_descriptor(base=")
+        fc.check("_desc.load(").check(write_api).run(code[0])
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
@@ -252,6 +388,7 @@ class TestMaxAutotuneBlackwell(TestCase):
     @parametrize("dynamic", (False, True))
     @parametrize("tma_store", (False, True))
     @parametrize("epilogue_subtile", (1, 2, 4))
+    @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_addmm_persistent_tma(
         self,
         a_transposed: bool,
@@ -259,6 +396,7 @@ class TestMaxAutotuneBlackwell(TestCase):
         dynamic: bool,
         tma_store: bool,
         epilogue_subtile: int,
+        host_side_tma: bool,
     ):
         def addmm(x, a, b):
             # TMA requires 16-byte alignment: here we repeat the dims
@@ -294,16 +432,17 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
-                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                "triton.enable_host_side_tma": host_side_tma,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 "test_configs.autotune_choice_desc_regex": epilogue_subtile_regex,
                 # If we dynamically disable pipelining,
-                # triton_blackwell_ws_persistent_device_tma template will
+                # triton_blackwell_ws_persistent_tma template will
                 # be picked and then cause mis-aligned memory access.
                 # If we don't dynamically disable pipelining,
                 # this template is skipped and triton_tem_fused_addmm_repeat_3
                 # is used.
                 #
-                # Fundamentally we should fix the triton_blackwell_ws_persistent_device_tma template
+                # Fundamentally we should fix the triton_blackwell_ws_persistent_tma template
                 # The flag below work around the problem.
                 #
                 # This only happens in fbcode https://www.internalfb.com/diff/D101855575.
@@ -316,8 +455,8 @@ class TestMaxAutotuneBlackwell(TestCase):
             )
             c_expected = addmm(x, a, b)
 
-        make_desc_api = "triton.language.make_tensor_descriptor"
-        read_api = "tl.load_tensor_descriptor"
+        make_desc_api = "tl.make_tensor_descriptor"
+        read_api = "_desc.load("
         if tma_store:
             # Verify that we are using a TMA implementation
             # Note: The tma_descriptor0 is generated by the kernel. If the
@@ -327,14 +466,27 @@ class TestMaxAutotuneBlackwell(TestCase):
             write_api = "tl.store"
 
         # Verify that we are using a TMA implementation
-        FileCheck().check("triton_tem_fused_addmm").check(make_desc_api).check(
-            read_api
-        ).check(write_api).run(code[0])
+        fc = FileCheck().check("triton_tem_fused_addmm")
+        if host_side_tma:
+            fc.check("host_tma_descriptor_args")
+            if not tma_store:
+                fc.check_not(make_desc_api)
+        else:
+            fc.check(make_desc_api)
+        fc.check(read_api).check(write_api).run(code[0])
+        if host_side_tma and tma_store:
+            # Loads are host-side, so the TMA store is the only descriptor
+            # still built in-kernel.
+            FileCheck().check_count(make_desc_api, 1, exactly=True).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
 
 @instantiate_parametrized_tests
+@unittest.skipIf(
+    config.triton.enable_host_side_tma,
+    "epilogue fusion registers a descriptor the host path cannot resolve",
+)
 class TestBlackwellTMAStoreFusion(TestCase):
     """Tests for TMA store with fused pointwise epilogues on Blackwell."""
 
@@ -381,8 +533,8 @@ class TestBlackwellTMAStoreFusion(TestCase):
         from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -395,7 +547,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_template_tma_store": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), x, W)
@@ -438,8 +590,8 @@ class TestBlackwellTMAStoreFusion(TestCase):
         from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -452,7 +604,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_template_tma_store": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), x, W, bias)
@@ -470,6 +622,10 @@ class TestBlackwellTMAStoreFusion(TestCase):
 
 
 @instantiate_parametrized_tests
+@unittest.skipIf(
+    config.triton.enable_host_side_tma,
+    "epilogue fusion registers a descriptor the host path cannot resolve",
+)
 class TestBlackwellTMALoadFusion(TestCase):
     """Tests for TMA load with fused pointwise epilogues on Blackwell."""
 
@@ -511,8 +667,8 @@ class TestBlackwellTMALoadFusion(TestCase):
         from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -525,7 +681,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_tma_load_for_template_epilogue": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), x, W)
@@ -567,8 +723,8 @@ class TestBlackwellTMALoadFusion(TestCase):
         from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -581,7 +737,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_tma_load_for_template_epilogue": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), x, W, scale, bias)
@@ -622,8 +778,8 @@ class TestBlackwellTMALoadFusion(TestCase):
         from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -636,7 +792,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_tma_load_for_template_epilogue": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), bias, x, W)
@@ -739,6 +895,7 @@ class TestBlackwellAutoWSConstraints(TestCase):
             "EPILOGUE_SUBTILE": 2,
             "DATA_PARTITION_FACTOR": 1,
             "TWO_CTAS": True,
+            "USE_META_WS": True,
         }
         with (
             config.patch({"triton.enable_template_tma_store": True}),
@@ -751,9 +908,85 @@ class TestBlackwellAutoWSConstraints(TestCase):
                 kwargs["num_stages"] = num_stages
                 self.assertTrue(
                     CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
-                        kwargs
+                        kwargs, element_size=2
                     )
                 )
+
+    def test_two_ctas_swizzle_is_dtype_aware(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "EPILOGUE_SUBTILE": 1,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": True}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=2
+                )
+            )
+            self.assertTrue(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=4
+                )
+            )
+
+            kwargs["BLOCK_N"] = 32
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=4
+                )
+            )
+
+    def test_two_ctas_requires_tma_store_for_metaws_template(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "EPILOGUE_SUBTILE": 1,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": False}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=2
+                )
+            )
+
+    def test_two_ctas_odd_num_sms_covers_every_tile(self):
+        num_sms = _num_sms_for_two_ctas(149, True)
+        self.assertEqual(num_sms, 148)
+
+        block_m, block_n = 128, 128
+        m, n = 17 * block_m, 20 * block_n
+        meta = {
+            "BLOCK_M": block_m,
+            "BLOCK_N": block_n,
+            "NUM_SMS": num_sms,
+            "TWO_CTAS": True,
+        }
+        grid_size = blackwell_persistent_mm_grid(m, n, meta)[0]
+        grid_m = ((m + block_m - 1) // block_m + 1) // 2 * 2
+        num_tiles = grid_m * ((n + block_n - 1) // block_n)
+        visited = {
+            tile for pid in range(grid_size) for tile in range(pid, num_tiles, num_sms)
+        }
+        self.assertEqual(visited, set(range(num_tiles)))
 
 
 if __name__ == "__main__":

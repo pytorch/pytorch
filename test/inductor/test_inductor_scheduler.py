@@ -49,6 +49,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
     skipCUDAIf,
 )
@@ -56,6 +57,8 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
     run_tests,
+    skipIfMPS,
+    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -151,6 +154,15 @@ class TestScheduler(TestCase):
         node.ancestors = OrderedSet(ancestors)
         node.get_operation_names.return_value = OrderedSet([name])
         node.get_buffer_names.return_value = OrderedSet(writes)
+
+        def make_output(buf_name):
+            buf = Mock()
+            buf.get_name.return_value = buf_name
+            buf.get_aliases.return_value = ()
+            buf.get_mutations.return_value = ()
+            return buf
+
+        node.get_outputs.return_value = tuple(make_output(w) for w in writes)
         node.is_reduction.return_value = is_reduction
         if is_reduction:
             node.__class__ = SchedulerNode
@@ -290,7 +302,7 @@ class TestScheduler(TestCase):
 
     def test_fuse_two_nodes_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
-        device = torch.device("cuda", 0)
+        device = torch.device(GPU_TYPE, 0)
         node1 = self._mock_base_snode("node1", device)
         node2 = self._mock_base_snode("node2", device)
         node3 = self._mock_base_snode("node3", device)
@@ -364,10 +376,11 @@ class TestScheduler(TestCase):
 
         self.assertIsNone(result)
 
+    @skipIfMPS  # MPS is filtered by _filter_nodes_for_combo_kernel_grouping
     @inductor_config.patch(combo_kernel_max_num_nodes=16)
     def test_combo_kernel_grouping_respects_mempool(self):
         scheduler = Mock()
-        device = torch.device("cuda", 0)
+        device = torch.device(GPU_TYPE, 0)
         pool_node1 = self._mock_base_snode("pool_node1", device)
         pool_node2 = self._mock_base_snode("pool_node2", device)
         default_node = self._mock_base_snode("default_node", device)
@@ -1316,6 +1329,119 @@ class TestScheduler(TestCase):
         self.assertIsNone(cross_group_rate)
         self.assertIsNone(x_grouped_rate)
 
+    def test_nested_reduction_rejects_ambiguous_pointwise_domain(self):
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("reduced",), is_reduction=True
+        )
+        grouped.get_ranges.return_value = ([8], [2])
+        consumer = self._mock_schedule_node(
+            "consumer", reads=("reduced",), ancestors=("grouped",)
+        )
+        consumer.__class__ = SchedulerNode
+        context = Mock(grouped_reduction=grouped, grouped_numel=8, grouped_rnumel=2)
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_pointwise_node_matches_domain", return_value=True
+            ),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+        ):
+            result = NestedReduction._classify_grouped_pointwise_nodes(
+                context, (grouped, consumer)
+            )
+
+        self.assertIsNone(result)
+
+    def test_nested_reduction_rejects_template_nodes(self):
+        outer = self._mock_schedule_node("outer", is_reduction=True)
+        outer.node = Mock(spec=ir.TemplateBuffer)
+        outer.get_nodes.return_value = (outer,)
+        grouped = self._mock_schedule_node("grouped", is_reduction=True)
+        grouped.get_nodes.return_value = (grouped,)
+        context = Mock(grouped_axis=NestedReduction.GroupedAxis.R)
+
+        self.assertFalse(
+            NestedReduction._r_grouped_stage_accesses_match(outer, grouped, context, ())
+        )
+
+    @parametrize("writer_role", ["parent_stage", "local_input", "reduction"])
+    def test_nested_sub_parent_rejects_parent_stage_live_source(self, writer_role):
+        outer_reduction = self._mock_schedule_node(
+            "outer_reduction", writes=("rstd",), is_reduction=True
+        )
+        writer = self._mock_schedule_node(
+            "writer", writes=("source",), is_reduction=writer_role == "reduction"
+        )
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("scale",), is_reduction=True
+        )
+        epilogue = self._mock_schedule_node(
+            "epilogue",
+            reads=("source", "scale"),
+            writes=("packed",),
+            ancestors=("writer", "grouped"),
+        )
+        outer = Mock()
+        outer.get_nodes.return_value = (outer_reduction, writer)
+        outer.group = (None, (8, 16))
+        context = Mock(grouped_reduction=grouped, grouped_rnumel=2)
+        domains = [(epilogue, NestedReduction.PointwiseDomain.SUB_PARENT)]
+        if writer_role == "local_input":
+            domains.append(
+                (writer, NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT)
+            )
+        relation = Mock(requires_live_source=True)
+        relation.consumer_access.name = "source"
+        grouping = Mock(output_groups=(Mock(output_lanes=1, nodes=(epilogue,)),))
+        grouping.factor = 2
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+            patch.object(
+                NestedReduction,
+                "_group_sub_parent_epilogue_nodes",
+                return_value=grouping,
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_internal_access_relations",
+                return_value=(),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_epilogue_outputs_unread",
+                return_value=True,
+            ),
+            patch.object(
+                NestedReduction,
+                "_try_get_sub_parent_access_relations",
+                return_value=(relation,),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_broadcast_access_relations",
+                return_value=(),
+            ),
+        ):
+            stage = NestedReduction._plan_nested_sub_parent_stage(
+                outer, (grouped, epilogue), context, domains
+            )
+
+        # Only a value produced inside the parent loop is dead once a looped
+        # parent closes it; displaced and reduction writers stay live.
+        if writer_role == "parent_stage":
+            self.assertIsNone(stage)
+        else:
+            self.assertIsNotNone(stage)
+
     def test_sub_parent_parent_order_closes_final_loop_dependencies(self):
         source = self._mock_schedule_node("source", writes=("source",))
         sibling = self._mock_schedule_node("sibling", writes=("sibling",))
@@ -1642,6 +1768,7 @@ class TestScheduler(TestCase):
         {"force_disable_caches": True, "shape_padding": False}
     )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
             return
@@ -1825,7 +1952,7 @@ class TestScheduler(TestCase):
         self.assertFalse(can_fuse_prologue(hook_blocks=True))
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_index_add_fusion_prevented(self):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
@@ -1846,7 +1973,7 @@ class TestScheduler(TestCase):
             F_u_at_atom = F_u_mol[batch] + 1e-6
             return f_u / F_u_at_atom
 
-        device = "cuda"
+        device = GPU_TYPE
         f = torch.ones(1024, 1, device=device)
         batch = torch.zeros(1024, dtype=torch.long, device=device)
 
@@ -1866,7 +1993,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_atomic_add_no_fusion_correctness(self):
         """
         Test that atomic_add operations produce correct results.
@@ -1877,7 +2004,7 @@ class TestScheduler(TestCase):
             out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
             return out[idx] + 1.0  # read from same buffer: requires sync
 
-        device = "cuda"
+        device = GPU_TYPE
         x = torch.ones(5, device=device)
         idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
 
@@ -1897,7 +2024,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_expand_reuse_does_not_realize_before_reduction(self):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
@@ -1923,7 +2050,7 @@ class TestScheduler(TestCase):
         U = 4
         V = 4
         W = 4
-        device = "cuda"
+        device = GPU_TYPE
 
         torch.manual_seed(0)
         input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
@@ -1968,7 +2095,7 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_expand_reuse_realizes_in_deterministic_mode(self):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
@@ -1985,7 +2112,7 @@ class TestScheduler(TestCase):
             self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
             self.assertEqual(metrics.generated_kernel_count, 2)
 
-        device = "cuda"
+        device = GPU_TYPE
         torch.manual_seed(0)
         args = [
             torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)

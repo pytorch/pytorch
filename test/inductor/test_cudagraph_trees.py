@@ -45,7 +45,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
-    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
@@ -2416,6 +2415,11 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
+        @unittest.skipUnless(
+            torch.version.hip is not None
+            or os.environ.get("TORCH_CUBLAS_WORKSPACE_CACHE") == "1",
+            "persistent BLAS workspace caching is disabled",
+        )
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
 
@@ -2446,11 +2450,11 @@ if HAS_CUDA_AND_TRITON:
                             or "at::cuda::blas::bgemm_internal_cublaslt<float, float>"
                             in str(e)
                         )
-                        # CUDA uses getCurrentCUDABlasHandle/getNewWorkspace,
-                        # ROCm uses getNewCUDABlasLtWorkspace/getCUDABlasLtWorkspace
+                        # CUDA and ROCm allocate BLAS workspaces through the
+                        # shared allocation helper.
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
-                            or "getNewWorkspace" in str(e)
+                            or "allocateCUDABlasWorkspace" in str(e)
                             or "CUDABlasLtWorkspace" in str(e)
                         )
 
@@ -5131,16 +5135,18 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
             # When graph_partition is enabled but the forward has no unsafe
-            # ops, forward_is_partitioned should be False and all saved
+            # ops, forward_is_cudagraph_partitioned should be False and all saved
             # tensors remain static in the backward.
             from unittest.mock import patch
 
-            forward_partitioned = None
+            forward_cudagraph_partitioned = None
             orig_bw = torch._inductor.compile_fx.compile_fx_backward
 
             def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
-                nonlocal forward_partitioned
-                forward_partitioned = compiler_config_extra.forward_is_partitioned.value
+                nonlocal forward_cudagraph_partitioned
+                forward_cudagraph_partitioned = (
+                    compiler_config_extra.forward_is_cudagraph_partitioned.value
+                )
                 return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
 
             class Mod(torch.nn.Module):
@@ -5164,7 +5170,7 @@ if HAS_CUDA_AND_TRITON:
                 loss.backward()
                 optimizer.step()
 
-            self.assertFalse(forward_partitioned)
+            self.assertFalse(forward_cudagraph_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
@@ -6177,10 +6183,6 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
-        @unittest.skipIf(
-            IS_LINUX or TEST_WITH_SLOW,
-            "https://github.com/pytorch/pytorch/issues/176144",
-        )
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
@@ -6190,14 +6192,21 @@ if HAS_CUDA_AND_TRITON:
             from torch.testing._internal.triton_utils import add_kernel
 
             def foo(x, y):
+                n_elements = 128
+                BLOCK_SIZE = 16
+                grid = ((n_elements + BLOCK_SIZE - 1) // BLOCK_SIZE,)
                 # partition 1
                 output1 = torch.empty_like(x)
-                add_kernel[(4,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[grid](
+                    x, y, output1, n_elements=n_elements, BLOCK_SIZE=BLOCK_SIZE
+                )
                 output1_cpu = output1.cpu() + 1
                 # partition 2 should reuse the user-defined kernel
                 x2 = output1_cpu.to("cuda")
                 output2 = torch.empty_like(x)
-                add_kernel[(4,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[grid](
+                    x2, y, output2, n_elements=n_elements, BLOCK_SIZE=BLOCK_SIZE
+                )
                 return output1, output2
 
             compiled_foo = torch.compile(foo)
