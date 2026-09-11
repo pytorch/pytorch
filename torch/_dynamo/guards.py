@@ -4634,7 +4634,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
-            if "<locals>" in obj.__qualname__:
+            if "<locals>" in obj.__qualname__.split("."):
                 # Rebuilt whether or not a guard is rooted at it, as before this
                 # change: it can never be found by name, and unlike a wraps
                 # wrapper it has no module-level neighbourhood to drag along.
