@@ -144,7 +144,7 @@ try:
 except ImportError as e:
     log.warning(e)
 try:
-    from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
+    from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnly  # noqa: F401
 except ImportError as e:
     log.warning(e)
 

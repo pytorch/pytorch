@@ -7076,9 +7076,9 @@ instantiate_device_type_tests(TestTransformersAccelerator, globals(), only_for=d
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAGeneric, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAAccelerator, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
-instantiate_device_type_tests(TestSDPACPU, globals(), only_for=("cpu"))
+instantiate_device_type_tests(TestSDPACPU, globals(), only_for=("cpu"), add_device_type_to_name=False)
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
-instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
+instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True, add_device_type_to_name=False)
 
 if __name__ == '__main__':
     run_tests()

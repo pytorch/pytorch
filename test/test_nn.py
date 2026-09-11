@@ -17294,7 +17294,7 @@ instantiate_parametrized_tests(TestFusedRMSNormOverrideRouting)
 instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 
-instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda", add_device_type_to_name=False)
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
 

@@ -293,7 +293,9 @@ cuda_calls_behavior_unchanged()
         self.assertEqual(r, "")
 
 
-instantiate_device_type_tests(TestExportOnFakeCuda, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestExportOnFakeCuda, globals(), only_for="cuda", add_device_type_to_name=False
+)
 
 
 if __name__ == "__main__":
