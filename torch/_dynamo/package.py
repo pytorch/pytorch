@@ -116,10 +116,9 @@ class FunctionPicklerBase(pickle.Pickler):
     closure cells, python modules, bound methods, and functions rebuilt from
     their code object.
 
-    GuardsStatePickler is the one subclass today and decides what a rebuilt
-    function carries; this class fixes HOW it is rebuilt. AOTCompilePickler
-    keeps its own copies of these reducers until it is moved onto this base
-    separately; once both share it, a fix here cannot be missed in one pickler.
+    GuardsStatePickler and AOTCompilePickler each keep their own dispatch and
+    decide what a rebuilt function carries; this class fixes HOW it is rebuilt,
+    so a fix here cannot be missed in one pickler.
 
     Defaults, kwdefaults, __doc__, __dict__, __annotations__ and __type_params__
     travel as pickle STATE, applied after memoization, so `wrapper.me = wrapper`
