@@ -3365,7 +3365,7 @@ class TestLinalgDevice(TestCase):
             x = torch.linalg.solve(A, b)
             if rhs == ():
                 Ax = np.matmul(A.cpu(), x.unsqueeze(-1).cpu())
-                Ax.squeeze_(-1)
+                Ax = Ax.squeeze(-1)
             else:
                 Ax = np.matmul(A.cpu(), x.cpu())
             self.assertEqual(b.expand_as(Ax), Ax)
