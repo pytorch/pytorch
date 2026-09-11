@@ -1623,17 +1623,17 @@ def helper(x):
             override_persistent_reduction=False,
             override_cooperative_reduction=False,
         )
-        kernel.autotune_hints.add(AutotuneHint.SCALAR_ONLINE_SOFTMAX)
+        kernel.autotune_hints.add(AutotuneHint.SCALAR_ACCUMULATORS)
         kernel.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
         with V.set_kernel_handler(kernel):
             hints = kernel.inductor_meta_per_kernel()["autotune_hints"]
         self.assertEqual(
             hints,
-            (AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ONLINE_SOFTMAX),
+            (AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS),
         )
         self.assertEqual(
             repr(hints),
-            "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ONLINE_SOFTMAX)",
+            "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
         )
 
 
