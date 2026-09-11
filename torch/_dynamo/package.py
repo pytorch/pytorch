@@ -197,22 +197,18 @@ class FunctionPicklerBase(pickle.Pickler):
         # existed in sys.modules at save (exec-created, transformers_modules.*)
         # comes back empty: safe on the guard-serialization path, which reads
         # attributes off the rebuilt function without calling it; a pickler
-        # whose functions are CALLED after load (AOTCompilePickler, once it is
-        # on this base) sees an empty scope as a NameError at first call, not a
-        # load error. A scope of "__main__" imports the LOADING process's
-        # __main__, the same module pickle itself resolves a by-reference
-        # __main__ function against; right in-process, and cross-process only
-        # as right as the two scripts agree. A module that replaced its own
-        # sys.modules entry with a proxy (torch.backends.cudnn) imports as a
-        # small dict that is not empty, so a global read from it fails at call
-        # without the log below; the old import of __module__ landed on the
-        # same object.
+        # whose functions are CALLED after load (AOTCompilePickler) sees an
+        # empty scope as a NameError at first call, not a load error. "__main__"
+        # imports the LOADING process's __main__, as pickle's own by-reference
+        # path does; a module that swapped a proxy into sys.modules
+        # (torch.backends.cudnn) imports as that proxy, as the old import of
+        # __module__ did.
         # Not every __name__ is importable: a <locals>/exec function can carry
         # None or "" (bare globals with no __name__), and a relative name
         # (".rel") or a module whose body raises fails import with something
         # other than ImportError. None of those should fail the load, so require
         # a non-empty str and swallow any Exception from the import into the
-        # empty scope (a SystemExit or KeyboardInterrupt still propagates).
+        # empty scope (SystemExit/KeyboardInterrupt still propagate).
         f_globals: dict[str, Any] = {}
         why: str | Exception = f"scope {scope!r} is not an importable name"
         if isinstance(scope, str) and scope:
@@ -303,9 +299,8 @@ class FunctionPicklerBase(pickle.Pickler):
         module that is not in sys.modules yet, this reports False for it
         (guards.py explains why on its caller), and a "<locals>" qualname
         component is refused like pickle refuses it. GuardsStatePickler handles
-        <locals> on its own branch before asking; the helper keeps the check so
-        that AOTCompilePickler can dispatch on it alone once it moves onto this
-        base."""
+        <locals> on its own branch before asking; AOTCompilePickler dispatches
+        on this alone."""
         if "<locals>" in fn.__qualname__.split("."):
             return False
         # __module__ need not be a str (a decorator can set anything); an
@@ -321,18 +316,22 @@ class FunctionPicklerBase(pickle.Pickler):
         return resolved is fn
 
     @staticmethod
-    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+    def _read_raw_annotations(obj: Any, *, evaluate: bool = False) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the
         # FORWARDREF format instead: it evaluates what it can and falls back to
         # proxies only for names that do not resolve, returning a COPY either
         # way. A ForwardRef proxy carries its owner and may not pickle (it does
         # not for a local function), so the caller prunes any it does not need.
+        # `evaluate` asks for the VALUE format instead, for a caller that has to
+        # serialize the values and cannot carry a proxy; that read raises for a
+        # name that does not resolve.
         if sys.version_info >= (3, 14):
             import annotationlib
 
+            fmt = annotationlib.Format
             return annotationlib.get_annotations(
-                obj, format=annotationlib.Format.FORWARDREF
+                obj, format=fmt.VALUE if evaluate else fmt.FORWARDREF
             )
         return obj.__annotations__
 
@@ -356,10 +355,11 @@ class FunctionPicklerBase(pickle.Pickler):
     ) -> tuple[Any, ...] | None:
         # pickle rebuilds a bound method by getattr() on self at load, which is
         # wrong when that does not resolve back to the same bound method; those
-        # carry the function and self explicitly. `receiver_is_live` says the
-        # receiver is the SAME object at load (a persistent_id reference), so
-        # only the probe below decides: the per-instance and __getattr__ gates
-        # exist for a receiver that is rebuilt, possibly as a different type.
+        # carry the function and self explicitly. `receiver_is_live` says
+        # getattr() on the load-time receiver serves names as it does here (it
+        # is handed over as external data, a persistent_id reference), so only
+        # the probe below decides; the per-instance and __getattr__ gates exist
+        # for a receiver that is rebuilt, possibly as a different type.
         receiver = method.__self__
         cls = type(receiver)
         func = method.__func__
@@ -377,16 +377,18 @@ class FunctionPicklerBase(pickle.Pickler):
         # a subclass may rebuild such a receiver as a DIFFERENT type at load
         # (GuardsStatePickler._unpickle_module turns a non-referenceable module
         # into a bare torch.nn.Module), on which getattr() would not resolve
-        # the method. A type receiver (classmethod) is exempt: its namespace is
-        # restored with the class. issubclass(cls, ...) rather than isinstance
-        # so a raising __getattribute__ cannot escape before the try below.
+        # the method. Both gates are skipped for a type receiver (a classmethod;
+        # its namespace is restored with the class) and for a live receiver,
+        # whose names getattr() serves at load exactly as it does now; those
+        # are probed. issubclass(cls, ...) rather than isinstance so a raising
+        # __getattribute__ cannot escape before the try below.
         explicit = (type(self)._unpickle_bound_method, (func, receiver))
-        is_type = issubclass(cls, type) or receiver_is_live
+        exempt = issubclass(cls, type) or receiver_is_live
         try:
-            if not is_type and hasattr(cls, "__getattr__"):
+            if not exempt and hasattr(cls, "__getattr__"):
                 return explicit
             self_dict = getattr(receiver, "__dict__", None)
-            if not is_type and (
+            if not exempt and (
                 (isinstance(self_dict, dict) and name in self_dict)
                 or (
                     name is not None
