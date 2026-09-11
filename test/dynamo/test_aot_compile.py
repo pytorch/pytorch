@@ -55,6 +55,14 @@ EPS = torch.tensor(1e-7)
 AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
 
 
+class BottomlessReduce:
+    # Every save reduces to a fresh instance, so the pickler recurses without
+    # bound on every Python version (3.14's C pickler no longer overflows on a
+    # merely deep list).
+    def __reduce__(self):
+        return (BottomlessReduce, (BottomlessReduce(),))
+
+
 def _aot_pep695_generic():
     # `def inner[T](x: T) -> T`, built via exec so this file parses below 3.12.
     ns = {"__name__": __name__}
@@ -944,15 +952,11 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIn("external_data", msg)
 
     def test_save_guidance_when_a_default_overflows_the_pickler(self):
-        # A deep-but-finite value in an unpruned slot overflows the C pickler;
-        # the RecursionError gets the same guidance and the handler itself does
-        # not overflow.
-        deep = []
-        for _ in range(20000):
-            deep = [deep]
-
+        # A value in an unpruned slot that recurses without bound in the C
+        # pickler raises RecursionError; it gets the same guidance and the
+        # handler itself does not overflow.
         def outer():
-            def fn(x, cfg=deep):
+            def fn(x, cfg=BottomlessReduce()):
                 return x + 1
 
             return fn
