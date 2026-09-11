@@ -23,6 +23,7 @@ from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
+    GradientReductionHandle,
     MixedPrecisionPolicy,
     OffloadPolicy,
     register_fsdp_forward_method,
@@ -1764,6 +1765,49 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 2)
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_finalize_gradient_accumulation_async(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model[1], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        torch.manual_seed(42 + self.rank)
+        inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(3)]
+        model.set_is_last_backward(False)
+        model.set_reshard_after_backward(False)
+        model.set_requires_gradient_sync(False)
+        for input_tensor in inputs:
+            model(input_tensor).sum().backward()
+
+        handle = model.finalize_gradient_accumulation(async_op=True)
+        self.assertIsInstance(handle, GradientReductionHandle)
+        state = model._get_fsdp_state()
+        self.assertTrue(state._state_ctx.gradient_reduction_pending)
+        self.assertGreater(len(state._comm_ctx.reduce_scatter_states), 0)
+        with self.assertRaisesRegex(RuntimeError, "must be waited on"):
+            model.finalize_gradient_accumulation(async_op=True)
+        with self.assertRaisesRegex(RuntimeError, "must be waited on"):
+            model(inputs[0])
+
+        handle.wait()
+        handle.wait()
+        self.assertFalse(state._state_ctx.gradient_reduction_pending)
+        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 0)
+
+        for input_tensor in inputs:
+            ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsInstance(param, DTensor)
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
     @skip_if_lt_x_gpu(4, allow_cpu=True)
     def test_finalize_gradient_accumulation_rejects_partial_all_reduce(self):
         mesh = init_device_mesh(
@@ -2815,6 +2859,12 @@ class TestFullyShardCudaGraph(FSDPTest):
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_finalize_gradient_accumulation_cudagraph(self):
+        self.run_subtests(
+            {"async_op": [False, True]},
+            self._test_finalize_gradient_accumulation_cudagraph,
+        )
+
+    def _test_finalize_gradient_accumulation_cudagraph(self, async_op: bool) -> None:
         torch.cuda.set_device(self.rank)
         device = torch.device("cuda", self.rank)
         torch.manual_seed(42)
@@ -2833,7 +2883,9 @@ class TestFullyShardCudaGraph(FSDPTest):
         def run_accumulation() -> tuple[torch.Tensor, ...]:
             for input_tensor in static_inputs:
                 model(input_tensor).sum().backward()
-            model.finalize_gradient_accumulation()
+            handle = model.finalize_gradient_accumulation(async_op=async_op)
+            if handle is not None:
+                handle.wait()
             return tuple(param.grad.detach().clone() for param in model.parameters())
 
         model.set_is_last_backward(False)
