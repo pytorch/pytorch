@@ -701,12 +701,12 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         def outer():
             scale = None
 
-            def helper(x, *, k=2):
+            def helper(x, y=3, *, k=2):
                 if x is None:
                     return unset
                 if scale is None:
                     x = x + 1
-                return x * k
+                return x * k + y
 
             helper.tag = 2.0
             if helper is None:
@@ -739,6 +739,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             cells["unset"].cell_contents
         self.assertIsNone(cells["scale"].cell_contents)
         self.assertEqual(loaded.__kwdefaults__, {"k": 2})
+        self.assertEqual(loaded.__defaults__, (3,))
         self.assertEqual(loaded.tag, 2.0)
 
     def test_aot_compile_prunes_a_helpers_unpicklable_attribute(self):
@@ -767,9 +768,11 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             compiled_fn.save_compiled_function(self.path())
         self.assertEqual(len(logs.output), 1)
         self.assertIn("helper.lock (lock) from the artifact", logs.output[0])
-        with open(self.path(), "rb") as f:
-            loaded = torch.compiler.load_compiled_function(f)
-        self.assertEqual(loaded(*inputs), expected)
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            self.assertEqual(loaded(*inputs), expected)
         (cell,) = loaded._artifacts.runtime_env.closure
         self.assertEqual(cell.cell_contents.__dict__, {"tag": 2.0})
 
@@ -803,16 +806,15 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         compiled_fn = compiled_fn.aot_compile((inputs, {}))
         # One warning per dropped entry, from the real dump only (the probe
         # picklers reach both functions too) and named by the code object, since
-        # wraps gave helper base's __qualname__.
+        # wraps gave helper base's __qualname__ (co_qualname is 3.11+; 3.10 gets
+        # the bare co_name).
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             compiled_fn.save_compiled_function(self.path())
         self.assertEqual(len(logs.output), 2)
-        self.assertTrue(
-            any("build.<locals>.helper.lock (lock)" in l for l in logs.output)
-        )
-        self.assertTrue(
-            any("build.<locals>.base.lock (lock)" in l for l in logs.output)
-        )
+        self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
+        self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
+        if sys.version_info >= (3, 11):
+            self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
@@ -2056,7 +2058,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         def outer():
             def inner(x):
-                return x
+                return inner if x is None else x  # closes over itself: reduced twice
 
             inner.__doc__ = threading.Lock()
             return inner
@@ -2065,6 +2067,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             AOTCompilePickler({}, buf).dump(fn)
+        self.assertEqual(len(logs.output), 1)
         self.assertIn("inner.__doc__ (lock) from the artifact", logs.output[0])
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertIsNone(out.__doc__)
@@ -2161,8 +2164,10 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         fn = outer()
         buf = io.BytesIO()
         pickler = AOTCompilePickler({}, buf)
-        pickler.dump(fn)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            pickler.dump(fn)
         self.assertEqual(pickler.errors, {})
+        self.assertIn("not marked as external data (Linear)", logs.output[0])
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertFalse(hasattr(out, "mod"))
         buf = io.BytesIO()
@@ -2171,9 +2176,9 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.mod, mod)
 
     def test_pickler_rebuilds_a_nested_function_faithfully(self):
-        # The full set of function state a rebuilt helper carries once __dict__
-        # lands: __name__ vs __qualname__ and the empty cell (fixed by the shared
-        # base), __kwdefaults__ (the subclass swap) and a __dict__ entry (here).
+        # The old rebuild passed __qualname__ where FunctionType wants __name__,
+        # raised on an EMPTY cell, and dropped __kwdefaults__ (a reloaded
+        # `def f(x, *, k=2)` failed with TypeError when called without k).
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
@@ -2182,27 +2187,47 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
             def inner(*, k=1):
                 return unset, scale
 
+            def scaled(x, *, k=2):
+                return x * k
+
             inner.__name__ = "renamed"
-            inner.tag = 2.0
             if inner is None:
                 unset = 1  # never runs, so the cell inner closes over stays empty
-            return inner
+            return inner, scaled
 
-        fn = outer()
+        fn, scaled = outer()
         cells = dict(zip(fn.__code__.co_freevars, fn.__closure__))
         with self.assertRaisesRegex(ValueError, "empty"):
             cells["unset"].cell_contents
         buf = io.BytesIO()
-        AOTCompilePickler({}, buf).dump(fn)
-        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        AOTCompilePickler({}, buf).dump((fn, scaled))
+        out, out_scaled = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.__name__, "renamed")
         self.assertEqual(out.__qualname__, fn.__qualname__)
         self.assertEqual(out.__kwdefaults__, {"k": 1})
-        self.assertEqual(out.tag, 2.0)
+        self.assertEqual(out_scaled(3), 6)
         cells = dict(zip(out.__code__.co_freevars, out.__closure__))
         with self.assertRaisesRegex(ValueError, "empty"):
             cells["unset"].cell_contents
         self.assertIsNone(cells["scale"].cell_contents)
+
+    def test_pickler_carries_a_dict_entry(self):
+        # A helper's __dict__ travels with it; a rebuild from the code object
+        # alone starts with an empty one.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                return x
+
+            inner.tag = 2.0
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.tag, 2.0)
 
     def test_pickler_does_not_persist_a_wrong_false_across_an_inflight_seed(self):
         # An in-flight probe must not leave a wrong False in the shared cache.
