@@ -2844,6 +2844,29 @@ from user code:
                     make((0, 0), None), "cuda", check_codegen=False
                 )
 
+    def test_inductor_cpu_capture_records_cpu_codegen_target(self):
+        # Pins the recording side: a regression that records None silently
+        # disarms check_compatibility via its predates-the-field skip.
+        if _current_cpu_codegen_target() is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_types, frozenset(("cpu",)))
+        self.assertIsNotNone(artifacts.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            artifacts.check_compatibility()
+
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
         # Under dynamic shapes the leading placeholder is a SymInt, which has no
         # device. Reading only the first meta value reported "cpu" for this
@@ -2898,6 +2921,32 @@ from user code:
         graph.call_method("to", (x, "mps"))
         graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": "cuda"})
         self.assertEqual(_graph_device_types(graph), frozenset(("mps", "cuda")))
+
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_mixed_device_graph_arms_cpu_codegen_target(self):
+        # A mixed cpu+accelerator graph collapses device_type to the
+        # accelerator, but inductor still emits native CPU kernels for the cpu
+        # half, so the codegen target must be recorded and compared anyway.
+        if _current_cpu_codegen_target() is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x, y):
+            return x + 1, y + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor").aot_compile(
+            ((torch.randn(4), torch.randn(4, device=GPU_TYPE)), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_type, GPU_TYPE)
+        self.assertIn("cpu", artifacts.device_types)
+        self.assertIsNotNone(artifacts.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            artifacts.check_compatibility()
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_aot_compile(self):
