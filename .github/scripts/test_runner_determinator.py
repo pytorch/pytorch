@@ -795,6 +795,47 @@ class TestRunnerDeterminatorAmdSandboxExperiment(TestCase):
         self.assertEqual("amd-sandbox-", result.amd_sandbox_prefix)
 
 
+class TestRunnerDeterminatorAmdDpxExperiment(TestCase):
+    AMD_DPX_SETTINGS = """
+        experiments:
+            amd-dpx:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,amd-dpx
+        @User2,lf
+
+        """
+
+    def test_amd_dpx_opted_in_returns_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_DPX_SETTINGS, ["User1"], USER_BRANCH)
+        self.assertEqual("amd-dpx-", result.amd_dpx_prefix)
+        self.assertEqual("mt-", result.prefix)
+
+    def test_amd_dpx_not_enabled_returns_default_fleet(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_DPX_SETTINGS, ["User2"], USER_BRANCH)
+        self.assertEqual("", result.amd_dpx_prefix)
+        self.assertEqual("mt-", result.prefix)
+
+    def test_amd_dpx_with_lf_keeps_both(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            amd-dpx:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,amd-dpx
+
+        """
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf-", result.prefix)
+        self.assertEqual("amd-dpx-", result.amd_dpx_prefix)
+
+
 class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
     """no-runner-experiments opts out of lf, so the run stays on the default Meta fleet."""
 
@@ -859,3 +900,51 @@ class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
 
 if __name__ == "__main__":
     main()
+
+
+class TestScaleConfigPrefix(TestCase):
+    """Only wincanary/wincanarylf drive scale-config-label-type."""
+
+    SETTINGS = """
+experiments:
+  lf:
+    rollout_perc: 0
+  wincanary:
+    rollout_perc: 0
+  wincanarylf:
+    rollout_perc: 0
+---
+@lfuser,lf
+@wcuser,wincanary
+@wclfuser,wincanarylf
+@bothuser,lf,wincanarylf
+@plainuser,
+"""
+    ALL = frozenset({"lf", "wincanary", "wincanarylf"})
+
+    def _result(self, user: str) -> rd.RunnerPrefixResult:
+        return rd.get_runner_prefix(
+            self.SETTINGS, (user, user), "somebranch", self.ALL, frozenset()
+        )
+
+    def test_no_variant_means_no_prefix(self) -> None:
+        self.assertEqual("", self._result("plainuser").scale_config_prefix)
+
+    def test_lf_alone_does_not_set_a_prefix(self) -> None:
+        # lf rolls out over ALL workflows; it must not relocate Windows builds.
+        self.assertEqual("", self._result("lfuser").scale_config_prefix)
+
+    def test_wincanary(self) -> None:
+        self.assertEqual("wincanary.", self._result("wcuser").scale_config_prefix)
+
+    def test_wincanarylf(self) -> None:
+        self.assertEqual("wincanarylf.", self._result("wclfuser").scale_config_prefix)
+
+    def test_lf_does_not_compose_with_the_variant(self) -> None:
+        # never "lf.wincanarylf."
+        self.assertEqual("wincanarylf.", self._result("bothuser").scale_config_prefix)
+
+    def test_arc_label_type_is_untouched(self) -> None:
+        self.assertEqual("mt-", self._result("plainuser").prefix)
+        self.assertEqual("lf-", self._result("lfuser").prefix)
+        self.assertEqual("lf-", self._result("bothuser").prefix)
