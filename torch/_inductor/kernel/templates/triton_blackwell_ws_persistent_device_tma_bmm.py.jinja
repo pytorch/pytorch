@@ -59,6 +59,17 @@
     # prologue's loop induction variable (as in the Blackwell MM template).
     tile_id_c = start_pid - NUM_SMS
 
+    {%- if USE_META_WS %}
+    for tile_id in tl.range(
+        start_pid,
+        num_tiles,
+        NUM_SMS,
+        flatten=FLATTEN,
+        warp_specialize=WARP_SPECIALIZE,
+        data_partition_factor=DATA_PARTITION_FACTOR,
+        separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+    ):
+    {%- else %}
     for tile_id in tl.range(
         start_pid,
         num_tiles,
@@ -66,6 +77,7 @@
         flatten=FLATTEN,
         warp_specialize=WARP_SPECIALIZE,
     ):
+    {%- endif %}
         batch = tile_id // num_tiles_per_batch
         batch_tile_id = tile_id % num_tiles_per_batch
         pid_m, pid_n = _blackwell_bmm_pid(
