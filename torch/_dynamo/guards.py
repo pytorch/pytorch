@@ -4285,17 +4285,30 @@ class GuardsStatePickler(FunctionPicklerBase):
         # pyrefly: ignore [bad-return]
         return collections.namedtuple(name, fields)
 
-    @classmethod
-    def _unpickle_nested_function(
-        cls,
-        code: types.CodeType,
-        module: str,
-        qualname: str,
-        argdefs: tuple[object, ...] | None,
-        closure: tuple[types.CellType, ...] | None,
-    ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+    # Note [Reconstructing a function a guard is rooted at]
+    #
+    # A function whose qualname does not resolve back to it cannot be pickled by
+    # reference, and every functools.wraps decorator produces one: the wrapper
+    # copies the wrapped function's __module__ and __qualname__ while living in
+    # the decorator's file. Such a function becomes a _Missing sentinel, which is
+    # right for one nothing depends on. When a guard's source walks THROUGH it,
+    # evaluating that source against the sentinel either raises while the guard
+    # manager is still being built, failing the whole load, or -- for a name the
+    # sentinel happens to have, like __module__ -- rebakes the guard against the
+    # sentinel's value and misses forever with no error. So it is rebuilt from
+    # its code object instead (FunctionPicklerBase._reduce_function), carrying
+    # __code__, __name__, __qualname__, __module__, __closure__ and __defaults__;
+    # a guard walking through anything else (__kwdefaults__, an attribute in
+    # __dict__) still fails to rebuild until those are carried too.
+
+    def _reduce_function_by_value(self, obj: types.FunctionType) -> tuple[Any, ...]:
+        """Pickle a function by value.
+
+        See Note [Reconstructing a function a guard is rooted at].
+        """
+        return self._reduce_function(
+            obj, defaults=obj.__defaults__, closure=obj.__closure__
+        )
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -4447,19 +4460,29 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
-                return type(self)._unpickle_nested_function, (
-                    obj.__code__,
-                    obj.__module__,
-                    obj.__qualname__,
-                    obj.__defaults__,
-                    obj.__closure__,
-                )
-            if obj.__module__ in sys.modules:
-                f = sys.modules[obj.__module__]
+                # Rebuilt whether or not a guard is rooted at it, as before this
+                # change: it can never be found by name, and unlike a wraps
+                # wrapper it has no module-level neighbourhood to drag along.
+                return self._reduce_function_by_value(obj)
+            resolved: Any = None
+            # __module__ need not be a str (a decorator can set anything); an
+            # unhashable one must not TypeError out of the reducer.
+            if isinstance(obj.__module__, str) and obj.__module__ in sys.modules:
+                resolved = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
-                    f = getattr(f, name, None)  # type: ignore[assignment]
-                if f is not obj:
+                    resolved = getattr(resolved, name, None)
+            if resolved is not obj:
+                # See Note [Reconstructing a function a guard is rooted at].
+                # A module absent from sys.modules (an exec-created function, or
+                # __module__ is None) is an fqn mismatch too: pickling by
+                # reference imports __module__ and re-reads the qualname, which
+                # would not round back to this object -- it fails to resolve, or
+                # resolves to a different one -- so rebuild a guarded function by
+                # value and prune an unguarded one, rather than fall through and
+                # fail the dump with pickle's PicklingError (a bypass).
+                if id(obj) not in self.guard_tree_values:
                     return _Missing, ("fqn mismatch",)
+                return self._reduce_function_by_value(obj)
         elif inspect.ismethod(obj):
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:

@@ -22,7 +22,12 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
-from torch._dynamo.guards import CheckFunctionManager, CompileId, GuardsStatePickler
+from torch._dynamo.guards import (
+    _Missing,
+    CheckFunctionManager,
+    CompileId,
+    GuardsStatePickler,
+)
 from torch._dynamo.package import CompilePackage
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -34,8 +39,11 @@ from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
+    parametrize,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -71,12 +79,123 @@ def global_func(x):
     return x + 1
 
 
+def keep_defaults(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if len(func.__defaults__) == 2:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_qualname(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__qualname__ == "DecoratedQualnameForwardModule.forward":
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+THIS_MODULE = __name__
+
+
+def keep_module_name(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__module__ == THIS_MODULE:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_none_module(func):
+    # Dynamo traces func.__module__ as func.__globals__["__name__"] (a str), so
+    # the traced branch differs from eager here; the guard itself reads the
+    # real attribute (None) and that round trip is what the subtest pins.
+    func.__module__ = None
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__module__ is None:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_renamed_name(func):
+    # __name__ differs from co_name, so a co_name fallback reads "forward".
+    func.__name__ = "renamed_forward"
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "renamed_forward":
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
 def _cell_is_empty(cell):
     try:
         cell.cell_contents
     except ValueError:
         return True
     return False
+
+
+class DecoratedForwardModule(torch.nn.Module):
+    # The undecorated forward is unreachable by reference, so it is rebuilt by value.
+    @keep_defaults
+    def forward(self, x, scale=2.0, shift=1.0):
+        return x * scale + shift
+
+
+class DecoratedQualnameForwardModule(torch.nn.Module):
+    @keep_qualname
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedModuleNameForwardModule(torch.nn.Module):
+    @keep_module_name
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedNoneModuleForwardModule(torch.nn.Module):
+    @keep_none_module
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedRenamedNameForwardModule(torch.nn.Module):
+    @keep_renamed_name
+    def forward(self, x):
+        return x * 2
+
+
+def none_cell_wrapper(func):
+    scale = None
+
+    @functools.wraps(func)
+    def wrapper(x):
+        if scale is None:
+            x = x + 1
+        return func(x)
+
+    return wrapper
+
+
+def _none_cell_base(x):
+    return x * 2
+
+
+NONE_CELL_WRAPPED = none_cell_wrapper(_none_cell_base)
 
 
 def keep_name_with_empty_cell(func):
@@ -97,6 +216,32 @@ def _empty_cell_base(x):
 
 
 EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
+
+
+def keep_default_value(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__defaults__[0] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedDefaultValueForwardModule(torch.nn.Module):
+    @keep_default_value
+    def forward(self, x, scale=2.0):
+        return x * scale
+
+
+def keep_fn_name(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        if func.__name__ == "base":
+            x = x + 1
+        return func(x)
+
+    return wrapper
 
 
 class RecursingGuardedDefault:
@@ -122,6 +267,35 @@ class UnpicklableGuardedDefault:
 
 def global_add(obj, x):
     return x + 1
+
+
+# mutation: what to change on the undecorated function so the guard stops matching.
+FQN_MISMATCH_CASES = [
+    subtest(
+        ("SEQUENCE_LENGTH", DecoratedForwardModule, ("__defaults__", (2.0,))),
+        name="defaults_length",
+    ),
+    subtest(
+        ("EQUALS_MATCH", DecoratedDefaultValueForwardModule, ("__defaults__", (3.0,))),
+        name="default_value",
+    ),
+    subtest(
+        ("EQUALS_MATCH", DecoratedRenamedNameForwardModule, ("__name__", "forward")),
+        name="renamed_name",
+    ),
+    subtest(
+        ("CONSTANT_MATCH", DecoratedNoneModuleForwardModule, ("__module__", "other")),
+        name="none_module",
+    ),
+    subtest(
+        ("EQUALS_MATCH", DecoratedQualnameForwardModule, ("__qualname__", "other")),
+        name="qualname",
+    ),
+    subtest(
+        ("EQUALS_MATCH", DecoratedModuleNameForwardModule, ("__module__", "other")),
+        name="module_name",
+    ),
+]
 
 
 class ModuleNotSerializable(torch.nn.Module):
@@ -583,6 +757,80 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
 
+    def test_rebuilt_function_keeps_an_empty_closure_cell(self):
+        # A by-value rebuild of an fqn-mismatched wrapper carries its cells
+        # through FunctionPicklerBase._reduce_cell, so an EMPTY cell has to come
+        # back empty: a cell holding a sentinel reads as an assigned variable.
+        wrapped = EMPTY_CELL_WRAPPED
+        empty = [i for i, c in enumerate(wrapped.__closure__) if _cell_is_empty(c)]
+        self.assertEqual(len(empty), 1)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(wrapped): wrapped}, {}, {}, buf).dump({"fn": wrapped})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertTrue(_cell_is_empty(out.__closure__[empty[0]]))
+
+    def test_rebuilt_functions_keep_a_shared_closure_cell_shared(self):
+        # Two functions closing over one variable must still share the cell
+        # after reload; rebuilding every cell silently unshares them.
+        def outer():
+            shared = torch.zeros(2)
+
+            def a():
+                return shared
+
+            def b():
+                return shared
+
+            return a, b
+
+        a, b = outer()
+        self.assertIs(a.__closure__[0], b.__closure__[0])
+        buf = io.BytesIO()
+        cell = a.__closure__[0]
+        gtv = {id(a): a, id(b): b, id(cell): cell}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump({"a": a, "b": b})
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
+
+    def test_rebuilt_locals_function_keeps_its_name(self):
+        # The old <locals> rebuild passed __qualname__ where FunctionType wants
+        # __name__, so a reloaded local function reported "outer.<locals>.f" as
+        # its __name__.
+        def outer():
+            def f(x):
+                return x
+
+            return f
+
+        fn = outer()
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual((out.__name__, out.__qualname__), ("f", fn.__qualname__))
+
+    def test_reduce_restores_a_non_str_module(self):
+        # Dynamo cannot trace a function whose __module__ is not a str (its
+        # trace rules split it), so this is pickler-level: a decorator can still
+        # leave one behind, and the reducer must neither TypeError on
+        # `__module__ in sys.modules` (an unhashable value would) nor drop the
+        # value it restores.
+        fn = types.FunctionType(global_func.__code__, globals(), "global_func")
+        fn.__module__ = ["not", "a", "module"]
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(out.__module__, ["not", "a", "module"])
+
+    def test_unguarded_fqn_mismatched_function_is_pruned(self):
+        # Rebuilding by value is only for functions a guard is rooted at; an
+        # unguarded one stays a sentinel, so widening the set of rebuilt
+        # functions does not drag their neighbourhoods into the pickle.
+        inner = DecoratedForwardModule.forward.__wrapped__
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": inner})
+        self.assertIsInstance(pickle.loads(buf.getvalue())["fn"], _Missing)
+
     def test_reduce_keeps_a_none_valued_cell(self):
         # None is a value, not an empty cell; see
         # FunctionPicklerBase._set_cell_contents.
@@ -722,7 +970,11 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out(torch.ones(1)), torch.ones(1) + 1)
 
 
+# NB config.patch subclasses the class it decorates, so it has to go outermost:
+# instantiate_parametrized_tests deletes the template method it expands, which
+# only works on the class that actually defines it.
 @torch._dynamo.config.patch({"strict_precompile": True})
+@instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
     def test_function_locals(self):
         def foo(x):
@@ -783,6 +1035,88 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         with self.assertRaisesRegex(PackageError, "exceeded the recursion limit"):
             self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+
+    def test_guard_rooted_at_a_none_valued_closure_cell(self):
+        # The cell is reached as a CELL through the wrapper's __closure__, so
+        # _reduce_cell has to hand None back as a value, not an empty cell.
+        def fn(x):
+            return NONE_CELL_WRAPPED(x)
+
+        wrapper = NONE_CELL_WRAPPED
+        cell = wrapper.__closure__[wrapper.__code__.co_freevars.index("scale")]
+        self.assertIsNone(cell.cell_contents)
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        cell.cell_contents = 2.0
+        try:
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            cell.cell_contents = None
+
+    def test_fqn_mismatched_function_from_a_module_gone_at_load(self):
+        # The rebuilt function's __module__ names a module that only ever lived
+        # in sys.modules (exec-created, transformers_modules.*), so the load
+        # cannot import it; see FunctionPicklerBase._unpickle_fn_from_module.
+        name = "dynamo_test_guard_serialization_exec_module"
+        mod = types.ModuleType(name)
+        mod.keep_fn_name = keep_fn_name
+        exec("@keep_fn_name\ndef base(x):\n    return x * 2\n", mod.__dict__)
+        sys.modules[name] = mod
+        try:
+            ref, _ = self._test_serialization("EQUALS_MATCH", mod.base, torch.randn(3))
+        finally:
+            del sys.modules[name]
+        inner = mod.base.__wrapped__
+        self.assertEqual(inner.__module__, name)
+        state = torch._dynamo.package.load_guards_state(self._cached_guards_state)
+        f_code, f_globals = self._cached_f_code, keep_fn_name.__globals__
+        loaded = torch._dynamo.package.load_guard_manager(state, f_code, f_globals)
+        inputs = {"x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        old_name = inner.__name__
+        try:
+            inner.__name__ = "renamed"
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.__name__ = old_name
+
+    def test_fqn_mismatched_function_from_a_module_never_in_sys_modules(self):
+        # A module absent from sys.modules at DUMP time used to fall out of the
+        # reducer and be pickled by reference, failing the dump (a bypass); it is
+        # an fqn mismatch too and is rebuilt by value like the others.
+        mod = types.ModuleType("dynamo_test_guard_serialization_unregistered")
+        mod.keep_fn_name = keep_fn_name
+        exec("@keep_fn_name\ndef base(x):\n    return x * 2\n", mod.__dict__)
+        self.assertNotIn(mod.__name__, sys.modules)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod.base, torch.randn(3))
+        inner = mod.base.__wrapped__
+        inputs = {"x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        old_name = inner.__name__
+        try:
+            inner.__name__ = "renamed"
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.__name__ = old_name
+
+    @parametrize("guard_type,cls,mutation", FQN_MISMATCH_CASES)
+    def test_guard_rooted_at_fqn_mismatched_function(self, guard_type, cls, mutation):
+        # The undecorated function the guard is rooted at is rebuilt by value
+        # (see DecoratedForwardModule), with whatever the guard reads intact.
+        mod = cls()
+        ref, loaded = self._test_serialization(guard_type, mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        # The guard must also REJECT: a reconstruction that pinned the wrong
+        # thing, or nothing at all, still passes the positive check.
+        attr, new_value = mutation
+        old_value = getattr(inner, attr)
+        try:
+            setattr(inner, attr, new_value)
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            setattr(inner, attr, old_value)
 
     def test_guard_rooted_at_bound_method_under_a_name_self_lacks(self):
         # See TestGuardsStatePickler.test_bound_method_under_a_name_self_lacks.
