@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from model_registry import MultiMLP
 
 import torch
+import torch.distributed.config as dist_config
 from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     Schedule1F1B,
@@ -20,6 +21,8 @@ from torch.distributed.pipelining import (
     ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining._utils import (
+    _StageMeta,
+    _TensorMeta,
     generate_stage_to_rank_mapping,
     InferenceMode,
 )
@@ -28,6 +31,8 @@ from torch.distributed.pipelining.schedules import (
     _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
+    _analyze_pipeline_resource_liveness,
+    _assign_pipeline_recv_buffer_slots,
     _batch_p2p,
     _defer_recv_ops,
     _format_pipeline_order,
@@ -50,6 +55,8 @@ from torch.distributed.pipelining.schedules import (
     W,
 )
 from torch.distributed.pipelining.stage import (
+    _p2p_edge_matchings,
+    _p2p_topology,
     _PipelineStageBase,
     _RecvInfo,
     PipelineStage,
@@ -76,6 +83,49 @@ logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
 
+class P2PTopologyTest(TestCase):
+    def test_loop_topology_uses_four_disjoint_split_rounds(self):
+        topology = _p2p_topology({stage: stage % 4 for stage in range(8)}, group_size=4)
+
+        self.assertEqual(
+            _p2p_edge_matchings(topology),
+            (
+                ((0, 1), (2, 3)),
+                ((1, 0), (3, 2)),
+                ((0, 3), (1, 2)),
+                ((3, 0), (2, 1)),
+            ),
+        )
+
+    def test_v_topology_excludes_same_rank_turn_and_wraparound(self):
+        topology = _p2p_topology(
+            dict(enumerate((0, 1, 2, 3, 3, 2, 1, 0))),
+            group_size=4,
+        )
+
+        rounds = _p2p_edge_matchings(topology)
+        edges = {edge for round_edges in rounds for edge in round_edges}
+        self.assertEqual(
+            edges,
+            {(0, 1), (1, 0), (1, 2), (2, 1), (2, 3), (3, 2)},
+        )
+        self.assertNotIn((0, 3), edges)
+        self.assertNotIn((3, 3), edges)
+        self.assertTrue(
+            all(
+                len({rank for edge in round_edges for rank in edge})
+                == 2 * len(round_edges)
+                for round_edges in rounds
+            )
+        )
+
+    def test_topology_requires_contiguous_valid_stage_mapping(self):
+        with self.assertRaisesRegex(ValueError, "contiguous indices"):
+            _p2p_topology({0: 0, 2: 1}, group_size=2)
+        with self.assertRaisesRegex(ValueError, "outside"):
+            _p2p_topology({0: 0, 1: 2}, group_size=2)
+
+
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
@@ -84,6 +134,8 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group")
+        self.p2p_per_direction = False
+        self._init_recv_buffer_pools()
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -147,6 +199,252 @@ def _run_adjacency_validation(stage, num_stages):
 
 
 class ScheduleTest(TestCase):
+    def test_stage_recv_buffers_allocated_just_in_time(self):
+        stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
+        stage.stage_index = 1
+        stage.device = torch.device("cpu")
+        stage.has_backward = True
+        stage.args_recv_info = {}
+        stage.grad_recv_info = {}
+
+        activation_meta = _TensorMeta.from_tensor(torch.ones(2))
+        grad_meta = _TensorMeta.from_tensor(torch.ones(2))
+        stage._stage_meta = _StageMeta(
+            inputs=(activation_meta,),
+            output_grads=(grad_meta,),
+        )
+        stage.act_send_info = {0: [2]}
+        PipelineStage._setup_forward_recv_info(stage, 2, has_backward=True)
+        for mb_index in range(2):
+            stage.grad_recv_info[mb_index] = PipelineStage._create_grad_recv_info(
+                stage, stage.act_send_info
+            )
+
+        for recv_info_by_chunk in (stage.args_recv_info, stage.grad_recv_info):
+            for recv_infos in recv_info_by_chunk.values():
+                self.assertIsNone(recv_infos[0].buffer)
+
+        with (
+            patch.object(stage, "_resolve_peer_global_rank", return_value=0),
+            patch("torch.distributed.pipelining.stage.dist.P2POp"),
+        ):
+            fwd_ops = stage.get_fwd_recv_ops(1)
+            self.assertEqual(len(fwd_ops), 1)
+            self.assertIsNone(stage.args_recv_info[0][0].buffer)
+            fwd_buffer = stage.args_recv_info[1][0].buffer
+            if fwd_buffer is None:
+                raise AssertionError("expected forward receive buffer to be allocated")
+
+            activations = stage._retrieve_recv_activations(1)
+            self.assertIs(activations[0], fwd_buffer)
+            self.assertIsNone(stage.args_recv_info[1][0].buffer)
+
+            bwd_ops = stage.get_bwd_recv_ops(0)
+            self.assertEqual(len(bwd_ops), 1)
+            bwd_buffer = stage.grad_recv_info[0][0].buffer
+            if bwd_buffer is None:
+                raise AssertionError("expected backward receive buffer to be allocated")
+            self.assertIsNone(stage.grad_recv_info[1][0].buffer)
+
+            grads = stage._retrieve_recv_grads(0)
+            self.assertIs(grads[0], bwd_buffer)
+            self.assertIsNone(stage.grad_recv_info[0][0].buffer)
+
+    def test_recv_buffer_slots_follow_schedule_lifetimes(self):
+        actions = [
+            _Action(1, RECV_F, 0),
+            _Action(1, F, 0),
+            _Action(1, RECV_F, 1),
+            _Action(1, F, 1),
+            _Action(1, RECV_B, 1),
+            _Action(1, I, 1),
+            _Action(1, RECV_B, 0),
+            _Action(1, RECV_F, 2),
+            _Action(1, F, 2),
+            _Action(1, W, 1),
+            _Action(1, RECV_F, 3),
+            _Action(1, F, 3),
+            _Action(1, B, 0),
+            _Action(1, B, 2),
+            _Action(1, B, 3),
+        ]
+
+        slots = _assign_pipeline_recv_buffer_slots(actions, has_backward=True)[1]
+
+        self.assertEqual(slots.forward, {0: 0, 1: 1, 2: 2, 3: 1})
+        self.assertEqual(slots.backward, {1: 0, 0: 1})
+        inference_slots = _assign_pipeline_recv_buffer_slots(
+            [
+                _Action(1, RECV_F, 0),
+                _Action(1, F, 0),
+                _Action(1, RECV_F, 1),
+                _Action(1, F, 1),
+            ],
+            has_backward=False,
+        )[1]
+        self.assertEqual(inference_slots.forward, {0: 0, 1: 1})
+
+    def test_stage_recv_buffer_pool_reuses_deterministic_slots(self):
+        stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
+        stage.stage_index = 1
+        stage.device = torch.device("cpu")
+        stage.has_backward = True
+        stage.args_recv_info = {}
+        stage.grad_recv_info = {}
+
+        activation_meta = _TensorMeta.from_tensor(torch.ones(2))
+        grad_meta = _TensorMeta.from_tensor(torch.ones(2))
+        stage._stage_meta = _StageMeta(
+            inputs=(activation_meta,),
+            output_grads=(grad_meta,),
+        )
+        stage.act_send_info = {0: [2]}
+        PipelineStage._setup_forward_recv_info(stage, 3, has_backward=True)
+        for microbatch_index in range(3):
+            stage.grad_recv_info[microbatch_index] = (
+                PipelineStage._create_grad_recv_info(stage, stage.act_send_info)
+            )
+        stage._prepare_recv_buffer_pools(
+            fwd_slots={0: 0, 1: 1, 2: 0},
+            bwd_slots={0: 0, 1: 0, 2: 0},
+        )
+
+        for recv_info_by_chunk in (stage.args_recv_info, stage.grad_recv_info):
+            for recv_infos in recv_info_by_chunk.values():
+                self.assertIsNone(recv_infos[0].buffer)
+
+        with (
+            patch.object(stage, "_resolve_peer_global_rank", return_value=0),
+            patch("torch.distributed.pipelining.stage.dist.P2POp"),
+            patch(
+                "torch.distributed.pipelining.stage._make_tensor_from_meta"
+            ) as make_tensor,
+        ):
+            self.assertEqual(len(stage.get_fwd_recv_ops(0)), 1)
+            fwd_buffer_0 = stage.args_recv_info[0][0].buffer
+            self.assertIsNotNone(fwd_buffer_0)
+            self.assertIs(stage._retrieve_recv_activations(0)[0], fwd_buffer_0)
+
+            stage.get_fwd_recv_ops(1)
+            fwd_buffer_1 = stage.args_recv_info[1][0].buffer
+            self.assertIsNot(fwd_buffer_1, fwd_buffer_0)
+            with self.assertRaisesRegex(RuntimeError, "still owned by microbatch 0"):
+                stage.get_fwd_recv_ops(2)
+
+            stage._release_fwd_recv_buffers(0)
+            stage.get_fwd_recv_ops(2)
+            self.assertIs(stage.args_recv_info[2][0].buffer, fwd_buffer_0)
+            for microbatch_index in (1, 2):
+                stage._retrieve_recv_activations(microbatch_index)
+                stage._release_fwd_recv_buffers(microbatch_index)
+
+            self.assertEqual(len(stage.get_bwd_recv_ops(0)), 1)
+            bwd_buffer = stage.grad_recv_info[0][0].buffer
+            self.assertIsNotNone(bwd_buffer)
+            self.assertIs(stage._retrieve_recv_grads(0)[0], bwd_buffer)
+            stage._release_bwd_recv_buffers(0)
+            stage.get_bwd_recv_ops(1)
+            self.assertIs(stage.grad_recv_info[1][0].buffer, bwd_buffer)
+            stage._retrieve_recv_grads(1)
+            stage._release_bwd_recv_buffers(1)
+            make_tensor.assert_not_called()
+
+    def test_pipeline_resource_liveness_reuses_completed_slots(self):
+        stage = MockPipelineStage(group_size=1, num_stages=1)
+        stage.stage_index = 0
+        schedule = PipelineScheduleMulti([stage], n_microbatches=3)
+        schedule.pipeline_order = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, F, 1),
+                _Action(0, I, 0),
+                _Action(0, W, 0),
+                _Action(0, F, 2),
+                _Action(0, I, 1),
+                _Action(0, W, 1),
+                _Action(0, I, 2),
+                _Action(0, W, 2),
+            ]
+        }
+
+        plan = _analyze_pipeline_resource_liveness(
+            schedule,
+            physical_rank=0,
+            stage_indices=(0,),
+            granularity="stage_microbatch",
+        )
+
+        self.assertEqual(plan.num_slots, 2)
+        self.assertEqual([plan.slot_for(0, mb) for mb in range(3)], [0, 1, 0])
+        self.assertEqual(
+            [(item.start_position, item.release_position) for item in plan.lifetimes],
+            [(0, 3), (1, 6), (4, 8)],
+        )
+
+    def test_pipeline_resource_liveness_uses_finalized_schedule(self):
+        stages = []
+        for stage_index in (0, 2):
+            stage = MockPipelineStage(group_size=2, group_rank=0, num_stages=4)
+            stage.stage_index = stage_index
+            stages.append(stage)
+        schedule = ScheduleInterleaved1F1B(stages, n_microbatches=4)
+        schedule.pipeline_order = {0: []}
+
+        stage_plan = _analyze_pipeline_resource_liveness(
+            schedule,
+            physical_rank=0,
+            stage_indices=(0, 2),
+            granularity="stage_microbatch",
+        )
+        microbatch_plan = _analyze_pipeline_resource_liveness(
+            schedule,
+            physical_rank=0,
+            stage_indices=(0, 2),
+            granularity="microbatch",
+        )
+
+        self.assertEqual(len(stage_plan.lifetimes), 8)
+        self.assertEqual(len(microbatch_plan.lifetimes), 4)
+        self.assertEqual(stage_plan.stage_indices, (0, 2))
+        self.assertEqual(stage_plan.num_microbatches, 4)
+        self.assertEqual(stage_plan.num_slots, 5)
+        self.assertEqual(stage_plan.peak_live_count, 5)
+        self.assertEqual(microbatch_plan.num_slots, 4)
+        self.assertTrue(
+            all(
+                stage_plan.local_compute_actions[index][0]
+                < stage_plan.local_compute_actions[index + 1][0]
+                for index in range(len(stage_plan.local_compute_actions) - 1)
+            )
+        )
+        for stage_index in stage_plan.stage_indices:
+            for microbatch_index in range(stage_plan.num_microbatches):
+                self.assertTrue(
+                    0
+                    <= stage_plan.slot_for(stage_index, microbatch_index)
+                    < stage_plan.num_slots
+                )
+                self.assertEqual(
+                    microbatch_plan.slot_for(stage_index, microbatch_index),
+                    microbatch_plan.slot_for(0, microbatch_index),
+                )
+
+    def test_pipeline_resource_liveness_rejects_incomplete_backward(self):
+        stage = MockPipelineStage(group_size=1, num_stages=1)
+        stage.stage_index = 0
+        schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+        schedule.pipeline_order = {
+            0: [_Action(0, F, 0), _Action(0, I, 0)],
+        }
+
+        with self.assertRaisesRegex(ValueError, "Backward actions"):
+            _analyze_pipeline_resource_liveness(
+                schedule,
+                physical_rank=0,
+                stage_indices=(0,),
+                granularity="stage_microbatch",
+            )
+
     def test_get_schedule_class(self):
         # List of all expected schedule names
         schedule_names = [
@@ -191,7 +489,7 @@ class ScheduleTest(TestCase):
             3,
             4,
             3,
-            {0: (_RecvInfo("x", source=0, buffer=None, tensor_meta=None),)},
+            {0: (_RecvInfo("x", source=0, tensor_meta=None),)},
             {},
         )
         with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
@@ -525,7 +823,8 @@ class ScheduleTest(TestCase):
             torch.distributed.destroy_process_group()
 
     @parametrize("rank", [0, 1])
-    def test_fake_pg_cross_rank_uses_static_metadata(self, rank):
+    @parametrize("per_direction", [False, True])
+    def test_fake_pg_cross_rank_uses_static_metadata(self, rank, per_direction):
         """
         With a fake process group, the cross-rank warm-up vote cannot exchange
         real data, so the schedule must infer the metadata mode locally:
@@ -544,19 +843,24 @@ class ScheduleTest(TestCase):
         x = torch.randn(batch_size, d_hid, device=device)
         mb = torch.randn(batch_size // num_microbatches, d_hid, device=device)
         try:
-            stage = PipelineStage(
-                mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
-            )
-            schedule = ScheduleGPipe(stage, num_microbatches)
-            schedule.step(x) if rank == 0 else schedule.step()
-            self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+            with dist_config.patch(pipeline_per_direction_p2p=per_direction):
+                stage = PipelineStage(
+                    mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
+                )
+                schedule = ScheduleGPipe(stage, num_microbatches)
+                schedule.step(x) if rank == 0 else schedule.step()
+                self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+                if per_direction:
+                    stage.stage_index_to_group_rank = {0: 1, 1: 0}
+                    with self.assertRaisesRegex(RuntimeError, "mapping changed"):
+                        stage._configure_p2p_direction_groups()
 
-            # Without static metadata, dynamic inference is required, which
-            # cannot work over a fake group and must fail loudly.
-            stage_dyn = PipelineStage(mod, rank, n_stages, device)
-            schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
-            with self.assertRaisesRegex(RuntimeError, "fake process group"):
-                schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
+                # Without static metadata, dynamic inference is required, which
+                # cannot work over a fake group and must fail loudly.
+                stage_dyn = PipelineStage(mod, rank, n_stages, device)
+                schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
+                with self.assertRaisesRegex(RuntimeError, "fake process group"):
+                    schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
         finally:
             torch.distributed.destroy_process_group()
 
