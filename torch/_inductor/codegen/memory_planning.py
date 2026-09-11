@@ -4,16 +4,26 @@ from __future__ import annotations
 import collections
 import dataclasses
 import itertools
+import math
+import os
 import pprint
 from typing import Any, Protocol, TYPE_CHECKING
 
+import sympy
 import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Max
 
 from .. import config
-from ..utils import _align, align, cache_on_self, CachedMethod, IndentedBuffer
+from ..utils import (
+    _align,
+    align,
+    ALIGN_BYTES,
+    cache_on_self,
+    CachedMethod,
+    IndentedBuffer,
+)
 from ..virtualized import V
 from .wrapper import (
     AllocateLine,
@@ -23,6 +33,48 @@ from .wrapper import (
     NullLine,
     ReuseLine,
 )
+
+
+def _cudagraph_slab_cache_enabled(wrapper: Any) -> bool:
+    """The AOTI cuda-graph runtime captures partitions whose kernels bake in the
+    address of every reinterpret_tensor view INTO the memory_planning slab.
+    If the slab is re-allocated each forward (the default empty_strided), those
+    captured addresses go stale and a replay reads/writes the wrong memory ->
+    illegal memory access or silent garbage. Caching the slab per-shape in the
+    wrapper makes the base address stable across forwards of the same shape,
+    so the captured partitions stay valid. Gated to AOTI cpp wrapper + cuda-graph;
+    Python/CPU paths are unaffected.
+    """
+    if config.aot_inductor.cudagraph_mode != "regional":
+        return False
+    if not V.graph.aot_mode:
+        return False
+    # The const-folding graph is not cuda-graph-captured, so its buffers need no
+    # stable slab; and it shares this->cudagraph_slabs_ with the main graph but
+    # restarts pools at pool0 in a partition_key=0 scope, colliding with the main
+    # graph's outer pools (main reuses a wrong-sized slab -> illegal memory access).
+    if V.graph.is_const_graph:
+        return False
+    # cpp_wrapper_cpu.CppWrapperCpu (inherited by CppWrapperGpu) defines
+    # make_allocation; the Python PythonWrapperCodegen path has a different API.
+    return hasattr(wrapper, "codegen_int_array_var")
+
+
+def _cudagraph_global_slab_offset(name: str) -> tuple[str, Any] | None:
+    """Single source of truth for cross-partition slab redirection: the
+    (pool_name, offset) an outer-owned cudagraph slab publishes for `name`
+    (intra-partition scratch or a cross-partition handoff), else None. The
+    pool0-sizing skip in MemoryPlanner.allocate_groups and the redirect in
+    AllocFromPoolLine.codegen consult THIS SAME lookup, so a skipped group
+    always has a published offset and vice versa (they cannot desync).
+    """
+    scratch = getattr(V.graph, "_cudagraph_scratch_offsets", None) or {}
+    if name in scratch:
+        return scratch[name]
+    boundary = getattr(V.graph, "_cudagraph_boundary_offsets", None) or {}
+    if name in boundary:
+        return boundary[name]
+    return None
 
 
 if TYPE_CHECKING:
@@ -402,6 +454,18 @@ class AllocationPool:
     name: str | None = None
     names_to_del: list[str] = dataclasses.field(default_factory=list)
     creation_cache: dict[str, str] = dataclasses.field(default_factory=dict)
+    # Explicit cudagraph-slab-cache id, folded into the per-instance cache key so
+    # each pool's cached slab stays disjoint. None -> derive from the pool name
+    # (pool0/pool1/... numeric path). Set explicitly for the cross-partition
+    # handoff pools, whose names are not poolN, to a reserved collision-free id.
+    pool_id: int | None = None
+    # Eager-transient pool marker (config.aot_inductor.cudagraph_exclude_eager_transient):
+    # True -> this pool holds only eager-transient (non-boundary, non-handoff)
+    # buffers that are never touched by a captured cuda-graph, so it takes the
+    # normal (non-cached) make_allocation path even when the cudagraph slab cache
+    # is enabled. Default False -> every pool slab-caches as before, so a flag-off
+    # run is byte-identical.
+    cudagraph_transient: bool = False
 
     def __post_init__(self) -> None:
         for block in self.root.allocations:
@@ -459,6 +523,35 @@ class AllocationPool:
         if not self.name:
             raise AssertionError("pool must be finalized before codegen_create")
         nbytes = self.root.get_symbolic_size()
+        # Under AOTI cuda-graph the slab base address must be stable across
+        # forwards so captured partitions' reinterpret_tensor views (which bake
+        # the slab address at capture time) stay valid. Route the slab allocation
+        # through a per-instance cached slab. See _cudagraph_slab_cache_enabled.
+        # cudagraph_transient pools opt OUT of the slab cache (eager-transient
+        # buffers need no address stability) and fall through to make_allocation.
+        if _cudagraph_slab_cache_enabled(wrapper) and not self.cudagraph_transient:
+            for block in self.root.allocations:
+                if (
+                    isinstance(block, Allocation)
+                    and nbytes == block.get_symbolic_size()
+                ):
+                    node = block.node
+                    self._codegen_create_cudagraph_cached(
+                        wrapper,
+                        code,
+                        dtype=node.get_dtype(),
+                        shape=tuple(node.get_size()),
+                        stride=tuple(node.get_stride()),
+                    )
+                    return
+            self._codegen_create_cudagraph_cached(
+                wrapper,
+                code,
+                dtype=torch.uint8,
+                shape=(nbytes,),
+                stride=(1,),
+            )
+            return
         for block in self.root.allocations:
             if isinstance(block, Allocation) and nbytes == block.get_symbolic_size():
                 node = block.node
@@ -483,7 +576,301 @@ class AllocationPool:
                 )
             )
 
+    def _codegen_create_cudagraph_cached(
+        self, wrapper, code: IndentedBuffer, dtype, shape, stride
+    ):
+        """Emit the persistent per-shape slab. The cache is the per-instance
+        member `this->cudagraph_slabs_` (an
+        unordered_map<int64_t, RAIIAtenTensorHandle> on AOTInductorModel) that
+        owns the allocation; the local `pool<i>` is a non-owning view at the
+        cached base address, so the existing AllocFromPoolLine codegen (which
+        calls `aoti_torch__alloc_from_pool(pool<i>, ...)`) is unchanged and free
+        of per-replay re-allocation. The member is owned by the AOTInductorModel
+        instance and freed with it (RAII), matching the per-instance scope of
+        `this->cudagraph_mgr_` -- concurrent instances in a model_container get
+        isolated slabs. The single member is shared by every pool, so the cache
+        key folds a stable per-pool id into the high bits (see below) to keep
+        pools disjoint; under single-max-slab the per-pool key is otherwise a
+        constant, so every shape of a pool reuses that pool's one max-sized slab.
+
+        Single-max-slab: when the slab's shape/stride contains dynamic
+        symbols, size the slab ONCE to those symbols' upper bounds (max batch)
+        and share it across all shapes via a constant cache key. Small shapes use
+        a prefix of the max slab; the per-buffer offset views are unchanged and
+        fit inside the max slab. Every contributing dynamic symbol must have a
+        finite upper bound; an unbounded symbol is a compile-time error (see
+        below). Static slabs (no dynamic symbol) keep the constant cache key
+        directly.
+        """
+        # Collect the dynamic-symbol names referenced by the slab's shape OR
+        # stride. Their presence decides whether we resize the slab to the
+        # dynamic-shape upper bounds below; the slab packs many partitions so it
+        # can depend on several (s13, s14, ...).
+        sym_set: OrderedSet[sympy.Symbol] = OrderedSet()
+        for expr in [*shape, *stride]:
+            if isinstance(expr, sympy.Expr):
+                for sym in expr.free_symbols:
+                    if isinstance(sym, sympy.Symbol):
+                        sym_set.add(sym)
+        sym_list = sorted(sym_set, key=str)
+
+        # Single-max-slab path: replace the symbolic shape/stride with
+        # their dynamic-shape upper bounds (max batch) so ONE slab, keyed on a
+        # constant, is shared across all shapes. Use the same bound_sympy
+        # mechanism AOTI uses for runtime input upper-bound checks (see
+        # cpp_wrapper_cpu.py). Every contributing symbol MUST have a finite upper
+        # bound; an unbounded dim (math.isinf / sympy oo / int_oo) is a
+        # compile-time error -- AOTI regional cuda-graph needs a fixed max slab
+        # size, which an unbounded dim cannot provide.
+        if sym_list:
+            from torch.utils._sympy.numbers import int_oo
+            from torch.utils._sympy.value_ranges import bound_sympy
+
+            var_to_range = V.graph.sizevars.shape_env.var_to_range
+
+            # Keep in sync with cudagraph_partition._freeze_nbytes_to_const
+            # (duplicated there to keep this baseline path zero-touch).
+            def _const_upper_bound(expr):
+                if isinstance(expr, (int, sympy.Integer)):
+                    return int(expr)
+                if not isinstance(expr, sympy.Expr):
+                    return None
+                # The slab size/stride can contain Inductor's `align` sympy
+                # Function (from SpatialSplit.get_symbolic_size / finalize), which
+                # the ValueRanges interpreter behind bound_sympy has no handler
+                # for -> KeyError. align(e) rounds e up to the next multiple of
+                # ALIGN_BYTES, so align(e) <= e + (ALIGN_BYTES - 1); substitute
+                # that boundable upper bound before bounding. Taking .upper then
+                # still yields a valid (>= true max) slab dimension.
+                expr = expr.replace(align, lambda e: e + (ALIGN_BYTES - 1))
+                upper = bound_sympy(expr, var_to_range).upper
+                if upper in (sympy.oo, int_oo) or math.isinf(upper):
+                    return None
+                return int(upper)
+
+            max_shape = [_const_upper_bound(d) for d in shape]
+            max_stride = [_const_upper_bound(s) for s in stride]
+            if any(d is None for d in max_shape) or any(s is None for s in max_stride):
+                raise RuntimeError(
+                    "AOTI regional cuda-graph requires finite dynamic-shape upper "
+                    "bounds; set them via the export Dim(max=...) / "
+                    "dynamic_shapes_strategy. Slab shape="
+                    f"{shape}, stride={stride} has an unbounded dynamic dimension."
+                )
+            # Size the slab to the max so a single slab is shared across all
+            # shapes (the per-pool cache key below is a constant).
+            shape = tuple(max_shape)
+            stride = tuple(max_stride)
+        # Under single-max-slab the per-shape key is always a constant: the slab
+        # is sized to the dynamic-shape upper bounds and shared across shapes, so
+        # only the per-pool id (folded in below) distinguishes cache slots.
+        #
+        # Memory planning is PER-PARTITION: each captured partition is codegen'd
+        # through its OWN subgraph wrapper with its OWN MemoryPlanner, so pool
+        # names RESTART per partition (every partition's first pool is "pool0",
+        # pool_id 0). The slab cache (this->cudagraph_slabs_) is process-shared
+        # across partition bodies, so without further disambiguation EVERY
+        # partition's "pool0" maps to the SAME cache key (pool_id 0, key 0) and
+        # thus the SAME physical slab. Two partitions then alias the same slab
+        # offsets: a later partition's buffer clobbers an earlier partition's
+        # slab-resident output that must survive to the end of the forward (model
+        # outputs / handoffs), producing deterministic wrong outputs on every
+        # forward (the captured graph itself is fine -- the memory is overwritten
+        # by a downstream partition before the caller reads it). Per-subgraph
+        # live-range analysis cannot see this: it only orders buffers WITHIN one
+        # partition. So fold the owning partition id into the cache key here, in
+        # the low 40 bits, giving each captured partition DISJOINT slabs. This is
+        # the correctness baseline (no cross-partition memory reuse); cross-SHAPE
+        # sharing within a partition is preserved (the key stays constant per
+        # (partition, pool)). The id is partition_id + 1 so partition 0's slab
+        # never collides with a non-subgraph (outer-scope) pool whose key low
+        # bits are 0. Handoff pools are created in the OUTER wrapper (no
+        # subgraph_name) and are already disambiguated by an explicit reserved
+        # self.pool_id, so they keep key low bits 0.
+        subgraph_name = getattr(wrapper, "subgraph_name", None)
+        partition_key = 0
+        if isinstance(subgraph_name, str) and subgraph_name.startswith("partition_"):
+            partition_suffix = subgraph_name[len("partition_") :]
+            if partition_suffix.isdigit():
+                partition_key = int(partition_suffix) + 1
+        key_expr = f"{partition_key}LL"
+        shape_log_expr = '""'
+
+        # Reuse the existing cpp wrapper helpers for size/stride/dtype/device
+        # rendering -- this keeps the slab's ABI call identical to the
+        # non-cached path (same aoti_torch_empty_strided signature).
+        device_str = wrapper.codegen_device(self.device)
+        dtype_code = wrapper.codegen_dtype(dtype)
+        size_str = wrapper.codegen_shape_tuple(shape)
+        stride_str = wrapper.codegen_shape_tuple(stride)
+        device_type, device_id = device_str.split(",")
+        device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
+
+        size_array_var = wrapper.codegen_int_array_var(
+            size_str,
+            wrapper.wrapper_call.writeline,
+            known_statically=wrapper.is_statically_known_list_of_ints(shape),
+            graph=wrapper.get_codegened_graph(),
+        )
+        stride_array_var = wrapper.codegen_int_array_var(
+            stride_str,
+            wrapper.wrapper_call.writeline,
+            known_statically=wrapper.is_statically_known_list_of_ints(stride),
+            graph=wrapper.get_codegened_graph(),
+        )
+        ndim = str(len(shape))
+
+        pool_name = self.name
+        cache_member = "this->cudagraph_slabs_"
+        owner_name = f"{pool_name}_owner_handle"
+        data_ptr_name = f"{pool_name}_data_ptr"
+        view_name = f"{pool_name}_view_handle"
+        key_name = f"{pool_name}_shape_key"
+        # On only for a truthy AOTI_CUDAGRAPH_DEBUG. Unset/empty/"0" is off so a
+        # production run that exports AOTI_CUDAGRAPH_DEBUG=0 (e.g. the scorecard
+        # harness) does not codegen the per-forward [smp-bind] address audit.
+        debug = os.environ.get("AOTI_CUDAGRAPH_DEBUG", "") not in ("", "0")
+
+        # Stable per-pool id, folded into the cache key so the single shared
+        # member keeps each pool's slabs disjoint. An explicit self.pool_id
+        # (cross-partition handoff pools) wins; otherwise pools are named "pool0",
+        # "pool1", ...; parse the trailing integer. Fall back to a hash bucket if
+        # the name ever changes shape (keeps the id deterministic + bounded).
+        pool_suffix = pool_name[len("pool") :] if pool_name.startswith("pool") else ""
+        if self.pool_id is not None:
+            pool_id = self.pool_id
+        elif pool_suffix.isdigit():
+            pool_id = int(pool_suffix)
+        else:
+            pool_id = abs(hash(pool_name)) % (1 << 20)
+
+        # Per-instance cache (this->cudagraph_slabs_) survives across forwards and
+        # is owned by the AOTInductorModel instance (NOT process-static), matching
+        # the per-instance scope of this->cudagraph_mgr_ so concurrent instances
+        # in a model_container have isolated slabs. The key mirrors the
+        # cudagraph_runtime.h encode() packing: the pool id occupies the high bits
+        # ((pool_id) << 40) and the low 40 bits (key_expr & 0xFFFFFFFFFFLL) hold
+        # the owning partition id (partition_key, set above) so a partition's
+        # pool is disjoint from the same-named pool of every other partition.
+        # pool_id and partition_key occupy disjoint bit ranges, so the key is
+        # injective over (pool_id, partition_id); distinct pools never collide.
+        code.writeline(
+            f"int64_t {key_name} = "
+            f"((int64_t){pool_id} << 40) ^ (({key_expr}) & 0xFFFFFFFFFFLL);"
+        )
+        code.writeline(f"auto {pool_name}_it = {cache_member}.find({key_name});")
+        code.writeline(f"if ({pool_name}_it == {cache_member}.end()) {{")
+        code.writeline(f"    AtenTensorHandle {owner_name};")
+        code.writeline(
+            f"    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided("
+            f"{ndim}, {size_array_var}, {stride_array_var}, "
+            f"{dtype_code}, {device_type}, {device_idx}, &{owner_name}));"
+        )
+        code.writeline(
+            f"    auto {pool_name}_ins = {cache_member}.emplace("
+            f"{key_name}, RAIIAtenTensorHandle({owner_name}));"
+        )
+        code.writeline(f"    {pool_name}_it = {pool_name}_ins.first;")
+        if debug:
+            code.writeline(
+                f'    std::cerr << "[smp-bind] FIRST pool=" << "{pool_name}"'
+                f' << " shape=" << {shape_log_expr}'
+                f' << " addr=" << ({pool_name}_it->second.operator AtenTensorHandle())'
+                f" << std::endl;"
+            )
+        code.writeline("}")
+        # NOTE on the "largest-seen" defensive guard (peer's caveat): the slab
+        # nbytes is a sympy formula in the dynamic symbols (s13/s14) so it is
+        # deterministic for a fixed shape key -- the same key cannot produce
+        # different slab sizes. Skipping the guard keeps the per-forward path
+        # branch-free; if a future refactor ever decouples size from key,
+        # re-add a `static unordered_map<int64_t,int64_t> shape_to_nbytes` check
+        # and grow via empty_strided + std::move.
+        # Audit: detect any drift between first-bind and reuse (must be impossible
+        # with this construction, but guards future refactors). Cheap, gated on
+        # AOTI_CUDAGRAPH_DEBUG -- zero cost when unset.
+        code.writeline(f"void* {data_ptr_name} = nullptr;")
+        code.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr("
+            f"{pool_name}_it->second, &{data_ptr_name}));"
+        )
+        if debug:
+            audit_map = f"{pool_name}_audit"
+            code.writeline(f"static std::unordered_map<int64_t, void*> {audit_map};")
+            code.writeline(f"auto {pool_name}_ait = {audit_map}.find({key_name});")
+            code.writeline(f"if ({pool_name}_ait == {audit_map}.end()) {{")
+            code.writeline(f"    {audit_map}.emplace({key_name}, {data_ptr_name});")
+            code.writeline("} else {")
+            code.writeline(f"    if ({pool_name}_ait->second != {data_ptr_name}) {{")
+            code.writeline(
+                f'        std::cerr << "[smp-VIOLATION P1] pool=" << "{pool_name}"'
+                f' << " shape=" << {shape_log_expr}'
+                f' << " addr_now=" << {data_ptr_name}'
+                f' << " addr_first=" << {pool_name}_ait->second'
+                f" << std::endl;"
+            )
+            code.writeline("        std::abort();")
+            code.writeline("    }")
+            code.writeline("}")
+            code.writeline(
+                f'std::cerr << "[smp-bind] REUSE pool=" << "{pool_name}"'
+                f' << " shape=" << {shape_log_expr}'
+                f' << " addr=" << {data_ptr_name}'
+                f" << std::endl;"
+            )
+        # Expose the cached OWNER handle directly as a raw (borrowed) AtenTensorHandle
+        # named after the pool. The downstream codegen (`AllocFromPoolLine`) emits
+        # `aoti_torch__alloc_from_pool(pool<i>, ...)`, which accepts any
+        # AtenTensorHandle; an AtenTensorHandle is just a pointer to TensorImpl
+        # and is implicitly convertible to/from raw, so the existing call sites
+        # compile unchanged. We deliberately do NOT wrap in a local
+        # RAIIAtenTensorHandle: the per-instance member (this->cudagraph_slabs_)
+        # owns the handle for the model's lifetime, and a local RAII destructor
+        # would try to free it on `codegen_destroy` -> `pool<i>.reset()`.
+        # `codegen_destroy` is overridden below to omit the pool from
+        # `names_to_del` so no `.reset()` is emitted.
+        code.writeline(
+            f"AtenTensorHandle {pool_name} = "
+            f"static_cast<AtenTensorHandle>({pool_name}_it->second);"
+        )
+
     def codegen_destroy(self, wrapper, code: IndentedBuffer):
+        # The cg-cached pool slab is owned by the per-instance member
+        # this->cudagraph_slabs_; the local `pool<i>` is a raw borrowed handle, so
+        # emitting `pool<i>.reset()` would not compile and would also try to free a
+        # member-owned handle. Drop the pool name from the destroy list when the
+        # cached path was used; the slab is freed by the member's RAII at model
+        # destruction.
+        #
+        # Additionally, when codegenning a captured cuda-graph partition body
+        # (cpp_wrapper_gpu.codegen_partition_call has set partition_signatures
+        # with skip_cudagraph=False), the partition body ends with
+        # `partition_outputs[i] = bufXXX.release();` for each output handed off
+        # to the cg-tree runtime. The default pool-last-use destroy emits
+        # `bufXXX.reset();` for ALL pool-allocated names INCLUDING bufXXX,
+        # nullifying the handle before `.release()` runs and SIGSEGV'ing in
+        # `cuda_graph_capture_meta -> aoti_torch_get_data_ptr(nullptr)`. So
+        # drop subgraph-output names from the destroy list -- they're still
+        # owned via the outer-scope handoff and freed by the caller's RAII at
+        # end of wrapper_call.
+        # cudagraph_transient pools took the normal make_allocation path (not the
+        # member-owned slab), so they free normally -- their buffers are never
+        # boundary/handoff buffers, so an early reset can never null a handle
+        # needed across a partition/scope boundary. Only genuinely slab-cached
+        # pools skip the reset.
+        if _cudagraph_slab_cache_enabled(wrapper) and not self.cudagraph_transient:
+            # Emit NO per-buffer reset. Every pooled buffer is a view into the
+            # member-cached slab; any early reset risks nulling a handle still
+            # needed across a partition/scope boundary -- a partition output handed
+            # to the cg-tree (`= bufXXX.release()` next line -> capture_meta
+            # nullptr) or a boundary buffer that is a LATER captured partition's
+            # input, reset by an earlier scope before that partition records (->
+            # clone_preserve_strides nullptr, cudagraph_runtime.h:351). Output-name
+            # exclusion can't cover inputs produced by another scope. Views are
+            # freed by local RAII at scope exit; the slab is fixed and owned by
+            # this->cudagraph_slabs_, and in-order cuda-graph replay keeps reuse
+            # sequence-correct.
+            return
         code.writeline(wrapper.make_free_by_names(self.names_to_del))
 
     def __eq__(self, other):
@@ -541,10 +928,14 @@ class AllocationPools:
                 )
             )
 
-    def finalize(self):
-        """Called at the end of allocation process"""
+    def finalize(self, start_index: int = 0):
+        """Called at the end of allocation process. start_index continues the
+        pool{i} numbering from another collection so two collections finalized
+        into the same wrapper (cached + eager-transient) never collide on a
+        C++ pool variable name."""
         for i, pool in enumerate(
-            itertools.chain.from_iterable(self.device_to_pools.values())
+            itertools.chain.from_iterable(self.device_to_pools.values()),
+            start=start_index,
         ):
             pool.finalize(f"pool{i}")
 
@@ -622,10 +1013,68 @@ class AllocFromPoolLine(PoolMemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer):
         allocation = self.group.allocation
+        name = self.node.get_name()
+
+        # Buffer excluded from pool0 by allocate_groups (pool left None) lives in
+        # an outer-owned persistent slab (scratch/handoff), captured by the
+        # partition lambda's [&]. Emit the slab view and return BEFORE
+        # names_to_del below so it is never freed with pool0. Gated: flag-off
+        # keeps pool set, so this branch is byte-identical (never taken) there.
+        if config.aot_inductor.cudagraph_cross_partition_memory and (
+            allocation is None or allocation.pool is None
+        ):
+            slab = _cudagraph_global_slab_offset(name)
+            if slab is None:
+                raise AssertionError(
+                    f"cross-partition: {name} excluded from pool0 but has no "
+                    "published slab offset"
+                )
+            slab_pool_name, slab_offset = slab
+            alloc_from_pool, lines_to_write = self.wrapper.codegen_alloc_from_pool(
+                slab_pool_name,
+                slab_offset,
+                self.node.get_dtype(),
+                tuple(self.node.get_size()),
+                tuple(self.node.get_stride()),
+            )
+            code.writelines(lines_to_write)
+            code.writeline(
+                f"{self.wrapper.declare}{name} = {alloc_from_pool}{self.wrapper.ending}"
+            )
+            return
+
         if not (allocation and allocation.pool):
             raise AssertionError("group must have an allocation with a pool")
         pool = allocation.pool
-        name = self.node.get_name()
+
+        # Cross-partition handoff producer-suppression + redirect. When this
+        # buffer is a published cross-partition handoff, its storage lives in the
+        # OUTER-owned per-symbol slab (cudagraph_handoff_pool_<sym>), in scope in
+        # this producer body via the partition lambda's [&] capture. Bind the
+        # name to a view into that slab at the published byte offset instead of
+        # this subgraph's pool0; the existing generate_return .release() then
+        # hands off the slab-resident view. pool0 is still created (for the
+        # partition's other pooled buffers) but this handoff is NOT added to
+        # pool0.names_to_del -- it is owned by the outer slab, not pool0. The
+        # dict is empty (no redirect) unless plan_cudagraph_handoff_slab ran for
+        # this graph, so non-cuda-graph codegen is unaffected.
+        boundary_offsets = getattr(V.graph, "_cudagraph_boundary_offsets", None) or {}
+        if name in boundary_offsets:
+            if self.is_first_pool_usage:
+                pool.codegen_create(self.wrapper, code)
+            handoff_pool_name, handoff_offset = boundary_offsets[name]
+            alloc_from_pool, lines_to_write = self.wrapper.codegen_alloc_from_pool(
+                handoff_pool_name,
+                handoff_offset,
+                self.node.get_dtype(),
+                tuple(self.node.get_size()),
+                tuple(self.node.get_stride()),
+            )
+            code.writelines(lines_to_write)
+            code.writeline(
+                f"{self.wrapper.declare}{name} = {alloc_from_pool}{self.wrapper.ending}"
+            )
+            return
 
         if self.is_first_pool_usage:
             pool.codegen_create(self.wrapper, code)
@@ -670,6 +1119,12 @@ class MemoryPlanner:
 
     wrapper: Any
     pools: AllocationPools = dataclasses.field(default_factory=AllocationPools)
+    # Separate collection for eager-transient (non-boundary) outer buffers under
+    # config.aot_inductor.cudagraph_exclude_eager_transient. Stays empty (and is
+    # never finalized/emitted) unless that flag routes buffers here.
+    transient_pools: AllocationPools = dataclasses.field(
+        default_factory=AllocationPools
+    )
     buffer_groups: list[BufferGroup] | None = None
 
     def plan(self, lines: list[Any]) -> list[Any]:
@@ -680,6 +1135,12 @@ class MemoryPlanner:
         self.compute_live_ranges(lines)
         self.allocate_groups()
         self.mark_first_last_usage(lines)
+        # The cross-partition handoff slab is NOT planned here. Its readers (the
+        # per-partition body AllocFromPoolLine redirect and the outer
+        # codegen_partition_call) run in scheduler.codegen() (Phase 1), which
+        # strictly precedes this outer wrapper plan (Phase 2). Planning is done in
+        # the scheduler pre-pass instead -- see plan_cudagraph_handoff_slab and
+        # its single call site in Scheduler._codegen_partitions.
         return lines
 
     def drop_removed_buffers(self, lines):
@@ -774,6 +1235,21 @@ class MemoryPlanner:
             if group.is_output:
                 group.update_usage(timestep)
 
+        # cg slab offset-reuse control. memory_planning packs buffers at shared
+        # offsets via sequential live ranges, but cg capture/replay + eager-rerun
+        # does not preserve those lifetimes, so a shared offset can be clobbered
+        # across a partition boundary (deterministic out-N corruption). Forcing a
+        # buffer's live range to overlap everything gives it a UNIQUE offset.
+        # Protect ONLY cross-cg-boundary buffers (captured partition inputs +
+        # outputs, _cudagraph_boundary_names): their slab offset must persist
+        # until the captured partition replays, while intra-scope buffers reuse
+        # safely (sequential within their own scope).
+        if _cudagraph_slab_cache_enabled(self.wrapper):
+            boundary = getattr(V.graph, "_cudagraph_boundary_names", None) or set()
+            for group in self.buffer_groups:
+                if any(nm in boundary for nm in group.names):
+                    group.live_range = LiveRange(0, timestep + 1)
+
     def allocate_groups(self):
         """
         Assign every allocation to a specific location in a specific AllocationPool.
@@ -788,9 +1264,41 @@ class MemoryPlanner:
 
         outputs: list[Allocation] = []
         intermediates: list[Allocation] = []
+        # Eager-transient (non-boundary) outer buffers excluded from the
+        # persistent cudagraph slab; packed into transient pools below.
+        eager_transient: list[Allocation] = []
+        cross_partition = config.aot_inductor.cudagraph_cross_partition_memory
+        # Eager-transient exclusion only applies to the OUTER wrapper
+        # (subgraph_name is None); per-partition subgraph pools are untouched.
+        # Gated by _cudagraph_slab_cache_enabled so a flag-off run is byte-identical.
+        exclude_eager_transient = (
+            config.aot_inductor.cudagraph_exclude_eager_transient
+            and _cudagraph_slab_cache_enabled(self.wrapper)
+            and getattr(self.wrapper, "subgraph_name", None) is None
+        )
+        boundary_names = getattr(V.graph, "_cudagraph_boundary_names", None) or set()
         for group in self.buffer_groups:
             if not group.allocation:
                 raise AssertionError("group has no allocation")
+            # Cross-partition slab: a singleton non-output buffer published in an
+            # outer-owned cudagraph slab (scratch/handoff) is NOT sized into pool0;
+            # it is redirected in AllocFromPoolLine.codegen, which keys off the
+            # None pool left here. Singleton-only so an inplace-reuse chain
+            # (multi-name group) is never split across pools.
+            if (
+                cross_partition
+                and len(group.names) == 1
+                and not group.is_output
+                and _cudagraph_global_slab_offset(group.names[0]) is not None
+            ):
+                continue
+            # Eager-transient buffers never need the address-stable slab; route
+            # them to a normal transient pool so the per-instance slab shrinks.
+            if exclude_eager_transient and self._is_eager_transient(
+                group, boundary_names
+            ):
+                eager_transient.append(group.allocation)
+                continue
             if group.is_output and config.memory_pool != "combined":
                 outputs.append(group.allocation)
             else:
@@ -815,6 +1323,50 @@ class MemoryPlanner:
             self.pools.allocate(block)
 
         self.pools.finalize()
+        self._emit_eager_transient_pools(eager_transient)
+
+    @staticmethod
+    def _is_eager_transient(group: BufferGroup, boundary_names: Any) -> bool:
+        """A singleton, non-output buffer that is not a captured-partition
+        boundary buffer and has no published cross-partition slab offset is used
+        only in eager regions -- it never needs the address-stable cudagraph slab
+        and can live in an ordinary transient pool. Multi-name inplace-reuse
+        groups are conservatively kept slab-cached: if any name in the group were
+        a boundary buffer the whole group must stay address-stable, so no
+        non-singleton group is ever excluded. IMA-critical: never demote a
+        boundary buffer to a non-cached pool."""
+        return (
+            len(group.names) == 1
+            and not group.is_output
+            and group.names[0] not in boundary_names
+            and _cudagraph_global_slab_offset(group.names[0]) is None
+        )
+
+    def _emit_eager_transient_pools(self, eager_transient: list[Allocation]) -> None:
+        """Pack eager-transient allocations into a SEPARATE pool collection whose
+        pools take the non-cached make_allocation path (cudagraph_transient=True),
+        so their memory is ordinary per-forward transient rather than persisted in
+        the cudagraph slab. Pools continue the cached-pool numbering (poolN,
+        poolN+1, ...) so the two collections never share a C++ variable name.
+        No-op when the flag is off (eager_transient is empty)."""
+        if not eager_transient:
+            return
+        for block in sorted(
+            eager_transient,
+            key=lambda x: (
+                -x.size_hint,
+                -len(x.live_range),
+            ),
+        ):
+            self.transient_pools.allocate(block)
+        n_cached_pools = sum(
+            len(pools) for pools in self.pools.device_to_pools.values()
+        )
+        self.transient_pools.finalize(start_index=n_cached_pools)
+        for pool in itertools.chain.from_iterable(
+            self.transient_pools.device_to_pools.values()
+        ):
+            pool.cudagraph_transient = True
 
     def mark_first_last_usage(self, lines):
         """
@@ -822,6 +1374,7 @@ class MemoryPlanner:
         DeallocFromPoolLine.is_last_pool_usage fields so that pools
         are created/destroyed.
         """
+        cross_partition = config.aot_inductor.cudagraph_cross_partition_memory
         seen = OrderedSet[AllocationPool]()
         for line in lines:
             if isinstance(line, AllocFromPoolLine):
@@ -829,6 +1382,9 @@ class MemoryPlanner:
                     raise AssertionError("group has no allocation")
                 pool = line.group.allocation.pool
                 if pool is None:
+                    if cross_partition:
+                        # excluded -> redirected to an outer slab, no pool0 bookkeeping
+                        continue
                     raise AssertionError("allocation has no pool")
                 if pool not in seen:
                     line.is_first_pool_usage = True
@@ -841,6 +1397,8 @@ class MemoryPlanner:
                     raise AssertionError("group has no allocation")
                 pool = line.group.allocation.pool
                 if pool is None:
+                    if cross_partition:
+                        continue
                     raise AssertionError("allocation has no pool")
                 if pool not in seen:
                     line.is_last_pool_usage = (

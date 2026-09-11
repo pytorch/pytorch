@@ -5,6 +5,11 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/model_base.h>
+#ifdef USE_CUDA
+// Header-only over the stable C ABI (shim.h), so it is safe to include here per
+// the rule above. Provides the per-instance cuda-graph tree manager member below.
+#include <torch/csrc/inductor/aoti_runtime/cudagraph_runtime.h>
+#endif
 
 struct AOTInductorArrayRefTensor;
 
@@ -63,8 +68,29 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
         std::move(cubin_dir));
   }
 
+#ifdef USE_CUDA
+  // Drop this instance's captured cuda graphs. Captures bake the addresses of
+  // the constant buffer they were recorded against, so the container calls this
+  // whenever a weight update re-points the constants; otherwise replays keep
+  // reading the old buffer and silently serve stale weights. No-op for models
+  // built without cuda graph. Caller must hold model_exec_mutex_ exclusively.
+  void reset_cuda_graph_captures() {
+    if (cudagraph_mgr_) {
+      cudagraph_mgr_->reset_captures();
+    }
+  }
+#endif
+
  private:
   std::unique_ptr<AOTInductorModelKernelsBase> kernels_;
+#ifdef USE_CUDA
+  // Per-instance cuda-graph manager: owns THIS model's private graph pool
+  // + capture stream, so concurrent instances in a model_container are isolated.
+  // Lazily created by the generated run_impl on the first forward; stays null
+  // for models built without cuda graph. Destroyed with the model (no leak).
+  // See cudagraph_runtime.h.
+  std::unique_ptr<AOTICUDAGraphManager> cudagraph_mgr_;
+#endif
 };
 
 } // namespace torch::aot_inductor
