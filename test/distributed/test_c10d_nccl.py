@@ -4587,6 +4587,100 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
             self.assertRegex(nccl_debug_file_content, "Symmetric")
 
 
+class CudagraphNcclMemPoolTest(MultiProcessTestCase):
+    """A MemPool backed by NCCL's allocator can be registered with cudagraph_trees
+    so a cudagraph-captured region can produce NCCL-registered ("userbuffer")
+    buffers, which collectives then use directly."""
+
+    def setUp(self):
+        super().setUp()
+        # Allowing multiple ranks on a single GPU requires on opt-in.
+        self.env_patcher = mock.patch.dict(
+            os.environ, {"NCCL_MULTI_RANK_GPU_ENABLE": "1"}
+        )
+        self.env_patcher.start()
+        self._spawn_processes()
+
+    def tearDown(self):
+        self.env_patcher.stop()
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 2
+
+    @requires_nccl()
+    @requires_nccl_version((2, 19), "Need NCCL 2.19 for user buffer registration")
+    @skip_if_lt_x_gpu(1)
+    def test_cudagraph_registered_nccl_mempool(self):
+        from torch._inductor import config as inductor_config
+        from torch._inductor.cudagraph_trees import (
+            get_container,
+            register_external,
+            unregister_external,
+        )
+
+        # Multiplex both ranks onto cuda:0 so this runs on a single-GPU box.
+        device = torch.device("cuda:0")
+        torch.cuda.set_device(device)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        backend = pg._get_backend(device)
+
+        # Prefer a MemPool backed by NCCL's allocator (ncclMemAlloc, the full
+        # "userbuffer" path); it needs multicast-capable hardware, so fall back to
+        # a plain MemPool + local NCCL registration where that is unavailable.
+        try:
+            pool = torch.cuda.MemPool(backend.mem_allocator)
+        except RuntimeError:
+            pool = torch.cuda.MemPool()
+        backend.register_mem_pool(pool)
+        register_external(pool, device=device)
+
+        out = None
+        try:
+            with inductor_config.patch(
+                {"triton.cudagraphs": True, "triton.cudagraph_trees": True}
+            ):
+
+                def step(pool, x):
+                    with torch.cuda.use_mem_pool(pool):
+                        return x + 1
+
+                step_opt = torch.compile(step, mode="reduce-overhead", fullgraph=True)
+                expected = float(sum(r + 2 for r in range(self.world_size)))
+                for _ in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    x = torch.full((1024,), float(self.rank + 1), device=device)
+                    # y lives in the NCCL-registered pool and is produced by the
+                    # cudagraph; the collective uses it directly (userbuffer).
+                    out = step_opt(pool, x)
+                    dist.all_reduce(out)
+                    torch.cuda.synchronize(device)
+                    self.assertEqual(out, torch.full((1024,), expected, device=device))
+
+                # The registered pool did not disable cudagraphs: a cudagraph
+                # tree manager recorded on this device.
+                self.assertIsNotNone(get_container(device.index).tree_manager)
+        finally:
+            out = None
+            unregister_external(pool, device=device)
+            backend.deregister_mem_pool(pool)
+            del pool
+            torch.cuda.empty_cache()
+
+
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @property
     def device(self):
