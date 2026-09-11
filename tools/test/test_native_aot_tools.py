@@ -360,9 +360,22 @@ class TestExportJobs(unittest.TestCase):
                     export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
 
     def test_pool_preload_stays_fork_safe(self):
-        # The forkserver's server process is the fork parent, so only modules inert
-        # there may be preloaded: cutlass or triton would build state workers inherit.
-        self.assertEqual(export.POOL_PRELOAD, ("tools.native_aot.forkserver_preload",))
+        # CPython gh-117378 was not backported below 3.12.
+        for version, expected in (
+            ((3, 10, 20), ()),
+            ((3, 11, 14), ()),
+            ((3, 12, 7), ()),
+            ((3, 12, 8), ("torch",)),
+            ((3, 13, 0), ()),
+            ((3, 13, 1), ("torch",)),
+            ((3, 14, 0), ("torch",)),
+            ((3, 15, 0), ("torch",)),
+        ):
+            with self.subTest(version=version):
+                self.assertEqual(export._pool_preload(version), expected)
+        self.assertEqual(
+            export.POOL_PRELOAD, export._pool_preload(sys.version_info[:3])
+        )
 
     def test_pool_preload_ignores_source_torch(self):
         # The forkserver starts with `python -c` from REPO, putting the checkout
@@ -391,9 +404,8 @@ def torch_origin():
 if __name__ == "__main__":
     ctx = multiprocessing.get_context(export.POOL_START_METHOD)
     ctx.set_forkserver_preload(list(export.POOL_PRELOAD))
-    with export._forkserver_torch_env():
-        with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
-            print("ORIGIN=" + pool.submit(torch_origin).result())
+    with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
+        print("ORIGIN=" + pool.submit(torch_origin).result())
 """
                 )
             env = dict(os.environ)
