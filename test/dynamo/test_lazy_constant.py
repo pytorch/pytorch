@@ -7,9 +7,12 @@ import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class LazyConstantVariableTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_compile_count(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
@@ -542,6 +545,8 @@ class LazyConstantVariableTests(TestCase):
 
 
 class ComputedLazyConstantTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _check(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
