@@ -691,6 +691,8 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError(
                 "cannot register a hook on a tensor that doesn't require gradient"
             )
+        # Accessing grad_fn refreshes a stale view before creating its hook dict.
+        _ = self.grad_fn
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
             if self.grad_fn is not None:
