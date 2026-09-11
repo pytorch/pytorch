@@ -77,6 +77,7 @@ class _ProbeState:
     # must not re-probe or re-warn.
     attributes: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
     docs: dict[int, Any] = dataclasses.field(default_factory=dict)
+    annotations: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
     # Whether a probe short-circuited on an in-flight id; such a verdict is
     # not cached as final but parked (as unpicklable) for the rest of the
     # probe tree.
@@ -225,9 +226,13 @@ class AOTCompilePickler(FunctionPicklerBase):
     def _dumps_cleanly(self, value: Any) -> bool:
         # "does it pickle?" has no cheaper predicate than trying. A throwaway
         # pickler of this exact class keeps external_data/persistent_id behaviour
-        # identical to the real dump. A recursion overflow counts as unpicklable
-        # (the value is pruned) rather than re-raising: a deep-but-finite value
-        # in an optional slot must not fail a save that has nothing wrong with it.
+        # identical to the real dump. The cache stops a value from being probed
+        # twice, not from being dumped again inside an ancestor's probe, so the
+        # total work is the reachable bytes times the nesting depth, and user
+        # __reduce__ code runs once per probe that reaches it. A recursion
+        # overflow counts as unpicklable (the value is pruned) rather than
+        # re-raising: a deep-but-finite value in an optional slot must not fail a
+        # save that has nothing wrong with it.
         if self._is_literal(value):
             return True
         state = self._probe_state
@@ -280,12 +285,17 @@ class AOTCompilePickler(FunctionPicklerBase):
         # A False that leaned on an in-flight True may be a false negative, so
         # it is not cached as final. It is parked for the rest of this probe
         # tree -- re-deriving it is exponential on a cyclic cluster -- and
-        # dropped when the tree finishes, so the real dump never consults it
-        # (a stale park can only over-prune inside a probe, which never flips a
-        # probe verdict). A True, or a False that leaned on nothing, is final.
-        # So is the OUTERMOST probe's verdict, leaned or not: the only in-flight
-        # id it can lean on is its own, and that lean is exact because pickle's
-        # memo resolves the back-reference; the caller acts on it irrevocably.
+        # dropped when the tree finishes, so the real dump never consults it.
+        # Consulting a park is not a lean: it can make a probe over-prune, and
+        # over-pruning CAN flip a probe's verdict False -> True, but such a True
+        # is only ever consumed as a keep decision inside probes (a probe's
+        # attribute set never reaches the real dump; the memo above is gated on
+        # not _probing), and every value the real dump asks about is probed
+        # outermost, cached final, after the parks were cleared. A True, or a
+        # False that leaned on nothing, is final. So is the OUTERMOST probe's
+        # verdict, leaned or not: the only in-flight id it can lean on is its
+        # own, and that lean is exact because pickle's memo resolves the
+        # back-reference; the caller acts on it irrevocably.
         if result or not leaned or not state.inflight:
             state.cache[vid] = result
         else:
@@ -299,12 +309,21 @@ class AOTCompilePickler(FunctionPicklerBase):
         # The runtime must SERIALIZE these, so on 3.14 ask for evaluated VALUEs
         # rather than the FORWARDREF proxies the guard pickler reads: a proxy
         # must not be carried (it holds its owner and may drag the owner's
-        # globals along). When they cannot be evaluated -- a TYPE_CHECKING-only
-        # name is the common case -- the whole set is dropped, with a debug log.
-        # Below 3.14 __annotations__ is read as is (never mutated: the kept
-        # values go into a fresh dict). A value can still be unpicklable -- a
+        # globals along). Evaluating runs the function's __annotate__ and
+        # caches the result on it, the same thing inspect.signature does; when
+        # it raises -- a TYPE_CHECKING-only name is the common case -- the whole
+        # set is dropped, since __annotate__ is one function returning the whole
+        # dict (a FORWARDREF retry that keeps the proxy-free values would
+        # salvage the siblings; not done). Below 3.14 __annotations__ is the
+        # live dict; its items are snapshotted, since a probe runs user
+        # __reduce__ code that may write back onto the function, and the kept
+        # values go into a fresh dict. A value can still be unpicklable -- a
         # <locals> class resolves fine yet pickle cannot reference it -- so
-        # probe each and keep only the ones that dump.
+        # probe each and keep only the ones that dump, warning per drop like a
+        # __dict__ entry. Memoized for the real dump like the attributes.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.annotations:
+            return state.annotations[id(obj)]
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -313,11 +332,26 @@ class AOTCompilePickler(FunctionPicklerBase):
                     obj, format=annotationlib.Format.VALUE
                 )
             except Exception as e:
-                log.debug("dropping the annotations of %s: %s", obj, e)
-                return {}
+                code = obj.__code__
+                log.debug(
+                    "dropping the annotations of %s (%s:%d): %s",
+                    getattr(code, "co_qualname", code.co_name),
+                    code.co_filename,
+                    code.co_firstlineno,
+                    e,
+                )
+                annotations = {}
         else:
             annotations = obj.__annotations__
-        return {k: v for k, v in annotations.items() if self._dumps_cleanly(v)}
+        kept = {}
+        for name, value in list(annotations.items()):
+            if self._dumps_cleanly(value):
+                kept[name] = value
+            else:
+                self._warn_dropped(obj, f"__annotations__[{name!r}]", value)
+        if not self._probing:
+            state.annotations[id(obj)] = kept
+        return kept
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
