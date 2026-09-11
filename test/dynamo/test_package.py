@@ -43,8 +43,8 @@ def compiled_region_with_backend_id_for_package_test():
 
 
 class UnpicklableConfig:
-    def __init__(self):
-        self.flag = 2.0
+    # Like ConfigThatCannotPickle, but the failure is not an AttributeError.
+    scale = 2.0
 
     def __reduce__(self):
         raise RuntimeError("config cannot pickle")
@@ -187,34 +187,40 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.backend_ids, [])
         with package.code_context(fn.__code__):
             package.add_guarded_code(b"", code)
+            # A bypass used to stick to the entry and suppress this too.
+            package.add_inlined_source([fn.__code__])
         self.assertFalse(entry.bypassed)
         self.assertEqual(entry.backend_ids, [backend_id])
+        self.assertTrue(package.cache_entry().source_info.inlined_sources)
 
+    @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
-    def test_bypassed_guards_keep_the_frames_earlier_variant(self):
+    def test_bypassed_guards_keep_the_frames_earlier_variant(self, config_cls):
         # The title path: the second variant guards on a value whose __reduce__
         # raises, so serializing its guards bypasses the compile. The first
         # variant is still saved, installed on reload and hit; the second is
         # traced fresh. On main this tripped `check_fn.guards_state must not be
-        # None` in convert_frame.
+        # None` in convert_frame; a __reduce__ raising anything other than
+        # AttributeError escaped as an internal error.
         def fn(x, cfg=None):
             if cfg is not None:
                 return x.sin() * cfg.scale
             return x.sin()
 
         x = torch.randn(3)
-        cfg = ConfigThatCannotPickle()
+        cfg = config_cls()
         compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(compiled(x), fn(x))
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x, cfg), fn(x, cfg))
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
-        # The bypassed compile's backend was recorded but is referenced by no
-        # entry, so it is not written; both artifacts were recorded, one is saved.
+        # The bypassed compile's backend id is referenced by no entry, so the
+        # written cache entry carries exactly the surviving compile's backend.
         info = PrecompileContext.save_to_dynamo_cache()
         (entry,) = info["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
-        self.assertEqual(len(info["backends"]), 2)
+        written = DynamoCache.load(fn)
+        self.assertEqual(list(written.backends), entry["backend_ids"])
         torch._dynamo.reset()
         PrecompileContext.clear()
         # Wrapping reloads from the on-disk DynamoCache (per-test fresh_cache dir).
@@ -224,7 +230,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
             self.assertEqual(compiled(x), fn(x))
         # Deliberate: re-triggers the bypass in the loading process against an
         # entry that already holds one installed guarded code.
-        self.assertEqual(compiled(x, cfg), fn(x, cfg))
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x, cfg), fn(x, cfg))
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
 
     @torch._dynamo.config.patch(
         caching_precompile=True, strict_precompile=False, prepare_freezing=True
@@ -703,14 +711,21 @@ def add(x, y):
         expected = mod(x)
         self.assertEqual(torch.compile(mod)(x), expected)  # noqa: UNSPECIFIED_BACKEND
         (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
-        self.assertTrue(entry["backend_ids"])
+        self.assertEqual(len(entry["backend_ids"]), 1)
         torch._dynamo.reset()
         PrecompileContext.clear()
         compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
         code = BoundMethodNameGuardModule.forward.__code__
-        self.assertGreater(len(_debug_get_precompile_entries(code)), 0)
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), expected)
+            # The reloaded guard really reads __name__ off the rebuilt function.
+            _bound_method_guard_wrapper.__name__ = "renamed"
+            try:
+                with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                    compiled(x)
+            finally:
+                _bound_method_guard_wrapper.__name__ = "_bound_method_guard_target"
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_unserializable_guard_bypasses_the_package(self):
@@ -718,7 +733,7 @@ def add(x, y):
         # compile failure: the frame still compiles and runs, and its entry is
         # saved bypassed with no backend, so nothing is installed on reload.
         def fn(x, cfg=UnpicklableConfig()):
-            if cfg.flag == 2.0:
+            if cfg.scale == 2.0:
                 x = x + 1
             return x.sin()
 
@@ -736,36 +751,6 @@ def add(x, y):
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x), expected)
-        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
-
-    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
-    def test_bypassed_recompile_keeps_the_frames_earlier_variants(self):
-        # A bypass drops only the compile whose guards could not be serialized.
-        # A variant of the same frame that serialized earlier is still saved and
-        # installed on reload; only the bypassed inputs are traced fresh there.
-        def fn(x, cfg=None):
-            if cfg is not None and cfg.flag == 2.0:
-                x = x + 1
-            return x.sin()
-
-        x = torch.randn(3)
-        expected = fn(x)
-        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(compiled(x), expected)
-        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
-            compiled(x, UnpicklableConfig())
-        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
-        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
-        self.assertEqual(len(entry["backend_ids"]), 1)
-        torch._dynamo.reset()
-        PrecompileContext.clear()
-        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled(x), expected)
-        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
-            cfg = UnpicklableConfig()
-            self.assertEqual(compiled(x, cfg), fn(x, cfg))
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
