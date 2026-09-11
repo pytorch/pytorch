@@ -6,9 +6,9 @@ from cutlass import Int32
 
 import torch
 
+from ...cutedsl import launch as _L
 from ...cutedsl.dtypes import torch2cute
-from .._cutedsl import launch as _L
-from .._cutedsl.plan_cache import cached_plan
+from ...cutedsl.plan_cache import cached_plan
 from . import tile
 from .kernel_general import _launch, _PART_TORCH, ReduceBlock
 
@@ -84,7 +84,7 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
                 _L.fake_compact(
                     torch2cute[x.dtype],
                     (_L.sym(), _L.sym(vec)),
-                    order=(1, 0),
+                    stride_order=(1, 0),
                     align=align,
                 )
             ],

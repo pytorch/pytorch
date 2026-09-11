@@ -226,10 +226,10 @@ class TestInnerTreeOrder(TestCase):
     @parametrize("op", ["sum", "prod"])
     def test_bitwise_equal_to_upstream(self, op):
         # The matching DAG must reproduce upstream bit for bit.
-        from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             inner_tree_kernel as up,
             kernel_rowtile as rt,
+            traits as T,
         )
 
         prod = op == "prod"
@@ -254,8 +254,7 @@ class TestInnerTreeOrder(TestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float64])
     def test_bitwise_equal_to_upstream_dtypes(self, dtype):
         # Dtype sets the 16-byte vector width; widths below four fold linearly, changing the DAG.
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import inner_tree_kernel as up
+        from torch._native.ops.reductions import inner_tree_kernel as up, traits as T
 
         # Prod has a distinct identity and ragged padding and previously covered only fp32.
         ikind = {2: torch.int16, 4: torch.int32, 8: torch.int64}
@@ -289,10 +288,10 @@ class TestInnerTreeOrder(TestCase):
     def test_signed_zero_matches_upstream_per_shape(self):
         # A stray identity changes all -0.0 rows because 0.0 + -0.0 is +0.0. Upstream seeds
         # only some shapes, and close comparison hides the resulting disagreement.
-        from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             inner_tree_kernel as up,
             kernel_rowtile as rt,
+            traits as T,
         )
 
         for m, n in ((256, 8), (256, 1024), (64, 100000)):
@@ -311,8 +310,7 @@ class TestInnerTreeOrder(TestCase):
         # An N-only DAG makes each row independent of batch size, unlike the default order.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         n = 4096
         big = torch.randn(64, n, device="cuda")
@@ -337,8 +335,7 @@ class TestInnerTreeOrder(TestCase):
         # Pin bits across all plan shapes, ragged Ns, and four dtypes.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         dtypes = {
             "float16": torch.float16,
@@ -408,8 +405,7 @@ class TestInnerTreeOrder(TestCase):
         # difference, and a single thread owns all of N=4.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         for op in ("sum", "prod"):
             trait = T.ProdOps if op == "prod" else T.SumOps
@@ -440,10 +436,10 @@ class TestInnerTreeOrder(TestCase):
         # Test dispatcher routing because wrong paths still compute valid reductions.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             kernel_general as kg,
             kernel_rowtile as rt,
+            traits as T,
         )
 
         for m, n in [(524288, 16), (64, 100000), (8192, 1024)]:
@@ -472,8 +468,7 @@ class TestInnerTreeOrder(TestCase):
         # identity padding. Compare only plumbing with launch order because the DAGs differ.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         x = torch.randn(64, 4097, device="cuda")
         cases = [
@@ -517,8 +512,7 @@ class TestInnerTreeOrder(TestCase):
         # Otherwise tree order can fold raw values into plausible wrong results.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         x = (
             torch.rand(64, 512, device="cuda") + 0.5
@@ -579,10 +573,10 @@ class TestInnerTreeOrder(TestCase):
         # Compare bits because reading live data for padding can still look plausible.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             inner_tree_kernel as ref,
             kernel_rowtile as rt,
+            traits as T,
         )
 
         staged = [

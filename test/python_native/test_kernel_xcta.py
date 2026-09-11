@@ -14,8 +14,7 @@ class TestKernelXcta(TestCase):
     def test_reduce_row_xcta(self):
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_xcta
+        from torch._native.ops.reductions import kernel_xcta, traits as T
 
         x = torch.randn(1, 1 << 20, device="cuda")
         out = kernel_xcta.reduce_row_xcta(
@@ -27,8 +26,7 @@ class TestKernelXcta(TestCase):
         # Stage 2 projects both outputs from one accumulator; this path rejects index traits.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_xcta
+        from torch._native.ops.reductions import kernel_xcta, traits as T
 
         x = torch.randn(2, 1 << 20, device="cuda")
         res = kernel_xcta.reduce_row_xcta_2out(
@@ -47,8 +45,7 @@ class TestKernelXcta(TestCase):
         # Runtime sub-row geometry lets one kernel serve every M and N in a vector class.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_xcta
+        from torch._native.ops.reductions import kernel_xcta, traits as T
 
         key = "vecclass"
         trait = T.SumOps(acc=cutlass.Float32)
@@ -78,8 +75,7 @@ class TestKernelXcta(TestCase):
         # Return None for unsplittable rows so the dispatcher can choose a faster path.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_xcta
+        from torch._native.ops.reductions import kernel_xcta, traits as T
 
         trait = T.SumOps(acc=cutlass.Float32)
         # Below the sub-row floor, no C > 1 is legal.

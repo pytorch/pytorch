@@ -14,7 +14,7 @@ if not TEST_CUTEDSL:
         sys.exit(0)
     raise unittest.SkipTest("CuTeDSL not available")
 
-from torch._native.ops._cutedsl.hw_caps import caps
+from torch._native.cutedsl.hw_caps import caps
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
