@@ -2682,6 +2682,37 @@ if HAS_CUDA_AND_TRITON:
                 wrapped_functions[0].cudagraph_managed_input_rerecord_action, "skip"
             )
 
+        @parametrize("compile_options", (False, True))
+        def test_initial_mempool_allocation(self, compile_options):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return [x + 1]
+
+            inp = torch.rand([2 * (1 << 20)], device="cuda")
+            option = {"triton.cudagraph_initial_mempool_allocation_gb": 16 / 1024}
+            if compile_options:
+                foo_cg = torch.compile(
+                    lambda x: x + 1, options={"triton.cudagraphs": True, **option}
+                )
+                self.assertEqual(foo_cg(inp), inp + 1)
+            else:
+                with torch._inductor.config.patch(option):
+                    foo_cg = self.cudagraphify_impl(foo, [inp], ())
+                    self.assertEqual(foo_cg([inp])[0], inp + 1)
+
+            # The 8 MiB output should be carved out of the primed 16 MiB
+            # segment rather than growing the pool with a new large segment.
+            # Sub-1MiB allocations still go to separate 2 MiB small-pool
+            # segments, so only check large segments.
+            large_segments = [
+                s
+                for s in get_all_cudagraph_segments()
+                if s["total_size"] > 2 * (1 << 20)
+            ]
+            self.assertEqual(len(large_segments), 1)
+            self.assertEqual(large_segments[0]["total_size"], 16 * (1 << 20))
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._inductor.config.patch(
             "triton.cudagraph_managed_input_rerecord_limit", 1

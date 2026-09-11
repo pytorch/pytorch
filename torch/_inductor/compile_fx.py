@@ -2250,6 +2250,9 @@ def cudagraphify(
             user_visible_output_idxs=user_visible_output_idxs,
             cudagraph_managed_input_rerecord_limit=managed_input_rerecord_limit,
             cudagraph_managed_input_rerecord_action=managed_input_rerecord_action,
+            cudagraph_initial_mempool_allocation_gb=(
+                config.triton.cudagraph_initial_mempool_allocation_gb
+            ),
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
