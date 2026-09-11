@@ -1156,18 +1156,18 @@ def _aten_erfcx_y100(y100):
 @triton.jit
 def aten_erfcx(x):
     zero = tl.full(x.shape, 0.0, tl.float32)
-    four = tl.full(x.shape, 4.0, tl.float32)
-    four_hundred = tl.full(x.shape, 400.0, tl.float32)
     positive_polynomial = (x >= 0.0) & (x <= 50.0)
     negative_polynomial = (x < 0.0) & (x >= -6.1)
-    positive_x = tl.where(positive_polynomial, x, zero)
-    negative_x = tl.where(negative_polynomial, x, zero)
-    positive_y100 = tl.div_rn(four_hundred, four + positive_x)
-    negative_y100 = tl.div_rn(four_hundred, four - negative_x)
-    # Only one side is ever kept, and the two differ solely in their argument, so
-    # select the argument rather than the result: one pass over the 100-segment
-    # table instead of two.
-    poly = _aten_erfcx_y100(tl.where(x >= 0.0, positive_y100, negative_y100))
+    poly = zero
+    # Skip the coefficient table when every lane uses a tail formula.
+    if tl.max((positive_polynomial | negative_polynomial).to(tl.int32), axis=None):
+        four = tl.full(x.shape, 4.0, tl.float32)
+        four_hundred = tl.full(x.shape, 400.0, tl.float32)
+        positive_x = tl.where(positive_polynomial, x, zero)
+        negative_x = tl.where(negative_polynomial, x, zero)
+        positive_y100 = tl.div_rn(four_hundred, four + positive_x)
+        negative_y100 = tl.div_rn(four_hundred, four - negative_x)
+        poly = _aten_erfcx_y100(tl.where(x >= 0.0, positive_y100, negative_y100))
 
     x2 = x * x
     numerator_inner = tl.fma(x2, x2 + 4.5, 2.0)
@@ -1186,6 +1186,8 @@ def aten_erfcx(x):
     )
     result = tl.where(x >= 0.0, positive, negative)
     return tl.where(x != x, x, result)
+
+
 @triton.jit
 def is_floating(x):
     return promote_to_tensor(x).dtype.is_floating()
