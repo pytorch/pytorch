@@ -257,9 +257,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
-        GraphTransformObserver(
-            gm, "reuse_dtype_conversion_across_views"
-        ).apply_graph_pass(reuse_dtype_conversion_across_views)
+        if config.reuse_dtype_conversion_across_views:
+            GraphTransformObserver(
+                gm, "reuse_dtype_conversion_across_views"
+            ).apply_graph_pass(reuse_dtype_conversion_across_views)
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
                 gm, "partitioned_scatter_optimization"
@@ -1426,6 +1427,10 @@ def _classify_storage_use(user: torch.fx.Node, node: torch.fx.Node) -> _StorageU
     """Classify how ``user`` interacts with ``node``'s storage."""
     if user.op != "call_function" or not isinstance(user.target, torch._ops.OpOverload):
         return _StorageUse.HAZARD
+    # Custom operators can observe storage identity without expressing that in
+    # their schema, so only trust alias annotations from built-in operator sets.
+    if user.target.namespace not in ("aten", "prims"):
+        return _StorageUse.HAZARD
     # This read-only predicate observes the storage sharing introduced by reuse.
     if user.target is aten.is_set_to.default:
         return _StorageUse.HAZARD
@@ -1451,9 +1456,13 @@ def _classify_storage_use(user: torch.fx.Node, node: torch.fx.Node) -> _StorageU
         node_alias_sets.update(alias_info.before_set)
 
     if not found_node:
-        raise RuntimeError(
-            f"{user} is registered as a user of {node} but does not consume it"
+        log.warning(
+            "%s is registered as a user of %s but does not consume it; "
+            "skipping dtype-conversion reuse",
+            user,
+            node,
         )
+        return _StorageUse.HAZARD
 
     node_storage = get_node_storage(node)
     found_writable_arg = False
@@ -1547,6 +1556,14 @@ def _conversion_results_with_unsafe_storage_uses(
 def _replay_node_with_replacement(
     node: torch.fx.Node, old: torch.fx.Node, new: torch.Tensor
 ) -> Any:
+    # Skip replay if an unreplaced FX argument has no ``meta["val"]``.
+    if any(
+        isinstance(value, torch.fx.Node)
+        and value is not old
+        and "val" not in value.meta
+        for value in pytree.tree_leaves((node.args, node.kwargs))
+    ):
+        return None
     fake_args, fake_kwargs = pytree.tree_map(
         lambda value: (
             new
@@ -1694,10 +1711,13 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
     if not view_conversion_candidates:
         return
 
-    # Phase 4: map each view conversion to the safe convert(base, dtype) it may
-    # reuse. The two conversions must have no mutation operation between them.
+    # Phase 4: map each view conversion to an earlier safe convert(base, dtype)
+    # that it may reuse. Requiring the base conversion to occur first avoids
+    # moving the view conversion's consumers across RNG or other effectful nodes.
+    # The two conversions must also have no mutation operation between them.
     # NOTE: Reuse across unrelated mutations could be allowed by checking whether their
     # writable arguments can alias base instead of treating every mutation as a boundary.
+    node_order = {node: index for index, node in enumerate(graph.nodes)}
     base_conversion_for_view_conversion: dict[torch.fx.Node, torch.fx.Node] = {}
     for base_conversion_key, view_conversions in view_conversion_candidates.items():
         base_conversions = all_conversions_by_source[base_conversion_key]
@@ -1708,6 +1728,7 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
                     conversion
                     for conversion in base_conversions
                     if conversion not in unsafe_conversions
+                    and node_order[conversion] < node_order[view_conversion]
                     and isinstance(conversion.meta.get("val"), torch.Tensor)
                     and get_mutation_region_id(graph, conversion)
                     == view_conversion_region
