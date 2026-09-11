@@ -765,6 +765,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         compiled_fn = compiled_fn.aot_compile((inputs, {}))
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             compiled_fn.save_compiled_function(self.path())
+        self.assertEqual(len(logs.output), 1)
         self.assertIn("helper.lock (lock) from the artifact", logs.output[0])
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
@@ -800,7 +801,18 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         expected = fn(*inputs)
         compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled_fn = compiled_fn.aot_compile((inputs, {}))
-        compiled_fn.save_compiled_function(self.path())
+        # One warning per dropped entry, from the real dump only (the probe
+        # picklers reach both functions too) and named by the code object, since
+        # wraps gave helper base's __qualname__.
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            compiled_fn.save_compiled_function(self.path())
+        self.assertEqual(len(logs.output), 2)
+        self.assertTrue(
+            any("build.<locals>.helper.lock (lock)" in l for l in logs.output)
+        )
+        self.assertTrue(
+            any("build.<locals>.base.lock (lock)" in l for l in logs.output)
+        )
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
@@ -2011,25 +2023,36 @@ from user code:
 
 
 class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
-    def test_pickler_prunes_an_unpicklable_docstring(self):
-        # A docstring assigned after definition is not in the code object, so
-        # FunctionType would lose it: it travels in the pickle state. Nothing on
-        # the load path forces __doc__, so an unpicklable one is dropped to None
-        # rather than failing the dump.
+    def test_pickler_carries_a_docstring(self):
+        # A native docstring lives in the code object, one assigned after
+        # definition does not; both travel in the pickle state, so neither is
+        # lost on reload (a rebuild that passed doc=None lost both).
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
             def inner(x):
+                """native"""
                 return x
 
-            inner.__doc__ = "assigned by a decorator"
-            return inner
+            def assigned(x):
+                return x
 
-        fn = outer()
+            assigned.__doc__ = "assigned by a decorator"
+            return inner, assigned
+
+        fns = outer()
         buf = io.BytesIO()
-        AOTCompilePickler({}, buf).dump(fn)
+        AOTCompilePickler({}, buf).dump(fns)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
-        self.assertEqual(out.__doc__, "assigned by a decorator")
+        self.assertEqual(
+            [f.__doc__ for f in out], ["native", "assigned by a decorator"]
+        )
+
+    def test_pickler_prunes_an_unpicklable_docstring(self):
+        # Nothing on the load path forces __doc__, so an unpicklable one is
+        # dropped to None with a warning rather than failing the dump; carried
+        # verbatim the dump fails on the lock.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
             def inner(x):
@@ -2040,7 +2063,9 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         fn = outer()
         buf = io.BytesIO()
-        AOTCompilePickler({}, buf).dump(fn)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertIn("inner.__doc__ (lock) from the artifact", logs.output[0])
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertIsNone(out.__doc__)
         self.assertEqual(out(5), 5)
@@ -2146,10 +2171,9 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.mod, mod)
 
     def test_pickler_rebuilds_a_nested_function_faithfully(self):
-        # The pickler passed __qualname__ where FunctionType wants __name__, so
-        # a reloaded function reported the dotted qualname as its __name__; it
-        # read cell_contents unguarded, so an EMPTY cell raised ValueError out
-        # of the pickler; and it dropped __kwdefaults__ and __dict__ outright.
+        # The full set of function state a rebuilt helper carries once __dict__
+        # lands: __name__ vs __qualname__ and the empty cell (fixed by the shared
+        # base), __kwdefaults__ (the subclass swap) and a __dict__ entry (here).
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
@@ -2219,6 +2243,46 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertTrue(hasattr(out.h, "g"))
         self.assertEqual(out.h.g(), "g!")
+
+    def test_pickler_probes_a_cyclic_cluster_in_bounded_time(self):
+        # Eight nested functions fully connected through __dict__, one of them
+        # unpicklable through a kwdefault. Parking the leaned verdicts and
+        # caching the outermost probe's keeps this to a few dozen probe dumps;
+        # re-deriving a leaned False on every re-entry is exponential (hundreds
+        # of thousands of dumps for this graph).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        dumps = [0]
+        real_dump = AOTCompilePickler.dump
+
+        def counting_dump(self, obj):
+            dumps[0] += 1
+            return real_dump(self, obj)
+
+        def outer():
+            fns = [(lambda x, i=i: x + i) for i in range(8)]
+            for f in fns:
+                for i, g in enumerate(fns):
+                    setattr(f, f"f{i}", g)
+            fns[0].__kwdefaults__ = {"k": threading.Lock()}
+
+            def top(x):
+                return x
+
+            for i, f in enumerate(fns):
+                setattr(top, f"f{i}", f)
+            return top
+
+        top = outer()
+        buf = io.BytesIO()
+        with patch.object(AOTCompilePickler, "dump", counting_dump):
+            AOTCompilePickler({}, buf).dump(top)
+        self.assertLess(dumps[0], 100)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "f0"))
+        self.assertFalse(hasattr(out.f1, "f0"))
+        self.assertIs(out.f1.f2, out.f2)
+        self.assertIs(out.f7.f1, out.f1)
 
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
