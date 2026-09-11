@@ -4171,6 +4171,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        self._missing_cache: dict[str, _Missing] = {}
+        self._pruned_cells: dict[int, types.CellType] = {}
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4297,17 +4299,133 @@ class GuardsStatePickler(FunctionPicklerBase):
     # sentinel happens to have, like __module__ -- rebakes the guard against the
     # sentinel's value and misses forever with no error. So it is rebuilt from
     # its code object instead (FunctionPicklerBase._reduce_function), carrying
-    # __code__, __name__, __qualname__, __module__, __closure__ and __defaults__;
-    # a guard walking through anything else (__kwdefaults__, an attribute in
-    # __dict__) still fails to rebuild until those are carried too.
+    # __code__, __name__, __qualname__, __module__, __closure__, __defaults__,
+    # __kwdefaults__, __dict__, __doc__, __annotations__ and __type_params__.
+    #
+    # Rebuilding drags along whatever the function holds -- closure cells,
+    # defaults, attributes, and the module scope its body reads -- and carrying
+    # all of that would let an unpicklable neighbour fail a package that never
+    # needed it. So only values some guard tree node references are carried
+    # (_keep) and the rest become sentinels. A registered CONTAINER is carried
+    # verbatim rather than pruned per element: a guard on the __defaults__ tuple
+    # or __kwdefaults__ dict itself -- what wrap_listlike's SEQUENCE_LENGTH and
+    # CONSTANT_MATCH register -- rebakes its comparison constant from the
+    # reconstructed function at load, so a pruned element would make that guard
+    # fail forever with no load error.
+
+    def _keep(self, value: object) -> bool:
+        """Identity match; an interned value that collides is kept, harmlessly."""
+        return id(value) in self.guard_tree_values
+
+    def _missing(self, reason: str) -> _Missing:
+        """One sentinel per reason; a pruned container shares them."""
+        if reason not in self._missing_cache:
+            self._missing_cache[reason] = _Missing(reason)
+        return self._missing_cache[reason]
+
+    @staticmethod
+    def _is_literal(value: object) -> bool:
+        # An always-picklable constant is carried whether or not a guard reads
+        # it: pruning it buys nothing and would make the rebuilt state depend on
+        # whether some unrelated guard happened to register the interned value.
+        # These are the singletons and scalars dynamo treats as constants; NOT
+        # every common_constant_type (torch.finfo/iinfo do not pickle).
+        if value is None or value is Ellipsis or value is NotImplemented:
+            return True
+        return type(value) in (
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+        )
+
+    def _prune(self, value: object, reason: str) -> object:
+        if self._is_literal(value) or self._keep(value):
+            return value
+        return self._missing(reason)
+
+    def _prune_cell(self, cell: types.CellType) -> types.CellType:
+        # The contents decide: any guard that reads them registers them. A cell
+        # with kept (or empty) contents passes through UNCHANGED so pickle
+        # memoizes it and two functions closing over one variable still share it
+        # after reload.
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            return cell
+        if self._is_literal(contents) or self._keep(contents):
+            return cell
+        # Memoize by the ORIGINAL cell's identity so two functions sharing one
+        # unguarded cell still share a single pruned cell after reload, rather
+        # than each getting a distinct _Missing-filled one.
+        pruned = self._pruned_cells.get(id(cell))
+        if pruned is None:
+            pruned = types.CellType(self._missing("unguarded function closure"))
+            self._pruned_cells[id(cell)] = pruned
+        return pruned
 
     def _reduce_function_by_value(self, obj: types.FunctionType) -> tuple[Any, ...]:
-        """Pickle a function by value.
+        """Pickle a function by value, pruned to what some guard reads.
 
         See Note [Reconstructing a function a guard is rooted at].
         """
+        # A kept container (__defaults__/__kwdefaults__/__dict__/__annotations__)
+        # is carried whole; an unkept one is pruned per value. See the Note.
+        defaults = obj.__defaults__
+        if defaults is not None and not self._keep(defaults):
+            reason = "unguarded function default"
+            defaults = tuple(self._prune(v, reason) for v in defaults)
+
+        kwdefaults = obj.__kwdefaults__
+        if kwdefaults is not None and not self._keep(kwdefaults):
+            reason = "unguarded function kwdefault"
+            kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
+
+        closure = obj.__closure__
+        if closure is not None:
+            # No verbatim gate like the other containers: a guard through
+            # __closure__ always ends at cell_contents, which registers the
+            # contents _prune_cell keys on, so per-cell pruning already keeps
+            # what is read, and _prune_cell is length-preserving.
+            closure = tuple(self._prune_cell(cell) for cell in closure)
+        if self._keep(obj.__dict__):
+            attributes = obj.__dict__
+        else:
+            attributes = {
+                name: self._prune(value, "unguarded function attribute")
+                for name, value in obj.__dict__.items()
+            }
+        # An unguarded annotation/type param may be an unpicklable local class;
+        # prune it. (On 3.14 _read_raw_annotations returns a copy, so the dict is
+        # never kept and is always pruned per value.)
+        raw_annotations = self._read_raw_annotations(obj)
+        if self._keep(raw_annotations):
+            annotations = raw_annotations
+        else:
+            annotations = {
+                name: self._prune(value, "unguarded function annotation")
+                for name, value in raw_annotations.items()
+            }
+        type_params = getattr(obj, "__type_params__", None)
+        if type_params is not None and not self._keep(type_params):
+            type_params = tuple(
+                self._prune(t, "unguarded function type param") for t in type_params
+            )
         return self._reduce_function(
-            obj, defaults=obj.__defaults__, closure=obj.__closure__
+            obj,
+            defaults=defaults,
+            kwdefaults=kwdefaults,
+            closure=closure,
+            attributes=attributes,
+            doc=self._prune(obj.__doc__, "unguarded function doc"),
+            annotations=annotations,
+            type_params=type_params,
         )
 
     # pyrefly: ignore [bad-override]
