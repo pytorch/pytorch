@@ -875,8 +875,18 @@ class AOTCompiledModel:
         for result in self.compiled_results:
             # A call the signature cannot bind is a caller error no ModelInput
             # could fix: let bind_locals' TypeError propagate as the plain module
-            # call would.
-            if result.guard_check(self.model, *args, **kwargs):
+            # call would. Only a raising guard tree counts as "did not match";
+            # _no_match_message names the raiser, so the scan tolerates it the
+            # same way the report does.
+            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+            guard_manager = result._artifacts.guard_manager
+            if guard_manager is None:
+                raise AssertionError("guard_manager must not be None")
+            try:
+                matched = guard_manager.check(f_locals)
+            except Exception:
+                continue
+            if matched:
                 # guard_check already passed; call fn directly so result()
                 # does not re-run the guard eval on this hot dispatch path.
                 return result.fn(self.model, *args, **kwargs)
@@ -899,8 +909,21 @@ class AOTCompiledModel:
             guard_manager = result._artifacts.guard_manager
             if guard_manager is None:
                 raise AssertionError("live artifact must have a guard_manager")
-            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
-            reason = guard_manager.check_verbose(f_locals)
+            # A guard that raises here must not replace the whole report.
+            try:
+                f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+                reason = guard_manager.check_verbose(f_locals)
+            except Exception as e:
+                kind = type(e).__name__
+                detail = str(e).replace("\n", " ")
+                # A guard that RAISES a missing-global error still names the
+                # global; feed that into the same detection the non-raising
+                # branch uses so the footer points at the real cause instead of
+                # the generic "add a ModelInput" hint.
+                if kind == "KeyError" and "G['" in detail:
+                    missing_global = True
+                lines.append(f"  [{i}] <guard check raised {kind}: {detail}>")
+                continue
             parts = reason.verbose_code_parts or [str(reason)]
             joined = "; ".join(str(p) for p in parts).replace("\n", " ")
             if "KeyError on G[" in joined:
