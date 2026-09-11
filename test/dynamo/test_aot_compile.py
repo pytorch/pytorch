@@ -1509,6 +1509,30 @@ from user code:
         finally:
             AOT_POOL_MODE = saved
 
+    def test_aot_compile_fn_missing_global_hint_names_f_globals(self):
+        # Loaded without f_globals, a function artifact's guard scope is the
+        # live module dict rebuilt from the serialized bytecode; when a guarded
+        # global is then missing, the failure says how to supply it.
+        x = torch.randn(4, 8)
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        saved = globals().pop("AOT_POOL_MODE")
+        try:
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            with self.assertRaisesRegex(RuntimeError, "an f_globals carrying it"):
+                loaded(x)
+        finally:
+            globals()["AOT_POOL_MODE"] = saved
+
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
         compiled_fn: SerializableCallable = torch.compile(
