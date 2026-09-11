@@ -566,9 +566,13 @@ class _DynamoCodeCacheEntry:
          it was bypassed (its guards could not be serialized), or a backend
          artifact was missing when the package was saved. install() then leaves
          the frame to be traced fresh rather than skipping it as trivial.
-         Cleared once a compile records a guarded code. (The save-time writer,
-         PrecompileCacheEntry.from_cache_entry, still flags the whole entry and
-         keeps the stale guarded codes.)
+         Cleared once a compile records a guarded code. The save-time writer,
+         PrecompileCacheEntry.from_cache_entry, flags the whole entry when any
+         one of its backend artifacts is missing; CompilePackage.initialize then
+         loads it without its stale guarded codes and backend ids, every variant
+         of that code object included, since install() would have used none.
+         TODO(#196773): prune only the guarded codes whose bytecode names the
+         missing backend at write time, so the other variants stay installable.
     """
 
     python_code: SerializedCode
@@ -1034,6 +1038,23 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            for key, code in self._codes.items():
+                if code.bypassed:
+                    # install() skips a bypassed entry entirely, so its guarded
+                    # codes and backend ids are dead; start from a copy without
+                    # them so the fresh compile's record replaces them and the
+                    # next save writes an installable entry. A copy, not a
+                    # clear, with the mutable containers the fresh compile
+                    # writes to (import_sources, function_names) detached too:
+                    # the caller's entry may be a store's own object
+                    # (InMemoryDynamoStore hands out what it holds).
+                    self._codes[key] = dataclasses.replace(
+                        code,
+                        guarded_codes=[],
+                        backend_ids=[],
+                        function_names=list(code.function_names),
+                        import_sources=dict(code.import_sources),
+                    )
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
