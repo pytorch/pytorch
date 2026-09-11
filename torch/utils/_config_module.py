@@ -92,10 +92,9 @@ class _Config(Generic[T]):
             module, using dotted names for nested targets. Sources and targets
             must have bool, int, str, None, or corresponding Literal/union types.
             Aliases, cycles, and conflicting active implications are rejected.
-            Assignments and deletions of actively implied targets are ignored;
-            use ``config.patch`` to temporarily change their stored values.
-            ``mock.patch.object`` on a target is unsupported if its active
-            implications differ between entry and exit. Use ``config.patch`` instead.
+            Assignments update stored values without overriding active implications.
+            Use ``config.patch`` for temporary changes that restore stored values.
+            ``mock.patch.object`` is unsupported on targets with active implications.
     """
 
     default: T | object
@@ -677,6 +676,7 @@ class ConfigModule(ModuleType):
         targets: list[tuple[ModuleType, str, Any]] = []
         modules = {self}
         changed: dict[_ImplicationConfigModule, set[str]] = {}
+        external_undo: list[tuple[ModuleType, str, Any]] = []
 
         def invalidate() -> None:
             for module in modules:
@@ -696,16 +696,28 @@ class ConfigModule(ModuleType):
             if entry.hide != hide:
                 entry.hide = hide
 
+        def restore_external() -> None:
+            with contextlib.ExitStack() as stack:
+                for module, key, value in reversed(external_undo):
+                    stack.callback(setattr, module, key, value)
+
         try:
             with contextlib.ExitStack() as rollback:
+                raw_rollback = contextlib.ExitStack()
+                # Final token resets undo default materialization by external setters.
+                rollback.callback(raw_rollback.close)
+                rollback.callback(restore_external)
+                rollback.callback(invalidate)
                 for (module, key), (value, hide) in (prior or {}).items():
                     if isinstance(module, ConfigModule):
                         modules.add(module)
                         entry = module._config[key]
                         rollback.callback(entry.user_override.set, value)
                         rollback.callback(restore_hide, entry, hide)
+                        raw_rollback.callback(entry.user_override.set, value)
+                        raw_rollback.callback(restore_hide, entry, hide)
                     else:
-                        rollback.callback(setattr, module, key, value)
+                        external_undo.append((module, key, value))
                 targets, resolved_modules = self._resolve_patch_changes(changes)
                 modules.update(resolved_modules)
                 for module, key, value in targets:
@@ -716,9 +728,12 @@ class ConfigModule(ModuleType):
                     if isinstance(module, ConfigModule):
                         entry = module._config[key]
                         # Snapshot before external getters can materialize config defaults.
-                        token = entry.user_override.set(entry.user_override.get())
-                        rollback.callback(entry.user_override.reset, token)
+                        prior_value = entry.user_override.get()
+                        token = entry.user_override.set(prior_value)
+                        rollback.callback(entry.user_override.set, prior_value)
                         rollback.callback(restore_hide, entry, entry.hide)
+                        raw_rollback.callback(entry.user_override.reset, token)
+                        raw_rollback.callback(restore_hide, entry, entry.hide)
                 external_prior = {}
                 for module, key, _ in targets:
                     if isinstance(module, ConfigModule):
@@ -736,9 +751,10 @@ class ConfigModule(ModuleType):
                             entry.hide = False
                     else:
                         if (module, key) in external_prior:
-                            rollback.callback(
-                                setattr, module, key, external_prior.pop((module, key))
+                            external_undo.append(
+                                (module, key, external_prior.pop((module, key)))
                             )
+                        invalidate()
                         setattr(module, key, value)
                 validate()
                 undo = rollback.pop_all()
@@ -1174,6 +1190,11 @@ class ConfigModule(ModuleType):
 
             with config.patch("name", val):
                 ...
+
+        For implication targets, this changes stored values; active implications
+        still take precedence. On exit, stored values are restored before checking
+        for conflicts. If changes to other sources leave conflicting implications,
+        exit raises ValueError, including when unwinding an exception from the body.
         """
         changes: dict[str, Any]
         if arg1 is not None:
@@ -1373,25 +1394,10 @@ class _ImplicationConfigModule(ConfigModule):
         return self._get_resolved_value(name, {})
 
     def __setattr__(self, name: str, value: object) -> None:
-        if (
-            name in self._implications
-            and self._get_implied_value(name) is not _UNSET_SENTINEL
-        ):
-            self._warn_if_deprecated(name, self._config[name])
-            return
         if name in self._implication_sources:
             self._set_raw_values({name: value})
         else:
             super().__setattr__(name, value)
-
-    def __delattr__(self, name: str) -> None:
-        if (
-            name in self._implications
-            and self._get_implied_value(name) is not _UNSET_SENTINEL
-        ):
-            # Keeping the attribute present prevents mock.patch writing back an implied value.
-            return
-        super().__delattr__(name)
 
     def _is_default(self, name: str) -> bool:
         return name not in self._implication_dynamic_sources and super()._is_default(
