@@ -112,7 +112,10 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         ):
             return
 
-        m_hint, n_hint, k_hint = map(int, (m, n, k))
+        # The partial template uses compile-time descriptor geometry, so backed
+        # dynamic dimensions must be specialized explicitly. Unbacked symbols
+        # were rejected above.
+        m_hint, n_hint, k_hint = V.graph.sizevars.guard_int_seq((m, n, k))
         device_properties = DeviceProperties.create(kernel_inputs.device())
         # Keep the Triton search to one M/N-specific schedule family and its
         # one- and two-wave splits. Narrow-N and one-M-tile cases use the 1CTA
