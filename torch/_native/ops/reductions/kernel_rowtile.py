@@ -383,8 +383,7 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
     """Run one launch per stage; split shapes allocate one partial buffer per trait field."""
     M, N = x.shape
     dt = torch2cute[x.dtype]
-    # Ragged strides and nonzero storage offsets may underalign; declare and key the
-    # pointer-supported width because N alone cannot see the offset.
+    # Storage offsets may underalign; declare and key the pointer-supported width.
     align = _declared_align(x, tile.align_bytes(N, x.element_size()))
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
     fake_in = _L.fake_compact(dt, (_L.sym(), N), order=(1, 0), align=align)
@@ -468,8 +467,8 @@ def reduce_row_tile(
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     M, N = x.shape
-    # leaf/combine serves every trait and N. Raw partial stages impose a layout, and explicit
-    # tpr requests launch shape; both keep default order rather than falling back to ATen.
+    # leaf/combine serves every trait and N. The opt-in gate leaves partial stages and
+    # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
     itree = None
