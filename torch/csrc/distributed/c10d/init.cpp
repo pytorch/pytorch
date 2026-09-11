@@ -820,6 +820,19 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
             return reducer.update_process_group(std::move(new_process_group));
           },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_manual_finalization_required",
+          &::c10d::Reducer::set_manual_finalization_required,
+          py::arg("required"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_should_finalize_after_backward",
+          &::c10d::Reducer::should_finalize_after_backward,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_finalize_backward_manual",
+          &::c10d::Reducer::finalize_backward_manual,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
