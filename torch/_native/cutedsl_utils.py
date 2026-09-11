@@ -25,12 +25,8 @@ log = logging.getLogger(__name__)
 
 
 _CUTEDSL_DSL_NAME = "cutedsl"
+# Reductions require FastDivmodDivisorV2 from 4.6.2; Version.from_part needs packaging >26.
 _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
-    # Current version - Note Version.from_part(release=(4.4.1)) is better
-    #                   but > v26 of packaging.
-    Version("4.4.1"),
-    Version("4.4.2"),
-    Version("4.5.2"),
     Version("4.6.2"),
     Version("4.7.1"),
 }

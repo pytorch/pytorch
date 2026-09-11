@@ -108,6 +108,17 @@ class TestKernelRowTile(TestCase):
         # A row too narrow to feed one warp keeps the ladder's pick.
         self.assertIsNone(rt.single_row_config(32, 32))
 
+    def test_oneshot_gate_bounds_loads_not_just_smem(self):
+        # One-shot must reject both oversized rows and excessive per-thread loads.
+        import torch
+        from torch._native.ops.reductions import kernel_general as kg
+
+        self.assertTrue(kg._oneshot_ok(torch.empty(1, 4096, device="cuda")))
+        # Prime N collapses vec to 1 and exceeds the load bound despite fitting smem.
+        self.assertFalse(kg._oneshot_ok(torch.empty(1, 65537, device="cuda")))
+        # Wide enough to blow the smem budget outright.
+        self.assertFalse(kg._oneshot_ok(torch.empty(1, 1 << 22, device="cuda")))
+
     def test_absmax_absmin_propagate_nan(self):
         # Abs extrema model vector_norm(+/-inf), which propagates NaN. Vary its fold
         # position and leave clean rows to check values too.
@@ -349,6 +360,33 @@ class TestKernelRowTile(TestCase):
         want = torch.aminmax(x, dim=1)
         self.assertEqual(lo, want.min)
         self.assertEqual(hi, want.max)
+
+    def test_dispatcher_takes_the_narrow_arm(self):
+        # One-shot is numerically identical; tpr=1 and a consulted TMA gate identify this arm.
+        from unittest import mock
+
+        import cutlass
+
+        from torch._native.ops.reductions import (
+            kernel_general as kg,
+            kernel_rowtile as rt,
+            traits as T,
+        )
+
+        m, n = 1 << 20, 32
+        self.assertTrue(rt.narrow_row(n, 4, m), "the gate no longer admits this shape")
+        x = torch.randn(m, n, device="cuda")
+        real = rt.reduce_row_tile
+        with (
+            mock.patch.object(rt, "reduce_row_tile", wraps=real) as served,
+            mock.patch.object(rt, "tma_ok", wraps=rt.tma_ok) as gate,
+        ):
+            got = kg.reduce_dim(
+                T.SumOps(acc=cutlass.Float32), "disp_narrow", x, -1, torch.float32
+            )
+        self.assertEqual(served.call_args.kwargs.get("tpr"), 1, "not the narrow arm")
+        self.assertTrue(gate.called, "the use_tma auto-derivation never ran")
+        self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
 
     def test_use_tma_rejects_a_non_power_of_two_row(self):
         # The rotation mask requires power-of-two N; forced N=24 silently erred by 13.2,
