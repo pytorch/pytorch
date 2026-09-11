@@ -5102,6 +5102,7 @@ class TestRsample(DistributionsTestCase):
 
 class TestDistributionShapes(DistributionsTestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.scalar_sample = 1
@@ -6862,7 +6863,7 @@ class TestAgainstScipy(DistributionsTestCase):
 
 class TestFunctors(DistributionsTestCase):
     hw_classification = HardwareClassification.GENERIC
-    
+
     def test_cat_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         x2 = (torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100
