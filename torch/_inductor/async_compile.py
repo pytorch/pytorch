@@ -600,6 +600,11 @@ class AsyncCompile:
         # no need to call this in parallel since the sub-kernels are already parallel tasks
         return MultiKernelCall(*args, **kwargs)
 
+    def multi_kernel_plan(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import MultiKernelPlanCall
+
+        return MultiKernelPlanCall(*args, **kwargs)
+
     def size_hint_multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import SizeHintMultiKernelCall
 
