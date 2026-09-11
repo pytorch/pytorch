@@ -2403,8 +2403,9 @@ class TritonOverrides(OpOverrides):
         # approximate divide the result matches neither eager nor tl.sigmoid, so fall
         # back to the intrinsic unless both knobs are on.
         if (
-            config.numerics == "strict" or config.eager_numerics.use_pytorch_libdevice
-        ) and config.eager_numerics.division_rounding:
+            config.eager_numerics.use_pytorch_libdevice
+            and config.eager_numerics.division_rounding
+        ):
             denominator = f"(1.0 + libdevice.exp(-({x})))"
             return f"triton.language.div_rn(1.0, {denominator})"
         return f"tl.sigmoid({x})"
