@@ -22,11 +22,23 @@ on:
 jobs:
   select:
     if: github.repository_owner == 'pytorch'
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     outputs:
       x86: ${{ steps.pick.outputs.x86 }}
       arm64: ${{ steps.pick.outputs.arm64 }}
     steps:
+      - name: Checkout CI gate
+        if: github.event.pull_request.number || startsWith(github.ref, 'refs/tags/ciflow/')
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/check-ci
+
+      - name: Check for disabled CI
+        if: github.event.pull_request.number || startsWith(github.ref, 'refs/tags/ciflow/')
+        uses: ./.github/actions/check-ci
+
       - id: pick
         shell: bash
         run: |

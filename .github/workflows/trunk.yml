@@ -36,6 +36,7 @@ permissions:
 jobs:
   # See job-filter.yml for rules on adding job filter conditions
   job-filter:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: job-filter
     uses: ./.github/workflows/job-filter.yml
@@ -391,7 +392,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' && (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' macos-py3-arm64 ')) }}
     name: macos-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
-    needs: job-filter
+    needs: [get-label-type, job-filter]
     with:
       sync-tag: macos-py3-arm64-build
       build-environment: macos-py3-arm64
