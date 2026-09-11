@@ -4172,6 +4172,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
+        self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
 
     @classmethod
@@ -4318,7 +4319,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         return id(value) in self.guard_tree_values
 
     def _missing(self, reason: str) -> _Missing:
-        """One sentinel per reason; a pruned container shares them."""
+        """One sentinel per reason; a snapshot prunes a whole module dict."""
         if reason not in self._missing_cache:
             self._missing_cache[reason] = _Missing(reason)
         return self._missing_cache[reason]
@@ -4350,6 +4351,28 @@ class GuardsStatePickler(FunctionPicklerBase):
             return value
         return self._missing(reason)
 
+    def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
+        """Built once per module dict, so every function rebuilt against that
+        dict is built over ONE shared scope after load (pickle memoizes it)."""
+        snapshot = self._globals_snapshots.get(id(f_globals))
+        if snapshot is None:
+            snapshot = {
+                name: self._prune(value, "unguarded function global")
+                for name, value in f_globals.items()
+            }
+            # FunctionType binds builtins from the scope's __builtins__ at
+            # creation, so that entry can never be a sentinel: a pruned one
+            # becomes the real module (pickled by reference), a kept one (the
+            # builtins dict some guard read through) stays verbatim as the
+            # keep contract says. The key set is the module dict's at save time,
+            # names Dynamo installed into it included; a guard on the dict's
+            # shape compares against the live dict at run time and is only as
+            # portable as those names (see the commit message).
+            if isinstance(snapshot.get("__builtins__"), _Missing):
+                snapshot["__builtins__"] = builtins
+            self._globals_snapshots[id(f_globals)] = snapshot
+        return snapshot
+
     def _prune_cell(self, cell: types.CellType) -> types.CellType:
         # The contents decide: any guard that reads them registers them. A cell
         # with kept (or empty) contents passes through UNCHANGED so pickle
@@ -4375,6 +4398,9 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         See Note [Reconstructing a function a guard is rooted at].
         """
+        snapshot = None
+        if self._keep(obj.__globals__):
+            snapshot = self._globals_snapshot(obj.__globals__)
         # A kept container (__defaults__/__kwdefaults__/__dict__/__annotations__)
         # is carried whole; an unkept one is pruned per value. See the Note.
         defaults = obj.__defaults__
@@ -4426,6 +4452,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             doc=self._prune(obj.__doc__, "unguarded function doc"),
             annotations=annotations,
             type_params=type_params,
+            globals_snapshot=snapshot,
         )
 
     # pyrefly: ignore [bad-override]

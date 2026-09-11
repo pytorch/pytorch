@@ -173,6 +173,38 @@ def keep_renamed_name(func):
     return wrapper
 
 
+def keep_module(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        # Guarding __globals__ too forces the SNAPSHOT variant.
+        if func.__module__ == func.__globals__["__name__"]:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+FQN_MISMATCH_GLOBAL = 2
+
+
+def keep_global(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__globals__["FQN_MISMATCH_GLOBAL"] == 2:
+            x = x + 10
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_globals_length(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        return func(self, x) + len(func.__globals__)
+
+    return wrapper
+
+
 def keep_annotations(func):
     # A guard reading an annotation value reads through the __annotations__
     # dict and bakes an ID_MATCH on the value, so the by-value function
@@ -244,6 +276,24 @@ class DecoratedRenamedNameForwardModule(torch.nn.Module):
         return x * 2
 
 
+class DecoratedModuleForwardModule(torch.nn.Module):
+    @keep_module
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedGlobalForwardModule(torch.nn.Module):
+    @keep_global
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedGlobalsLengthForwardModule(torch.nn.Module):
+    @keep_globals_length
+    def forward(self, x):
+        return x * 2
+
+
 class DecoratedAnnotationsForwardModule(torch.nn.Module):
     @keep_annotations
     def forward(self, x):
@@ -254,6 +304,51 @@ class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
     @keep_name
     def forward(self, x, unused=UnpicklableDefault()):
         return x * 2
+
+
+# functools.wraps copies the wrapped function's __module__, so this wrapper
+# claims torch._dynamo.testing while its __globals__ is THIS module's dict.
+OTHER_MODULE_CONST = 2
+
+
+def wrap_other_module_function(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        return x * 2
+
+    return wrapper
+
+
+WRAPPED_FROM_OTHER_MODULE = wrap_other_module_function(
+    torch._dynamo.testing.reset_rng_state
+)
+
+
+# Module-scope wrappers: the globals snapshot contains the wrappers themselves.
+MODULE_SCOPE_CONST = 2
+MODULE_SCOPE_CONST_B = 2
+
+
+def module_scope_wrapper(func, const_name):
+    @functools.wraps(func)
+    def wrapper(x):
+        if func.__globals__[const_name] == 2:
+            x = x + 1
+        return func(x)
+
+    return wrapper
+
+
+def _scope_base_a(x):
+    return x * 2
+
+
+def _scope_base_b(x):
+    return x * 3
+
+
+MODULE_SCOPE_WRAPPED_A = module_scope_wrapper(_scope_base_a, "MODULE_SCOPE_CONST")
+MODULE_SCOPE_WRAPPED_B = module_scope_wrapper(_scope_base_b, "MODULE_SCOPE_CONST_B")
 
 
 def self_referencing_wrapper(func):
@@ -469,6 +564,10 @@ FQN_MISMATCH_CASES = [
     subtest(
         ("EQUALS_MATCH", DecoratedModuleNameForwardModule, ("__module__", "other")),
         name="module_name",
+    ),
+    subtest(
+        ("EQUALS_MATCH", DecoratedModuleForwardModule, ("__module__", "other")),
+        name="module",
     ),
     subtest(
         ("EQUALS_MATCH", DecoratedUnpicklableDefaultForwardModule, ("__name__", "x")),
@@ -1056,6 +1155,88 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out["a"].__closure__[0].cell_contents, _Missing)
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
+    def test_snapshot_globals_function_preserves_module(self):
+        # A wraps wrapper's __module__ is the wrappee's, not the snapshot's
+        # __name__, so FunctionType's derivation from the scope is wrong and
+        # the recorded value has to be restored; see _build_function. The
+        # wrapper is also an item of its own module snapshot, so it is built
+        # while the dict is still loading.
+        fn = WRAPPED_FROM_OTHER_MODULE
+        self.assertEqual(fn.__module__, torch._dynamo.testing.__name__)
+        buf = io.BytesIO()
+        g = fn.__globals__
+        gtv = {id(fn): fn, id(g): g}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump(fn)
+        out = pickle.loads(buf.getvalue())
+        self.assertEqual(out.__module__, torch._dynamo.testing.__name__)
+        self.assertEqual(out.__globals__["__name__"], __name__)
+        # And the state really did arrive, so a guard on the scope's shape
+        # (DICT_KEYS_MATCH, len) still sees the module it was captured from.
+        self.assertEqual(out.__globals__.keys(), g.keys())
+
+    def test_snapshot_keeps_the_save_time_value_of_a_guarded_global(self):
+        # The guard is baked from the value the compile saw; a rebuild that
+        # shares the live module dict would silently accept whatever the
+        # global holds at load instead.
+        global FQN_MISMATCH_GLOBAL
+        fn = WRAPPED_FROM_OTHER_MODULE
+        g = fn.__globals__
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn, id(g): g}, {}, {}, buf).dump(fn)
+        FQN_MISMATCH_GLOBAL = 3
+        try:
+            out = pickle.loads(buf.getvalue())
+            self.assertEqual(out.__globals__["FQN_MISMATCH_GLOBAL"], 2)
+            self.assertIsNot(out.__globals__, g)
+        finally:
+            FQN_MISMATCH_GLOBAL = 2
+
+    def test_functions_sharing_a_module_dict_share_the_rebuilt_scope(self):
+        # Two module-scope wrappers are items of their own module snapshot, so
+        # one of them is rebuilt while the snapshot is still loading. The scope
+        # is a reduce ARGUMENT shared by both, so the nested one still sees the
+        # complete dict once the load finishes; as pickle STATE it would have
+        # been a copy of the half-loaded dict, empty for the nested function.
+        a, b = MODULE_SCOPE_WRAPPED_A, MODULE_SCOPE_WRAPPED_B
+        g = a.__globals__
+        gtv = {id(a): a, id(b): b, id(g): g}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out["a"].__globals__, out["b"].__globals__)
+        self.assertEqual(out["a"].__globals__.keys(), g.keys())
+        self.assertEqual(out["b"].__globals__.keys(), g.keys())
+        self.assertIs(out["a"].__globals__["MODULE_SCOPE_WRAPPED_A"], out["a"])
+        self.assertIs(out["b"].__globals__["MODULE_SCOPE_WRAPPED_B"], out["b"])
+
+    def test_globals_snapshot_is_built_once_per_module_dict(self):
+        # The snapshot prunes a whole module dict. Building one per function
+        # grew the payload with functions x globals; built once, pickle
+        # memoizes it and a second function adds a reference, not a copy.
+        def make():
+            def fn():
+                return MODULE_SCOPE_CONST
+
+            return fn
+
+        fns = [make() for _ in range(8)]
+        g = globals()
+
+        def dump_size(chosen):
+            gtv = {id(fn): fn for fn in chosen}
+            gtv[id(g)] = g
+            buf = io.BytesIO()
+            pickler = GuardsStatePickler(gtv, {}, {}, buf)
+            pickler.dump(chosen)
+            self.assertEqual(len(pickler._globals_snapshots), 1)
+            return len(buf.getvalue())
+
+        # Each extra function still costs its own reduce record, but eight of
+        # them together must cost less than one more copy of the scope.
+        one = dump_size(fns[:1])
+        self.assertLess(dump_size(fns) - one, one // 2)
+
     def test_locals_function_prunes_unguarded_values(self):
         # A <locals> function is rebuilt by value too, and used to carry its
         # defaults and closure verbatim: one unpicklable unguarded neighbour
@@ -1086,6 +1267,24 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"fn": inner})
         self.assertIsInstance(pickle.loads(buf.getvalue())["fn"], _Missing)
+
+    def test_snapshot_globals_share_one_missing_sentinel(self):
+        # A globals snapshot prunes a whole module dict; a fresh _Missing per
+        # pruned value bloated the pickle with thousands of identical
+        # sentinels, none shared even across snapshots in the same pickle.
+        a, b = MODULE_SCOPE_WRAPPED_A, MODULE_SCOPE_WRAPPED_B
+        g = a.__globals__
+        gtv = {id(a): a, id(b): b, id(g): g}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
+        out = pickle.loads(buf.getvalue())
+        sentinels = {
+            id(v)
+            for fn in out.values()
+            for v in fn.__globals__.values()
+            if isinstance(v, _Missing)
+        }
+        self.assertEqual(len(sentinels), 1)
 
     def test_reduce_keeps_a_none_valued_cell(self):
         # None is a value, not an empty cell; see
@@ -1343,6 +1542,51 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
+    def test_guard_through_globals_of_a_wrapper_from_another_module(self):
+        # __module__ names the wrapped function's module, so an import at load
+        # would hand the rebuilt wrapper THAT module's dict and the guard
+        # reading wrapper.__globals__[name] would KeyError while the guard
+        # manager is built. The snapshot carries the dict the guard read.
+        global OTHER_MODULE_CONST
+        wrapper = WRAPPED_FROM_OTHER_MODULE
+        self.assertEqual(wrapper.__module__, torch._dynamo.testing.__name__)
+        self.assertIs(wrapper.__globals__, globals())
+
+        def fn(x):
+            if WRAPPED_FROM_OTHER_MODULE.__globals__["OTHER_MODULE_CONST"] == 2:
+                x = x + 1
+            return WRAPPED_FROM_OTHER_MODULE(x)
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        try:
+            OTHER_MODULE_CONST = 3
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            OTHER_MODULE_CONST = 2
+
+    def test_guard_rooted_at_module_scope_wrappers_that_reach_themselves(self):
+        # Two functools.wraps helpers bound at module scope and called from one
+        # frame is ordinary code; see the fixture for why both are rebuilt
+        # against one snapshot. Rejecting through either global shows both
+        # guards survived the round trip.
+        global MODULE_SCOPE_CONST, MODULE_SCOPE_CONST_B
+
+        def fn(x):
+            return MODULE_SCOPE_WRAPPED_A(x) + MODULE_SCOPE_WRAPPED_B(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        try:
+            MODULE_SCOPE_CONST_B = 3
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+            MODULE_SCOPE_CONST_B = 2
+            MODULE_SCOPE_CONST = 3
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            MODULE_SCOPE_CONST = MODULE_SCOPE_CONST_B = 2
+
     def test_guard_rooted_at_wrapper_that_reaches_itself(self):
         # A kept closure cell and a kept attribute both reach back to the
         # function being reduced; see FunctionPicklerBase for why that has to
@@ -1458,6 +1702,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             DOC_WRAPPED.__doc__ = "base doc"
 
+    def test_fqn_mismatched_function_rejects_a_new_global(self):
+        # len(func.__globals__) installs SEQUENCE_LENGTH (derived
+        # DICT_KEYS_MATCH), rebaked from the snapshot's size at load, so a key
+        # added to the live module dict is rejected.
+        mod = DecoratedGlobalsLengthForwardModule()
+        ref, loaded = self._test_serialization("DICT_KEYS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        inner.__globals__["FQN_MISMATCH_NEW_GLOBAL"] = 1
+        try:
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            del inner.__globals__["FQN_MISMATCH_NEW_GLOBAL"]
+
     def test_unserializable_default_of_a_rebuilt_function_is_a_package_error(self):
         # Whatever the pickler raises for a value some guard reads -- here a
         # RuntimeError from the value's own __reduce__ -- surfaces as a
@@ -1531,6 +1790,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, inputs, False)
         finally:
             setattr(inner, attr, old_value)
+
+    def test_fqn_mismatched_function_preserves_guarded_globals(self):
+        global FQN_MISMATCH_GLOBAL
+
+        mod = DecoratedGlobalForwardModule()
+        x = torch.ones(1)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, x)
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": x, "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+
+        # The loaded guard baked the snapshot's 2 at load, so the live 3 that
+        # the check reads through func.__globals__ no longer matches it.
+        old_value = FQN_MISMATCH_GLOBAL
+        try:
+            FQN_MISMATCH_GLOBAL = 3
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            FQN_MISMATCH_GLOBAL = old_value
 
     def test_nested_function_preserves_a_guarded_defaults_tuple(self):
         # A rebuilt local function's __defaults__ and __kwdefaults__ (the latter
