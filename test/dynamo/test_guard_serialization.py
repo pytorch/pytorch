@@ -758,11 +758,9 @@ class GetattrProxy:
 
 
 class RaisingProbes:
-    # Any attribute probe of the instance (isinstance reads __class__, so that
-    # one is served) raises something other than AttributeError.
+    # Any attribute probe of the instance raises something other than
+    # AttributeError; the reducer must not read the instance outside its try.
     def __getattribute__(self, name):
-        if name == "__class__":
-            return object.__getattribute__(self, name)
         raise RuntimeError(f"probed {name}")
 
 
@@ -1147,7 +1145,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
 
-    def test_reducer_handles_an_empty_cell_reached_directly(self):
+    def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
         # raised ValueError out of the pickler for an empty cell. Pickler-level
         # because a guard cannot root at a raw cell through a capture:
@@ -1158,10 +1156,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
 
-    def test_reduce_handles_an_empty_closure_cell(self):
-        # Reading an EMPTY cell raised ValueError out of the reducer. It has to
-        # come back empty: a cell holding a sentinel reads as an assigned
-        # variable. See FunctionPicklerBase._reduce_cell.
+    def test_rebuilt_function_keeps_an_empty_closure_cell(self):
+        # A by-value rebuild of an fqn-mismatched wrapper carries its cells
+        # through FunctionPicklerBase._reduce_cell, so an EMPTY cell has to come
+        # back empty: a cell holding a sentinel reads as an assigned variable.
         wrapped = EMPTY_CELL_WRAPPED
         empty = [i for i, c in enumerate(wrapped.__closure__) if _cell_is_empty(c)]
         self.assertEqual(len(empty), 1)
@@ -1265,6 +1263,22 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
+    def test_rebuilt_locals_function_keeps_its_name(self):
+        # The old <locals> rebuild passed __qualname__ where FunctionType wants
+        # __name__, so a reloaded local function reported "outer.<locals>.f" as
+        # its __name__.
+        def outer():
+            def f(x):
+                return x
+
+            return f
+
+        fn = outer()
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual((out.__name__, out.__qualname__), ("f", fn.__qualname__))
+
     def test_rebuilt_wrapper_is_scoped_to_the_module_that_compiled_it(self):
         # functools.wraps copies __module__ from the wrappee, but the wrapper's
         # body reads the decorator module's globals. A rebuild that imported
@@ -1302,6 +1316,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(out.__module__, ["not", "a", "module"])
+        # A non-str __module__ still has a compile scope, and that is what the
+        # rebuilt function gets as its globals.
+        self.assertIs(out.__globals__, globals())
 
     def test_fqn_resolves_only_when_pickle_by_name_lands_on_the_function(self):
         # The shared test behind "rebuild from the code object or not": True
@@ -1358,26 +1375,41 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
     def test_snapshot_globals_function_preserves_module(self):
-        # The snapshot variant builds the function over the shared snapshot
-        # dict, which has no __name__ of its own; see FunctionPicklerBase.
-        def outer():
-            def inner():
-                return FQN_MISMATCH_GLOBAL
-
-            return inner
-
-        fn = outer()
-        self.assertIsNotNone(fn.__module__)
+        # A wraps wrapper's __module__ is the wrappee's, not the snapshot's
+        # __name__, so FunctionType's derivation from the scope is wrong and
+        # the recorded value has to be restored; see _build_function. The
+        # wrapper is also an item of its own module snapshot, so it is built
+        # while the dict is still loading.
+        fn = WRAPPED_FROM_OTHER_MODULE
+        self.assertEqual(fn.__module__, torch._dynamo.testing.__name__)
         buf = io.BytesIO()
         g = fn.__globals__
         gtv = {id(fn): fn, id(g): g}
         pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
         pickler.dump(fn)
         out = pickle.loads(buf.getvalue())
-        self.assertEqual(out.__module__, fn.__module__)
+        self.assertEqual(out.__module__, torch._dynamo.testing.__name__)
+        self.assertEqual(out.__globals__["__name__"], __name__)
         # And the state really did arrive, so a guard on the scope's shape
         # (DICT_KEYS_MATCH, len) still sees the module it was captured from.
         self.assertEqual(out.__globals__.keys(), g.keys())
+
+    def test_snapshot_keeps_the_save_time_value_of_a_guarded_global(self):
+        # The guard is baked from the value the compile saw; a rebuild that
+        # shares the live module dict would silently accept whatever the
+        # global holds at load instead.
+        global FQN_MISMATCH_GLOBAL
+        fn = WRAPPED_FROM_OTHER_MODULE
+        g = fn.__globals__
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn, id(g): g}, {}, {}, {}, buf).dump(fn)
+        FQN_MISMATCH_GLOBAL = 3
+        try:
+            out = pickle.loads(buf.getvalue())
+            self.assertEqual(out.__globals__["FQN_MISMATCH_GLOBAL"], 2)
+            self.assertIsNot(out.__globals__, g)
+        finally:
+            FQN_MISMATCH_GLOBAL = 2
 
     def test_functions_sharing_a_module_dict_share_the_rebuilt_scope(self):
         # Two module-scope wrappers are items of their own module snapshot, so
