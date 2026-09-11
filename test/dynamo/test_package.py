@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import dataclasses
 import functools
 import gc
 import importlib
@@ -22,6 +23,7 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
@@ -33,6 +35,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    subtest,
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.testing._internal.inductor_utils import (
@@ -140,6 +143,80 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    # Named codegen targets: (machine, isa, bit width, build macros, simdlen, march).
+    _CODEGEN_TARGETS = {
+        "avx2": ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None),
+        "avx512": ("x86_64", "avx512", 512, ("CPU_CAPABILITY_AVX512",), None, None),
+        "neon": (
+            "aarch64",
+            "asimd",
+            128,
+            ("CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"),
+            None,
+            None,
+        ),
+        "sve128": ("aarch64", "asimd", 128, ("CPU_CAPABILITY_SVE128",), None, None),
+        "avx2_simdlen": ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), 256, None),
+    }
+
+    @parametrize(
+        "cached, host, error",
+        [
+            subtest(("avx2", "avx2", None), name="same_isa"),
+            subtest(
+                ("avx2", "avx512", "generated for vector ISA 'avx2'.*for 'avx512'"),
+                name="wider_host",
+            ),
+            subtest(
+                ("avx512", "avx2", "generated for vector ISA 'avx512'.*for 'avx2'"),
+                name="narrower_host",
+            ),
+            subtest(
+                ("neon", "avx2", "machine 'aarch64', this host is 'x86_64'"),
+                name="other_machine",
+            ),
+            # NEON and SVE128 share both the name "asimd" and a 128-bit width, so
+            # only the build macro tells them apart.
+            subtest(
+                ("neon", "sve128", "vector ISA 'asimd'"), name="same_name_other_macro"
+            ),
+            # simdlen and march are recorded for diagnostics but do not gate:
+            # pick_vec_isa() folds cpp.simdlen (and ATEN_CPU_CAPABILITY) into the
+            # ISA it resolves, and march never reaches it -- it only changes how
+            # the same tiled source is compiled -- so a host that lands on the
+            # same (ISA, width, macro) can rebuild the kernels whatever knob got
+            # it there. An artifact built under cpp.simdlen=256 loads on a host
+            # whose default already picks the same 256-bit ISA; gating on the raw
+            # knob would reject it and make the cpp.simdlen escape hatch trade an
+            # ISA error for a simdlen error.
+            subtest(("avx2_simdlen", "avx2", None), name="simdlen_does_not_gate"),
+            subtest(
+                ("avx2", None, "reports no CPU codegen target"), name="no_host_target"
+            ),
+        ],
+    )
+    def test_cpu_codegen_target_requires_the_host_to_pick_the_same_isa(
+        self, cached, host, error
+    ):
+        # The kernel source is tiled for the ISA picked at codegen and compiled
+        # with the ISA picked on the loading host, so the two must be equal. A
+        # wider host is not a superset: its masked loads zero-fill the lanes the
+        # narrower tiling never touches, and unmasked reductions read them.
+        base = SystemInfo.current(cpu_codegen=False)
+        cached_info = dataclasses.replace(
+            base, cpu_codegen_target=self._CODEGEN_TARGETS[cached]
+        )
+        host_target = None if host is None else self._CODEGEN_TARGETS[host]
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            return_value=host_target,
+        ):
+            if error is None:
+                cached_info.check_compatibility(SystemInfo.current())
+            else:
+                with self.assertRaisesRegex(RuntimeError, error):
+                    cached_info.check_compatibility(SystemInfo.current())
 
     def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
         # pick_vec_isa never raises for a missing compiler; it returns
