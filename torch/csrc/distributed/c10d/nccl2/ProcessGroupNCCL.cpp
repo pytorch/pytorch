@@ -205,11 +205,12 @@ void ProcessGroupNCCL::init(at::Device device) {
   TC_LOG(INFO, this) << "Initializing ProcessGroupNCCL for device: " << device;
   device_ = device;
 
-  if (init_state_ == InitializationState::INITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL already initialized");
-  } else if (init_state_ == InitializationState::FINALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL already finalized");
-  }
+  TORCH_CHECK(
+      init_state_ != InitializationState::INITIALIZED,
+      "ProcessGroupNCCL already initialized");
+  TORCH_CHECK(
+      init_state_ != InitializationState::FINALIZED,
+      "ProcessGroupNCCL already finalized");
 
   if (!nccl_api_) {
     nccl_api_ = std::make_unique<DefaultNcclApi>();
@@ -301,6 +302,10 @@ void ProcessGroupNCCL::initFromComm(
   TracingGuard tracingGuard(name_, comm_size_, "init", rank_, sequence_number_);
   TC_LOG(INFO, this) << "ProcessGroupNCCL initialized from split for rank: "
                      << rank_;
+}
+
+bool ProcessGroupNCCL::isInitialized() {
+  return init_state_ == InitializationState::INITIALIZED;
 }
 
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
@@ -504,11 +509,12 @@ std::unordered_map<std::string, uint64_t> ProcessGroupNCCL::getMemoryStats() {
 }
 
 void ProcessGroupNCCL::finalize() {
-  if (init_state_ == InitializationState::UNINITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL not initialized");
-  } else if (init_state_ == InitializationState::FINALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL already finalized");
-  }
+  TORCH_CHECK(
+      init_state_ != InitializationState::UNINITIALIZED,
+      "ProcessGroupNCCL not initialized");
+  TORCH_CHECK(
+      init_state_ != InitializationState::FINALIZED,
+      "ProcessGroupNCCL already finalized");
   init_state_ = InitializationState::FINALIZED;
 
   // Stop the watchdog first: draining the work queue below may surface a
@@ -519,23 +525,20 @@ void ProcessGroupNCCL::finalize() {
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
 
-  if (work_status == WorkNCCL::WorkStatus::NOT_STARTED ||
-      work_status == WorkNCCL::WorkStatus::INPROGRESS) {
-    throw std::runtime_error(
-        "WorkQ finalize returned in progress or not started state");
-  }
+  TORCH_CHECK(
+      work_status != WorkNCCL::WorkStatus::NOT_STARTED &&
+          work_status != WorkNCCL::WorkStatus::INPROGRESS,
+      "WorkQ finalize returned in progress or not started state");
 
   // Update comm_state_ based on the work status
   if (work_status == WorkNCCL::WorkStatus::TIMEDOUT) {
     comm_state_ = CommState::TIMEOUT;
     abortNcclComm();
-    throw std::runtime_error("Work timed out during finalize");
+    TORCH_CHECK(false, "Work timed out during finalize");
   } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
     comm_state_ = CommState::ERROR;
-    if (!nccl_comm_) {
-      throw std::runtime_error(
-          "NCCL communicator was aborted after a previous error");
-    }
+    TORCH_CHECK(
+        nccl_comm_, "NCCL communicator was aborted after a previous error");
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -545,6 +548,10 @@ void ProcessGroupNCCL::finalize() {
     NCCLException ncclException(
         *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
     abortNcclComm();
+    // The constructor reads the communicator for getLastError(), and
+    // abortNcclComm() has just set nccl_comm_ to nullptr, so the exception has
+    // to be built first. A check macro would raise before the cleanup ran.
+    // @allow-raw-throw: abortNcclComm() nulls the comm it reads
     throw std::move(ncclException);
   }
 
@@ -822,9 +829,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
     std::chrono::milliseconds timeout) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
-  if (ops.empty()) {
-    throw std::runtime_error("Cannot issue empty batch operation");
-  }
+  TORCH_CHECK(!ops.empty(), "Cannot issue empty batch operation");
 
   // Collect input and output tensors for work tracking
   std::vector<at::Tensor> input_tensors;
@@ -841,7 +846,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
       ensureTensorContiguous(tensor);
       output_tensors.push_back(tensor);
     } else {
-      throw std::runtime_error("Unknown op type");
+      TORCH_CHECK(false, "Unknown op type");
     }
   }
 
@@ -1049,10 +1054,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
     std::chrono::milliseconds timeout) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
-  if (tensor_list.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "tensor_list size must equal comm_size for all_gather");
-  }
+  TORCH_CHECK(
+      tensor_list.size() == static_cast<size_t>(comm_size_),
+      "tensor_list size must equal comm_size for all_gather");
 
   // Ensure input tensor is contiguous
   ensureTensorContiguous(tensor);
@@ -1166,10 +1170,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   checkTensorDevice(input);
   checkSameDtype(input, output);
 
-  if (output.numel() != input.numel() * comm_size_) {
-    throw std::runtime_error(
-        "Output tensor size must be input_size * comm_size for allGatherSingleImpl");
-  }
+  TORCH_CHECK(
+      output.numel() == input.numel() * comm_size_,
+      "Output tensor size must be input_size * comm_size for allGatherSingleImpl");
 
   TracingGuard tracingGuard(
       name_,
@@ -1216,10 +1219,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
 
-  if (input_list.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "input_list size must equal comm_size for reduce_scatter");
-  }
+  TORCH_CHECK(
+      input_list.size() == static_cast<size_t>(comm_size_),
+      "input_list size must equal comm_size for reduce_scatter");
 
   // Check that all input tensors are contiguous.
   for (const auto& t : input_list) {
@@ -1317,10 +1319,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
   checkTensorDevice(input);
   checkSameDtype(input, output);
 
-  if (input.numel() != output.numel() * comm_size_) {
-    throw std::runtime_error(
-        "Input tensor size must be output_size * comm_size for reduceScatterSingleImpl");
-  }
+  TORCH_CHECK(
+      input.numel() == output.numel() * comm_size_,
+      "Input tensor size must be output_size * comm_size for reduceScatterSingleImpl");
 
   TracingGuard tracingGuard(
       name_,
@@ -1374,15 +1375,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
   checkTensorDevice(input);
   checkSameDtype(input, output);
 
-  if (input.numel() != output.numel()) {
-    throw std::runtime_error(
-        "Input and output tensors must have same size for allToAllSingleImpl");
-  }
+  TORCH_CHECK(
+      input.numel() == output.numel(),
+      "Input and output tensors must have same size for allToAllSingleImpl");
 
-  if (input.numel() % comm_size_ != 0) {
-    throw std::runtime_error(
-        "Tensor size must be divisible by comm_size for allToAllSingleImpl");
-  }
+  TORCH_CHECK(
+      input.numel() % comm_size_ == 0,
+      "Tensor size must be divisible by comm_size for allToAllSingleImpl");
 
   TracingGuard tracingGuard(
       name_,
@@ -1473,15 +1472,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
   checkSameDtype(input, output);
 
   // Validate split sizes vectors
-  if (input_split_sizes.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "input_split_sizes length must equal comm_size for all_to_all_v_single");
-  }
+  TORCH_CHECK(
+      input_split_sizes.size() == static_cast<size_t>(comm_size_),
+      "input_split_sizes length must equal comm_size for all_to_all_v_single");
 
-  if (output_split_sizes.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "output_split_sizes length must equal comm_size for all_to_all_v_single");
-  }
+  TORCH_CHECK(
+      output_split_sizes.size() == static_cast<size_t>(comm_size_),
+      "output_split_sizes length must equal comm_size for all_to_all_v_single");
 
   // Validate that split sizes sum does not exceed tensor dimensions
   uint64_t input_total = 0;
@@ -1491,15 +1488,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
     output_total += output_split_sizes[i];
   }
 
-  if (input_total > static_cast<uint64_t>(input.size(0))) {
-    throw std::runtime_error(
-        "Sum of input_split_sizes exceeds input tensor size for all_to_all_v_single");
-  }
+  TORCH_CHECK(
+      input_total <= static_cast<uint64_t>(input.size(0)),
+      "Sum of input_split_sizes exceeds input tensor size for all_to_all_v_single");
 
-  if (output_total > static_cast<uint64_t>(output.size(0))) {
-    throw std::runtime_error(
-        "Sum of output_split_sizes exceeds output tensor size for all_to_all_v_single");
-  }
+  TORCH_CHECK(
+      output_total <= static_cast<uint64_t>(output.size(0)),
+      "Sum of output_split_sizes exceeds output tensor size for all_to_all_v_single");
 
   TracingGuard tracingGuard(
       name_,
@@ -1602,11 +1597,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
   checkAndAbortIfTimedOutOrError();
   checkTensorsDevice(output_tensor_list);
   checkTensorsDevice(input_tensor_list);
-  if (output_tensor_list.size() != static_cast<size_t>(comm_size_) ||
-      input_tensor_list.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "Tensor list sizes must equal comm_size for all_to_all");
-  }
+  TORCH_CHECK(
+      output_tensor_list.size() == static_cast<size_t>(comm_size_) &&
+          input_tensor_list.size() == static_cast<size_t>(comm_size_),
+      "Tensor list sizes must equal comm_size for all_to_all");
 
   // Validate all tensors
   for (int i = 0; i < comm_size_; ++i) {
@@ -1749,18 +1743,16 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
 
   // Only the root rank needs valid input tensors
   if (rank_ == root) {
-    if (input_tensor_list.size() != static_cast<size_t>(comm_size_)) {
-      throw std::runtime_error(
-          "input_tensor_list size must equal comm_size for scatter");
-    }
+    TORCH_CHECK(
+        input_tensor_list.size() == static_cast<size_t>(comm_size_),
+        "input_tensor_list size must equal comm_size for scatter");
 
     for (const auto& t : input_tensor_list) {
       ensureTensorContiguous(t);
       checkSameDtype(output_tensor, t);
-      if (t.numel() != output_tensor.numel()) {
-        throw std::runtime_error(
-            "All input tensors must have same size as output tensor");
-      }
+      TORCH_CHECK(
+          t.numel() == output_tensor.numel(),
+          "All input tensors must have same size as output tensor");
     }
   }
 
@@ -1870,18 +1862,16 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
 
   // Only the root rank needs valid output tensors
   if (rank_ == root) {
-    if (output_tensor_list.size() != static_cast<size_t>(comm_size_)) {
-      throw std::runtime_error(
-          "output_tensor_list size must equal comm_size for gather");
-    }
+    TORCH_CHECK(
+        output_tensor_list.size() == static_cast<size_t>(comm_size_),
+        "output_tensor_list size must equal comm_size for gather");
 
     for (const auto& t : output_tensor_list) {
       ensureTensorContiguous(t);
       checkSameDtype(input_tensor, t);
-      if (t.numel() != input_tensor.numel()) {
-        throw std::runtime_error(
-            "All output tensors must have same size as input tensor");
-      }
+      TORCH_CHECK(
+          t.numel() == input_tensor.numel(),
+          "All output tensors must have same size as input tensor");
     }
   }
 

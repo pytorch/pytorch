@@ -993,6 +993,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
 
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        # The region's outputs are pre-declared as RAIIAtenTensorHandle and
+        # codegen_subgraph_suffix std::moves the region's output buffer into
+        # them. A stack-allocated buffer is an ArrayRefTensor<T>, which has no
+        # conversion to RAIIAtenTensorHandle, so that assignment would not
+        # compile -- the same clash cond and while_loop hit. Turn stack
+        # allocation off for the graph, as the extern-kernel paths below do,
+        # rather than emitting C++ that fails to build.
+        self.allow_stack_allocation = False
+        return super().codegen_invoke_subgraph(invoke_subgraph)
+
     def codegen_while_loop(self, while_loop, stack_output=False):
         if stack_output:
             raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")

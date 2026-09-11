@@ -233,6 +233,10 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
                                                         int64_t _padding_mode,
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("grid_sampler_2d_backward_mps");
+
   check_grid_sampler_2d_backward(input, grid, grad_output);
 
   TORCH_CHECK(input.scalar_type() == grid.scalar_type(),
@@ -331,6 +335,10 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
   using namespace mps;
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("grid_sampler_3d_backward_mps");
+
   check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
 
   TORCH_CHECK_NOT_IMPLEMENTED(interpolation_mode == 0 || interpolation_mode == 1,

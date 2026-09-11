@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import sys
+import time
 import traceback
 import unittest
 import unittest.mock
@@ -421,6 +422,28 @@ Call to `torch.compiler.disable()`
 from user code:
    File "test_error_messages.py", line N, in fn
     torch.compiler.disable()""",
+        )
+
+    def test_time_function(self):
+        def fn():
+            return time.perf_counter()
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Call to a time function
+  Explanation: Dynamo graph breaks on `time.perf_counter()` so that the clock read occurs at the correct point relative to compiled operations.
+  Hint: Move the `time.perf_counter()` call outside the compiled function if the graph break is undesirable.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: Called `time.perf_counter()` inside a compiled region
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb9193.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return time.perf_counter()""",
         )
 
     def test_skipfile_dynamo_disable_wrapped_method(self):

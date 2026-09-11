@@ -36,6 +36,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
@@ -905,17 +906,7 @@ class TestExternKernelCaller(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @requires_gpu()
-    def test_extern_kernel_benchmark_request_variations(self):
-        """
-        Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
-        different configurations:
-        - With has_out_variant=True
-        - When out is None (tensors created from metadata)
-        - With profile_bandwidth_with_do_bench_using_profiling enabled
-        - When len(args) is 0
-        """
-
+    def _mm_tensor_metas(self):
         input_meta = [
             TensorMeta(
                 device=torch.device(GPU_TYPE),
@@ -939,6 +930,21 @@ class TestExternKernelCaller(TestCase):
             strides=(64, 1),
             offset=0,
         )
+        return input_meta, output_meta
+
+    @requires_gpu()
+    def test_extern_kernel_benchmark_request_variations(self):
+        """
+        Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
+        different configurations:
+        - With has_out_variant=True
+        - When out is None (tensors created from metadata)
+        - When len(args) is 0
+
+        The profile_bandwidth_with_do_bench_using_profiling variation lives in
+        test_extern_kernel_benchmark_request_with_profiling, which needs Kineto.
+        """
+        input_meta, output_meta = self._mm_tensor_metas()
 
         # Test 1: has_out_variant=True with out=None and len(args)==0
         # This should call super().benchmark() which creates tensors from metadata
@@ -989,8 +995,20 @@ class TestExternKernelCaller(TestCase):
         expected = torch.mm(a, b)
         torch.testing.assert_close(out, expected, atol=1e-4, rtol=1e-4)
 
-        # Test 4: profile_bandwidth_with_do_bench_using_profiling enabled
-        # with has_out_variant=False and len(args) > 0
+    @requires_gpu()
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_extern_kernel_benchmark_request_with_profiling(self):
+        """
+        ExternKernelBenchmarkRequest.benchmark with
+        profile_bandwidth_with_do_bench_using_profiling enabled, has_out_variant=False
+        and len(args) > 0.
+
+        do_bench_using_profiling times the kernel by capturing device events through
+        the profiler, so a build without Kineto falls back to the legacy profiler and
+        cannot run this path.
+        """
+        input_meta, output_meta = self._mm_tensor_metas()
+
         with config.patch(profile_bandwidth_with_do_bench_using_profiling=True):
             a = torch.randn(64, 64, device=GPU_TYPE)
             b = torch.randn(64, 64, device=GPU_TYPE)
@@ -1264,6 +1282,44 @@ class TestTemplateRender(TestCase):
             kernel.startswith("def triton_tem")
             and "tl.atomic_add" in kernel.split("'''", 1)[0]
             for kernel in template_kernels
+        )
+
+    @requires_triton()
+    def test_jit_lines_preserves_hip_options(self):
+        kernel = unittest.mock.MagicMock()
+        kernel.use_jit = False
+        kernel.args.python_argdefs.return_value = ([], [], [], [])
+        kernel.index_dtype = "tl.int32"
+        kernel.output_node.get_device.return_value = torch.device("cuda")
+        kernel.meta = {
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 0,
+            "kpack": 1,
+        }
+        kernel.triton_meta = None
+        kernel.inductor_meta_common.return_value = {}
+        kernel.num_stages = 1
+        kernel.num_warps = 4
+        kernel.num_consumer_groups = 0
+        kernel.num_buffers_warp_spec = 0
+
+        with patch.object(
+            select_algorithm.DeviceProperties,
+            "create",
+            return_value=unittest.mock.MagicMock(),
+        ):
+            TritonTemplateKernel.jit_lines(kernel)
+
+        self.assertEqual(
+            {
+                key: kernel.triton_meta[key]
+                for key in ("matrix_instr_nonkdim", "waves_per_eu", "kpack")
+            },
+            {
+                "matrix_instr_nonkdim": 16,
+                "waves_per_eu": 0,
+                "kpack": 1,
+            },
         )
 
     @requires_gpu()

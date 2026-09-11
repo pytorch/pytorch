@@ -108,21 +108,67 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
+# Defined before the torch._dynamo import below to avoid a circular import
+# when pulled in from dynamo; hence the lazy registry imports in the bodies.
+def _gpu_types() -> list[str]:
+    """Freshly scan the DeviceInterface registry for GPU-class device types,
+    skipping indexed aliases such as "cuda:0". Production code should use the
+    GPU_TYPES snapshot below; this scan exists to compute it and for tests.
+    """
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+
+    return [
+        name
+        for name, device_interface in get_registered_device_interfaces()
+        if ":" not in name and device_interface.is_gpu()
+    ]
+
+
+def _device_is_available(device: str) -> bool:
+    """Whether a registered DeviceInterface reports the device available.
+
+    Tolerates partially-implemented out-of-tree interfaces: the base-class
+    is_available() raises NotImplementedError, which must not propagate out
+    of registry-driven consumers (some run at module import time). Device
+    types with no registered interface are likewise treated as unavailable.
+    """
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    try:
+        return get_interface_for_device(device).is_available()
+    except NotImplementedError:
+        return False
+
+
 @functools.cache
 def get_gpu_type() -> str:
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    if not len(avail_gpus) <= 1:
-        raise AssertionError(
-            f"Expected at most 1 available GPU type, got {len(avail_gpus)}: {avail_gpus}"
-        )
-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
-    return gpu_type
+    avail_gpus = [gpu for gpu in GPU_TYPES if _device_is_available(gpu)]
+
+    if not avail_gpus:
+        return "cuda"
+    if len(avail_gpus) == 1:
+        return avail_gpus[0]
+
+    # >1 GPU type available: disambiguate via the current accelerator.
+    acc = torch.accelerator.current_accelerator()
+    if acc is not None and acc.type in avail_gpus:
+        return acc.type
+    # Registry order is insertion order and may differ between processes
+    # (out-of-tree backends register at import time), so fall back to a
+    # stable choice rather than a positional one.
+    chosen = "cuda" if "cuda" in avail_gpus else sorted(avail_gpus)[0]
+    log.warning(
+        "Multiple GPU types %s are available but the current accelerator (%s) "
+        "is not one of them; defaulting to %r. Codegen may target the wrong "
+        "device.",
+        avail_gpus,
+        acc,
+        chosen,
+    )
+    return chosen
 
 
 from torch._dynamo.device_interface import get_interface_for_device
@@ -149,6 +195,15 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+
+# Scanned exactly once, when this module is imported. Safe because both
+# registration paths precede any import of inductor: autoloaded out-of-tree
+# backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
+# of torch/__init__.py) and explicit ones at their package import (e.g.
+# `import torch_npu`), while in-tree backends are registered by
+# init_device_reg() inside the scan itself. Registering after this module is
+# imported is not supported (see register_interface_for_device).
+GPU_TYPES: list[str] = _gpu_types()
 
 
 _DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
@@ -406,6 +461,26 @@ ALIGNMENT = 16
 
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
+
+# AMD TDM descriptor thresholds. Three distinct rules, deliberately separate:
+#
+# 1. Legality. `make_tensor_descriptor` enforces rank 1-5, a unit innermost
+#    stride, and an innermost *block* extent of at least 16 bytes. This is the
+#    only alignment-shaped rule Triton actually checks.
+# 2. Operand policy. Inductor additionally requires 16-byte storage offset and
+#    outer strides. Conservative, not required: it constrains where an operand
+#    may start, and does not establish base-pointer alignment.
+# 3. Direct-path policy. 128-byte relative alignment is a *performance* choice.
+#    A 16-byte-but-not-128-byte descriptor still compiles and is still correct;
+#    it only forgoes the direct request path. Being relative, it never proves a
+#    tile starts at a 128-byte address, and it rejects shapes that would have
+#    worked (FP16 head_dim 32 is 64 bytes).
+_TDM_MIN_INNERMOST_REQUEST_BYTES = TMA_ALIGNMENT
+_TDM_OPERAND_ALIGNMENT_BYTES = TMA_ALIGNMENT
+_TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES = 128
+_TDM_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [torch.float16, torch.bfloat16, torch.float32]
+)
 
 TRITON_FLOAT8_DTYPES = (
     torch.float8_e4m3fn,
@@ -2202,6 +2277,29 @@ def use_triton_template(
     )
 
 
+def _bytes_aligned(expr_bytes: _IntLike, alignment: int = TMA_ALIGNMENT) -> bool:
+    """Statically-known multiple-of test for a byte-valued expression."""
+    from .virtualized import V
+
+    return V.graph.sizevars.statically_known_multiple_of(expr_bytes, alignment)
+
+
+def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
+    """Index of the single stride-1 ("inner") dim, or None if there is not
+    exactly one. TMA requires exactly one contiguous dim, so None means the
+    tensor is not TMA-compatible. `strides` must already be resolved to ints or
+    hinted symbols by the caller.
+    """
+    from .virtualized import V
+
+    inner = [
+        i
+        for i, st in enumerate(strides)
+        if V.graph.sizevars.statically_known_equals(st, 1)
+    ]
+    return inner[0] if len(inner) == 1 else None
+
+
 def can_use_tma(
     *matrices: IRNode, output_layout: Layout | None = None, add_guards: bool = False
 ) -> bool:
@@ -2223,8 +2321,7 @@ def can_use_tma(
 
     from .virtualized import V
 
-    def _aligned(expr_bytes: int | sympy.Expr) -> bool:
-        return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
+    _aligned = _bytes_aligned
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2278,15 +2375,9 @@ def can_use_tma(
                 V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
             ]
 
-        # Find the single contiguous ("inner") dim
-        inner = [
-            i
-            for i, st in enumerate(strides_i)
-            if V.graph.sizevars.statically_known_equals(st, 1)
-        ]
-        if len(inner) != 1:
+        inner_idx = tma_inner_dim(strides_i)
+        if inner_idx is None:
             return False
-        inner_idx = inner[0]
 
         # All "outer" dims must have 16-byte aligned strides
         for i, st in enumerate(strides_i):
@@ -2335,22 +2426,38 @@ def can_use_tma(
     )
 
 
-def _descriptor_shape_fits_in_int32(
-    sizes: Sequence[sympy.Expr], add_guards: bool = False
+def _descriptor_shapes_fit_in_int32(
+    shapes: Sequence[Sequence[sympy.Expr]], add_guards: bool = False
 ) -> bool:
+    """Range-check several descriptor shapes, installing at most one guard.
+
+    Checking operands one at a time leaves a guard behind for every operand that
+    passed before a later one failed, constraining the graph for a feature that
+    was then rejected. Every dimension is therefore decided guard-free first --
+    constants directly, backed symbols through their hints -- so no rejection
+    installs anything. `guard_or_false` would otherwise append the *negated*
+    bound when a hint is out of range. Only once all dimensions pass are the
+    symbolic conditions combined into a single guard. Unbacked symbols have no
+    hint, so they fall through to that guard, which fails closed.
+    """
+    from .virtualized import V
+
     int32_max = torch.iinfo(torch.int32).max
     conditions = []
-    for size in sizes:
-        if isinstance(size, (int, sympy.Integer)):
-            if size > int32_max:
-                return False
-        else:
+    for sizes in shapes:
+        for size in sizes:
+            if isinstance(size, (int, sympy.Integer)):
+                if size > int32_max:
+                    return False
+                continue
+            if add_guards:
+                hint = V.graph.sizevars.replace_backed_symbols_with_hints(size)
+                if isinstance(hint, (int, sympy.Integer)) and hint > int32_max:
+                    return False
             conditions.append(sympy.Le(size, int32_max))
 
     if not conditions:
         return True
-
-    from .virtualized import V
 
     condition = conditions[0] if len(conditions) == 1 else sympy.And(*conditions)
     return (
@@ -2358,6 +2465,221 @@ def _descriptor_shape_fits_in_int32(
         if add_guards
         else V.graph.sizevars.statically_known_true(condition)
     )
+
+
+def _descriptor_shape_fits_in_int32(
+    sizes: Sequence[sympy.Expr], add_guards: bool = False
+) -> bool:
+    return _descriptor_shapes_fit_in_int32([sizes], add_guards=add_guards)
+
+
+def is_gfx1250_arch(arch: str) -> bool:
+    """Return True only for gfx1250, including feature-suffixed GCN names."""
+    return arch.split(":", 1)[0] == "gfx1250"
+
+
+# The torch.version attributes are process-constant, so the parse happens once.
+@functools.cache
+def _rocm_version_tuple() -> tuple[int, int]:
+    """Return the ROCm SDK ``(major, minor)``, or ``(0, 0)`` if unavailable.
+
+    ``torch.version.rocm`` carries CMake's ``ROCM_VERSION_DEV``, which PyTorch's
+    own ROCm component gates compare (see the 7.14 hipfile gate in
+    ``cmake/public/LoadHIP.cmake``), so it wins. ``torch.version.hip`` carries
+    ``HIP_VERSION_CLEAN`` and is consulted only when ``rocm`` is absent. A
+    present-but-malformed ``rocm`` fails closed rather than falling through.
+    """
+    version = getattr(torch.version, "rocm", None)
+    if not version:
+        version = torch.version.hip
+    if not version:
+        return (0, 0)
+    match = re.match(r"(\d+)\.(\d+)", version)
+    if match is None:
+        return (0, 0)
+    return (int(match.group(1)), int(match.group(2)))
+
+
+def _rocm_version_at_least(major: int, minor: int) -> bool:
+    if not torch.version.hip:
+        return False
+    return _rocm_version_tuple() >= (major, minor)
+
+
+def _gfx1250_device_prereqs(device: torch.device | None) -> bool:
+    """Check the runtime and compiler prerequisites shared by TDM paths.
+
+    Not memoized: the device-property probe can fail transiently during
+    initialization, and caching that failure would disable TDM process-wide.
+    """
+    from torch.utils._triton import has_triton_amd_tdm_device
+
+    # ROCm 7.14 is the first supported compiler/runtime toolchain for gfx1250.
+    if not _rocm_version_at_least(7, 14):
+        return False
+    if device is None or device.type != "cuda":
+        return False
+    try:
+        props = torch.cuda.get_device_properties(device)
+        arch = getattr(props, "gcnArchName", "")
+    except Exception:
+        return False
+    # The Triton probe also requires the stable make_tensor_descriptor API.
+    return is_gfx1250_arch(arch) and has_triton_amd_tdm_device(arch)
+
+
+def _tdm_row_major_from_strides(strides_i: Sequence[sympy.Expr | int]) -> bool | None:
+    """Classify an already-resolved 2D stride pair by its unit-stride dimension.
+
+    Split out of ``tdm_descriptor_row_major`` so callers that already resolved
+    the strides do not resolve (or re-specialize) them twice.
+    """
+    inner_idx = tma_inner_dim(strides_i)
+    if inner_idx is None:
+        return None
+    return inner_idx == 1
+
+
+def tdm_descriptor_row_major(mat: IRNode) -> bool | None:
+    """Classify a 2D operand by its single statically unit-stride dimension."""
+    from .virtualized import V
+
+    strides = mat.get_stride()
+    if len(strides) != 2:
+        return None
+    strides_i = [
+        V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
+    ]
+    return _tdm_row_major_from_strides(strides_i)
+
+
+def _tdm_operand_compatible(
+    mat: IRNode,
+    accepted_dtypes: OrderedSet[torch.dtype],
+) -> bool:
+    """Check descriptor semantics and the current direct-path selection policy."""
+    from .virtualized import V
+
+    dtype = mat.get_dtype()
+    sizes = mat.get_size()
+    strides = mat.get_stride()
+    if dtype not in accepted_dtypes or len(sizes) != 2 or len(strides) != 2:
+        return False
+    if mat.get_name() in V.graph.unaligned_buffers:
+        return False
+
+    strides_i = [
+        V.graph.sizevars.replace_backed_symbols_with_hints(stride) for stride in strides
+    ]
+    offset = V.graph.sizevars.replace_backed_symbols_with_hints(mat.get_layout().offset)
+
+    # Reuse the strides resolved above rather than resolving their hints twice.
+    row_major = _tdm_row_major_from_strides(strides_i)
+    if row_major is None:
+        return False
+    outer_idx = 0 if row_major else 1
+    itemsize = dtype.itemsize
+
+    aligned = _bytes_aligned
+
+    # Operand policy (rule 2). The innermost block extent (rule 1) is checked by
+    # the template config filter, not by constraining the tensor extent here.
+    if not aligned(offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
+        return False
+    # Redundant under the 128-byte check below, kept because that one is
+    # provisional while this is an independent policy on outer strides.
+    if not aligned(strides_i[outer_idx] * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
+        return False
+
+    # Direct-path policy (rule 3): relative only, proves nothing about the
+    # absolute address.
+    return aligned(
+        strides_i[outer_idx] * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES
+    )
+
+
+def _guard_tdm_operand_layout(mat: IRNode) -> None:
+    """Specialize the values used to construct a selected TDM descriptor."""
+    from .virtualized import V
+
+    V.graph.sizevars.guard_int_seq(mat.get_size())
+    V.graph.sizevars.guard_int_seq(mat.get_stride())
+    V.graph.sizevars.guard_int(mat.get_layout().offset)
+
+
+class TDMGuardMode(enum.Enum):
+    """How much a TDM operand check is allowed to constrain the graph.
+
+    Admission and commitment are separate phases because they happen at
+    different times: a template is admitted while lowering, but its
+    configuration pool is not known until the heuristic has finished filtering
+    and scaling. Committing exact layout at admission specializes the graph for
+    a template that may end up contributing nothing.
+    """
+
+    # Admission. May bound a dynamic descriptor dimension to int32, which does
+    # not pin its value, but must not call guard_int.
+    BOUNDS = "bounds"
+    # Commitment. Pins size, stride and storage offset. Only legitimate once a
+    # non-empty configuration set has materialized.
+    EXACT = "exact"
+
+
+def _tdm_operands_compatible(
+    matrices: Sequence[IRNode],
+    accepted_dtypes: OrderedSet[torch.dtype],
+    guard_mode: TDMGuardMode,
+) -> bool:
+    """Check a full operand list for TDM under the given guard mode.
+
+    Rejecting an operand must not leave the graph specialized on its shape, so
+    the decision is made guard-free before anything pins a hint.
+    """
+    if not all(_tdm_operand_compatible(mat, accepted_dtypes) for mat in matrices):
+        return False
+
+    # Bounds only: this does not pin a dynamic dim.
+    if not _descriptor_shapes_fit_in_int32(
+        [mat.get_size() for mat in matrices], add_guards=True
+    ):
+        return False
+
+    if guard_mode is not TDMGuardMode.EXACT:
+        return True
+
+    for mat in matrices:
+        _guard_tdm_operand_layout(mat)
+    return True
+
+
+def use_triton_tdm_template(*matrices: IRNode) -> bool:
+    """Return whether dense MM operands may be admitted to the TDM template.
+
+    Admission only. It may bound a dynamic dimension to int32 but never pins a
+    size, stride or offset -- the operands are not specialized until
+    ``commit_tdm_operand_layout`` runs against a materialized config set.
+    """
+    if not matrices or not config.triton.enable_persistent_tma_matmul:
+        return False
+    if not _gfx1250_device_prereqs(matrices[0].get_device()):
+        return False
+    return _tdm_operands_compatible(
+        matrices, _TDM_SUPPORTED_DTYPES, TDMGuardMode.BOUNDS
+    )
+
+
+def commit_tdm_operand_layout(*matrices: IRNode) -> None:
+    """Specialize operands whose TDM configurations have actually materialized.
+
+    The only production caller of ``TDMGuardMode.EXACT``. Revalidates rather
+    than trusting admission, and raises rather than falling back: reaching here
+    means a TDM choice is being built, so a failed premise is a bug in the
+    admission/commit split and not an ordinary "no candidates" outcome.
+    """
+    if not _tdm_operands_compatible(
+        matrices, _TDM_SUPPORTED_DTYPES, TDMGuardMode.EXACT
+    ):
+        raise AssertionError("TDM layout commit revalidation failed")
 
 
 def _tma_descriptor_max_offset_fits_in_int32(
@@ -2727,6 +3049,8 @@ def use_decompose_k_choice(
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
         and config.triton.num_decompose_k_splits > 0
+        # Callers rely on False to retain the regular MM fallback.
+        and bool(get_k_splits(m, n, k))
     )
 
 
@@ -2817,11 +3141,23 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache
+def rocm_gfx_arch() -> str:
+    """Canonical gfx target of the current device, e.g. "gfx950". Empty if not ROCm.
+
+    Prefer this over get_device_capability() for target-specific behaviour. On
+    ROCm that call reports the gfx major/minor, which does not order by
+    capability and spans two product lines: gfx1250 (MI450) reports (12, 5) and
+    gfx1100 (RDNA3) reports (11, 0), both greater than gfx950's (9, 5). Target
+    features are stripped, so "gfx950:sramecc+:xnack-" becomes "gfx950".
+    """
+    if not torch.version.hip or not torch.cuda.is_available():
+        return ""
+    return _rocm_native_device_arch_name("cuda").split(":", 1)[0]
+
+
 def using_rocm_rdna3() -> bool:
     """Returns true if the device is based on RDNA3, otherwise returns false."""
-    return torch.cuda.is_available() and _rocm_native_device_arch_name(
-        "cuda"
-    ).startswith("gfx11")
+    return rocm_gfx_arch().startswith("gfx11")
 
 
 @functools.cache
@@ -3008,6 +3344,19 @@ def use_cpp_gemm_template(
         and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and (mat2.is_module_buffer() or not require_constant_mat2)
+    )
+
+
+# Note [BF16x9 precision]
+# The CUDA "bfx9" mode requests cuBLAS's full nine-product BF16 emulation.
+# Triton's bf16x3 and bf16x6 modes use different arithmetic, and Triton has no
+# bf16x9 input_precision. FP32 CUDA matmuls must therefore remain ATen extern
+# calls. Fused kernels without an ATen path warn and fall back to IEEE.
+def is_bf16x9_matmul(device_type: str, dtype: torch.dtype) -> bool:
+    return (
+        device_type == "cuda"
+        and dtype == torch.float32
+        and torch.backends.cuda.matmul.fp32_precision == "bfx9"
     )
 
 
@@ -3828,7 +4177,11 @@ def is_triton_fp8_dtype_supported(
 
 
 def device_need_guard(device: str) -> bool:
-    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
+    if not is_gpu(device):
+        return False
+    # A GPU-class device still only needs stream guards if it exposes streams;
+    # e.g. MPS is a GPU but does not, so it must be excluded here.
+    return get_interface_for_device(device).exposes_streams()
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
@@ -4153,16 +4506,14 @@ def set_tracing_context_output_strides(
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                fakify_first_call = False
-                if ctx := torch._guards.TracingContext.try_get():
-                    fakify_first_call = ctx.fakify_first_call
 
                 def map_expr(e: Any) -> float | int | SymInt | SymFloat | SymBool:
                     if shape_env is None:
                         return int(e)
-                    if fakify_first_call:
-                        return shape_env.deserialize_symexpr(e)
-                    return shape_env.evaluate_symexpr(e)
+                    # Keep the stride symbolic. Collapsing it to the current
+                    # hint would freeze that hint into the backward graph's
+                    # saved-activation placeholder.
+                    return shape_env.deserialize_symexpr(e)
 
                 context.output_strides.append(
                     tuple(map_expr(e) for e in exprs)  # type: ignore[misc]
@@ -5090,6 +5441,18 @@ def tlx_only_cuda_options() -> list[str]:
         from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
 
         return tlx_only_cuda_options
+
+    except ImportError:
+        return []
+
+
+@lru_cache
+def tlx_only_hip_options() -> list[str]:
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor.registry import tlx_only_hip_options
+
+        return tlx_only_hip_options
 
     except ImportError:
         return []

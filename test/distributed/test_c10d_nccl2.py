@@ -888,6 +888,25 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
         self._check_all_reduce_over_pool(symm=True)
 
     @requires_nccl()
+    @unittest.skipUnless(torch.version.hip is not None, "ROCm-only contract")
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_symmetric_rejects_unrelated_allocator(
+        self,
+    ) -> None:
+        backend = self._backend()
+        pool = torch.cuda.MemPool()
+        tensor = self._pool_tensor(pool)
+        # register_mem_pool validates provenance before touching any state, so a
+        # rejected pool is never recorded.
+        with self.assertRaisesRegex(RuntimeError, "mem_allocator|ncclMemAlloc"):
+            backend.register_mem_pool(pool, symm=True)
+        # Guard the no-leftover-state contract: a revert to insert-then-throw
+        # would leave the pool registered and this deregister would succeed.
+        with self.assertRaisesRegex(RuntimeError, "not previously registered"):
+            backend.deregister_mem_pool(pool)
+        del tensor
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_register_mem_pool_round_trip(self) -> None:
         # Megatron re-enters its allocator context once per bucket: deregister,

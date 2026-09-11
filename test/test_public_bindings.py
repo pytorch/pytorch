@@ -289,6 +289,7 @@ class TestPublicBindings(TestCase):
         # DO NOT add public modules here.
         private_allowlist = {
             "torch._inductor.codegen.cutlass.cuda_kernel",
+            "torch._native.flydsl.intrinsics",  # depends on flydsl
             # TODO(#133647): Remove the onnx._internal entries after
             # onnx and onnxscript are installed in CI.
             "torch.onnx._internal.exporter",
@@ -369,6 +370,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -425,8 +427,9 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.reductions.inner_tree_kernel",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
+                "torch._inductor.kernel.flex_gemm.quack_ops.",
                 "torch._vendor.quack",
-                "torch.profiler._cupti.",
+                "torch.profiler._cuspy.",
             )
             dsl_names = ("triton", "flydsl")
             if (
