@@ -7,15 +7,14 @@ import re
 import sys
 from itertools import count, zip_longest
 from typing import Any, cast
-from typing_extensions import Self
 
 import sympy
-
 import torch
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import Self
 
 from .. import config
 from ..codecache import CudaKernelParamCache
@@ -1174,6 +1173,187 @@ class CppWrapperGpu(CppWrapperCpu):
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
+        if self._cudagraph_whole_enabled():
+            # Whole-graph cuda-graph runtime: one capture per dynamic shape over
+            # a per-instance private pool. See cudagraph_runtime.h.
+            self.header.splice(
+                """
+                #include <cstring>
+                #include <torch/csrc/inductor/aoti_runtime/cudagraph_runtime.h>
+                namespace {
+                // Bit-exact int64 view of a double, for the shape key. A scalar
+                // graph input is read on the host and baked into captured kernel
+                // arguments, so two calls may share a capture only if the scalar
+                // is bit-identical -- a lossy numeric cast could alias two
+                // different values onto one graph.
+                inline int64_t aoti_cg_key_bits(double v) {
+                  int64_t bits = 0;
+                  std::memcpy(&bits, &v, sizeof(bits));
+                  return bits;
+                }
+                } // namespace
+                """
+            )
+
+    def _cudagraph_whole_enabled(self) -> bool:
+        """True when this wrapper should capture its whole body as one cuda graph.
+
+        Mode validity is checked once in `Scheduler._check_cudagraph_mode`; the
+        extra conditions here are the ones only codegen can see. Const graphs
+        (`_const_run_impl`) have no input/output handle arrays to capture around,
+        and are run once at load, so they are simply excluded rather than an
+        error.
+        """
+        if config.aot_inductor.cudagraph_mode != "whole":
+            return False
+        if not V.graph.aot_mode or V.graph.is_const_graph:
+            return False
+        if V.graph.is_dual_wrapper_mode:
+            raise RuntimeError(
+                'config.aot_inductor.cudagraph_mode="whole" is not supported in '
+                "dual-wrapper mode, which emits a JIT entry point alongside the "
+                "AOTI one; only the AOTI body can be captured. Set cudagraph_mode "
+                'to "off" for dual-wrapper builds.'
+            )
+        return True
+
+    def _cudagraph_input_spec(self):
+        """(tensor input names, scalar input names) in graph-input order.
+
+        Scalars are the sympy.Expr inputs, which `_write_input_unpacking` reads
+        into plain C++ locals. They belong in the shape key because their value
+        is baked into captured kernel arguments.
+
+        Anything else (TorchBindObject, GeneratorState, OpaqueObjectState) is a
+        Python-level input with no capturable representation, so it is rejected
+        rather than silently dropped from the key.
+        """
+        tensor_names: list[str] = []
+        scalar_names: list[str] = []
+        for name, value in V.graph.graph_inputs.items():
+            if isinstance(value, sympy.Expr):
+                scalar_names.append(name)
+            elif isinstance(value, TensorBox):
+                tensor_names.append(name)
+            else:
+                raise RuntimeError(
+                    'config.aot_inductor.cudagraph_mode="whole" cannot capture a '
+                    f"graph with the Python-level input {name!r} of type "
+                    f"{type(value).__name__}, whose value cannot be part of the "
+                    "capture key."
+                )
+        return tensor_names, scalar_names
+
+    def _output_array_name(self) -> str:
+        if getattr(self, "_cg_in_capture_lambda", False):
+            return "out"
+        return super()._output_array_name()
+
+    def write_wrapper_decl(self):
+        super().write_wrapper_decl()
+        if self._cudagraph_whole_enabled():
+            self._codegen_cudagraph_prologue()
+
+    def _codegen_cudagraph_prologue(self) -> None:
+        """Open the capture: build the key and the handle arrays, then start the
+        lambda that the rest of run_impl is emitted into.
+
+        Runs at the end of write_wrapper_decl, so input unpacking and symbol
+        reads have already happened on the host and are OUTSIDE the capture --
+        only device work ends up inside it.
+        """
+        code = self.prefix
+        tensor_names, scalar_names = self._cudagraph_input_spec()
+        num_ins = len(tensor_names)
+        # Sized here but written by generate_return, which is driven by
+        # get_output_refs(). The epilogue re-checks the two agree: a mismatch
+        # would write past __cg_outputs rather than fail visibly.
+        num_outs = len(V.graph.graph_outputs)
+        self._cg_num_outputs = num_outs
+
+        code.writeline("if (!this->cudagraph_mgr_) {")
+        code.writeline(
+            "  this->cudagraph_mgr_ = std::make_unique<"
+            "torch::aot_inductor::AOTICUDAGraphManager>(this->device_idx_, "
+            f"{config.aot_inductor.cudagraph_max_captures});"
+        )
+        code.writeline("}")
+
+        # Key on every input dim plus every scalar input value: two calls share a
+        # capture exactly when their inputs have identical shapes and scalars,
+        # which is precisely when replaying the same graph is valid. Keying on
+        # the dynamic symbols instead would miss a scalar input, whose value is
+        # baked into captured kernel args.
+        code.writeline("std::vector<int64_t> __cg_shape_key;")
+        for name in tensor_names:
+            ndim = len(V.graph.graph_inputs[name].get_size())
+            if ndim:
+                code.writeline(f"{{ const int64_t* __s = {name}.sizes();")
+                code.writeline(
+                    f"  __cg_shape_key.insert(__cg_shape_key.end(), __s, __s + {ndim}); }}"
+                )
+        for name in scalar_names:
+            # An integer scalar goes in verbatim; anything else is a double
+            # local, which must go in bit-exact (see aoti_cg_key_bits).
+            if V.graph.graph_inputs[name].is_integer:
+                code.writeline(
+                    f"__cg_shape_key.push_back(static_cast<int64_t>({name}));"
+                )
+            else:
+                code.writeline(f"__cg_shape_key.push_back(aoti_cg_key_bits({name}));")
+
+        handles = ", ".join(f"{name}.get()" for name in tensor_names)
+        code.writeline(
+            f"AtenTensorHandle __cg_inputs[] = {{{handles}}};"
+            if num_ins
+            else "AtenTensorHandle* __cg_inputs = nullptr;"
+        )
+        code.writeline(f"AtenTensorHandle __cg_outputs[{max(num_outs, 1)}] = {{}};")
+        # Every input is staged (there is no earlier capture to chain from) and
+        # every output escapes to the caller.
+        copy_in = "std::vector<int32_t>{" + ", ".join(map(str, range(num_ins))) + "}"
+        escape = "std::vector<int32_t>{" + ", ".join(map(str, range(num_outs))) + "}"
+        code.writeline(
+            f"this->cudagraph_mgr_->run_graph(__cg_shape_key, __cg_inputs, "
+            f"{num_ins}, __cg_outputs, {num_outs}, {copy_in}, {escape}, "
+            "(void*)stream, "
+            "[&](AtenTensorHandle* in, AtenTensorHandle* out, void* cs) {"
+        )
+        # Kernels read the `stream` variable; point it at the capture stream for
+        # the duration of the body and restore it in the epilogue.
+        code.writeline("  auto __cg_saved_stream = stream;")
+        code.writeline("  stream = reinterpret_cast<decltype(stream)>(cs);")
+        # Shadow each input local with the runtime's staged slot, so captured
+        # kernels bake the slot address (refreshed per replay) instead of the
+        # caller's handle, which is a different allocation on every call.
+        for i, name in enumerate(tensor_names):
+            code.writeline(f"  RAIIAtenTensorHandle {name}(in[{i}]);")
+
+    def _codegen_cudagraph_epilogue(self, num_outs: int) -> None:
+        """Close the capture lambda and publish the recorded output views."""
+        sized = getattr(self, "_cg_num_outputs", None)
+        if sized != num_outs:
+            raise RuntimeError(
+                f"AOTI cuda graph: __cg_outputs was sized for {sized} outputs "
+                f"but generate_return produced {num_outs}. Writing them would "
+                "overrun the array."
+            )
+        self.wrapper_call.writeline("stream = __cg_saved_stream;")
+        self.wrapper_call.writeline("});")
+        for idx in range(num_outs):
+            self.wrapper_call.writeline(f"output_handles[{idx}] = __cg_outputs[{idx}];")
+
+    def generate_return(self, output_refs: list[str]):
+        if not self._cudagraph_whole_enabled():
+            return super().generate_return(output_refs)
+        # Inside the lambda the body's RAII handles are local, so results go to
+        # the lambda's `out` array; the epilogue copies them to output_handles.
+        self._cg_in_capture_lambda = True
+        try:
+            super().generate_return(output_refs)
+        finally:
+            self._cg_in_capture_lambda = False
+        self._codegen_cudagraph_epilogue(len(output_refs))
 
     def _generate(self, is_inference):
         # Per-Run()-function state, reset each generation. Do NOT reset
