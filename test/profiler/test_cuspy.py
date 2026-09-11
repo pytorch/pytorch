@@ -150,6 +150,29 @@ class TestCuspyRecords(TestCase):
         self.assertEqual(fields[memcpy], all_memcpy)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires the cupti python bindings")
+    def test_annotation_column_resolves_source_node_first(self):
+        # A graph's annotations sit under its capture node ids or its exec ones depending on
+        # that capture's annotation_config["key_by"], and one trace can carry both, so the
+        # lookup tries the source (capture) id first and falls back to the exec id. Rows
+        # whose CUPTI ABI reports no source id pass the exec id as both.
+        import numpy as np
+
+        from torch.profiler._cuspy.observers.profiler import _resolve_annotation_column
+
+        registry = {10: {"name": "capture_keyed"}, 21: {"name": "exec_keyed"}}
+        gnid = np.array([20, 21, 22], dtype=np.int64)
+        src_gnid = np.array([10, 11, 12], dtype=np.int64)
+
+        out = _resolve_annotation_column(registry.get, gnid, src_gnid)
+        self.assertEqual(
+            list(out), [{"name": "capture_keyed"}, {"name": "exec_keyed"}, None]
+        )
+        # No resolver installed -> no lookups at all.
+        self.assertEqual(
+            list(_resolve_annotation_column(None, gnid, src_gnid)), [None] * 3
+        )
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires the cupti python bindings")
     def test_configure_and_get_config(self):
         # configure() sets the process-wide config get_config() reports; it is first-come-
         # first-serve. Pure config -- no session, only the cupti python bindings (not
