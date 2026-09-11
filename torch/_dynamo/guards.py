@@ -1386,6 +1386,10 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
+        # The plain tuples an EQUALS_MATCH reads whole, keyed by id and holding
+        # the value so the id stays live; see Note [Reconstructing a function a
+        # guard is rooted at] in GuardsStatePickler. Save-path only.
+        self.value_guarded_containers: dict[int, Any] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -2856,6 +2860,11 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
+        # See Note [Reconstructing a function a guard is rooted at] in
+        # GuardsStatePickler: a plain tuple this guard compares whole must be
+        # carried verbatim by the serializer.
+        if self.save_guards and type(val) is tuple:
+            self.value_guarded_containers[id(val)] = val
         if np:
             np_types: tuple[type[Any], ...] = (
                 np.int8,
@@ -4162,6 +4171,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         guard_tree_values: dict[int, Any],
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
+        value_guarded_containers: dict[int, Any],
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -4169,6 +4179,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
+        # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
+        # above _keep. Required, because omitting it silently prunes every
+        # container per value.
+        self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
@@ -4307,12 +4321,23 @@ class GuardsStatePickler(FunctionPicklerBase):
     # defaults, attributes, and the module scope its body reads -- and carrying
     # all of that would let an unpicklable neighbour fail a package that never
     # needed it. So only values some guard tree node references are carried
-    # (_keep) and the rest become sentinels. A registered CONTAINER is carried
-    # verbatim rather than pruned per element: a guard on the __defaults__ tuple
-    # or __kwdefaults__ dict itself -- what wrap_listlike's SEQUENCE_LENGTH and
-    # CONSTANT_MATCH register -- rebakes its comparison constant from the
-    # reconstructed function at load, so a pruned element would make that guard
-    # fail forever with no load error.
+    # (_keep) and the rest become sentinels. A plain tuple is carried verbatim
+    # only when an EQUALS_MATCH reads its values whole (`f.__defaults__ ==
+    # (2.0, (1, 2))`): that guard rebakes its comparison constant from the
+    # reconstructed function at load, so a pruned element would make it fail
+    # forever with no load error. A plain dict is never carried verbatim, since
+    # a whole-dict comparison lowers to DICT_KEYS_MATCH plus per-value guards.
+    # A container registered by a length or type guard alone -- what bind_args
+    # installs on __defaults__ for every called function with a positional
+    # default -- is pruned per value, since those guards survive it. Being
+    # registered is not what decides this: a whole-tuple EQUALS_MATCH and a
+    # per-element guard through the same tuple coexist in ordinary code (a
+    # call-site default binding next to `f.__defaults__ == (...)`), and only
+    # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
+    # records those tuples in value_guarded_containers, which the pickler takes
+    # as a required argument. A dict/tuple SUBCLASS is verbatim whenever kept,
+    # since its type must survive for the guard reading the slot
+    # (_keep_container_verbatim).
 
     def _keep(self, value: object) -> bool:
         """Identity match; an interned value that collides is kept, harmlessly."""
@@ -4350,6 +4375,18 @@ class GuardsStatePickler(FunctionPicklerBase):
         if self._is_literal(value) or self._keep(value):
             return value
         return self._missing(reason)
+
+    def _keep_container_verbatim(self, container: object) -> bool:
+        """Whether a function container (__defaults__/__dict__/...) is carried whole
+        rather than pruned per value; the rule and its reasons are in the Note
+        [Reconstructing a function a guard is rooted at] above."""
+        if not self._keep(container):
+            return False
+        if type(container) is dict:
+            return False
+        if type(container) is tuple:
+            return id(container) in self.value_guarded_containers
+        return True
 
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
         """Built once per module dict, so every function rebuilt against that
@@ -4401,26 +4438,26 @@ class GuardsStatePickler(FunctionPicklerBase):
         snapshot = None
         if self._keep(obj.__globals__):
             snapshot = self._globals_snapshot(obj.__globals__)
-        # A kept container (__defaults__/__kwdefaults__/__dict__/__annotations__)
-        # is carried whole; an unkept one is pruned per value. See the Note.
+        # A container (__defaults__/__kwdefaults__/__dict__/__annotations__) is
+        # carried whole or pruned per value; see _keep_container_verbatim.
         defaults = obj.__defaults__
-        if defaults is not None and not self._keep(defaults):
+        if defaults is not None and not self._keep_container_verbatim(defaults):
             reason = "unguarded function default"
             defaults = tuple(self._prune(v, reason) for v in defaults)
 
         kwdefaults = obj.__kwdefaults__
-        if kwdefaults is not None and not self._keep(kwdefaults):
+        if kwdefaults is not None and not self._keep_container_verbatim(kwdefaults):
             reason = "unguarded function kwdefault"
             kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
 
         closure = obj.__closure__
         if closure is not None:
-            # No verbatim gate like the other containers: a guard through
-            # __closure__ always ends at cell_contents, which registers the
-            # contents _prune_cell keys on, so per-cell pruning already keeps
-            # what is read, and _prune_cell is length-preserving.
+            # No _keep_container_verbatim gate like the other containers: a
+            # guard through __closure__ always ends at cell_contents, which
+            # registers the contents _prune_cell keys on, so per-cell pruning
+            # already keeps what is read, and _prune_cell is length-preserving.
             closure = tuple(self._prune_cell(cell) for cell in closure)
-        if self._keep(obj.__dict__):
+        if self._keep_container_verbatim(obj.__dict__):
             attributes = obj.__dict__
         else:
             attributes = {
@@ -4431,7 +4468,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         # prune it. (On 3.14 _read_raw_annotations returns a copy, so the dict is
         # never kept and is always pruned per value.)
         raw_annotations = self._read_raw_annotations(obj)
-        if self._keep(raw_annotations):
+        if self._keep_container_verbatim(raw_annotations):
             annotations = raw_annotations
         else:
             annotations = {
@@ -4439,7 +4476,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in raw_annotations.items()
             }
         type_params = getattr(obj, "__type_params__", None)
-        if type_params is not None and not self._keep(type_params):
+        if type_params is not None and not self._keep_container_verbatim(type_params):
             type_params = tuple(
                 self._prune(t, "unguarded function type param") for t in type_params
             )
@@ -4731,7 +4768,11 @@ def pickle_guards_state(
                 # Prune more objects in pytree hierarchy.
                 missing_values[id(leaf)] = leaf
         pickler = GuardsStatePickler(
-            guard_tree_values, empty_values, missing_values, buf
+            guard_tree_values,
+            empty_values,
+            missing_values,
+            builder.value_guarded_containers,
+            buf,
         )
 
         if all(
