@@ -428,6 +428,24 @@ def _delayed_compile_uses_native_pgo(stance: StanceStr) -> bool:
     return stance == "aot_eager_then_compile" and config.delayed_compile_use_native_pgo
 
 
+def _aot_eager_safe_backward_compiler(
+    graph_module: torch.fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+) -> Callable[..., Any]:
+    # AOT eager executes this graph verbatim, without Inductor's unconditional
+    # view-to-reshape normalization. Runtime kernels can return a different
+    # stride than FakeTensor predicted, making an otherwise traced view invalid.
+    for node in graph_module.graph.find_nodes(
+        op="call_function",
+        target=torch.ops.aten.view.default,
+    ):
+        node.target = torch.ops.aten.reshape.default
+
+    from .backends.debugging import boxed_nop
+
+    return boxed_nop(graph_module, example_inputs)
+
+
 def _create_delayed_compile_callback(
     callback: DynamoCallback, stance: StanceStr
 ) -> Callable[..., Any]:
@@ -438,7 +456,10 @@ def _create_delayed_compile_callback(
             phase = _get_delayed_compile_phase(frame)
             if phase == 1:
                 if stance == "aot_eager_then_compile":
-                    aot_eager_fn = get_compiler_fn("aot_eager")
+                    aot_eager_fn = functools.partial(
+                        get_compiler_fn("aot_eager"),
+                        bw_compiler=_aot_eager_safe_backward_compiler,
+                    )
                     result = _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
                     if result.guarded_code is not None:
                         _record_delayed_compile_cache_code(frame.f_code)
