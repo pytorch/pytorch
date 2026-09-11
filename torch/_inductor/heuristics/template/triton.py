@@ -78,11 +78,6 @@ def _use_template_autows() -> bool:
     return config.triton.enable_template_autows and USE_META_WS
 
 
-def _num_sms_for_two_ctas(num_sms: int, two_ctas: bool) -> int:
-    """Keep the launch grid and persistent-loop stride cluster-aligned."""
-    return num_sms // 2 * 2 if two_ctas else num_sms
-
-
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
@@ -3030,7 +3025,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             two_ctas = template_kwargs.get("TWO_CTAS", False)
             out = {
                 **template_kwargs,
-                "NUM_SMS": _num_sms_for_two_ctas(get_num_sms(), two_ctas),
+                "NUM_SMS": get_num_sms(two_ctas=two_ctas),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
                 "HOST_SIDE_TMA": config.triton.enable_host_side_tma,
