@@ -298,6 +298,56 @@ class TestMaxAutotune(TestCase):
         ):
             torch.compile(blackwell_bmm, fullgraph=True)(a, b)
 
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_rejects_zero_k(self) -> None:
+        bsz, m, k, n = 2, 256, 0, 128
+        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            self.assertEqual(choices, [])
+            raise NoValidChoicesError("Blackwell BMM template rejected zero K")
+
+        with (
+            self.assertRaisesRegex(BackendCompilerFailed, "rejected zero K"),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
+            ),
+            config.patch(compile_threads=1),
+        ):
+            torch.compile(blackwell_bmm, fullgraph=True)(a, b)
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_rejects_dynamic_shapes(self) -> None:
+        bsz, m, k, n = 2, 256, 256, 128
+        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            self.assertEqual(choices, [])
+            raise NoValidChoicesError("Blackwell BMM template rejected dynamic shapes")
+
+        with (
+            self.assertRaisesRegex(BackendCompilerFailed, "rejected dynamic shapes"),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
+            ),
+            config.patch(compile_threads=1),
+        ):
+            torch.compile(blackwell_bmm, fullgraph=True, dynamic=True)(a, b)
+
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):

@@ -4,7 +4,7 @@
     N = {{size("B", 2)}}
     K = {{size("A", 2)}}
     batch = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)).to(tl.int32)
-    if batch >= BATCH or M * N == 0:
+    if batch >= BATCH or M == 0 or N == 0:
         return
 
     stride_ab = {{stride("A", 0)}}
@@ -19,7 +19,9 @@
     b_base = B + batch * stride_bb
 
     # A logical rank-3 BMM is represented by one rank-2 descriptor per batch.
-    # This supports arbitrary/zero batch strides and keeps the descriptor-load
+    # Keeping batch in the launch grid lets us hoist descriptor construction
+    # out of the persistent tile loop and supports zero batch strides, which a
+    # rank-3 TMA descriptor cannot encode.  It also keeps the descriptor-load
     # shape compatible with today's rank-2 Transform2CTALoads implementation.
     a_desc = triton.language.make_tensor_descriptor(
         base=a_base,
@@ -40,6 +42,8 @@
     num_tiles = grid_m * grid_n
     num_pid_in_group = GROUP_M * grid_n
     k_tiles = tl.cdiv(K, BLOCK_K)
+    # Track the epilogue tile separately to break its dependency on the
+    # prologue's loop induction variable (as in the Blackwell MM template).
     tile_id_c = start_pid - NUM_SMS
 
     for tile_id in tl.range(
