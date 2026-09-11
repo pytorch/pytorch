@@ -1139,8 +1139,16 @@ def hipify(
     for f in extra_files:
         if not os.path.isabs(f):
             f = os.path.join(output_directory, f)
+        # `preprocessor` normalizes each path with `_to_unix_path` before testing
+        # membership in `all_files`, and `matched_files_iter` already yields
+        # `_to_unix_path`-normalized entries. Normalize here too so the two forms
+        # can match; otherwise on Windows the backslash spelling appended here never
+        # equals the forward-slash form tested later, the `extra_files` escape hatch
+        # is effectively dead, and the source is silently skipped (never hipified).
+        f = _to_unix_path(f)
         if f not in all_files_set:
             all_files.append(f)
+            all_files_set.add(f)
 
     # List all files in header_include_paths to ensure they are hipified
     from pathlib import Path
