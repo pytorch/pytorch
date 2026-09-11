@@ -1746,17 +1746,15 @@ static void triangular_solve_metal(const Tensor& A_,
   });
 }
 
-// Right-looking blocked solve: substitution on the nb x nb diagonal block, then
-// one GEMM to push its contribution into the rest of the panel. Substitution
-// reads every element of A once per right-hand side, so it is bandwidth-bound
-// once there are many of them; blocking cuts that traffic by nb and moves the
-// work into matmul. X holds B on entry and the solution on exit, and M is a
-// contiguous op(A) whose triangle is given by upper.
+// Right-looking blocked solve: solve the nb x nb diagonal block, then one GEMM
+// to push its contribution into the rest of the panel. Substitution reads every
+// element of A once per right-hand side and serializes n steps deep; blocking
+// cuts that traffic by nb, shortens the chain to nb, and moves the rest into
+// matmul. X holds B on entry and the solution on exit; M is op(A), possibly as
+// a transposed/conjugated view, with its triangle given by upper.
 static void triangular_solve_blocked(const Tensor& M, bool upper, bool unitriangular, int64_t nb, Tensor& X) {
   const int64_t n = M.size(-1);
   const int64_t k = X.size(-1);
-  // Both are contiguous, so these fold the batch dims into one without copying
-  // and let the trailing update be a single baddbmm_.
   // M may be a transposed and/or conjugated view, so fold the batch dims with
   // flatten (a view here) rather than reshape, which would copy. matmul and
   // baddbmm_ take such views directly, which is what keeps a transposed or
