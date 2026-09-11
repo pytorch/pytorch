@@ -8739,19 +8739,19 @@ class TestNNDeviceType(NNTestCase):
                 padding=[0, 0, 0, 0, -2, -2])
 
     @onlyNativeDeviceTypes
-    @skipMPS  # MPS routes through a separate kernel (mps::pad_out_template) that does not validate the channel dim
-    def test_ReplicationPad_backward_channel_mismatch(self, device):
+    def test_Pad_backward_channel_mismatch(self, device):
         # regression test for https://github.com/pytorch/pytorch/issues/142834: a
         # gradOutput whose channel dim doesn't match the input used to segfault in
         # the backward pass instead of raising a clear error.
-        for backward, inp, grad_output, padding in [
-            (torch.ops.aten.replication_pad1d_backward,
-             torch.ones(2, 2, 4, device=device), torch.ones(2, 0, 8, device=device), [2, 2]),
-            (torch.ops.aten.replication_pad2d_backward,
-             torch.ones(2, 2, 4, 4, device=device), torch.ones(2, 0, 6, 8, device=device), [2, 2, 1, 1]),
-        ]:
-            with self.assertRaisesRegex(RuntimeError, "gradOutput channel unexpected"):
-                backward(grad_output, inp, padding)
+        for name in ["reflection", "replication"]:
+            for inp, grad_output, padding in [
+                ((2, 2, 4), (2, 0, 8), [2, 2]),
+                ((2, 2, 4, 4), (2, 0, 6, 8), [2, 2, 1, 1]),
+                ((2, 2, 4, 4, 4), (2, 0, 6, 6, 8), [2, 2, 1, 1, 1, 1]),
+            ]:
+                backward = getattr(torch.ops.aten, f"{name}_pad{len(padding) // 2}d_backward")
+                with self.assertRaisesRegex(RuntimeError, "grad_output channel unexpected"):
+                    backward(torch.ones(grad_output, device=device), torch.ones(inp, device=device), padding)
 
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])

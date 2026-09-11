@@ -2600,6 +2600,8 @@ class TestShouldRun(unittest.TestCase):
         # Free-threaded is not the question; a published tag is.
         for version, ft in (
             ((3, 10), False),
+            ((3, 11), False),
+            ((3, 12), False),
             ((3, 13), False),
             ((3, 14), False),
             ((3, 14), True),
@@ -4323,6 +4325,15 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         # Same single owner of the install decision as .ci/pytorch/build.sh.
         self.assertIn("--print-verdict", block)
         self.assertIn("install_cutlass_dsl", block)
+
+    def test_cutlass_installer_does_not_override_stage_two_verdict(self):
+        text = self._read(".ci/pytorch/common_utils.sh")
+        block = text[text.index("function install_cutlass_dsl()") :]
+        block = block[: block.index("\n}\n") + 3]
+        self.assertNotIn("return 0", block)
+        self.assertNotIn("Skipping CUTLASS DSL install", block)
+        self.assertIn("nvidia-cutlass-dsl[cu13]==4.6.2", block)
+        self.assertIn("apache-tvm-ffi==0.1.11", block)
 
     def test_the_verdict_word_the_shells_compare_is_the_one_stage_two_prints(self):
         # Both shells install the DSL wheels only when stage 2 says RUN, comparing with
