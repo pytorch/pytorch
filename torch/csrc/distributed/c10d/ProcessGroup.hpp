@@ -6,6 +6,7 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -1205,6 +1206,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   c10::intrusive_ptr<c10d::Store> store_;
+  // Split children use distinct prefixes over one parent-owned connection.
+  // The parent keeps its original connection so child rendezvous cannot block
+  // unrelated parent control traffic.
+  std::mutex splitStoreMutex_;
+  c10::intrusive_ptr<c10d::Store> splitStore_;
   // Fallback rank/size used only when there is no default backend; the default
   // backend is otherwise the source of truth (see getRank/getSize).
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
