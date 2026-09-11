@@ -80,6 +80,7 @@ from ..utils import (
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
+    str_methods,
     tensortype_to_dtype,
     unpack_iterable,
 )
@@ -1915,20 +1916,15 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if (
-            isinstance(self.fn, type)
-            and args
-            and isinstance(
-                inspect.getattr_static(self.fn, name, None),
-                (types.WrapperDescriptorType, types.MethodDescriptorType),
-            )
-        ):
-            if (
-                isinstance(args[0], variables.UserDefinedObjectVariable)
-                and args[0]._base_vt is not None
-            ):
+        if self.fn in (set, frozenset, list, tuple):
+            if isinstance(args[0], variables.UserDefinedObjectVariable):
+                if args[0]._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedObjectVariable._base_vt must not be None"
+                    )
                 return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
-            return args[0].call_method(tx, name, args[1:], kwargs)
+            else:
+                return args[0].call_method(tx, name, args[1:], kwargs)
 
         if (
             name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
@@ -1946,6 +1942,20 @@ class BuiltinVariable(BaseBuiltinVariable):
             if isinstance(lval, self.fn):
                 return ConstantVariable.create(
                     getattr(self.fn, name)(lval, args[1].as_python_constant())
+                )
+
+        if self.fn is str and len(args) >= 1:
+            resolved_fn = getattr(self.fn, name, None)
+            if resolved_fn in str_methods:
+                # Only delegate to ConstantVariable, not other types that happen to be constants
+                if isinstance(args[0], ConstantVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if self.fn is float and len(args) >= 1:
+            # Only delegate to ConstantVariable, not other types that happen to be constants
+            if isinstance(args[0], ConstantVariable):
+                return VariableTracker.build(
+                    tx, getattr(float, name)(args[0].as_python_constant())
                 )
 
         if name == "__len__" and len(args) == 1 and not kwargs:
