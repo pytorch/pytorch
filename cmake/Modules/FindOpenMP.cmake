@@ -267,16 +267,6 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
     endif()
 
-    if ((NOT OpenMP_libomp_LIBRARY) AND MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
-      # On MSVC ARM64, OpenMP is provided by vcomp, which is a part of the Visual Studio installation.
-      find_library(OpenMP_libomp_LIBRARY
-      NAMES vcomp
-      HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-      DOC "vcomp location for OpenMP on MSVC ARM64"
-      )
-      mark_as_advanced(OpenMP_libomp_LIBRARY)
-    endif()
-
     # Check if we are using  OpenBLAS which is linked against libgomp
     # we may end up with  multiple omp runtimes linked
     # against libtorch_cpu.so
@@ -307,7 +297,16 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       unset(_omp_clang_lib)
     endif()
 
-    if (NOT OpenMP_libomp_LIBRARY)
+    # cl.exe autolinks the runtime matching its -openmp flag (vcomp for
+    # -openmp[:experimental], libomp for -openmp:llvm), so it must not get an
+    # explicit library. The search below would find the libomp.lib shipped
+    # with Visual Studio and link it on top of vcomp: parallel regions then
+    # run on vcomp while omp_get_num_threads()/omp_get_thread_num() are
+    # answered by libomp and return 1/0 on every worker, so each worker runs
+    # the whole range as if the region were serial (pytorch/pytorch#176091,
+    # #193784). clang-cl also sets MSVC but emits __kmpc_* calls, hence the
+    # check on the compiler id.
+    if (NOT OpenMP_libomp_LIBRARY AND NOT CMAKE_${LANG}_COMPILER_ID STREQUAL "MSVC")
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
         HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
