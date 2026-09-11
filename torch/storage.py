@@ -674,11 +674,21 @@ def _reset_warn_typed_storage_removal():
     _warn_typed_storage_removal.__dict__["has_warned"] = False
 
 
-def _get_device_from_module(module: str):
+def _get_device_from_module(module: str) -> str:
+    """Return the device type whose legacy storage classes live in ``module``.
+
+    A backend puts its legacy storage classes in its own device module --
+    ``torch.cuda``, ``torch.hpu``, out-of-tree ``torch.npu`` -- so the trailing
+    component of the module name is the device type. CPU is the exception: its
+    classes live in ``torch`` itself, which is why an unrecognised name maps to
+    ``"cpu"``. Ask the device-type parser rather than keeping a whitelist of
+    accelerator module names here; this is the same probe
+    :func:`torch._register_device_module` uses to accept a device module.
+    """
     last_part = module.rsplit(".", 1)[-1]
-    if last_part in ["cuda", torch._C._get_privateuse1_backend_name(), "hpu"]:
-        return last_part
-    else:
+    try:
+        return torch.device(last_part).type
+    except RuntimeError:
         return "cpu"
 
 
@@ -1502,22 +1512,16 @@ class TypedStorage:
 
         storage_name = _dtype_to_storage_type_map()[self.dtype]
 
-        if self.device.type not in [
-            "cpu",
-            "cuda",
-            "hpu",
-            torch._C._get_privateuse1_backend_name(),
-        ]:
-            return None
-
+        # A backend owns its legacy storage classes by defining them on its
+        # device module; CPU's live on ``torch`` itself. A missing module or a
+        # missing class means this device has no legacy class for this dtype,
+        # which is exactly what a whitelist of device types used to encode.
         module = (
-            torch if self.device.type == "cpu" else getattr(torch, self.device.type)
+            torch
+            if self.device.type == "cpu"
+            else getattr(torch, self.device.type, None)
         )
-
-        try:
-            return getattr(module, storage_name)
-        except AttributeError:
-            return None
+        return getattr(module, storage_name, None)
 
 
 TypedStorage.type.__doc__ = _type.__doc__
