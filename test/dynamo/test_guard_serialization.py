@@ -529,7 +529,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
 
-    def test_reducer_handles_an_empty_cell_reached_directly(self):
+    def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
         # raised ValueError out of the pickler for an empty cell. Pickler-level
         # because a guard cannot root at a raw cell through a capture:
