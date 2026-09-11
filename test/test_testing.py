@@ -14,6 +14,7 @@ import subprocess
 import sys
 import textwrap
 import unittest.mock
+from types import SimpleNamespace
 from typing import Any
 from collections.abc import Callable
 from collections.abc import Iterator
@@ -29,7 +30,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
-    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
+    (Capability, CPUTestBase, CUDATestBase, HPUTestBase, MPSTestBase,
+     PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, XPUTestBase, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
@@ -3245,6 +3247,90 @@ class TestHardwareClassifications(TestCase):
         suite = loader.loadTestsFromModule(mod)
 
         self.assertEqual(self._suite_test_names(suite), {"test_a", "test_b"})
+
+
+class TestFP64CapabilityDeclarations(TestCase):
+    def test_existing_capability_declarations(self):
+        existing_capabilities = {
+            Capability.dtype.fp8,
+            Capability.dtype.bf16,
+            Capability.attention.flash_attention,
+            Capability.attention.mem_efficient_attention,
+        }
+        for test_base in (CPUTestBase, CUDATestBase, MPSTestBase, XPUTestBase):
+            self.assertTrue(existing_capabilities <= test_base._capabilities().keys())
+
+        for test_base, expected in (
+            (
+                CPUTestBase,
+                {
+                    Capability.dtype.fp8: True,
+                    Capability.dtype.bf16: True,
+                    Capability.attention.flash_attention: True,
+                    Capability.attention.mem_efficient_attention: False,
+                },
+            ),
+            (
+                MPSTestBase,
+                {
+                    Capability.dtype.fp8: False,
+                    Capability.dtype.bf16: True,
+                    Capability.attention.flash_attention: False,
+                    Capability.attention.mem_efficient_attention: False,
+                },
+            ),
+        ):
+            predicates = test_base._capabilities()
+            self.assertEqual(
+                {capability: bool(predicates[capability]()) for capability in expected},
+                expected,
+            )
+
+    def test_static_fp64_capabilities(self):
+        for test_base, expected in (
+            (CPUTestBase, True),
+            (CUDATestBase, True),
+            (MPSTestBase, False),
+            (HPUTestBase, False),
+        ):
+            predicate = test_base._capabilities()[Capability.dtype.fp64]
+            self.assertEqual(predicate(), expected)
+
+    def test_hpu_has_no_distributed_capabilities(self):
+        capabilities = HPUTestBase._capabilities()
+        self.assertIn(Capability.lib.safetensors, capabilities)
+        distributed_capabilities = {
+            Capability.distributed.backend,
+            Capability.distributed.dtensor,
+            Capability.distributed.fsdp,
+        }
+        self.assertEqual(
+            set(capabilities) & distributed_capabilities,
+            set(),
+        )
+
+    def test_xpu_fp64_capability_tracks_device_properties(self):
+        predicate = XPUTestBase._capabilities()[Capability.dtype.fp64]
+        with (
+            unittest.mock.patch.object(torch.xpu, "is_available", return_value=False),
+            unittest.mock.patch.object(
+                torch.xpu, "get_device_properties"
+            ) as get_device_properties,
+        ):
+            self.assertFalse(predicate())
+            get_device_properties.assert_not_called()
+
+        for expected in (True, False):
+            properties = SimpleNamespace(has_fp64=expected)
+            with (
+                unittest.mock.patch.object(
+                    torch.xpu, "is_available", return_value=True
+                ),
+                unittest.mock.patch.object(
+                    torch.xpu, "get_device_properties", return_value=properties
+                ),
+            ):
+                self.assertEqual(predicate(), expected)
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())

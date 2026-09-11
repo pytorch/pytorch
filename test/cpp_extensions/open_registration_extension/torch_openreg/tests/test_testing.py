@@ -1,6 +1,5 @@
 # Owner(s): ["module: PrivateUse1"]
 
-import inspect
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
@@ -307,77 +306,121 @@ with _temp_test_configs(
 class TestCapabilityGating(TestCase):
     """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
 
-    executed_count = 0
+    executed_tests: set[str] = set()
+    completed_setup_tests: set[str] = set()
 
     @classmethod
     def setUpClass(cls):
-        cls._saved_capabilities = inspect.getattr_static(
-            PrivateUse1TestBase, "_capabilities"
-        )
-        PrivateUse1TestBase._capabilities = classmethod(
-            lambda cls: {
-                Capability.dtype.fp8: lambda: True,
-                Capability.dtype.bf16: lambda: False,
-            }
-        )
+        cls.executed_tests = set()
+        cls.completed_setup_tests = set()
+        super().setUpClass()
 
     @classmethod
     def tearDownClass(cls):
-        PrivateUse1TestBase._capabilities = cls._saved_capabilities
-        expected_runs = 3
-        if cls.executed_count != expected_runs:
+        expected_tests = {
+            "test_capability_combined_openreg",
+            "test_capability_missing_openreg",
+            "test_capability_supported_openreg",
+        }
+        if cls.executed_tests != expected_tests:
             raise AssertionError(
-                f"Capability gating failed! "
-                f"Expected {expected_runs} tests to run, "
-                f"but {cls.executed_count} tests executed."
+                f"Capability gating failed: expected {expected_tests}, "
+                f"got {cls.executed_tests}"
+            )
+        if cls.completed_setup_tests != expected_tests:
+            raise AssertionError(
+                f"Capability preflight failed: expected {expected_tests}, "
+                f"got {cls.completed_setup_tests}"
             )
         super().tearDownClass()
 
-    @requires_capabilities(Capability.dtype.fp8)
+    @requires_capabilities(Capability.dtype.bf16)
     def test_capability_supported(self, device):
-        type(self).executed_count += 1
+        type(self).executed_tests.add(self._testMethodName)
         self.assertEqual(torch.device(device).type, "openreg")
 
-    @requires_capabilities(Capability.dtype.bf16)
+    @requires_capabilities(Capability.dtype.fp64)
     def test_capability_unsupported(self, device):
-        type(self).executed_count += 1
-        self.fail("Expected skip: dtype.bf16 is unsupported on this device")
+        type(self).executed_tests.add(self._testMethodName)
+        self.fail("Expected skip: dtype.fp64 is unsupported on this device")
+
+    @requires_capabilities(Capability.dtype.bf16)
+    @requires_capabilities(Capability.dtype.fp64)
+    def test_capability_stacked(self, device):
+        type(self).executed_tests.add(self._testMethodName)
+        self.fail("Expected preflight skip: dtype.fp64 is unsupported on this device")
 
     def test_capability_missing(self, device):
-        """@requires_capabilities raises AssertionError for undeclared capabilities."""
+        """@requires_capabilities raises SkipTest for undeclared capabilities."""
 
         @requires_capabilities(Capability.attention.flash_attention)
         def dummy(self):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
-            AssertionError,
+            unittest.SkipTest,
             r"has not declared capabilities: attention\.flash_attention",
         ):
             dummy(self)
-        type(self).executed_count += 1
+        type(self).executed_tests.add(self._testMethodName)
 
     def test_capability_combined(self, device):
-        """@requires_capabilities raises AssertionError when a combined set
+        """@requires_capabilities raises SkipTest when a combined set
         includes an undeclared capability."""
 
         @requires_capabilities(
-            Capability.dtype.fp8,
             Capability.dtype.bf16,
+            Capability.dtype.fp64,
             Capability.attention.flash_attention,
         )
         def dummy(self):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
-            AssertionError,
+            unittest.SkipTest,
             r"has not declared capabilities: attention\.flash_attention",
         ):
             dummy(self)
-        type(self).executed_count += 1
+        type(self).executed_tests.add(self._testMethodName)
+
+
+def _openreg_test_capabilities(_cls):
+    capabilities = PrivateUse1TestBase._capabilities()
+    capabilities.update(
+        {
+            Capability.dtype.bf16: lambda: True,
+            Capability.dtype.fp64: lambda: False,
+        }
+    )
+    return capabilities
+
+
+def _openreg_capability_test_setup(self):
+    # Record only setups that complete DeviceTypeTestBase capability preflight.
+    PrivateUse1TestBase.setUp(self)
+    type(self).completed_setup_tests.add(self._testMethodName)
 
 
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
+_capability_test_cls = globals()["TestCapabilityGatingOPENREG"]
+_capability_test_cls._capabilities = classmethod(_openreg_test_capabilities)
+_capability_test_cls.setUp = _openreg_capability_test_setup
+del _capability_test_cls
+
+
+class TestNoCapabilityPreflight(TestCase):
+    def test_no_capability_requirement(self, device):
+        self.assertEqual(torch.device(device).type, "openreg")
+
+
+def _fail_if_capabilities_queried(_cls):
+    raise AssertionError("A test without capability requirements queried capabilities")
+
+
+instantiate_device_type_tests(TestNoCapabilityPreflight, globals(), only_for="openreg")
+_no_capability_test_cls = globals()["TestNoCapabilityPreflightOPENREG"]
+_no_capability_test_cls._capabilities = classmethod(_fail_if_capabilities_queried)
+del _no_capability_test_cls
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
