@@ -13,6 +13,7 @@ from torch.cuda._graph_annotations import (
     _is_tools_id_unavailable,
     _rekey_annotations,
     _reset_kernel_annotations,
+    _sourceless_nodes,
     mark_stream,
     resolve_and_remap,
     resolve_pending_annotations,
@@ -248,6 +249,38 @@ class TestMarkKernels(TestCase):
             self.assertIsNone(graph._remapped_exec_id)
             self.assertEqual(set(get_kernel_annotations()), keys)
         self.assertIn(capture_id, graph._recorded_exec_ids)
+
+    @unittest.skipIf(
+        not source_node_ids_available(),
+        "annotation_config={'key_by': 'source'} needs a CUDA driver >= 13.4",
+    )
+    def test_key_by_source_aliases_nodes_without_a_source_id(self):
+        """CUPTI reports no sourceGraphNodeId for memcpy/host nodes, so those entries keep
+        an exec-keyed copy sharing the annotation; a re-instantiate moves it."""
+        pinned = torch.ones(1024, pin_memory=True)
+        dst = torch.zeros(1024, device="cuda")
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(
+            graph, enable_annotations=True, annotation_config={"key_by": "source"}
+        ):
+            with mark_kernels("phase_a"):
+                dst.copy_(pinned, non_blocking=True)
+                dst.mul_(2)
+
+        captured = set(get_kernel_annotations())
+        # The copy is the memcpy node, the multiply a kernel -- if the capture stops
+        # producing a sourceless node, this test proves nothing.
+        (sourceless,) = [t for t in captured if t in _sourceless_nodes]
+
+        graph.instantiate()
+        alias = (graph._remapped_exec_id << 32) | (sourceless & 0xFFFFFFFF)
+        annotations = get_kernel_annotations()
+        self.assertEqual(set(annotations), captured | {alias})
+        self.assertEqual(annotations[alias], annotations[sourceless])
+
+        graph.instantiate()
+        moved = (graph._remapped_exec_id << 32) | (sourceless & 0xFFFFFFFF)
+        self.assertEqual(set(get_kernel_annotations()), captured | {moved})
 
     def test_key_by_exec_is_the_default(self):
         """The default rekeys to the exec graph, which is what a consumer reading CUPTI's
