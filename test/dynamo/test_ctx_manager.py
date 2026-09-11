@@ -413,6 +413,216 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.type, "cpu")
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    def _get_autocast_cpu_state(self):
+        n = torch.autocast_increment_nesting()
+        torch.autocast_decrement_nesting()
+        return (
+            n - 1,
+            torch.is_autocast_enabled("cpu"),
+            torch.get_autocast_dtype("cpu"),
+        )
+
+    def _test_autocast_exception_restores_state(self, fn):
+        # Regression test for https://github.com/pytorch/pytorch/issues/195488
+        # An exception raised inside a compiled `with autocast(...):` region
+        # must leave autocast state exactly as eager would: the compiled
+        # graph's own exit node never runs, since torch.fx.Graph has no
+        # try/finally, so the call site has to restore it instead.
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4, 4)
+        bad_idx = torch.tensor([99])
+
+        baseline = self._get_autocast_cpu_state()
+        for _ in range(3):
+            with self.assertRaisesRegex(IndexError, "index"):
+                opt_fn(x, bad_idx)
+            self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+    def test_autocast_exception_restores_state(self):
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                return x.index_select(0, idx)
+
+        self._test_autocast_exception_restores_state(fn)
+
+    def test_autocast_nested_exception_restores_state(self):
+        # Same as test_autocast_exception_restores_state, but the exception
+        # is raised inside a nested autocast region -- both levels must
+        # unwind, in reverse (innermost-first) order.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                with torch.autocast(device_type="cpu", dtype=torch.float16):
+                    return x.index_select(0, idx)
+
+        self._test_autocast_exception_restores_state(fn)
+
+    def test_autocast_sequential_exception_restores_state(self):
+        # Same as test_autocast_exception_restores_state, but with two
+        # non-nested regions in one graph, the second of which raises. Both
+        # regions trace to completion (only the runtime call raises), so both
+        # get recorded; the first region's exit must not be left restoring
+        # state the second region already changed.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                y = x.sin()
+            with torch.autocast(device_type="cpu", dtype=torch.float16):
+                return y.index_select(0, idx)
+
+        self._test_autocast_exception_restores_state(fn)
+
+    def test_autocast_exception_after_graph_break_restores_state(self):
+        # Same as test_autocast_exception_restores_state, but a graph break
+        # inside the `with` block splits the region's enter and exit across
+        # two separately compiled subgraphs (the exit is retraced into the
+        # resume function). The exception happens in the resume function,
+        # after the graph break -- verifies the split region still restores
+        # state correctly, not just the fullgraph=True case above.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                y = x.sin()
+                torch._dynamo.graph_break()
+                return y.index_select(0, idx)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4, 4)
+        bad_idx = torch.tensor([99])
+
+        baseline = self._get_autocast_cpu_state()
+        for _ in range(3):
+            with self.assertRaisesRegex(IndexError, "index"):
+                opt_fn(x, bad_idx)
+            self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+    def test_autocast_exception_restores_state_stale_nesting_baseline(self):
+        # GlobalStateGuard guards autocast's enabled/dtype/cache_enabled but
+        # not the nesting depth, so a cache hit can invoke a compiled artifact
+        # from a different ambient nesting depth than it had at compile time,
+        # as long as enabled/dtype/cache_enabled still match. Compile while
+        # already inside one ambient autocast(cpu, bfloat16) region (so the
+        # cached artifact's compile-time nesting baseline is 1), then call
+        # again from inside two (call-time baseline 2) -- the depth to unwind
+        # back to on exception must be read fresh each call, not fixed at
+        # compile time, or the second call unwinds too far and corrupts the
+        # still-open outer region.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                return x.index_select(0, idx)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4, 4)
+        bad_idx = torch.tensor([99])
+
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            with self.assertRaisesRegex(IndexError, "index"):
+                opt_fn(x, bad_idx)
+
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                with self.assertRaisesRegex(IndexError, "index"):
+                    opt_fn(x, bad_idx)
+                # Still inside both outer `with` blocks: nesting must be 2
+                # (only the compiled call's own region unwound, back to the
+                # ambient depth the two outer blocks put it at), not 1 or 0.
+                nesting, enabled, dtype = self._get_autocast_cpu_state()
+                self.assertEqual(nesting, 2)
+                self.assertTrue(enabled)
+                self.assertEqual(dtype, torch.bfloat16)
+
+        # Both outer `with` blocks have now run their own real __exit__.
+        # A corrupted nesting depth (dragged to 0 or below by the second
+        # call) would surface here as a negative or nonzero leftover.
+        self.assertEqual(self._get_autocast_cpu_state()[0], 0)
+
+    def test_autocast_exception_restores_state_specialized_dispatch(self):
+        # A graph with a dynamic-shape specialization (torch._dynamo.
+        # mark_dynamic(..., specialize_on=...)) compiles and caches a
+        # separate callable per specialization, alongside the primary
+        # compiled_fn -- see `specialized_dispatch` in
+        # OutputGraph.compile_and_call_fx_graph. If that graph also contains
+        # a fully-traced autocast region, the cached per-specialization
+        # callable needs the same exception-safety wrapping as compiled_fn,
+        # since it can execute the region's body too. This exercises the
+        # cached specialized callable specifically, not the compiled_fn
+        # fallback the other tests above cover.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                return x.index_select(0, idx)
+
+        x = torch.randn(8)
+        good_idx = torch.tensor([0])
+        bad_idx = torch.tensor([99])
+        torch._dynamo.mark_dynamic(x, 0, specialize_on=[lambda x: x == 8])
+
+        opt_fn = torch.compile(fn, backend="eager")
+        baseline = self._get_autocast_cpu_state()
+
+        # First call: compiles the primary graph, no specialization matched
+        # yet (x.shape[0] == 8, but the specialization is keyed off a fresh
+        # tensor of that exact shape below).
+        opt_fn(x, good_idx)
+        self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+        # Second call: shape 8 matches the specialization, triggering
+        # specialized_dispatch to compile and cache a specialized callable.
+        x8 = torch.randn(8)
+        opt_fn(x8, good_idx)
+        self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+        # Third call: same shape, so this hits the now-cached specialized
+        # callable (not a fresh compile) -- and raises inside it.
+        with self.assertRaisesRegex(IndexError, "index"):
+            opt_fn(x8, bad_idx)
+        self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+    def test_autocast_base_exception_restores_state(self):
+        # CPython's `with` statement runs `__exit__` on the way out for any
+        # BaseException, not just Exception -- KeyboardInterrupt and
+        # SystemExit unwind through `with` blocks the same as a plain
+        # exception does. The wrapper's job is to reproduce that guarantee,
+        # so it has to catch BaseException too, not narrow it to Exception.
+        #
+        # Dynamo's tracer itself cannot trace through a `raise` of a
+        # BaseException subclass (a separate, pre-existing limitation
+        # unrelated to this fix -- it graph-breaks with "Observed exception"
+        # regardless of autocast). So this cannot inject the BaseException
+        # via a `raise` in the traced function body the way the IndexError
+        # tests above do implicitly through a real op failure. Instead:
+        # compile and run successfully first (so the graph is fully traced
+        # and cached, with no BaseException involved in tracing at all),
+        # then monkeypatch the op the graph calls to raise a BaseException
+        # subclass, and call the *already-compiled* function again. That
+        # call is a pure cache hit -- it runs previously-generated bytecode
+        # and never re-enters Dynamo's tracer -- so it exercises exactly the
+        # runtime wrapper path this fix touches, the same way a real
+        # KeyboardInterrupt landing mid-call would.
+        class _MyBaseException(BaseException):
+            pass
+
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                return x.index_select(0, idx)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4, 4)
+        idx = torch.tensor([0])
+
+        baseline = self._get_autocast_cpu_state()
+        opt_fn(x, idx)
+        self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+        orig_index_select = torch.Tensor.index_select
+
+        def _raising_index_select(self, *args, **kwargs):
+            raise _MyBaseException("boom")
+
+        torch.Tensor.index_select = _raising_index_select
+        try:
+            for _ in range(3):
+                with self.assertRaisesRegex(_MyBaseException, "boom"):
+                    opt_fn(x, idx)
+                self.assertEqual(self._get_autocast_cpu_state(), baseline)
+        finally:
+            torch.Tensor.index_select = orig_index_select
+
     def test_autocast_cpu_graph_break(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):

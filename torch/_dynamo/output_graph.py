@@ -687,6 +687,76 @@ def noop_graph_call(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
     return ()
 
 
+class _AutocastExceptionSafeWrapper:
+    """Wraps `fn` so a raised exception restores autocast state the way the
+    traced `with autocast(...):` region's own `__exit__` would have.
+
+    See Note [Autocast exception safety] in OutputGraph.compile_and_call_fx_graph.
+    Used for every compiled callable that can execute a fully-traced autocast
+    region, including per-specialization recompiles -- not just the primary
+    `compiled_fn` -- since any of them can run the region's body without ever
+    reaching its `_exit_autocast` node.
+
+    A module-level class rather than a closure so that CompilePackage (which
+    records and later reinstalls this callable directly, see
+    OutputGraph.compile_and_call_fx_graph) can pickle it via the default
+    object protocol -- pickle resolves closures by walking to a `<locals>`
+    scope it cannot reach, but plain instance attributes on a module-level
+    class pickle like any other object. This fixes only that failure mode:
+    it defers entirely to `fn`'s own picklability, which is not guaranteed
+    in general (an arbitrary backend's compiled callable, or a
+    _LazyGraphModule-bound method, can still fail to pickle for reasons
+    unrelated to this wrapper -- that is a pre-existing property of what
+    `fn` can be, not something this class introduces or can fix).
+    """
+
+    def __init__(self, fn: Callable[..., Any], device_types: tuple[str, ...]) -> None:
+        self.fn = fn
+        self.device_types = device_types
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # Read fresh on every call, not once when this wrapper is built:
+        # GlobalStateGuard guards enabled/dtype/cache_enabled, so those never
+        # differ from this compile, but it does not guard the nesting depth.
+        # A cache hit can still invoke this same compiled artifact from a
+        # different ambient nesting depth (e.g. called from inside an
+        # unrelated outer `with autocast(...):` of the same device/dtype),
+        # so the depth to unwind back to has to be read per call.
+        prior_nesting = torch.autocast_increment_nesting() - 1
+        torch.autocast_decrement_nesting()
+        prior_states = {
+            device_type: (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+                torch.is_autocast_cache_enabled(),
+            )
+            for device_type in self.device_types
+        }
+        try:
+            return self.fn(*args, **kwargs)
+        except BaseException:
+            current_nesting = torch.autocast_increment_nesting() - 1
+            torch.autocast_decrement_nesting()
+            for _ in range(current_nesting - prior_nesting):
+                if torch.autocast_decrement_nesting() == 0:
+                    torch.clear_autocast_cache()
+            for device_type, (
+                enabled,
+                dtype,
+                cache_enabled,
+            ) in prior_states.items():
+                torch.set_autocast_enabled(device_type, enabled)
+                torch.set_autocast_dtype(device_type, dtype)
+                torch.set_autocast_cache_enabled(cache_enabled)
+            raise
+
+
+def _make_autocast_exception_safe(
+    fn: Callable[..., Any], device_types: tuple[str, ...]
+) -> Callable[..., Any]:
+    return _AutocastExceptionSafeWrapper(fn, device_types)
+
+
 class OutputGraph(OutputGraphCommon):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -744,6 +814,12 @@ class OutputGraph(OutputGraphCommon):
         self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
         self.cleanup_hooks: list[Callable[[], Any]] = []
+        # (device_type, dtype, enabled, cache_enabled) for each `with autocast(...)`
+        # region fully entered and exited while tracing this graph. Used to give
+        # the compiled callable the same exception safety as the traced `with`
+        # statement: see Note [Autocast exception safety] in
+        # compile_and_call_fx_graph.
+        self.autocast_target_values: list[tuple[Any, Any, Any, Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
@@ -3049,6 +3125,42 @@ class OutputGraph(OutputGraphCommon):
                 # tracing constants no longer need to keep real tensors alive.
                 old_fake_mode.fake_tensor_converter.clear_non_cpu_constants()
 
+            # Note [Autocast exception safety]
+            # A `with autocast(...):` region traced fully inside this graph
+            # lowers to flat `_enter_autocast` / `_exit_autocast` nodes (see
+            # AutocastModeVariable in variables/ctx_manager.py) -- torch.fx.Graph
+            # has no try/finally, so if the compiled graph raises between them,
+            # the exit node never runs and autocast state (the nesting counter,
+            # per-device enabled/dtype/cache_enabled) leaks past the `with`
+            # block. Eager `with` guarantees `__exit__` runs via Python's own
+            # try/finally (for BaseException too, not just Exception -- see
+            # _make_autocast_exception_safe), so restore that guarantee here
+            # at the call site instead.
+            #
+            # This wraps `compiled_fn`, but that is not the only callable that
+            # can execute this graph's autocast region: the `specializations`
+            # branch below compiles and caches a separate callable per
+            # dynamic-shape specialization, and any of those can run the
+            # traced region's body too. Each one needs its own wrapper --
+            # `specialized_dispatch` wraps its cached per-specialization
+            # callable at the point it's compiled, further down.
+            #
+            # This has to happen before `self.package.add_backend_id` below:
+            # that call records `compiled_fn` for CompilePackage to later
+            # reinstall directly (package.py's install()), so the recorded
+            # callable has to already be autocast-safe, not a pre-wrap
+            # snapshot that would silently drop this fix on that path.
+            autocast_device_types = tuple(
+                dict.fromkeys(
+                    device_type for device_type, _, _, _ in self.autocast_target_values
+                )
+            )
+            self.autocast_target_values = []
+            if autocast_device_types:
+                compiled_fn = _make_autocast_exception_safe(
+                    compiled_fn, autocast_device_types
+                )
+
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
@@ -3122,9 +3234,17 @@ class OutputGraph(OutputGraphCommon):
                                 gm.meta["specialization"] = specialization
                                 example_inputs: list[Tensor] = list(args)
                                 with tracing(self.tracing_context):
-                                    specialization_cache[specialization] = (
-                                        self.call_user_compiler(gm, example_inputs)
+                                    specialized_fn = self.call_user_compiler(
+                                        gm, example_inputs
                                     )
+                                # See Note [Autocast exception safety] above --
+                                # this compiled callable can execute the same
+                                # traced autocast region as compiled_fn.
+                                if autocast_device_types:
+                                    specialized_fn = _make_autocast_exception_safe(
+                                        specialized_fn, autocast_device_types
+                                    )
+                                specialization_cache[specialization] = specialized_fn
 
                             return specialization_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
