@@ -460,6 +460,9 @@ class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
     _extra_globals: dict[str, object] | None = None
+    # Guard-only scope, held by reference; kept apart from _extra_globals so it
+    # cannot rewire what the compiled bytecode reads.
+    _guard_globals: dict[str, object] | None = None
 
     def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
         f_locals: dict[str, object] = {}
@@ -495,10 +498,15 @@ class AOTCompiledFunction:
 
         if self._artifacts.guard_manager is None:
             guards_state = load_guards_state(self._artifacts.guards_state)
+            # No fallback to the serialized scope: a name the loading process
+            # lacks must fail the guard rather than resolve to a baked-in value.
+            guard_scope = self._guard_globals
+            if guard_scope is None:
+                guard_scope = self.fn.__globals__
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
-                self.fn.__globals__,
+                guard_scope,
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -594,7 +602,17 @@ class AOTCompiledFunction:
         data: bytes,
         f_globals: dict[str, object] | None = None,
         external_closure_data: dict[str, Any] | None = None,
+        *,
+        guard_globals: dict[str, object] | None = None,
     ) -> "AOTCompiledFunction":
+        # f_globals and guard_globals have distinct contracts and must not be
+        # conflated: f_globals is MERGED over the scope reconstructed from the
+        # serialized bytecode (extra names the compiled fn may reference), so a
+        # name it omits still resolves to the baked-in value. guard_globals
+        # REPLACES the guard scope with no such fallback -- a name it lacks
+        # fails the guard rather than resolving to a serialized value -- so it
+        # is the live namespace global guards are re-rooted at on load.
+
         f = io.BytesIO(data)
         f.seek(0)
         unpickler = AOTCompileUnpickler(external_closure_data or {}, f)
@@ -610,7 +628,7 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
-        return cls(artifacts, _extra_globals=f_globals)
+        return cls(artifacts, _extra_globals=f_globals, _guard_globals=guard_globals)
 
     def disable_guard_check(self) -> None:
         self._guard_check_enabled = False
@@ -657,6 +675,14 @@ def aot_compile_fullgraph(
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
+                # NB: dropping every global guard is what
+                # torch.compiler.skip_guard_on_globals_unsafe does explicitly,
+                # and the "unsafe" in that name applies here too: a dropped
+                # global guard does not fail, it silently reuses a graph traced
+                # under a different global value. Narrowing this default needs
+                # guard construction to resolve arbitrary global references
+                # first (today they can raise KeyError on G['...']), so callers
+                # who need a specific global guarded must pass guard_filter_fn.
                 return [
                     (
                         not (

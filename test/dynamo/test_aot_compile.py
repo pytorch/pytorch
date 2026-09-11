@@ -33,6 +33,7 @@ from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, Serializable
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
+from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
@@ -367,6 +368,38 @@ class SimpleLinearModule(torch.nn.Module):
 
     def forward(self, x):
         return self.linear(x)
+
+
+AOT_POOL_MODE = "sum"
+
+
+def global_rebind_fn(x):
+    if AOT_POOL_MODE == "sum":
+        return x.sum(1)
+    return x.mean(1) * 10.0
+
+
+@contextmanager
+def _set_pool_mode(mode):
+    global AOT_POOL_MODE
+    old = AOT_POOL_MODE
+    AOT_POOL_MODE = mode
+    try:
+        yield
+    finally:
+        AOT_POOL_MODE = old
+
+
+def keep_global_guards(guard_entries):
+    # Same policy the guard serializer enforces: drop only what cannot be
+    # serialized, and in particular keep the global guards that the default
+    # aot_compile filter drops wholesale.
+    unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+    return [
+        g.guard_type not in unsupported
+        and not any(d in unsupported for d in g.derived_guard_types)
+        for g in guard_entries
+    ]
 
 
 class RepeatInterleaveModule(torch.nn.Module):
@@ -1441,6 +1474,40 @@ from user code:
 
     def test_aot_compile_module(self):
         _run_in_subprocess(_subprocess_aot_compile_module)
+
+    def test_aot_compile_fn_guards_track_rebound_global(self):
+        # Function artifacts get their guard scope from load_compiled_function's
+        # f_globals. Same contract as the module test above: the live dict, not
+        # a copy, so a rebind after load changes the guard's answer.
+        global AOT_POOL_MODE
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pool_mode(mode):
+                expected[mode] = global_rebind_fn(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        saved = AOT_POOL_MODE
+        try:
+            AOT_POOL_MODE = "sum"
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f, f_globals=globals())
+            self.assertEqual(loaded(x), expected["sum"])
+            AOT_POOL_MODE = "mean"
+            with self.assertRaisesRegex(RuntimeError, "AOT_POOL_MODE"):
+                loaded(x)
+        finally:
+            AOT_POOL_MODE = saved
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
