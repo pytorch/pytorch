@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 import warnings
 import zipfile
@@ -4949,6 +4950,67 @@ class TestSerialization(TestCase, SerializationMixin):
         with torch.sparse.check_sparse_tensor_invariants(True):
             with self.assertRaisesRegex(RuntimeError, "size is inconsistent with indices"):
                 torch.load(bad_buf, weights_only=False)
+
+    def test_weights_only_sparse_validation_is_thread_local(self):
+        bad = torch.sparse_coo_tensor(
+            torch.tensor([[0, 999]]),
+            torch.tensor([1.0, 2.0]),
+            (2,),
+            check_invariants=False,
+        )
+        bad_buffer = io.BytesIO()
+        torch.save({"s": bad}, bad_buffer)
+        good_buffer = io.BytesIO()
+        torch.save({"t": torch.ones(1)}, good_buffer)
+
+        bad_validation_started = threading.Event()
+        resume_bad_validation = threading.Event()
+        original_validate = torch._utils._validate_loaded_sparse_tensors
+        errors = {}
+        results = {}
+
+        def synchronized_validate(weights_only=False):
+            if threading.current_thread() is bad_thread:
+                bad_validation_started.set()
+                if not resume_bad_validation.wait(timeout=5):
+                    raise RuntimeError("timed out waiting to resume validation")
+            return original_validate(weights_only=weights_only)
+
+        def load_bad():
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    results["bad"] = torch.load(
+                        io.BytesIO(bad_buffer.getvalue()), weights_only=True
+                    )
+            except Exception as error:
+                errors["bad"] = error
+
+        bad_thread = threading.Thread(target=load_bad)
+        with patch.object(
+            torch._utils,
+            "_validate_loaded_sparse_tensors",
+            synchronized_validate,
+        ):
+            bad_thread.start()
+            try:
+                self.assertTrue(bad_validation_started.wait(timeout=5))
+                try:
+                    results["good"] = torch.load(
+                        io.BytesIO(good_buffer.getvalue()), weights_only=True
+                    )
+                except Exception as error:
+                    errors["good"] = error
+            finally:
+                resume_bad_validation.set()
+                bad_thread.join(timeout=5)
+
+        self.assertFalse(bad_thread.is_alive())
+        self.assertNotIn("good", errors)
+        self.assertEqual(results["good"]["t"], torch.ones(1))
+        self.assertNotIn("bad", results)
+        self.assertIn("bad", errors)
+        self.assertRegex(str(errors["bad"]), "size is inconsistent with indices")
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
