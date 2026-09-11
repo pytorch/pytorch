@@ -791,6 +791,39 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         (cell,) = loaded._artifacts.runtime_env.closure
         self.assertEqual(cell.cell_contents.__dict__, {"tag": 2.0})
 
+    def test_aot_compile_reloads_a_helpers_annotations(self):
+        # The shipping path: an annotated helper reached through
+        # runtime_env.closure keeps the annotations that pickle and drops the
+        # <locals> class one.
+        def outer():
+            class Cfg:
+                pass
+
+            def helper(x: Cfg, scale: int = 2) -> int:
+                return x * scale
+
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            self.assertEqual(loaded(*inputs), expected)
+        (cell,) = loaded._artifacts.runtime_env.closure
+        self.assertEqual(
+            cell.cell_contents.__annotations__, {"scale": int, "return": int}
+        )
+
     def test_aot_compile_prunes_a_lock_behind_functools_wraps_wrapped(self):
         # functools.wraps writes __wrapped__ into the wrapper's __dict__ and
         # copies the wrappee's __dict__ too, so a helper that merely decorates
@@ -825,7 +858,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         # the bare co_name).
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             compiled_fn.save_compiled_function(self.path())
-        self.assertEqual(len(logs.output), 2)
+        self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
         self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
         self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
         if sys.version_info >= (3, 11):
@@ -2240,9 +2273,63 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         fn = outer()
         buf = io.BytesIO()
-        AOTCompilePickler({}, buf).dump(fn)
+        dumps = [0]
+        real_dump = AOTCompilePickler.dump
+
+        def counting_dump(self, obj):
+            dumps[0] += 1
+            return real_dump(self, obj)
+
+        with patch.object(AOTCompilePickler, "dump", counting_dump):
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertEqual(dumps[0], 1)  # a literal entry is not probed
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.tag, 2.0)
+
+    def test_pickler_warns_once_for_a_function_reduced_twice(self):
+        # A function that closes over itself is reduced twice (the closure is a
+        # reduce ARGUMENT, so the second pass finds it not yet memoized); the
+        # real dump's per-function memo keeps the drop to one probe and one
+        # warning.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                return inner if x is None else x
+
+            inner.lock = threading.Lock()
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertEqual(len([l for l in logs.output if "dropping" in l]), 1)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "lock"))
+        self.assertEqual(out(5), 5)
+
+    def test_pickler_names_the_modules_inside_a_dropped_container(self):
+        # A picklable container holding unmarked Modules is dropped whole; the
+        # warning names the container's type and every Module inside it.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.mods = [torch.nn.Linear(1, 1), torch.nn.ReLU()]
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("helper.mods (list)", line)
+        self.assertIn("not marked as external data (Linear, ReLU)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "mods"))
 
     def test_pickler_resolves_and_keeps_a_serializable_annotation(self):
         # A <locals> function's annotations are resolved to real values and
@@ -2281,10 +2368,38 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         fn = outer()
         buf = io.BytesIO()
-        AOTCompilePickler({}, buf).dump(fn)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("inner.__annotations__['x'] (type)", line)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.__annotations__, {"y": int, "return": int})
         self.assertEqual(out(object(), 5), 5)
+
+    def test_pickler_survives_a_reduce_that_writes_back_an_annotation(self):
+        # A probe runs user __reduce__ code; one that writes onto the function's
+        # __annotations__ while they are being walked must not raise
+        # "dictionary changed size during iteration" out of the dump.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            class WritesBack:
+                def __reduce__(self):
+                    inner.__annotations__["added"] = int
+                    raise TypeError("cannot pickle WritesBack")
+
+            def inner(x: "WritesBack", y: int) -> int:
+                return y
+
+            inner.__annotations__["x"] = WritesBack()
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING"):
+            AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__annotations__, {"y": int, "return": int})
 
     def test_pickler_keeps_picklable_type_params(self):
         # __type_params__ is carried when its elements pickle: a module-level
@@ -2443,7 +2558,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         with patch.object(AOTCompilePickler, "dump", counting_dump):
             AOTCompilePickler({}, buf).dump(top)
-        self.assertLess(dumps[0], 100)
+        self.assertLess(dumps[0], 32)  # 16 today; quadratic on 8 nodes is 64
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertFalse(hasattr(out, "f0"))
         self.assertFalse(hasattr(out.f1, "f0"))
