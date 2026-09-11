@@ -762,6 +762,11 @@ flydsl_mxfp8_grouped_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mxfp8_grouped_mm"),
 )
 
+flydsl_mxfp8_wgrad_template = FlyDSLTemplate(
+    name="mxfp8_wgrad_flydsl",
+    source=load_kernel_template("flydsl_mxfp8_wgrad"),
+)
+
 
 def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     mat_a: TensorBox,
@@ -912,6 +917,79 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     ]
 
 
+def get_flydsl_mxfp8_wgrad_template_kwargs(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    scale_a: TensorBox,
+    scale_b: TensorBox,
+    offs: TensorBox | None,
+    layout: Layout,
+    is_nonzero: bool,
+) -> list[dict[str, object]]:
+    """Return the FlyDSL config for a 2D x 2D grouped MXFP8 GEMM.
+
+    Offsets partition the shared contraction dimension, so each group computes
+    ``mat_a[:, start:end] @ mat_b[start:end, :]``. This is the weight-gradient
+    form used by MXFP8 MoE training.
+    """
+    if not is_nonzero or not use_flydsl_gemm_template(layout) or offs is None:
+        return []
+    if len(mat_a.get_size()) != 2 or len(mat_b.get_size()) != 2:
+        return []
+    if mat_a.get_dtype() != torch.float8_e4m3fn:
+        return []
+    if mat_b.get_dtype() != torch.float8_e4m3fn:
+        return []
+    if layout.dtype != torch.bfloat16:
+        return []
+    if scale_a.get_dtype() != torch.float8_e8m0fnu:
+        return []
+    if scale_b.get_dtype() != torch.float8_e8m0fnu:
+        return []
+    if offs.get_dtype() != torch.int32 or len(offs.get_size()) != 1:
+        return []
+
+    statically_known = PythonWrapperCodegen.statically_known_int_or_none
+    n = statically_known(mat_a.get_size()[0])
+    m = statically_known(mat_a.get_size()[1])
+    k = statically_known(mat_b.get_size()[1])
+    g = statically_known(offs.get_size()[0])
+    if n is None or m is None or k is None or g is None:
+        return []
+    if m != statically_known(mat_b.get_size()[0]):
+        return []
+    if m <= 0 or m % 128 != 0 or n % 16 != 0 or k % 16 != 0:
+        return []
+
+    sizevars = V.graph.sizevars
+    scale_m = m // 32
+    if mat_a.get_stride() != [m, 1]:
+        return []
+    if mat_b.get_stride() != [1, m]:
+        return []
+    if scale_a.get_size() != [n, scale_m] or scale_a.get_stride() != [scale_m, 1]:
+        return []
+    if scale_b.get_size() != [k, scale_m] or scale_b.get_stride() != [scale_m, 1]:
+        return []
+    if layout.stride != [n * k, k, 1]:
+        return []
+
+    operands = (mat_a, mat_b, scale_a, scale_b)
+    if any(is_unaligned(node) for node in operands):
+        return []
+    if any(
+        not sizevars.statically_known_multiple_of(
+            node.get_layout().offset, GPU_ALIGN_BYTES
+        )
+        for node in operands
+    ):
+        return []
+    if max(n * m, k * m, g * n * k) >= 2**31:
+        return []
+
+    return [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g}]
+
+
 # The op takes recipes and swizzles as plain ints, and the pybind enums compare
 # equal to neither ints nor freshly constructed instances of themselves, so the
 # two the lowering can serve are pinned to their integer values here.
@@ -947,14 +1025,12 @@ def tuned_scaled_grouped_mm_v2(
 ) -> TensorBox:
     """Auto-tuning for the _scaled_grouped_mm_v2() operator.
 
-    Only one combination has a lowering here: MXFP8 x MXFP8 (BlockWise1x32
-    e8m0 scales, NO_SWIZZLE) on gfx950, served by the vendored FlyDSL ragged
-    grouped GEMM. That combination has no ATen kernel on ROCm at all -- the
-    MSLK grouped path is CUDA-only and `_mx8_mx8_bf16_grouped_mm_mslk` raises
-    NOT_IMPLEMENTED there -- so the FlyDSL template is not competing with an
-    extern choice, it is the only one, and no ATen choice is offered for it.
-    Everything else falls back to the eager op, which is what happened before
-    this lowering existed.
+    MXFP8 x MXFP8 (BlockWise1x32 e8m0 scales, NO_SWIZZLE) on gfx950 is served
+    by FlyDSL for both the 2D x 3D forward form and the 2D x 2D weight-gradient
+    form. These combinations have no ATen kernel on ROCm -- the MSLK grouped
+    path is CUDA-only and `_mx8_mx8_bf16_grouped_mm_mslk` raises NOT_IMPLEMENTED
+    there -- so no ATen choice is offered. Everything else falls back to the
+    eager op, which is what happened before this lowering existed.
     """
 
     def _is_mxfp8_recipe(recipe: list[int]) -> bool:
@@ -1004,6 +1080,21 @@ def tuned_scaled_grouped_mm_v2(
                 layout=mm_layout,
                 **flydsl_kwargs,
             )
+        for flydsl_kwargs in get_flydsl_mxfp8_wgrad_template_kwargs(
+            mat_a,
+            mat_b,
+            scale_a_real,
+            scale_b_real,
+            offs,
+            mm_layout,
+            is_nonzero,
+        ):
+            flydsl_mxfp8_wgrad_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=mm_layout,
+                **flydsl_kwargs,
+            )
 
         if choices:
             counters["aten_mm_info"]["aten._scaled_grouped_mm_v2.default"] += 1
@@ -1018,9 +1109,10 @@ def tuned_scaled_grouped_mm_v2(
             )
             m, k = m1_size
             n = m2_size[-1]
+            alignment = 32 if len(m2_size) == 2 else 16 // mat_a.dtype.itemsize
             input_gen_fns = {
                 4: lambda x: create_offsets(
-                    x, True, False, m, n, k, 16 // mat_a.dtype.itemsize
+                    x, True, len(m2_size) == 2, m, n, k, alignment
                 )
             }
             node, _ = autotune_select_algorithm(
