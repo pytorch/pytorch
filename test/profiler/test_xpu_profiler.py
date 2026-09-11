@@ -3,6 +3,8 @@
 
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections import defaultdict
@@ -134,6 +136,54 @@ class XpuProfilerTest(TestCase):
 
         if Verbose:
             print(p.key_averages().table())
+
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_profiler_with_xpu_graph(self):
+        # Subprocess: Kineto registers its activity set once per process, and
+        # the other tests in this file already profile.
+        script = """
+import torch
+from torch.profiler import ProfilerActivity, profile
+
+def add_one(in_: torch.Tensor):
+    return in_ + 1
+
+sample_arg = torch.zeros(10, device="xpu").requires_grad_(True)
+
+add_one_graphed = torch.xpu.graphs.make_graphed_callables(add_one, sample_args=(sample_arg,))
+zeros = torch.zeros(10, device="xpu")
+out = add_one_graphed(zeros)
+if out[0] != 1:
+    raise AssertionError(f"Expected out[0] == 1, got {out[0]}")
+
+with profile(activities=[ProfilerActivity.CPU]):
+    add_one_graphed(zeros)
+
+# Graph replay surfaces no device-side events, so there is nothing to assert.
+with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.XPU]):
+    add_one_graphed(zeros)
+
+out = add_one_graphed(zeros)
+torch.xpu.synchronize()
+if out[0] != 1:
+    raise AssertionError(f"Expected out[0] == 1, got {out[0]}")
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            text=True,
+            timeout=120,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            # Native graph recording needs SYCL compiler >= 2026.1.0 on
+            # non-PVC architectures (aten/src/ATen/xpu/XPUGraph.cpp);
+            # older builds can fail to finalize the graph on the driver side.
+            if "Failed to instantiate native UR executable graph" in proc.stderr:
+                self.skipTest(
+                    "torch.xpu.graphs requires oneAPI SYCL compiler >= 2026.1.0 "
+                    "for native graph recording on this architecture"
+                )
+            self.fail(f"subprocess failed (exit {proc.returncode}):\n{proc.stderr}")
 
 
 if __name__ == "__main__":
