@@ -233,6 +233,9 @@ def prepare_cudagraph_post_compile(
 def _get_runtime_cudagraph_fail_reason(
     compiled_graph: CompiledFxGraph,
 ) -> str | None:
+    if config.cudagraph_policy is not None:
+        return None
+
     device_types = [
         device_type
         for device_type in compiled_graph.device_types
