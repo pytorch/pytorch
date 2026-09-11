@@ -13,8 +13,9 @@ By default only CONCURRENT_KERNEL is timed -- the common case. Opt into MEMCPY /
 MEMCPY2 (peer-to-peer) / MEMSET via ``kinds`` to time those nodes too. Requesting
 MEMCPY2 also enables MEMCPY implicitly (CUPTI emits no MEMCPY2 records unless
 MEMCPY is on too). Every kind here times the same 4
-fields (START, END, GRAPH_NODE_ID, STREAM_ID), so all records are one size and
-Cuspy decodes them via its vectorized stride + kind-dispatch path; this observer
+fields (START, END, GRAPH_NODE_ID, STREAM_ID) -- plus SOURCE_GRAPH_NODE_ID when every
+selected kind has one (``records.SOURCE_GRAPH_NODE_FIELD``) -- so all records are one size
+and Cuspy decodes them via its vectorized stride + kind-dispatch path; this observer
 just buffers the raw columns (the cost is in Cuspy's decode, not here).
 
 Durations are keyed by graph_node_id alone, kind-agnostic: each CUDA-graph node
@@ -26,7 +27,9 @@ base); :meth:`drain_annotated` then returns ``{name: [(start_ns, end_ns), ...]}`
 resolving each span graph-first then eager-fallback:
 
   * **Graph** (``graph_annotation_resolver``) -- ``graph_node_id -> name`` via the resolver
-    (a custom one or the default registry). Needs no extra record kinds, so it stays on
+    (a custom one or the default registry), tried on the node's source (capture) id before
+    its exec id, since a graph captured with ``annotation_config["key_by"] == "source"``
+    keeps its annotations under the former. Needs no extra record kinds, so it stays on
     Cuspy's **vectorized** decode path. On by default; ``None`` disables it.
   * **Eager** (``support_eager_annotations``) -- ``record_function``-style regions bracketed
     with :meth:`push_annotation`/:meth:`annotate` (inherited from the base) become
@@ -57,6 +60,7 @@ from torch.profiler._cuspy.records import (
     Memcpy,
     Memcpy2,
     Memset,
+    SOURCE_GRAPH_NODE_FIELD,
 )
 
 
@@ -113,6 +117,19 @@ def _bucket_name(annotation: Any) -> str:
     return str(annotation) if annotation else ""
 
 
+def _graph_names(resolver: Any, nodes: Any) -> Any:
+    """Per-span bucket name from a graph annotation resolver. Resolves each *unique* node
+    id once (a small set) and gathers back to per-span; node 0 (eager) never resolves."""
+    import numpy as np
+
+    uniq, inv = np.unique(nodes, return_inverse=True)
+    names = np.array(
+        [_bucket_name(resolver(int(g))) if g else "" for g in uniq.tolist()],
+        dtype=object,
+    )
+    return names[inv]
+
+
 class NodeTimerObserver(CuspyObserver):
     """Buffers raw per-activity ``(graph_node_id, start_ns, end_ns, stream_id)`` spans
     Cuspy delivers; :meth:`drain` returns them as flat numpy columns. Construct with
@@ -143,8 +160,9 @@ class NodeTimerObserver(CuspyObserver):
         self._lock = threading.Lock()
         # Raw span column chunks as the worker thread delivers them: each is
         # (graph_node_id, start, end, stream, correlation_id|None -- the id only when
-        # eager). Kept raw (not pre-aggregated) so consumers build per-kernel timing on top.
-        self._chunks: list[tuple[Any, Any, Any, Any, Any]] = []
+        # eager, source_graph_node_id). Kept raw (not pre-aggregated) so consumers build
+        # per-kernel timing on top.
+        self._chunks: list[tuple[Any, Any, Any, Any, Any, Any]] = []
         # EXTERNAL_CORRELATION chunks (external_id, correlation_id) for the eager name
         # join; only populated when eager naming is on.
         self._ext_chunks: list[tuple[Any, Any]] = []
@@ -152,12 +170,24 @@ class NodeTimerObserver(CuspyObserver):
         # (CORRELATION_ID + EXTERNAL_CORRELATION + RUNTIME) and sets up the resolver
         # from `annotations`. Register last so the buffers are ready before delivery.
         fields = {int(k): set(_TIMED_FIELDS[int(k)]) for k in self._kinds}
+        # Source (capture-graph) node ids where the CUPTI ABI has them: a graph's
+        # annotations sit under those instead of the exec node ids when it was captured
+        # with annotation_config["key_by"] == "source". All-or-nothing across the selected
+        # kinds (MEMCPY2 has no such field) so every record stays one size and the decode
+        # stays on the vectorized path.
+        self._source_fields: dict[int, int] = (
+            {k: SOURCE_GRAPH_NODE_FIELD[k] for k in fields}
+            if all(k in SOURCE_GRAPH_NODE_FIELD for k in fields)
+            else {}
+        )
+        for kind, field in self._source_fields.items():
+            fields[kind].add(field)
         super().__init__(fields, annotations=annotations)
 
     def _on_activities(self, columns: dict[Any, dict[int, Any]]) -> None:
         # Worker thread: just stash the columns (cheap append); grouping/joining
         # happens after drain, off this hot path.
-        spans: list[tuple[Any, Any, Any, Any, Any]] = []
+        spans: list[tuple[Any, Any, Any, Any, Any, Any]] = []
         exts: list[tuple[Any, Any]] = []
         for kind, cols in columns.items():
             k = int(kind)
@@ -182,7 +212,10 @@ class NodeTimerObserver(CuspyObserver):
             if start is None or end is None or gnode is None or stream is None:
                 continue
             corr = cols.get(CORRELATION_FIELD[k]) if self._eager else None
-            spans.append((gnode, start, end, stream, corr))
+            source_field = self._source_fields.get(k)
+            src = None if source_field is None else cols.get(source_field)
+            src = gnode if src is None else src
+            spans.append((gnode, start, end, stream, corr, src))
         if spans or exts:
             with self._lock:
                 self._chunks.extend(spans)
@@ -275,12 +308,16 @@ class NodeTimerObserver(CuspyObserver):
 
         resolver = self._annotation_resolver
         if resolver is not None:
-            uniq_g, inv_g = np.unique(gnode, return_inverse=True)
-            g_names = np.array(
-                [_bucket_name(resolver(int(g))) if g else "" for g in uniq_g.tolist()],
-                dtype=object,
-            )
-            span_names = g_names[inv_g]
+            # Source (capture) node ids first, then the exec ids: a graph's annotations are
+            # under one or the other depending on its annotation_config["key_by"], and a run
+            # can mix graphs that chose differently. The two key spaces hold different graph
+            # ids, so a hit is never ambiguous.
+            source = np.concatenate([c[5] for c in chunks]).astype("<u8", copy=False)
+            span_names = _graph_names(resolver, source)
+            if self._source_fields:
+                unnamed = span_names == ""
+                if unnamed.any():
+                    span_names[unnamed] = _graph_names(resolver, gnode)[unnamed]
 
         # Eager fallback for spans the graph resolver didn't name: correlation_id ->
         # external_id -> name. The external ids were resolved at dispatch through
