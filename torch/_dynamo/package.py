@@ -179,38 +179,46 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_module(
         cls,
+        scope: Any,
         module: Any,
         code: types.CodeType,
         qualname: str,
         name: str,
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
-        # functools.wraps copies __module__, so this scope can be a different
-        # file from the one the function lives in; a pickler that guards
-        # __globals__ sends the snapshot variant instead. Importing it here runs
-        # that module's top-level code at guard-load time if it is not loaded
-        # yet; for a wraps wrapper that is the wrapped function's module, almost
-        # always already imported. A module that only existed in sys.modules
-        # at save (exec-created, transformers_modules.*) gets an empty scope.
-        # That is safe on the guard-serialization path, which reads attributes
-        # off the rebuilt function without calling it; a pickler whose
-        # functions are CALLED after load would see an empty scope as a
-        # NameError at first call, not a load error.
-        f_globals: dict[str, Any]
-        # __module__ need not be an importable string: a decorator can set it to
-        # a non-str (42), a <locals>/exec function can carry None or "" (bare
-        # globals with no __name__), and a relative name (".rel") or a module
-        # whose body raises fails import with something other than ImportError.
-        # None of those should fail the load, so require a non-empty str and
-        # swallow any import failure into the empty scope.
-        if isinstance(module, str) and module:
+        # `scope` is the __name__ of the module dict the code was compiled
+        # against (fn.__globals__), which is what the body reads at call time;
+        # `module` is fn.__module__, restored as an attribute. functools.wraps
+        # copies __module__ from the wrappee, so the two differ for a wrapper
+        # defined in another file, and a function whose __module__ is None still
+        # has a scope. A pickler that guards __globals__ sends the snapshot
+        # variant instead. Importing here runs that module's top-level code at
+        # load if it is not loaded yet; for a wraps wrapper that is the
+        # decorator's module, almost always already imported. A scope that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # comes back empty: safe on the guard-serialization path, which reads
+        # attributes off the rebuilt function without calling it; a pickler
+        # whose functions are CALLED after load (AOTCompilePickler, once it is
+        # on this base) sees an empty scope as a NameError at first call, not a
+        # load error. "__main__" imports the LOADING process's __main__, as
+        # pickle's own by-reference path does; a module that swapped a proxy
+        # into sys.modules (torch.backends.cudnn) imports as that proxy, as the
+        # old import of __module__ did.
+        # Not every __name__ is importable: a <locals>/exec function can carry
+        # None or "" (bare globals with no __name__), and a relative name
+        # (".rel") or a module whose body raises fails import with something
+        # other than ImportError. None of those should fail the load, so require
+        # a non-empty str and swallow any Exception from the import into the
+        # empty scope (SystemExit/KeyboardInterrupt still propagate).
+        f_globals: dict[str, Any] = {}
+        why: str | Exception = f"scope {scope!r} is not an importable name"
+        if isinstance(scope, str) and scope:
             try:
-                f_globals = importlib.import_module(module).__dict__
+                f_globals = importlib.import_module(scope).__dict__
             except Exception as e:
-                logger.debug("rebuilding %s with an empty scope: %s", qualname, e)
-                f_globals = {}
-        else:
-            f_globals = {}
+                why = e
+        if not f_globals:
+            logger.debug("rebuilding %s with an empty scope: %s", qualname, why)
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
@@ -395,9 +403,12 @@ class FunctionPicklerBase(pickle.Pickler):
         # no guard reads so an unpicklable local class in an annotation -- or a
         # __doc__ reassigned to an unpicklable object -- cannot fail the whole
         # dump (a failure there silently bypasses the package).
+        # Both unpicklers take (scope, module, code, qualname, name, closure):
+        # the scope is the module NAME to import or the snapshot dict itself.
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
             unpickle = type(self)._unpickle_fn_from_module
+            args = (fn.__globals__.get("__name__"), *args)
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
             args = (globals_snapshot, *args)

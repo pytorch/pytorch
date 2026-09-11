@@ -1279,6 +1279,37 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual((out.__name__, out.__qualname__), ("f", fn.__qualname__))
 
+    def test_rebuilt_wrapper_is_scoped_to_the_module_that_compiled_it(self):
+        # functools.wraps copies __module__ from the wrappee, but the wrapper's
+        # body reads the decorator module's globals. A rebuild that imported
+        # __module__ handed it the wrappee's dict; the compile scope travels
+        # separately so the rebuilt function's __globals__ is the decorator's.
+        deco_mod = types.ModuleType("_guard_deco_mod_for_scope_test")
+        deco_mod.SCALE = 100
+        exec(
+            "import functools\n"
+            "def deco(f):\n"
+            "    @functools.wraps(f)\n"
+            "    def wrapper(x):\n"
+            "        return f(x) * SCALE\n"
+            "    return wrapper\n",
+            deco_mod.__dict__,
+        )
+        sys.modules[deco_mod.__name__] = deco_mod
+        self.addCleanup(sys.modules.pop, deco_mod.__name__, None)
+        fn = deco_mod.deco(global_func)
+        self.assertEqual(fn.__module__, __name__)
+        buf = io.BytesIO()
+        # global_func is registered so the closure cell holding it is kept and
+        # the rebuilt wrapper can be CALLED (the guard pickler never does).
+        gtv = {id(fn): fn, id(global_func): global_func}
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIs(out.__globals__, deco_mod.__dict__)
+        self.assertEqual(out.__module__, __name__)
+        # SCALE resolves through the decorator module; __module__'s dict has none.
+        self.assertEqual(out(1), (1 + 1) * 100)
+
     def test_reduce_restores_a_non_str_module(self):
         # Dynamo cannot trace a function whose __module__ is not a str (its
         # trace rules split it), so this is pickler-level: a decorator can still
@@ -1291,6 +1322,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(out.__module__, ["not", "a", "module"])
+        # A non-str __module__ still has a compile scope, and that is what the
+        # rebuilt function gets as its globals.
+        self.assertIs(out.__globals__, globals())
 
     def test_fqn_resolves_only_when_pickle_by_name_lands_on_the_function(self):
         # The shared test behind "rebuild from the code object or not": True
@@ -1757,10 +1791,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
     def test_guard_through_globals_of_a_wrapper_from_another_module(self):
-        # __module__ names the wrapped function's module, so an import at load
-        # would hand the rebuilt wrapper THAT module's dict and the guard
-        # reading wrapper.__globals__[name] would KeyError while the guard
-        # manager is built. The snapshot carries the dict the guard read.
+        # A guard reads through wrapper.__globals__, so the dict it read travels
+        # as a snapshot; __module__ is the wrapped function's and is restored as
+        # an attribute. The wrapper lives in this module, so an import of its
+        # compile scope would land on the same live dict; what only the snapshot
+        # provides is pinned by test_snapshot_keeps_the_save_time_value_of_a_guarded_global.
         global OTHER_MODULE_CONST
         wrapper = WRAPPED_FROM_OTHER_MODULE
         self.assertEqual(wrapper.__module__, torch._dynamo.testing.__name__)
@@ -1941,9 +1976,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
 
     def test_fqn_mismatched_function_from_a_module_gone_at_load(self):
-        # The rebuilt function's __module__ names a module that only ever lived
-        # in sys.modules (exec-created, transformers_modules.*), so the load
-        # cannot import it; see FunctionPicklerBase._unpickle_fn_from_module.
+        # The rebuilt function's compile scope, __globals__["__name__"], names a
+        # module that only ever lived in sys.modules (exec-created,
+        # transformers_modules.*), so the load cannot import it; see
+        # FunctionPicklerBase._unpickle_fn_from_module.
         name = "dynamo_test_guard_serialization_exec_module"
         mod = types.ModuleType(name)
         mod.keep_fn_name = keep_fn_name
