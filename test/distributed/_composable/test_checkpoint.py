@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import unittest
 from collections import deque, OrderedDict
 from contextlib import ContextDecorator, contextmanager, nullcontext
 from copy import deepcopy
@@ -9,8 +8,12 @@ from functools import partial
 import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.utils.checkpoint import CheckpointError
 
 
@@ -93,7 +96,40 @@ class MultiInputModel(nn.Module):
         return nn.functional.relu(z)
 
 
+def check_tensor_only(
+    test_case: TestCase,
+    net: nn.Module,
+    x: torch.Tensor,
+) -> None:
+    x1 = x.clone()
+    x2 = x.clone()
+    x1.requires_grad = True
+    x2.requires_grad = True
+
+    net1 = net
+    net2 = deepcopy(net)
+
+    # no checkpoint
+    with MemoryDelta(x.device) as mem1:
+        loss1 = net1(x1).sum()
+    loss1.backward()
+
+    # with checkpoint
+    checkpoint(net2.seq)
+    with MemoryDelta(x.device) as mem2:
+        loss2 = net2(x2).sum()
+    loss2.backward()
+
+    if x.is_cuda or x.is_xpu:
+        test_case.assertTrue(mem2.delta() < mem1.delta())
+
+    for p1, p2 in zip(net1.parameters(), net2.parameters()):
+        test_case.assertEqual(p1.grad, p2.grad)
+
+
 class TestCheckpoint(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_graph_size(self, out: torch.Tensor) -> int:
         q = deque([out.grad_fn])
         num_functions = 0
@@ -106,46 +142,10 @@ class TestCheckpoint(TestCase):
 
         return num_functions
 
-    def _test_tensor_only(
-        self,
-        net: nn.Module,
-        x: torch.Tensor,
-    ) -> None:
-        x1 = x.clone()
-        x2 = x.clone()
-        x1.requires_grad = True
-        x2.requires_grad = True
-
-        net1 = net
-        net2 = deepcopy(net)
-
-        # no checkpoint
-        with MemoryDelta(x.device) as mem1:
-            loss1 = net1(x1).sum()
-        loss1.backward()
-
-        # with checkpoint
-        checkpoint(net2.seq)
-        with MemoryDelta(x.device) as mem2:
-            loss2 = net2(x2).sum()
-        loss2.backward()
-
-        if x.is_cuda or x.is_xpu:
-            self.assertTrue(mem2.delta() < mem1.delta())
-
-        for p1, p2 in zip(net1.parameters(), net2.parameters()):
-            self.assertEqual(p1.grad, p2.grad)
-
     def test_tensor_only_cpu(self):
         x = torch.randn(20, 100)
         net = ToyModel()
-        self._test_tensor_only(net, x)
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
-    def test_tensor_only_gpu(self):
-        x = torch.randn(20, 100, device=f"{device_type}:0")
-        net = ToyModel().to(f"{device_type}:0")
-        self._test_tensor_only(net, x)
+        check_tensor_only(self, net, x)
 
     def test_random_cpu(self):
         x1 = torch.randn(20, 100, requires_grad=True)
@@ -332,6 +332,23 @@ class TestCheckpoint(TestCase):
         # check that m6 and m8 have identical grads
         for p1, p2 in zip(m6.parameters(), m8.parameters()):
             self.assertEqual(p1.grad, p2.grad)
+
+
+class TestCheckpointAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_tensor_only_gpu(self, device):
+        x = torch.randn(20, 100, device=f"{device_type}:0")
+        net = ToyModel().to(f"{device_type}:0")
+        check_tensor_only(self, net, x)
+
+
+instantiate_device_type_tests(
+    TestCheckpointAccelerator,
+    globals(),
+    only_for=["cuda", "xpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
