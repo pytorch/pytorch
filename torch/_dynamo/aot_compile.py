@@ -107,12 +107,16 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except __doc__ and __dict__
-            # entries that will not pickle. The runtime assigns those back and
-            # never forces the pruned ones, so a value this pickler cannot
-            # serialize (a __dict__ entry like the __wrapped__ functools.wraps
-            # stashes, which can drag an unrelated lock/Module in) is dropped
-            # rather than left to fail the whole dump.
+            # pickler nothing it holds is pruned -- except annotations, __doc__,
+            # and __dict__ entries that will not pickle. The runtime assigns
+            # those back and never forces the pruned ones, so a value this
+            # pickler cannot serialize (a <locals> annotation class, or a
+            # __dict__ entry like the __wrapped__ functools.wraps stashes, which
+            # can drag an unrelated lock/Module in) is dropped rather than left
+            # to fail the whole dump. Known limitation: the top-level function's
+            # own annotations ride on CompileArtifacts.signature, which
+            # serialize() dumps unpruned, so this only protects the nested
+            # functions reached here.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
@@ -121,7 +125,7 @@ class AOTCompilePickler(FunctionPicklerBase):
                 attributes={
                     k: v for k, v in obj.__dict__.items() if self._dumps_cleanly(v)
                 },
-                annotations={},
+                annotations=self._pickleable_annotations(obj),
                 # __doc__ is the one reduced value the runtime never reads back
                 # (_apply_function_state assigns it, nothing forces it), so an
                 # unpicklable docstring must not fail the whole dump -- drop it
@@ -194,6 +198,18 @@ class AOTCompilePickler(FunctionPicklerBase):
             state.parked.clear()
             state.leaned = False
         return result
+
+    def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
+        # resolve=True first turns a 3.14 FORWARDREF proxy into a real value (or
+        # drops the whole set when a TYPE_CHECKING-only name will not resolve).
+        # Below 3.14 it hands back __annotations__ raw. Either way a value can
+        # still be unpicklable -- a <locals> class resolves fine yet pickle
+        # cannot reference it -- so probe each and keep only the ones that dump.
+        return {
+            name: value
+            for name, value in self._read_raw_annotations(obj, resolve=True).items()
+            if self._dumps_cleanly(value)
+        }
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
