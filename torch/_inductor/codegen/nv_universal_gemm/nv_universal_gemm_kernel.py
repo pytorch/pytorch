@@ -199,13 +199,13 @@ def _current_target_sm(dev_idx: int):
 def _make_disk_config_key(
     kernel_name: str,
     variant_name: str,
-    accumulator_type: Any,
-    scale_type_a: Any | None = None,
-    scale_type_b: Any | None = None,
-    swizzle_type_a: Any | None = None,
-    swizzle_type_b: Any | None = None,
+    accumulator_type: object,
+    scale_type_a: object = None,
+    scale_type_b: object = None,
+    swizzle_type_a: object = None,
+    swizzle_type_b: object = None,
     epilogue_source: str = "",
-) -> tuple:
+) -> tuple[str, ...]:
     return (
         kernel_name,
         variant_name,

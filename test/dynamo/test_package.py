@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 
+import functools
 import gc
 import importlib
 import os
 import sys
 import tempfile
+import types
 import unittest
 
 import torch
@@ -13,6 +15,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
@@ -37,6 +40,64 @@ def compute_loss_helper(x):
 
 def compiled_region_with_backend_id_for_package_test():
     return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
+
+
+class UnpicklableConfig:
+    # Like ConfigThatCannotPickle, but the failure is not an AttributeError.
+    scale = 2.0
+
+    def __reduce__(self):
+        raise RuntimeError("config cannot pickle")
+
+
+def _bound_method_guard_target(self, x):
+    return x
+
+
+@functools.wraps(_bound_method_guard_target)
+def _bound_method_guard_wrapper(self, x):
+    return x * 3
+
+
+class _BoundMethodGuardRecv:
+    pass
+
+
+class BoundMethodNameGuardModule(torch.nn.Module):
+    # self.cb binds an fqn-mismatched function; the guard reads through its
+    # __func__. Unless that function is seeded into guard_tree_values when the
+    # method's guard manager is built, it is pruned to an fqn-mismatch _Missing
+    # and the __name__ guard AttributeErrors at load (that reproduces with
+    # self.cb alone). self.other pins the seed SITE: it reaches the same
+    # function first, so a seed placed in the reducer, when it finally sees the
+    # method, is too late -- pickle has memoized the function by then.
+    def __init__(self):
+        super().__init__()
+        self.other = _bound_method_guard_wrapper  # must precede self.cb, see above
+        self.cb = types.MethodType(_bound_method_guard_wrapper, _BoundMethodGuardRecv())
+
+    def forward(self, x):
+        if self.cb.__name__ == "_bound_method_guard_target":
+            x = x + 1
+        return x * 2
+
+
+class ConfigThatCannotPickle:
+    scale = 2.0
+
+    def __reduce__(self):
+        raise AttributeError("config cannot pickle")
+
+
+class StaticParamModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(3))
+
+    def forward(self, x, use_w=False):
+        if use_w:
+            return (x * self.w).sin()
+        return x.sin()
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -85,6 +146,121 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
+
+    def test_bypass_drops_only_the_current_compiles_backend(self):
+        # A bypass discards what the compile that failed to serialize registered
+        # on its entry, not what earlier compiles of the same code object did.
+        def fn(x):
+            return x + 1
+
+        first_code = compiled_region_with_backend_id_for_package_test.__code__
+        (first_id,) = first_code.co_names
+        second_id = "__compiled_fn_1_00000000_0000_0000_0000_000000000000"
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(b"", first_code)
+        with package.code_context(fn.__code__):
+            package.add_backend_id(second_id, object())
+            package.bypass_current_compile()
+
+        entry = package.cache_entry().codes[0]
+        self.assertFalse(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [first_id])
+        self.assertEqual(len(entry.guarded_codes), 1)
+        self.assertNotIn(second_id, package.cached_backends)
+
+    def test_bypass_of_every_compile_marks_the_entry_bypassed(self):
+        # With nothing installable the entry must NOT look like a trivial
+        # function that install() would skip_code; a later compile that does
+        # record a guarded code makes it installable again.
+        def fn(x):
+            return x + 1
+
+        code = compiled_region_with_backend_id_for_package_test.__code__
+        (backend_id,) = code.co_names
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.add_backend_id(backend_id)
+            package.bypass_current_compile()
+        entry = package.cache_entry().codes[0]
+        self.assertTrue(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [])
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(b"", code)
+            # A bypass used to stick to the entry and suppress this too.
+            package.add_inlined_source([fn.__code__])
+        self.assertFalse(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [backend_id])
+        self.assertTrue(package.cache_entry().source_info.inlined_sources)
+
+    @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_bypassed_guards_keep_the_frames_earlier_variant(self, config_cls):
+        # The title path: the second variant guards on a value whose __reduce__
+        # raises, so serializing its guards bypasses the compile. The first
+        # variant is still saved, installed on reload and hit; the second is
+        # traced fresh. On main this tripped `check_fn.guards_state must not be
+        # None` in convert_frame; a __reduce__ raising anything other than
+        # AttributeError escaped as an internal error.
+        def fn(x, cfg=None):
+            if cfg is not None:
+                return x.sin() * cfg.scale
+            return x.sin()
+
+        x = torch.randn(3)
+        cfg = config_cls()
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(compiled(x), fn(x))
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x, cfg), fn(x, cfg))
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
+        # The bypassed compile's backend id is referenced by no entry, so the
+        # written cache entry carries exactly the surviving compile's backend.
+        info = PrecompileContext.save_to_dynamo_cache()
+        (entry,) = info["dynamo"]
+        self.assertEqual(len(entry["backend_ids"]), 1)
+        written = DynamoCache.load(fn)
+        self.assertEqual(list(written.backends), entry["backend_ids"])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        # Wrapping reloads from the on-disk DynamoCache (per-test fresh_cache dir).
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), fn(x))
+        # Deliberate: re-triggers the bypass in the loading process against an
+        # entry that already holds one installed guarded code.
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x, cfg), fn(x, cfg))
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
+
+    @torch._dynamo.config.patch(
+        caching_precompile=True, strict_precompile=False, prepare_freezing=True
+    )
+    def test_bypass_before_guards_keeps_the_frames_earlier_variant(self):
+        # A bypass raised before guards are built (a graph holding a named
+        # parameter under prepare_freezing) drops only that compile. It also
+        # pins that convert_frame reads the package off the output graph, which
+        # the bypass cleared: reading its own local instead records the bypassed
+        # compile's guarded code and a backend id nothing cached, and the save
+        # then fails or drops the whole frame.
+        mod = StaticParamModule()
+        torch._dynamo.mark_static_address(mod.w, guard=False)
+        x = torch.randn(3)
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(compiled(x), mod(x))
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x, use_w=True), mod(x, use_w=True))
+        self.assertTrue(any("named parameters" in line for line in logs.output))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(len(entry["backend_ids"]), 1)
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        code = StaticParamModule.forward.__code__
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), mod(x))
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -497,7 +673,6 @@ def add(x, y):
         # Regression test for https://github.com/pytorch/pytorch/issues/190664.
         # package.install() must register target_code in input_codes so that
         # torch._dynamo.reset() clears precompile entries on the installed code.
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
         ctx = DiskDynamoStore()
 
@@ -519,6 +694,64 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_bound_method_name_guard_survives_func_reached_first(self):
+        # Regression: a guard on a bound method's __name__ where the method's
+        # __func__ is ALSO reachable (self.other) and inserted first, so the
+        # pickle memoizes the fqn-mismatched function as _Missing before it
+        # reaches the method. Seeding the method's __func__ into
+        # guard_tree_values makes the save order-independent; without it the
+        # method's __func__ loads back as _Missing and the __name__ guard
+        # AttributeErrors at torch.compile() wrap time in the reloading process.
+        mod = BoundMethodNameGuardModule()
+        keys = list(mod.__dict__)
+        self.assertLess(keys.index("other"), keys.index("cb"))
+        x = torch.randn(3)
+        expected = mod(x)
+        self.assertEqual(torch.compile(mod)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(len(entry["backend_ids"]), 1)
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        code = BoundMethodNameGuardModule.forward.__code__
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), expected)
+            # The reloaded guard really reads __name__ off the rebuilt function.
+            _bound_method_guard_wrapper.__name__ = "renamed"
+            try:
+                with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                    compiled(x)
+            finally:
+                _bound_method_guard_wrapper.__name__ = "_bound_method_guard_target"
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_unserializable_guard_bypasses_the_package(self):
+        # A guarded value that cannot be pickled is a package bypass, not a
+        # compile failure: the frame still compiles and runs, and its entry is
+        # saved bypassed with no backend, so nothing is installed on reload.
+        def fn(x, cfg=UnpicklableConfig()):
+            if cfg.scale == 2.0:
+                x = x + 1
+            return x.sin()
+
+        x = torch.randn(3)
+        expected = fn(x)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(entry["backend_ids"], [])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        # Wrapping is what reloads the cache; the bypassed entry installs nothing.
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x), expected)
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)

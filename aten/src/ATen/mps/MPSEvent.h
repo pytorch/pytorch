@@ -4,7 +4,7 @@
 
 #include <ATen/mps/MPSStream.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ctime>
+#include <atomic>
 #include <stack>
 
 namespace at::mps {
@@ -20,8 +20,6 @@ class MPSEvent {
   void record(bool needsLock, bool syncEvent = false);
   // makes all future work submitted to the stream wait for this event.
   bool wait(bool needsLock, bool syncEvent = false);
-  // schedules a notifyListener callback for the event.
-  bool notify(bool needsLock, MTLSharedEventNotificationBlock block);
   // checks if events are already signaled.
   bool query() const;
   // blocks the CPU thread until all the GPU work that were scheduled
@@ -34,36 +32,46 @@ class MPSEvent {
   id_t getID() const {
     return m_id;
   }
-  // returns the completion timestamp of the event
-  uint64_t getCompletionTime() const {
-    return m_completion_time;
+  // returns whether timing is enabled for this event
+  bool isTimingEnabled() const {
+    return m_enable_timing;
   }
-  // if already recorded, waits for cpu_sync_cv to be signaled
-  void waitForCpuSync();
+  // returns whether this event has been recorded since it was last acquired
+  bool isRecorded() const {
+    return m_recorded.load();
+  }
 
  private:
   id_t m_id;
-  // enables measuring the completion time of the notifyListener of this event
+  // Enables measuring the GPU completion time of this event.
   bool m_enable_timing;
-  uint64_t m_signalCounter = 0;
+  // Tracks whether this event has been recorded since it was last acquired.
+  std::atomic<bool> m_recorded{false};
+  // Tracks the latest value encoded for the Metal shared event.
+  std::atomic<uint64_t> m_signalCounter{0};
+  // Stream on which this event is recorded.
   MPSStream* m_stream = nullptr;
+  // Metal event used to signal and wait for GPU progress.
   MTLSharedEvent_t m_event = nullptr;
-  MTLSharedEventListener* m_listener = nullptr;
-  // used to sync the events created on this Stream with CPU
+  // Guards timing state shared with command-buffer completion handlers.
   std::mutex m_cpu_sync_mutex{};
   std::condition_variable m_cpu_sync_cv{};
-  // CondVar predicate to sync the events created on this Stream with CPU
-  bool m_cpu_sync_completed = false;
+  // Each timing record receives a monotonically increasing generation. The
+  // completed generation identifies the newest handler whose timestamp is in
+  // m_completion_time. Generations survive pool reuse so a delayed handler
+  // cannot satisfy a wait for, or overwrite the timestamp of, a newer record.
+  uint64_t m_timing_generation = 0;
+  uint64_t m_completed_timing_generation = 0;
   // used to compute elapsed time
-  uint64_t m_completion_time = 0;
+  double m_completion_time = 0.0;
 
   void recordLocked(bool syncEvent);
   bool waitLocked(bool syncEvent);
-  bool notifyLocked(MTLSharedEventNotificationBlock block);
-  void notifyCpuSync();
-  static uint64_t getTime() {
-    return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
-  }
+  void notifyCpuSync(uint64_t timingGeneration, double completionTime);
+  // assumes timing is enabled and waits for the latest recording's timestamp
+  double waitForTiming();
+
+  friend class MPSEventPool;
 };
 
 class MPSEventPool;

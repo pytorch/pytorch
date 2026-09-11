@@ -38,7 +38,12 @@ from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.profiler import kineto_available
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM, TEST_XPU
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    MI300_ARCH,
+    skipIfRocmArch,
+    TEST_XPU,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -880,6 +885,12 @@ class TestExternKernelCaller(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    # gfx942: the 128x128x64 / 8-warp Triton candidate is miscompiled by the AMD
+    # block-pingpong schedule (LDS race, stale-by-one-BLOCK_K A operands), so the
+    # autotune correctness check fails intermittently; the compile-worker pool
+    # does not forward TRITON_HIP_USE_BLOCK_PINGPONG, so it cannot be disabled
+    # per test. https://github.com/triton-lang/triton/issues/11696
+    @skipIfRocmArch(MI300_ARCH)
     @patches
     def test_extern_kernel_benchmark_valid_timing(self):
         def fn(a, b):
@@ -1446,12 +1457,10 @@ class TestTemplateRender(TestCase):
                 (large_capture,),
             )
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
-    )
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
     def test_external_template_prologue_epilogue_fusion(self):
         """
         Tests prologue fusion, epilogue fusion, and extra inputs through the
