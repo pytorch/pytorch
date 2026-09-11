@@ -121,7 +121,15 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = Memor
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
-  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+  auto buffer = __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+  // Every buffer a captured op binds, wraps in an MPSNDArray/MPSGraphTensorData,
+  // or takes the GPU address of reaches it through here, so registering the
+  // capture's claim on it here covers all of them rather than relying on each
+  // wrap site to remember. Costs one atomic load when nothing is capturing.
+  if (C10_UNLIKELY(at::mps::isAnyStreamCapturing())) {
+    at::mps::getCurrentMPSStream()->captureNoteBuffer(buffer);
+  }
+  return buffer;
 }
 
 class Placeholder {

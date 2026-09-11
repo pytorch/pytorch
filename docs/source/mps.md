@@ -29,6 +29,18 @@
     load_metallib
 ```
 
+## MPS Graph Capture
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    MetalGraph
+    metal_graph
+    is_current_stream_capturing
+```
+
 ## MPS Profiler
 
 ```{eval-rst}
