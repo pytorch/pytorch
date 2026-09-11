@@ -339,7 +339,7 @@ def single_row_config(N: int, dtype_width: int):
 
 
 def _launch_itree(
-    trait, trait_key, plan, dt, fakes, operands, N, tag, nouts=1, dsts=()
+    trait, trait_key, plan, dt, fakes, operands, N, tag, nouts=1, dsts=(), align=0
 ):
     """Launch one stage, keying the baked alignment to prevent overstating later pointers."""
     op = tile.TileReduce(
@@ -374,24 +374,45 @@ def _launch_itree(
         )
 
     # Destination types are baked, so include them to prevent a wrong cached plan.
-    key = (tag, trait_key, dt, tuple(dsts)) + op.cache_sig
+    key = (tag, trait_key, dt, tuple(dsts), align) + op.cache_sig
     build = lambda: _compile(op, *_args(fakes))  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
 
 
-def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
-    """Run one launch per stage; split shapes allocate one partial buffer per trait field."""
+def _declared_align(x, natural: int) -> int:
+    """Largest N-allowed alignment satisfied by `x`'s base pointer."""
+    # const_data_ptr, so reading the address does not materialize a COW tensor.
+    with torch._C.DisableTorchFunctionSubclass():
+        ptr = x.const_data_ptr()
+    align = natural
+    while align > x.element_size() and ptr % align:
+        align //= 2
+    return align
+
+
+def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1, out=None):
+    """Launch each stage; split buffers are per field and supplied outputs are 1-D unit-stride."""
     M, N = x.shape
+
+    def results():
+        if out is not None:
+            return list(out)
+        return [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+
     dt = torch2cute[x.dtype]
-    # Storage offsets may underalign; declare and key the pointer-supported width.
-    align = _declared_align(x, tile.align_bytes(N, x.element_size()))
+    # Storage offsets may underalign; declare and key the supported width.
+    natural = tile.align_bytes(N, x.element_size())
+    align = _declared_align(x, natural)
+    if align < natural and itree.stage_e:
+        # Misaligned cp.async fails IR verification; unstaged preserves the same bits.
+        itree = itree_plan(N, M, x.element_size(), stage=False)
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
     fake_in = _L.fake_compact(dt, (_L.sym(), N), stride_order=(1, 0), align=align)
     fake_1d = lambda t: _L.fake_compact(  # noqa: E731
         torch2cute[t.dtype], (_L.sym(),)
     )
     if itree.shape != "split":
-        outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+        outs = results()
         _launch_itree(
             trait,
             trait_key,
@@ -403,6 +424,7 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
             "rowitree",
             nouts,
             tuple(o.dtype for o in outs),
+            align,
         )
         return tuple(outs)
     # Split writes one field-typed partial per (row, batch), then folds them linearly.
@@ -422,8 +444,9 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
         "rowitree1",
         nouts,
         tuple(p.dtype for p in parts),
+        align,
     )
-    outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+    outs = results()
     _launch_itree(
         trait,
         trait_key,
@@ -435,19 +458,19 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
         "rowitree2",
         nouts,
         tuple(o.dtype for o in outs),
+        align,
     )
     return tuple(outs)
 
 
-def _declared_align(x, natural: int) -> int:
-    """Return the greatest N-allowed alignment met by `x`'s base pointer."""
-    # const_data_ptr, so reading the address does not materialize a COW tensor.
-    with torch._C.DisableTorchFunctionSubclass():
-        ptr = x.const_data_ptr()
-    align = natural
-    while align > x.element_size() and ptr % align:
-        align //= 2
-    return align
+def reduce_row_itree(trait, trait_key, x, out):
+    """Write 2-D `x` rows to 1-D `out`; return False only when no inner-tree plan exists."""
+    M, N = x.shape
+    itree = itree_plan(N, M, x.element_size())
+    if itree is None:
+        return False
+    _run_itree(trait, trait_key, x, [out.dtype], itree, out=[out])
+    return True
 
 
 def reduce_row_tile(
