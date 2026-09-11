@@ -1892,6 +1892,31 @@ from user code:
 
 
 class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
+    def test_pickler_carries_a_docstring(self):
+        # A native docstring lives in the code object, one assigned after
+        # definition does not; both travel in the pickle state, so neither is
+        # lost on reload (a rebuild that passed doc=None lost both).
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                """native"""
+                return x
+
+            def assigned(x):
+                return x
+
+            assigned.__doc__ = "assigned by a decorator"
+            return inner, assigned
+
+        fns = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fns)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(
+            [f.__doc__ for f in out], ["native", "assigned by a decorator"]
+        )
+
     def test_pickler_keeps_an_external_modules_method_by_reference(self):
         # The receiver is external data, so it is the live object at load and
         # pickle's default getattr(receiver, name) resolves the method on it.
