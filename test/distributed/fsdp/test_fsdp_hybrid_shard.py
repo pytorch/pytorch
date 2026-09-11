@@ -24,6 +24,11 @@ from torch.distributed.fsdp._init_utils import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -33,7 +38,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -49,8 +54,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 @contextlib.contextmanager
@@ -98,6 +101,8 @@ class ShardingStrategyMode(Enum):
 
 
 class TestFSDPHybridShard(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return max(torch.accelerator.device_count(), 2)
@@ -106,8 +111,10 @@ class TestFSDPHybridShard(FSDPTestContinuous):
     def process_group(self):
         return dist.distributed_c10d._get_default_group()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_raises_manual_wrap_hybrid_shard_when_none_policy(self):
+    def test_raises_manual_wrap_hybrid_shard_when_none_policy(self, device):
+        device_type = torch.device(device).type
         model = MyModel().to(device_type)
         err_ctx = self.assertRaisesRegex(
             ValueError,
@@ -120,8 +127,10 @@ class TestFSDPHybridShard(FSDPTestContinuous):
         with err_ctx:
             model = FSDP(model, sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(4)
-    def test_hsdp_save_load_state_dict(self):
+    def test_hsdp_save_load_state_dict(self, device):
+        device_type = torch.device(device).type
         model = MyModel().to(device_type)
         num_node_devices = torch.accelerator.device_count()
         shard_rank_lists = (
@@ -154,7 +163,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
         model = fsdp_ctor(model)
         optim = torch.optim.AdamW(model.parameters())
         # Initialize optimizer states
-        model(torch.randn(2, 10)).sum().backward()
+        model(torch.randn(2, 10, device=device_type)).sum().backward()
         optim.step()
         shard_g = model.process_group
         replicate_g = model._inter_node_pg
@@ -177,8 +186,10 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             FSDP.optim_state_dict_to_load(load_model, load_optim, osd)
         load_optim.load_state_dict(osd)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(4)
-    def test_hsdp_sync_module_state(self):
+    def test_hsdp_sync_module_state(self, device):
+        device_type = torch.device(device).type
         model = MyModel().to(device_type)
         num_node_devices = torch.accelerator.device_count()
         shard_rank_lists = (
@@ -220,8 +231,10 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             self.assertTrue((model.lin2.weight == 0).all())
             self.assertTrue((model.lin3.weight == 0).all())
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_invalid_pg_specification_raises(self):
+    def test_invalid_pg_specification_raises(self, device):
+        device_type = torch.device(device).type
         pol = ModuleWrapPolicy({nn.Linear})
         model = MyModel().to(device_type)
         with self.assertRaisesRegex(
@@ -237,14 +250,16 @@ class TestFSDPHybridShard(FSDPTestContinuous):
     # TODO - add test for ZeRO-2 style sharding ensure params are not
     # resharded after forward.
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_fsdp_hybrid_shard_basic_setup(self):
+    def test_fsdp_hybrid_shard_basic_setup(self, device):
         """
         Tests basic functionality of HYBRID_SHARD and _HYBRID_SHARD_ZERO2:
             1. Inter and intra-node process groups are correctly setup
             2. Process groups are the same across FSDP wrapped instances
             3. reduce_scatter and allreduce called the expected no. of times
         """
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "hsdp_sharding_strategy": [
@@ -259,6 +274,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
                 "use_device_mesh": [False, True],
             },
             self._test_fsdp_hybrid_shard_basic_setup,
+            device_type=device_type,
         )
 
     def _test_fsdp_hybrid_shard_basic_setup(
@@ -267,6 +283,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
         sharding_strategy_mode: ShardingStrategyMode,
         use_orig_params: bool,
         use_device_mesh: bool,
+        device_type: str,
     ):
         if use_device_mesh:
             device_mesh = init_device_mesh(device_type, (1, self.world_size))
@@ -277,6 +294,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             sharding_strategy_mode,
             use_orig_params,
             hsdp_device_mesh=device_mesh,
+            device_type=device_type,
         )
         # All FSDP modules should have state.process_group as the process group over which to
         # shard (default process group), and state._inter_node_pg (process group containing only
@@ -325,7 +343,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             patch_allreduce(patched_allreduce),
             patch_reduce_scatter(patched_reduce_scatter),
         ):
-            inp = hsdp_model.get_input(device=torch.accelerator.current_device_index())
+            inp = hsdp_model.get_input(device=torch.device(device_type))
             out = hsdp_model(inp[0], inp[1])
             loss = hsdp_model.get_loss(inp, out)
             loss.backward()
@@ -342,8 +360,10 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             self.assertEqual(num_hsdp_flat_params, cntr[orig_ar])
             self.assertEqual(num_flat_params, cntr[orig_rs])
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(4)
-    def test_fsdp_hybrid_shard_parity(self):
+    def test_fsdp_hybrid_shard_parity(self, device):
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "hsdp_sharding_strategy": [
@@ -353,12 +373,16 @@ class TestFSDPHybridShard(FSDPTestContinuous):
                 "use_orig_params": [False, True],
             },
             self._test_fsdp_hybrid_shard_parity,
+            device_type=device_type,
         )
 
     def _test_fsdp_hybrid_shard_parity(
-        self, hsdp_sharding_strategy: ShardingStrategy, use_orig_params: bool
+        self,
+        hsdp_sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+        device_type: str,
     ):
-        fsdp_model = self._init_fsdp_model(use_orig_params)
+        fsdp_model = self._init_fsdp_model(use_orig_params, device_type)
         global_pg = dist.distributed_c10d._get_default_group()
         hsdp_pgs = _init_intra_and_inter_node_groups(global_pg, 2)
         hsdp_model = self._init_hsdp_model(
@@ -366,6 +390,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             ShardingStrategyMode.ALL_HYBRID_SHARD,
             use_orig_params,
             hsdp_process_groups=hsdp_pgs,
+            device_type=device_type,
         )
         if not (hsdp_model._inter_node_pg.size() > 1):
             raise AssertionError("HSDP model initialized without replication")
@@ -383,19 +408,19 @@ class TestFSDPHybridShard(FSDPTestContinuous):
                 optim.step()
             self.assertEqual(losses[0], losses[1])
 
-    def _init_fsdp_model(self, use_orig_params: bool) -> nn.Module:
+    def _init_fsdp_model(self, use_orig_params: bool, device_type: str) -> nn.Module:
         auto_wrap_policy = ModuleWrapPolicy(
             {TransformerEncoderLayer, TransformerDecoderLayer},
         )
         hsdp_kwargs = {
             "auto_wrap_policy": auto_wrap_policy,
-            "device_id": torch.accelerator.current_device_index(),
+            "device_id": device_type,
             "use_orig_params": use_orig_params,
         }
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            DEVICEInitMode.DEVICE_BEFORE,
+            DEVICEInitMode.DEVICE_NEVER,
             hsdp_kwargs,
             deterministic=True,
         )
@@ -406,6 +431,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
         hsdp_sharding_strategy: ShardingStrategy,
         sharding_strategy_mode: str,
         use_orig_params: bool,
+        device_type: str,
         hsdp_process_groups: tuple[dist.ProcessGroup, dist.ProcessGroup] | None = None,
         hsdp_device_mesh: Optional = None,
     ):
@@ -417,7 +443,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             {TransformerEncoderLayer, TransformerDecoderLayer},
         )
         hsdp_kwargs = {
-            "device_id": torch.accelerator.current_device_index(),
+            "device_id": device_type,
             "auto_wrap_policy": auto_wrap_policy,
             "sharding_strategy": hsdp_sharding_strategy,
             "use_orig_params": use_orig_params,
@@ -427,7 +453,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             hsdp_model = TransformerWithSharedParams.init(
                 hsdp_process_groups or self.process_group,
                 FSDPInitMode.RECURSIVE,
-                DEVICEInitMode.DEVICE_BEFORE,
+                DEVICEInitMode.DEVICE_NEVER,
                 hsdp_kwargs,
                 deterministic=True,
             )
@@ -435,16 +461,16 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             model = TransformerWithSharedParams.init(
                 hsdp_process_groups or self.process_group,
                 FSDPInitMode.NO_FSDP,
-                DEVICEInitMode.DEVICE_BEFORE,
+                DEVICEInitMode.DEVICE_NEVER,
                 {},
                 deterministic=True,
-            )
+            ).to(device_type)
             # Use the HSDP strategy for the transformer module
             model.transformer = FSDP(model.transformer, **hsdp_kwargs)
             # Use `FULL_SHARD` for the embedding and output projection
             hsdp_model = FSDP(
                 model,
-                device_id=torch.accelerator.current_device_index(),
+                device_id=device_type,
                 sharding_strategy=ShardingStrategy.FULL_SHARD,
                 use_orig_params=use_orig_params,
             )
@@ -452,6 +478,8 @@ class TestFSDPHybridShard(FSDPTestContinuous):
 
 
 class TestHSDPSyncModuleStates(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     class _ModelWithBuffer(nn.Module):
         def __init__(self, device):
             super().__init__()
@@ -465,8 +493,9 @@ class TestHSDPSyncModuleStates(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
-    def test_hsdp_buffer_sync_from_meta_device(self):
+    def test_hsdp_buffer_sync_from_meta_device(self, device):
         """Test that HSDP sync_module_states correctly broadcasts buffers
         when only rank 0 has real weights and other ranks use meta device.
 
@@ -482,6 +511,7 @@ class TestHSDPSyncModuleStates(FSDPTestMultiThread):
         unconditionally included in every sync call. This test specifically
         targets buffers, which are the only tensors gated by FSDP_SYNCED.
         """
+        device_type = torch.device(device).type
         dev = torch.device(device_type)
         mesh_2d = init_device_mesh(device_type, (2, self.world_size // 2))
 
@@ -514,7 +544,18 @@ class TestHSDPSyncModuleStates(FSDPTestMultiThread):
         self.assertEqual(model.bn.running_var, torch.full((10,), 7.0))
 
 
-instantiate_parametrized_tests(TestFSDPHybridShard)
+instantiate_device_type_tests(
+    TestFSDPHybridShard,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestHSDPSyncModuleStates,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
