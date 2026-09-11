@@ -74,6 +74,7 @@ from ..utils import (
     get_fake_value,
     is_tensor_getset_descriptor,
     istype,
+    list_methods,
     no_keywords,
     no_positional,
     numpy_operator_wrapper,
@@ -141,6 +142,7 @@ from .object_protocol import (
     pysequence_check,
     pysequence_contains,
     python_constant_richcompare_impl,
+    resolve_descriptor_owner,
     ternary_iop,
     ternary_op,
     type_implements_mp_length,
@@ -465,6 +467,27 @@ class BaseBuiltinVariable(VariableTracker):
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
         attr = getattr(fn, name, None)
+
+        # wrapperdescr_get/method_get with obj=NULL returns the descriptor
+        # itself when accessed on the class, e.g. `int.__hash__`. Model it as
+        # a real descriptor VT (like UserDefinedClassVariable.resolve_cls_descriptor
+        # does) instead of a generic GetAttrVariable, so unbound calls
+        # (`int.__hash__(7)`) go through tp_descr_get_impl's receiver
+        # type-check instead of being blindly forwarded.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
+        if isinstance(fn, type) and name not in ("__get__", "__set__", "__delete__"):
+            if isinstance(attr, types.WrapperDescriptorType):
+                owner = resolve_descriptor_owner(tx, attr, self, fn)
+                return variables.WrapperDescriptorVariable(
+                    attr, owner=owner, source=source
+                )
+            if isinstance(attr, types.MethodDescriptorType):
+                owner = resolve_descriptor_owner(tx, attr, self, fn)
+                return variables.MethodDescriptorVariable(
+                    attr, owner=owner, source=source
+                )
+
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
         )
@@ -2820,6 +2843,31 @@ class BuiltinVariable(BaseBuiltinVariable):
             if not callable(value):
                 return VariableTracker.build(tx, value, source)
         attr = getattr(self.fn, name, None)
+
+        # wrapperdescr_get/method_get with obj=NULL returns the descriptor
+        # itself when accessed on the class, e.g. `int.__hash__`. Model it as
+        # a real descriptor VT (like UserDefinedClassVariable.resolve_cls_descriptor
+        # does) instead of a generic GetAttrVariable, so unbound calls
+        # (`int.__hash__(7)`) go through tp_descr_get_impl's receiver
+        # type-check instead of being blindly forwarded.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
+        if isinstance(self.fn, type) and name not in (
+            "__get__",
+            "__set__",
+            "__delete__",
+        ):
+            if isinstance(attr, types.WrapperDescriptorType):
+                owner = resolve_descriptor_owner(tx, attr, self, self.fn)
+                return variables.WrapperDescriptorVariable(
+                    attr, owner=owner, source=source
+                )
+            if isinstance(attr, types.MethodDescriptorType):
+                owner = resolve_descriptor_owner(tx, attr, self, self.fn)
+                return variables.MethodDescriptorVariable(
+                    attr, owner=owner, source=source
+                )
+
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
         )
@@ -3926,6 +3974,13 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     [],
                     tx=tx,
                 )
+
+        resolved_fn = getattr(list, name, None)
+        if resolved_fn is not None and resolved_fn in list_methods:
+            obj = args[0]
+            if isinstance(obj, UserDefinedObjectVariable) and obj._base_vt is not None:
+                return obj._base_vt.call_method(tx, name, args[1:], kwargs)
+            return obj.call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
