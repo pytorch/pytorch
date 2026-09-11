@@ -562,6 +562,7 @@ class FSDPParamGroup:
                 self.unshard(self.unshard_async_op)
                 self.wait_for_unshard()
             for fsdp_param in self.fsdp_params:
+                fsdp_param.restore_unsharded_grad()
                 fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
@@ -600,6 +601,8 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.restore_unsharded_grad()
             if default_prefetch:
                 self._backward_prefetch()
 
@@ -620,15 +623,15 @@ class FSDPParamGroup:
                 and self._training_state == TrainingState.FORWARD  # partial path taken
             )
             self._training_state = TrainingState.POST_BACKWARD
-            with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
-                for fsdp_param in self.fsdp_params:
-                    fsdp_param.accumulate_unsharded_grad_if_needed()
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
+                    reduce_op = "avg" if self.gradient_divide_factor is None else "sum"
+                    for fsdp_param in self.fsdp_params:
+                        fsdp_param.publish_unsharded_grad(
+                            reduce_op, self.gradient_divide_factor
+                        )
                     if self.reshard_after_backward:
                         self.reshard()
-                    for fsdp_param in self.fsdp_params:
-                        fsdp_param.to_accumulated_grad_if_needed()
                     return
                 # Save the autograd-computed gradients before resharding to only
                 # access the unsharded parameters when their data is present
@@ -638,15 +641,10 @@ class FSDPParamGroup:
                 for fsdp_param in self.fsdp_params:
                     if not hasattr(fsdp_param, "_unsharded_param"):
                         continue
-                    # May have an accumulated gradient of the reduce dtype if the
-                    # previous backward did not reduce-scatter
-                    if fsdp_param.unsharded_accumulated_grad is not None:
-                        fsdp_params_with_grad.append(fsdp_param)
-                        unsharded_grads.append(
-                            fsdp_param.unsharded_accumulated_grad_data
-                        )
-                        fsdp_param.unsharded_accumulated_grad = None
-                    elif fsdp_param.unsharded_param.grad is not None:
+                    # A group unused in this microbatch may still own gradients
+                    # from an earlier backward without synchronization.
+                    fsdp_param.restore_unsharded_grad()
+                    if fsdp_param.unsharded_param.grad is not None:
                         fsdp_params_with_grad.append(fsdp_param)
                         unsharded_grads.append(fsdp_param.unsharded_grad_data)
                         fsdp_param.unsharded_param.grad = None
@@ -720,7 +718,6 @@ class FSDPParamGroup:
                     ),
                     self.comm_ctx.reduce_scatter_stream,
                     self._reduce_scatter_comm,
-                    self._orig_dtype,
                     self._reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,
