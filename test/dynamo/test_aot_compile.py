@@ -1306,6 +1306,7 @@ from user code:
                 inductor_config.patch(
                     fx_graph_cache=True,
                     fx_graph_remote_cache=False,
+                    graph_partition=True,
                 ),
             ):
                 compiled = torch.compile(model, backend="inductor", dynamic=True)
