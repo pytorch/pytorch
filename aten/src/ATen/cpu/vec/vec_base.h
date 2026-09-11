@@ -746,11 +746,6 @@ struct Vectorized {
   }
 };
 
-template <class T>
-Vectorized<T> inline operator-(const Vectorized<T>& a) {
-  return a.neg();
-}
-
 // There is an implicit conversion that would make this work if
 // these operators weren't template functions, but they are template
 // functions (and can't be moved to be non-member friends defined in
@@ -770,48 +765,11 @@ Vectorized<T> inline operator-(const Vectorized<T>& a) {
 #define VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(op) \
   VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(operator op)
 
-template <class T>
-Vectorized<T> inline operator+(const Vectorized<T>& a, const Vectorized<T>& b) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] + b[i];
-  }
-  return c;
-}
-
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(+)
-
-template <class T>
-Vectorized<T> inline operator-(const Vectorized<T>& a, const Vectorized<T>& b) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] - b[i];
-  }
-  return c;
-}
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(-)
 
-template <class T>
-Vectorized<T> inline operator*(const Vectorized<T>& a, const Vectorized<T>& b) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] * b[i];
-  }
-  return c;
-}
-
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(*)
-
-template <class T>
-Vectorized<T> inline operator/(const Vectorized<T>& a, const Vectorized<T>& b)
-    __ubsan_ignore_float_divide_by_zero__ {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] / b[i];
-  }
-  return c;
-}
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(/)
 
@@ -836,25 +794,6 @@ Vectorized<T> inline operator||(
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(||)
 
-// Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
-// either input is a NaN.
-template <
-    class T,
-    typename std::enable_if_t<!c10::is_complex<T>::value, int>>
-Vectorized<T> inline maximum(const Vectorized<T>& a, const Vectorized<T>& b) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = (a[i] > b[i]) ? a[i] : b[i];
-    if (_isnan(a[i])) {
-      // If either input is NaN, propagate a NaN.
-      // NOTE: The case where b[i] was NaN is handled correctly by the naive
-      // ternary operator above.
-      c[i] = a[i];
-    }
-  }
-  return c;
-}
-
 template <
     class T,
     typename std::enable_if_t<c10::is_complex<T>::value, int> = 0>
@@ -874,25 +813,6 @@ Vectorized<T> inline maximum(const Vectorized<T>& a, const Vectorized<T>& b) {
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(maximum)
 
-// Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
-// either input is a NaN.
-template <
-    class T,
-    typename std::enable_if_t<!c10::is_complex<T>::value, int>>
-Vectorized<T> inline minimum(const Vectorized<T>& a, const Vectorized<T>& b) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = (a[i] < b[i]) ? a[i] : b[i];
-    if (_isnan(a[i])) {
-      // If either input is NaN, propagate a NaN.
-      // NOTE: The case where b[i] was NaN is handled correctly by the naive
-      // ternary operator above.
-      c[i] = a[i];
-    }
-  }
-  return c;
-}
-
 template <
     class T,
     typename std::enable_if_t<c10::is_complex<T>::value, int> = 0>
@@ -911,20 +831,6 @@ Vectorized<T> inline minimum(const Vectorized<T>& a, const Vectorized<T>& b) {
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(minimum)
-
-template <
-    class T,
-    typename std::enable_if_t<!c10::is_complex<T>::value, int>>
-Vectorized<T> inline clamp(
-    const Vectorized<T>& a,
-    const Vectorized<T>& min_vec,
-    const Vectorized<T>& max_vec) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = std::min(std::max(a[i], min_vec[i]), max_vec[i]);
-  }
-  return c;
-}
 
 #define VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(name)       \
   template <class T>                                            \
@@ -962,175 +868,9 @@ Vectorized<T> inline clamp(
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(clamp)
 
-template <
-    class T,
-    typename std::enable_if_t<!c10::is_complex<T>::value, int>>
-Vectorized<T> inline clamp_max(
-    const Vectorized<T>& a,
-    const Vectorized<T>& max_vec) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
-  }
-  return c;
-}
-
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(clamp_max)
 
-template <
-    class T,
-    typename std::enable_if_t<!c10::is_complex<T>::value, int>>
-Vectorized<T> inline clamp_min(
-    const Vectorized<T>& a,
-    const Vectorized<T>& min_vec) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
-  }
-  return c;
-}
-
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(clamp_min)
-
-struct Vectorizedi;
-
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
-template <class T, typename Op>
-static inline Vectorized<T> bitwise_binary_op(
-    const Vectorized<T>& a,
-    const Vectorized<T>& b,
-    Op op) {
-  int_vector buffer;
-#if defined(CPU_CAPABILITY_AVX2)
-  int_vector a_buffer =
-      _mm256_load_si256(reinterpret_cast<const int_vector*>((const T*)a));
-  int_vector b_buffer =
-      _mm256_load_si256(reinterpret_cast<const int_vector*>((const T*)b));
-#elif defined(CPU_CAPABILITY_AVX512)
-  int_vector a_buffer =
-      _mm512_load_si512(reinterpret_cast<const int_vector*>((const T*)a));
-  int_vector b_buffer =
-      _mm512_load_si512(reinterpret_cast<const int_vector*>((const T*)b));
-#endif
-  buffer = op(a_buffer, b_buffer);
-  __at_align__ std::array<T, Vectorized<T>::size()> results{};
-
-#if defined(CPU_CAPABILITY_AVX2)
-  _mm256_store_si256(reinterpret_cast<int_vector*>(results.data()), buffer);
-#elif defined(CPU_CAPABILITY_AVX512)
-  _mm512_store_si512(reinterpret_cast<int_vector*>(results.data()), buffer);
-#endif
-  return Vectorized<T>::loadu(results.data());
-}
-
-template <
-    class T,
-    typename std::
-        enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int>>
-inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
-  // We enclose _mm512_and_si512 or _mm256_and_si256 with lambda because it is
-  // always_inline
-#if defined(CPU_CAPABILITY_AVX2)
-  return bitwise_binary_op(
-      a, b, [](int_vector a, int_vector b) { return _mm256_and_si256(a, b); });
-#elif defined(CPU_CAPABILITY_AVX512)
-  return bitwise_binary_op(
-      a, b, [](int_vector a, int_vector b) { return _mm512_and_si512(a, b); });
-#endif
-}
-template <
-    class T,
-    typename std::
-        enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int>>
-inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
-  // We enclose _mm512_or_si512 or _mm256_or_si256 with lambda because it is
-  // always_inline
-#if defined(CPU_CAPABILITY_AVX2)
-  return bitwise_binary_op(
-      a, b, [](int_vector a, int_vector b) { return _mm256_or_si256(a, b); });
-#elif defined(CPU_CAPABILITY_AVX512)
-  return bitwise_binary_op(
-      a, b, [](int_vector a, int_vector b) { return _mm512_or_si512(a, b); });
-#endif
-}
-template <
-    class T,
-    typename std::
-        enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int>>
-inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
-  // We enclose _mm512_xor_si512 or _mm256_xor_si256 with lambda because it is
-  // always_inline
-#if defined(CPU_CAPABILITY_AVX2)
-  return bitwise_binary_op(
-      a, b, [](int_vector a, int_vector b) { return _mm256_xor_si256(a, b); });
-#elif defined(CPU_CAPABILITY_AVX512)
-  return bitwise_binary_op(
-      a, b, [](int_vector a, int_vector b) { return _mm512_xor_si512(a, b); });
-#endif
-}
-
-#else
-
-template <typename T>
-auto load(char const* data) -> T {
-  T ret;
-  std::memcpy(&ret, data, sizeof(ret));
-  return ret;
-}
-
-template <class T, typename Op>
-static inline Vectorized<T> bitwise_binary_op(
-    const Vectorized<T>& a,
-    const Vectorized<T>& b,
-    Op op) {
-  static constexpr uint32_t element_no = VECTOR_WIDTH / sizeof(intmax_t);
-  __at_align__ std::array<intmax_t, element_no> buffer{};
-  static_assert(
-      VECTOR_WIDTH % sizeof(intmax_t) == 0,
-      "VECTOR_WIDTH not a multiple of sizeof(intmax_t)");
-  static_assert(
-      sizeof(buffer) == sizeof(Vectorized<T>),
-      "sizeof(buffer) must match sizeof(Vectorized<T>)");
-  // We should be using memcpy in order to respect the strict aliasing rule
-  // see: https://github.com/pytorch/pytorch/issues/66119
-  // Using char* is defined in the C11 standard 6.5 Expression paragraph 7
-  // (http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
-  const auto* a_data = a.as_bytes();
-  const auto* b_data = b.as_bytes();
-  // load each intmax_t chunk and process; increase pointers by sizeof(intmax_t)
-  for (auto& out : buffer) {
-    out = op(load<intmax_t>(a_data), load<intmax_t>(b_data));
-    a_data += sizeof(intmax_t);
-    b_data += sizeof(intmax_t);
-  }
-  assert(a_data == a.as_bytes() + sizeof(a));
-  assert(b_data == b.as_bytes() + sizeof(b));
-  return Vectorized<T>::loadu(buffer.data());
-}
-
-template <
-    class T,
-    typename std::
-        enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int>>
-inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_and<>());
-}
-template <
-    class T,
-    typename std::
-        enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int>>
-inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_or<>());
-}
-template <
-    class T,
-    typename std::
-        enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int>>
-inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_xor<>());
-}
-
-#endif // defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(&)
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(|)
@@ -1221,43 +961,11 @@ inline Vectorized<T>& operator>>=(Vectorized<T>& a, const Vectorized<T>& b) {
   return a;
 }
 
-template <typename T>
-inline Vectorized<T> fmadd(
-    const Vectorized<T>& a,
-    const Vectorized<T>& b,
-    const Vectorized<T>& c) {
-  return a * b + c;
-}
-
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmadd)
-
-template <typename T>
-inline Vectorized<T> fnmadd(
-    const Vectorized<T>& a,
-    const Vectorized<T>& b,
-    const Vectorized<T>& c) {
-  return -(a * b) + c;
-}
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmadd)
 
-template <typename T>
-inline Vectorized<T> fmsub(
-    const Vectorized<T>& a,
-    const Vectorized<T>& b,
-    const Vectorized<T>& c) {
-  return a * b - c;
-}
-
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmsub)
-
-template <typename T>
-inline Vectorized<T> fnmsub(
-    const Vectorized<T>& a,
-    const Vectorized<T>& b,
-    const Vectorized<T>& c) {
-  return -(a * b) - c;
-}
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmsub)
 

@@ -23,43 +23,6 @@ void ExpectVecEqual(
   }
 }
 
-TEST(TestVec, TestAdd) {
-  using Vec = at::vec::Vectorized<int>;
-  std::vector<int> a(1024, 1);
-  std::vector<int> b(1024, 2);
-  Vec a_vec = Vec::loadu(a.data());
-  Vec b_vec = Vec::loadu(b.data());
-  Vec actual_vec = a_vec + b_vec;
-  std::vector<int> expected(1024, 3);
-  Vec expected_vec = Vec::loadu(expected.data());
-
-  ExpectVecEqual(expected_vec, actual_vec);
-}
-
-TEST(TestVec, TestMax) {
-  using Vec = at::vec::Vectorized<int>;
-  std::vector<int> a(1024, -1);
-  std::vector<int> b(1024, 2);
-  Vec a_vec = Vec::loadu(a.data());
-  Vec b_vec = Vec::loadu(b.data());
-  Vec actual_vec = at::vec::maximum(a_vec, b_vec);
-  Vec expected_vec = b_vec;
-
-  ExpectVecEqual(expected_vec, actual_vec);
-}
-
-TEST(TestVec, TestMin) {
-  using Vec = at::vec::Vectorized<int>;
-  std::vector<int> a(1024, -1);
-  std::vector<int> b(1024, 2);
-  Vec a_vec = Vec::loadu(a.data());
-  Vec b_vec = Vec::loadu(b.data());
-  Vec actual_vec = at::vec::minimum(a_vec, b_vec);
-  Vec expected_vec = a_vec;
-
-  ExpectVecEqual(expected_vec, actual_vec);
-}
-
 TEST(TestVec, TestConvert) {
   std::vector<int> a(1024, -1);
   std::vector<float> b(1024, -1.0);
@@ -72,18 +35,5 @@ TEST(TestVec, TestConvert) {
   ExpectVecEqual(expected_vec, actual_vec);
 }
 
-TEST(TestVec, TestClampMin) {
-  using Vec = at::vec::Vectorized<float>;
-  std::vector<float> a(1024, -2.0);
-  std::vector<float> min(1024, -1.0);
-  Vec a_vec = Vec::loadu(a.data());
-  Vec min_vec = Vec::loadu(min.data());
-  Vec actual_vec = at::vec::clamp_min(a_vec, min_vec);
-  Vec expected_vec = min_vec;
-
-  ExpectVecEqual(expected_vec, actual_vec);
-}
-
 } // namespace aot_inductor
 } // namespace torch
-
