@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 import functools
+import importlib.util
 import logging
 import os
 import sys
 import tempfile
 import typing_extensions
+import warnings
 from collections.abc import Callable
 from typing import Any, TypeVar
 from typing_extensions import ParamSpec
@@ -35,24 +37,72 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
 # by an equivalent.
 
 
+def _stale_checkout_artifacts(checkout_torch_dir: str) -> list[str]:
+    """Build outputs left inside a source checkout's torch/ by an in-tree build
+    or an old setup.py install, which coexist badly with an editable install."""
+    found = []
+    for name in sorted(os.listdir(checkout_torch_dir)):
+        if name.startswith("_C.") and name.endswith((".so", ".pyd")):
+            found.append(os.path.join(checkout_torch_dir, name))
+    for sub in ("bin", "include", "share"):
+        path = os.path.join(checkout_torch_dir, sub)
+        if os.path.isdir(path):
+            found.append(path)
+    lib = os.path.join(checkout_torch_dir, "lib")
+    if os.path.isdir(lib):
+        for name in sorted(os.listdir(lib)):
+            if name.endswith((".so", ".dylib", ".dll")) or ".so." in name:
+                found.append(os.path.join(lib, name))
+    egg_info = os.path.join(os.path.dirname(checkout_torch_dir), "torch.egg-info")
+    if os.path.isdir(egg_info):
+        found.append(egg_info)
+    return found
+
+
+def _installed_torch_dir(torch_dir: str) -> str | None:
+    """The torch/ directory holding the compiled extension and the CMake-installed
+    lib/, include/, share/ and bin/. Under a redirect-mode editable install that is
+    beside the installed distribution, not torch_dir (the source checkout); for a
+    wheel or an in-tree build both are the same directory. None means no importable
+    extension, i.e. a libtorch wheel build (BUILD_LIBTORCH_WHL) or a frozen
+    interpreter."""
+    # scikit-build-core exposes a package's search locations as __loader__.paths
+    # (scikit-build/scikit-build-core#1567); the attribute is absent on older
+    # releases and in wheel installs. Their order is not guaranteed before
+    # scikit-build/scikit-build-core#1566, so the checkout is excluded by
+    # identity. lib/ cannot tell the trees apart (torch/lib is tracked); it only
+    # rejects an entry that is neither.
+    checkout = os.path.normcase(os.path.realpath(torch_dir))
+    for path in getattr(torch.__loader__, "paths", None) or []:
+        if os.path.normcase(os.path.realpath(path)) == checkout:
+            continue
+        if os.path.isdir(os.path.join(path, "lib")):
+            return os.path.abspath(path)
+    spec = importlib.util.find_spec("torch._C")
+    if spec is None or not spec.origin:
+        return None
+    return os.path.dirname(spec.origin)
+
+
 def _compute_torch_parent() -> str:
     torch_dir = os.path.dirname(os.path.abspath(__file__))
     if os.path.basename(torch_dir) == "shared":
         return os.path.dirname(os.path.dirname(torch_dir))
-    # In scikit-build-core editable installs with redirect mode, binary
-    # artifacts (bin/, lib/) are installed to the dist package directory
-    # rather than the source tree. Fall back to the installed package
-    # location for get_file_path.
-    if not os.path.isdir(os.path.join(torch_dir, "bin")):
-        try:
-            from importlib.metadata import distribution
-
-            installed = str(distribution("torch").locate_file("torch"))
-            if os.path.isdir(os.path.join(installed, "bin")):
-                return os.path.dirname(installed)
-        except Exception:
-            pass
-    return os.path.dirname(torch_dir)
+    installed_dir = _installed_torch_dir(torch_dir)
+    if installed_dir is None:
+        return os.path.dirname(torch_dir)
+    is_checkout = os.path.isfile(os.path.join(torch_dir, "CMakeLists.txt"))
+    if installed_dir != torch_dir and is_checkout:
+        stale = _stale_checkout_artifacts(torch_dir)
+        if stale:
+            listing = "\n  ".join(stale)
+            warnings.warn(
+                f"torch is installed at {installed_dir}, but the source checkout "
+                f"at {torch_dir} still holds build artifacts that tooling may "
+                f"pick up instead:\n  {listing}\nRemove them with `spin clean`.",
+                stacklevel=2,
+            )
+    return os.path.dirname(installed_dir)
 
 
 torch_parent = _compute_torch_parent()
