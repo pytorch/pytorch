@@ -52,11 +52,17 @@ from example_06_multidim_mesh import create_2d_mesh, create_3d_mesh, hybrid_para
 import torch
 import torch.distributed as dist
 from torch.distributed._local_tensor import LocalTensor
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestExample01BasicOperations(TestCase):
     """Tests for Example 1: Basic LocalTensor Operations."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_create_local_tensor(self):
         """Test creating a LocalTensor from per-rank tensors."""
@@ -102,6 +108,8 @@ class TestExample01BasicOperations(TestCase):
 class TestExample02CollectiveOperations(TestCase):
     """Tests for Example 2: Collective Operations."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         if dist.is_initialized():
@@ -144,6 +152,8 @@ class TestExample02CollectiveOperations(TestCase):
 class TestExample03DTensorIntegration(TestCase):
     """Tests for Example 3: DTensor Integration."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         if dist.is_initialized():
@@ -177,6 +187,8 @@ class TestExample03DTensorIntegration(TestCase):
 
 class TestExample04UnevenSharding(TestCase):
     """Tests for Example 4: Uneven Sharding."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def setUpClass(cls):
@@ -216,6 +228,8 @@ class TestExample04UnevenSharding(TestCase):
 class TestExample05RankSpecific(TestCase):
     """Tests for Example 5: Rank-Specific Computations."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_use_rank_map(self):
         """Test rank_map creates per-rank values."""
         values, expected = use_rank_map()
@@ -248,6 +262,8 @@ class TestExample05RankSpecific(TestCase):
 
 class TestExample06MultidimMesh(TestCase):
     """Tests for Example 6: Multi-Dimensional Meshes."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def setUpClass(cls):
