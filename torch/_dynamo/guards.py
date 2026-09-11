@@ -4415,9 +4415,10 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         closure = obj.__closure__
         if closure is not None:
-            # No verbatim gate like the other containers: a cell is never a
-            # literal a value guard could keep whole, and _prune_cell is
-            # length-preserving, so pruning every cell is always safe.
+            # No verbatim gate like the other containers: a guard through
+            # __closure__ always ends at cell_contents, which registers the
+            # contents _prune_cell keys on, so per-cell pruning already keeps
+            # what is read, and _prune_cell is length-preserving.
             closure = tuple(self._prune_cell(cell) for cell in closure)
         if self._keep(obj.__dict__):
             attributes = obj.__dict__
@@ -4623,7 +4624,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # would not round back to this object -- it fails to resolve, or
                 # resolves to a different one -- so rebuild a guarded function by
                 # value and prune an unguarded one, rather than fall through and
-                # mis-serialize.
+                # fail the dump with pickle's PicklingError (a bypass).
                 if id(obj) not in self.guard_tree_values:
                     return _Missing, ("fqn mismatch",)
                 return self._reduce_function_by_value(obj)
