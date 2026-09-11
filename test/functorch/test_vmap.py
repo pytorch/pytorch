@@ -6528,7 +6528,9 @@ class TestTransformFailureDevice(TestCase):
 
 
 @markDynamoStrictTest
-class TestVmapDeviceType(Namespace.TestVmapBase):
+class TestVmapDevice(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -6825,8 +6827,10 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestTransformFailureDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
 )
+instantiate_device_type_tests(
+    TestVmapDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
+)
 
-instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
 
 if __name__ == "__main__":
