@@ -1,5 +1,4 @@
 import dataclasses
-import importlib
 import inspect
 import io
 import logging
@@ -15,8 +14,8 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
-from torch._dynamo.graph_utils import _graph_device_type
-from torch._dynamo.package import SystemInfo
+from torch._dynamo.graph_utils import _graph_device_types
+from torch._dynamo.package import FunctionPicklerBase, SerializedCode, SystemInfo
 
 from . import convert_frame
 from .aot_compile_types import (
@@ -28,10 +27,14 @@ from .hooks import Hooks
 
 if TYPE_CHECKING:
     from .guards import GuardManagerWrapper
-    from .package import SerializedCode, SourceInfo
+    from .package import SourceInfo
 
 
 log = logging.getLogger(__name__)
+
+_EXTERNAL_DATA_HINT = (
+    "Mark the value(s) as external data by using `external_data={'key': ...}`."
+)
 
 
 def bind_locals(
@@ -61,14 +64,58 @@ class CompileArtifacts:
         current_system.check_compatibility(self.system_info, self.device_type)
 
 
-class AOTCompilePickler(pickle.Pickler):
-    def __init__(self, external_data: dict[str, object], buf: io.BytesIO) -> None:
+@dataclasses.dataclass
+class _ProbeState:
+    """Shared by an AOTCompilePickler and the throwaway probe picklers its
+    _dumps_cleanly spawns, so the whole probe tree sees one memo."""
+
+    # id(value) -> picklable; without the memo a probe tree is exponential.
+    cache: dict[int, bool] = dataclasses.field(default_factory=dict)
+    inflight: set[int] = dataclasses.field(default_factory=set)
+    # id(value) -> the unmarked nn.Modules the probe reached inside it, so the
+    # warning can name the actual reason and the offending modules.
+    unmarked_modules: dict[int, list[Any]] = dataclasses.field(default_factory=dict)
+    # id(value) -> the exception type that failed its probe, so the warning
+    # tells a value that does not pickle from a reducer bug (an AttributeError
+    # out of this file's own machinery, a RecursionError).
+    failures: dict[int, str] = dataclasses.field(default_factory=dict)
+    # id(function) -> its picklable __dict__ entries; a function that closes
+    # over itself is reduced twice, and the second pass must not re-probe or
+    # re-warn.
+    attributes: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    # id(function) -> its kept __doc__ (None when pruned), for the same warn-once
+    # reason.
+    docs: dict[int, Any] = dataclasses.field(default_factory=dict)
+    # id(function) -> its kept annotations, for the same warn-once reason.
+    annotations: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    type_params: dict[int, tuple[Any, ...] | None] = dataclasses.field(
+        default_factory=dict
+    )
+    # Whether a probe short-circuited on an in-flight id; such a verdict is
+    # not cached as final but parked (as unpicklable) for the rest of the
+    # probe tree.
+    leaned: bool = False
+    parked: set[int] = dataclasses.field(default_factory=set)
+
+
+class AOTCompilePickler(FunctionPicklerBase):
+    def __init__(
+        self,
+        external_data: dict[str, object],
+        buf: io.BytesIO,
+        *,
+        probe_state: _ProbeState | None = None,
+    ) -> None:
         super().__init__(buf)
         self.external_data = external_data
         self.id_map: dict[int, str] = {
             id(value): key for key, value in external_data.items()
         }
         self.errors = {}
+        # A probe pickler shares its parent's state; only the real dump reports
+        # what it drops, since a probe's verdict may not be final.
+        self._probing = probe_state is not None
+        self._probe_state = probe_state or _ProbeState()
 
     def persistent_id(self, obj: object) -> int | str | None:
         if id(obj) in self.id_map:
@@ -79,78 +126,298 @@ class AOTCompilePickler(pickle.Pickler):
         else:
             return None
 
-    @classmethod
-    def _unpickle_cell(cls, val: object) -> object:
-        def _() -> object:
-            return val
-
-        if _.__closure__ is None:
-            raise AssertionError("closure must not be None")
-        return _.__closure__[0]
-
-    @classmethod
-    # pyrefly: ignore [implicit-any]
-    def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
-        return types.MethodType(func, base)
-
-    @classmethod
-    def _unpickle_module(cls, name: str) -> types.ModuleType:
-        return importlib.import_module(name)
-
-    @classmethod
-    def _unpickle_code(cls, serialized_code: "SerializedCode") -> types.CodeType:
-        from torch._dynamo.package import SerializedCode
-
-        return SerializedCode.to_code_object(serialized_code)
-
-    @classmethod
-    def _unpickle_nested_function(
-        cls,
-        code: types.CodeType,
-        module: str,
-        qualname: str,
-        argdefs: tuple[object, ...] | None,
-        closure: tuple[types.CellType, ...] | None,
-    ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
-
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
-        if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+        if isinstance(obj, types.CellType):
+            return self._reduce_cell(obj)
         elif inspect.iscode(obj):
-            from torch._dynamo.package import SerializedCode
-
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
-
         elif inspect.ismodule(obj):
-            return type(self)._unpickle_module, (obj.__name__,)
+            return type(self)._unpickle_python_module, (obj.__name__,)
         elif inspect.ismethod(obj):
-            """
-            By default, pickle will call getattr() directly on the self object
-            for pickling bounded methods, this is not what we want, instead we
-            always want to serialize the original function and the self object
-            in their original form.
-            """
-            func = obj.__func__
-            method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
-            if inspect.ismethod(inner_func):
-                inner_func = inner_func.__func__
-            if func is not inner_func:
-                return type(self)._unpickle_bound_method, (func, method_self)
-        elif inspect.isfunction(obj):
-            if "<locals>" in obj.__qualname__:
-                return type(self)._unpickle_nested_function, (
-                    obj.__code__,
-                    obj.__module__,
-                    obj.__qualname__,
-                    obj.__defaults__,
-                    obj.__closure__,
-                )
+            receiver = obj.__self__
+            # A receiver in external_data is served by persistent_id, so it is
+            # the LIVE object at load and pickle's default getattr(receiver,
+            # name) resolves on it; the shared reducer's __getattr__ gate would
+            # instead pickle __func__ (every nn.Module defines __getattr__),
+            # rebuilding a local subclass's method by value and failing on its
+            # __class__ cell. An unmarked nn.Module is recorded in errors and
+            # fails serialize() anyway, so for it this only keeps the dump going.
+            live = id(receiver) in self.id_map or isinstance(receiver, torch.nn.Module)
+            reduced = self._reduce_bound_method(obj, receiver_is_live=live)
+            if reduced is not None:
+                return reduced
+        elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
+            # The runtime env has to RUN this function, so what a call needs
+            # (defaults, keyword defaults, closure) is carried verbatim, while
+            # annotations, type params, __dict__ entries and __doc__ are pruned
+            # per value: the runtime assigns those back and never forces a pruned
+            # one, so a value this pickler cannot serialize (a <locals>
+            # annotation class, a PEP 695 function-scoped TypeVar, or a __dict__
+            # entry like the __wrapped__ functools.wraps stashes, which can drag
+            # an unrelated lock/Module in) is dropped rather than left to fail
+            # the whole dump. Known limitation: the top-level function's own
+            # annotations ride on CompileArtifacts.signature, which serialize()
+            # dumps unpruned, so this only protects the nested functions reached
+            # here.
+            return self._reduce_function(
+                obj,
+                defaults=obj.__defaults__,
+                kwdefaults=obj.__kwdefaults__,
+                closure=obj.__closure__,
+                attributes=self._pickleable_attributes(obj),
+                annotations=self._pickleable_annotations(obj),
+                doc=self._pickleable_doc(obj),
+                type_params=self._pickleable_type_params(obj),
+                globals_snapshot=None,
+            )
 
         return NotImplemented
+
+    def _warn_dropped(self, obj: Any, slot: str, value: Any) -> None:
+        # The body may read a pruned attribute (`with helper.lock:`), so the
+        # drop is a warning that names the fix, not a silent debug line; the
+        # user can hand the object over as external data and it is kept. It
+        # names the exception type too: a reducer bug then reads as one in a
+        # bug report instead of as the user's value not pickling. The
+        # function is named by its code object: functools.wraps overwrites
+        # __qualname__ with the wrappee's, which would make the two drops of a
+        # wrapper and its wrappee indistinguishable.
+        if self._probing:
+            return
+        code = obj.__code__
+        modules = self._probe_state.unmarked_modules.get(id(value))
+        if modules is not None:
+            names = ", ".join(type(m).__name__ for m in modules)
+            reason = f"it holds nn.Module(s) not marked as external data ({names})"
+        else:
+            failure = self._probe_state.failures.get(id(value))
+            reason = (
+                f"it does not pickle ({failure})" if failure else "it does not pickle"
+            )
+        # co_qualname is 3.11+; the bare co_name on 3.10 cannot tell a wraps
+        # wrapper from its wrappee, but __qualname__ could not either.
+        log.warning(
+            "dropping %s.%s (%s) from the artifact: %s; pass it in external_data to keep it (function defined at %s:%d)",
+            getattr(code, "co_qualname", code.co_name),
+            slot,
+            type(value).__name__,
+            reason,
+            code.co_filename,
+            code.co_firstlineno,
+        )
+
+    def _pickleable_attributes(self, obj: Any) -> dict[str, Any]:
+        # Memoized for the REAL dump only, where every verdict consulted is
+        # final, so a function reduced twice (it closes over itself) is neither
+        # re-probed nor re-warned. A probe's answer may lean on an in-flight
+        # value and must not be reused. A snapshot of the items: a probe runs
+        # user __reduce__ code that may write back onto the function.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.attributes:
+            return state.attributes[id(obj)]
+        attributes = {}
+        for name, value in list(obj.__dict__.items()):
+            if self._dumps_cleanly(value):
+                attributes[name] = value
+            else:
+                self._warn_dropped(obj, name, value)
+        if not self._probing:
+            state.attributes[id(obj)] = attributes
+        return attributes
+
+    def _pickleable_doc(self, obj: Any) -> Any:
+        # Nothing on the load path forces __doc__ (_apply_function_state
+        # assigns it, that is all), so an unpicklable docstring is dropped like
+        # a pruned attribute rather than failing the dump. A plain str is not
+        # probed. Memoized for the real dump so a function reduced twice (it
+        # closes over itself) warns once; unlike the attributes memo there is no
+        # write-back to snapshot against, a single read cannot be mutated.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.docs:
+            return state.docs[id(obj)]
+        doc = obj.__doc__
+        if not self._dumps_cleanly(doc):
+            self._warn_dropped(obj, "__doc__", doc)
+            doc = None
+        if not self._probing:
+            state.docs[id(obj)] = doc
+        return doc
+
+    def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
+        # The runtime must SERIALIZE these, so on 3.14 ask for evaluated VALUEs
+        # rather than the FORWARDREF proxies the guard pickler reads: a proxy
+        # must not be carried (it holds its owner and may drag the owner's
+        # globals along). Evaluating runs the function's __annotate__ and
+        # caches the result on it, the same thing inspect.signature does; when
+        # it raises -- a TYPE_CHECKING-only name is the common case -- the whole
+        # set is dropped, since __annotate__ is one function returning the whole
+        # dict (a FORWARDREF retry that keeps the proxy-free values would
+        # salvage the siblings; not done). That drop is a debug line where a
+        # per-value drop below warns: a set that does not evaluate was never
+        # readable at runtime in this process either (typing.get_type_hints
+        # raises the same), so nothing the body does can depend on it, while a
+        # value that resolved but does not pickle is a live object the body may
+        # read. Below 3.14 the read hands back the live __annotations__ dict
+        # (materializing an empty one on a function that has none); its items
+        # are snapshotted, since a probe runs user __reduce__ code that may
+        # write back onto the function, and the kept values go into a fresh
+        # dict. A value can still be unpicklable -- a <locals> class resolves
+        # fine yet pickle cannot reference it -- so probe each and keep only the
+        # ones that dump, warning per drop like a __dict__ entry. The key is
+        # dropped rather than kept with a sentinel as the guard pickler does:
+        # this function is CALLED after load, and a sentinel where the body
+        # expects a type is a wrong object, while a missing key is the KeyError
+        # the warning predicts. Memoized for the real dump like the attributes.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.annotations:
+            return state.annotations[id(obj)]
+        annotations: dict[str, Any] = {}
+        try:
+            annotations = self._read_raw_annotations(obj, evaluate=True)
+        except Exception as e:
+            code = obj.__code__
+            log.debug(
+                "dropping the annotations of %s (%s:%d): %s",
+                getattr(code, "co_qualname", code.co_name),
+                code.co_filename,
+                code.co_firstlineno,
+                e,
+            )
+        kept = {}
+        for name, value in list(annotations.items()):
+            if self._dumps_cleanly(value):
+                kept[name] = value
+            else:
+                self._warn_dropped(obj, f"__annotations__[{name!r}]", value)
+        if not self._probing:
+            state.annotations[id(obj)] = kept
+        return kept
+
+    def _dumps_cleanly(self, value: Any) -> bool:
+        # "does it pickle?" has no cheaper predicate than trying. A throwaway
+        # pickler of this exact class keeps external_data/persistent_id behaviour
+        # identical to the real dump. The cache stops a value from being probed
+        # twice, not from being dumped again inside an ancestor's probe, so the
+        # total work is the reachable bytes times the nesting depth, and user
+        # __reduce__ code runs once per probe that reaches it; a tensor stashed
+        # on a function is serialized into the throwaway buffer too (a transient
+        # copy of its storage, and its hook warning fires once more). A
+        # recursion overflow counts as unpicklable (the value is pruned) rather
+        # than re-raising: a deep-but-finite value in an optional slot must not
+        # fail a save that has nothing wrong with it; the guard pickler makes
+        # the opposite call for the same condition, since it has a bypass to
+        # fall back to and this pickler does not.
+        if self._is_literal(value):
+            return True
+        state = self._probe_state
+        vid = id(value)
+        cached = state.cache.get(vid)
+        if cached is not None:
+            return cached
+        if vid in state.parked:
+            return False
+        if vid in state.inflight:
+            # Re-entered mid-probe (a value whose attributes reach back to
+            # itself). Say picklable to break the cycle -- pickle's memo handles
+            # the reference -- and record the lean so a verdict computed on top
+            # of it is not cached as final.
+            state.leaned = True
+            return True
+        # Every probed value is reachable from the object being dumped, which
+        # the REAL pickler's memo keeps alive until dump() returns, so an id is
+        # not reused within one dump; the cache lives as long as this pickler,
+        # one per serialize(). (A function a user __reduce__ manufactures inside
+        # a probe is not held that way; a later object at its address would
+        # inherit its verdict.)
+        probe = type(self)(self.external_data, io.BytesIO(), probe_state=state)
+        state.inflight.add(vid)
+        leaned_before = state.leaned
+        state.leaned = False
+        try:
+            probe.dump(value)
+        except Exception as exc:
+            # No %r of the value: a repr can raise or be huge.
+            log.debug(
+                "pruning an unpicklable %s from a nested function: %s",
+                type(value).__name__,
+                exc,
+            )
+            state.failures[vid] = type(exc).__name__
+            result = False
+        else:
+            # persistent_id records an unmarked nn.Module rather than raising, so
+            # such a value dumps here but would fail the real serialize(); treat
+            # it as unpicklable so it is pruned now instead of failing the whole
+            # dump later.
+            result = not probe.errors
+            if not result:
+                state.unmarked_modules[vid] = list(probe.errors.values())
+                log.debug(
+                    "pruning unmarked nn.Module(s) %s from a nested function",
+                    list(probe.errors.values()),
+                )
+        finally:
+            state.inflight.discard(vid)
+            # The lean travels back through this shared flag because the nested
+            # probe is reached through pickle's own dump stack (probe.dump ->
+            # reducer_override -> _pickleable_attributes -> _dumps_cleanly), so
+            # no return value of the child can reach this frame; restore it here
+            # so an aborting dump cannot leave the child's value behind.
+            leaned = state.leaned
+            state.leaned = leaned_before or leaned
+        # A False that leaned on an in-flight True may be a false negative, so
+        # it is not cached as final. It is parked for the rest of this probe
+        # tree -- re-deriving it is exponential on a cyclic cluster -- and
+        # dropped when the tree finishes, so the real dump never consults it.
+        # Consulting a park is not a lean: it can make a probe over-prune, and
+        # over-pruning CAN flip a probe's verdict False -> True, and the real
+        # dump may read that True straight from the cache. It cannot hurt: the
+        # real dump never reuses a probe's ATTRIBUTE SET (the memo above is
+        # gated on not _probing), so every prunable edge below such a value is
+        # re-decided by an outermost probe of its own, and the non-prunable
+        # slots (defaults, kwdefaults, closure) are traversed identically in
+        # every probe, so a failure there would have failed the earlier probe
+        # too. A True, or a False that leaned on nothing, is final. So is the
+        # OUTERMOST probe's verdict, leaned or not: the only in-flight id it can
+        # lean on is its own, and that lean is exact because pickle's memo
+        # resolves the back-reference; the caller acts on it irrevocably.
+        if result or not leaned or not state.inflight:
+            state.cache[vid] = result
+        else:
+            state.parked.add(vid)
+        if not state.inflight:
+            state.parked.clear()
+            state.leaned = False
+        return result
+
+    def _pickleable_type_params(self, obj: Any) -> tuple[Any, ...] | None:
+        # A PEP 695 function-scoped TypeVar pickles by name as typing.<name> and
+        # fails pickle's identity check against it (or the lookup, for a name
+        # typing lacks), so drop the whole tuple when any element will not dump:
+        # a generic cannot be rebuilt around a missing parameter. Ordinary
+        # functions carry (), which dumps and is kept.
+        # A TypeVar the body itself references sits in a closure cell, which is
+        # never pruned (the body needs it), so that shape still fails the dump.
+        # Memoized for the real dump like the other slots, so a function reduced
+        # twice warns once; below 3.12 the tuple lives in __dict__ and the
+        # attributes pass has already reported it, so this pass stays quiet.
+        state = self._probe_state
+        if not self._probing and id(obj) in state.type_params:
+            return state.type_params[id(obj)]
+        type_params = getattr(obj, "__type_params__", None)
+        kept = type_params
+        if type_params:
+            # next() short-circuits: every probe serializes the reachable graph
+            # into a throwaway buffer, and only the first failure is reported.
+            bad = next((p for p in type_params if not self._dumps_cleanly(p)), None)
+            if bad is not None:
+                if "__type_params__" not in obj.__dict__:
+                    self._warn_dropped(obj, "__type_params__", bad)
+                kept = None
+        if not self._probing:
+            state.type_params[id(obj)] = kept
+        return kept
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
@@ -193,6 +460,9 @@ class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
     _extra_globals: dict[str, object] | None = None
+    # Guard-only scope, held by reference; kept apart from _extra_globals so it
+    # cannot rewire what the compiled bytecode reads.
+    _guard_globals: dict[str, object] | None = None
 
     def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
         f_locals: dict[str, object] = {}
@@ -228,10 +498,15 @@ class AOTCompiledFunction:
 
         if self._artifacts.guard_manager is None:
             guards_state = load_guards_state(self._artifacts.guards_state)
+            # No fallback to the serialized scope: a name the loading process
+            # lacks must fail the guard rather than resolve to a baked-in value.
+            guard_scope = self._guard_globals
+            if guard_scope is None:
+                guard_scope = self.fn.__globals__
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
-                self.fn.__globals__,
+                guard_scope,
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -257,8 +532,6 @@ class AOTCompiledFunction:
     def serialize(
         cls, fn: "AOTCompiledFunction", external_data: dict[str, Any] | None = None
     ) -> AOTCompileSaveResult:
-        from torch._dynamo.package import SerializedCode
-
         state = fn._artifacts.__dict__.copy()
         state["guard_manager"] = None
         state["runtime_env"] = dataclasses.replace(
@@ -266,6 +539,9 @@ class AOTCompiledFunction:
             bytecode=SerializedCode.from_code_object(state["runtime_env"].bytecode),
         )
         compiled_fn = state["compiled_fn"]
+        # The backend pickles itself here, deliberately outside the handler
+        # below: external_data cannot fix an unpicklable graph module, so that
+        # failure must not be dressed up with guidance pointing at it.
         state["compiled_fn"] = (
             type(compiled_fn).deserialize_compile_artifacts,
             type(compiled_fn).serialize_compile_artifacts(compiled_fn),
@@ -273,11 +549,50 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
         buf = io.BytesIO()
         pickler = AOTCompilePickler(external_data or {}, buf)
-        pickler.dump(state)
+        try:
+            pickler.dump(state)
+        except (pickle.PicklingError, TypeError, AttributeError, RecursionError) as e:
+            # Preserve the original exception object -- callers and tests match
+            # on it (e.g. "cannot pickle '_thread.lock' object") -- and append
+            # guidance. Mutate args and re-raise rather than type(e)(msg): a
+            # TypeError subclass from a user __reduce__ may take a non-message
+            # constructor, so reconstructing would swap the real error for a
+            # constructor failure. (A subclass whose __str__ ignores args still
+            # renders without the guidance; add_note() would cover it but is
+            # 3.11+.) The args tail is kept for a consumer that reads it.
+            # AttributeError is caught too: the C _pickle accelerator raises a
+            # bare AttributeError "Can't get local object" for a <locals> class
+            # in a default/kwdefault (3.14+ raises PicklingError), so it needs
+            # the same guidance. RecursionError as well: a deep-but-finite value
+            # in an unpruned slot overflows the C pickler, and external_data is
+            # its fix too. Unmarked modules recorded before the failure are
+            # reported here rather than on the next attempt.
+            # str(e) is repr(args) for a 2+-argument exception, which would nest
+            # the tuple repr and escape the newline; the head argument is the
+            # message. str(e) of the result is still a tuple repr in that case,
+            # which is the price of keeping the tail.
+            message = str(e.args[0]) if e.args else ""
+            if _EXTERNAL_DATA_HINT in message:
+                raise  # a re-raised singleton already carries the guidance
+            prefix = f"{message}\n" if message else ""
+            modules = ""
+            if pickler.errors:
+                # Class names, not reprs: nn.Module.__repr__ renders the whole
+                # child tree and runs user code inside this handler.
+                names = ", ".join(type(m).__name__ for m in pickler.errors.values())
+                modules = f" It also reached unmarked nn.Modules ({names})."
+            e.args = (
+                prefix + "Some value reached by the artifact is not picklable (a "
+                "closure cell, a default/kwdefault, or the top-level function's "
+                "own signature annotations, which ride unpruned, are the common "
+                f"sources).{modules} {_EXTERNAL_DATA_HINT}",
+                *e.args[1:],
+            )
+            raise
         if pickler.errors:
             raise RuntimeError(
                 f"Failed to serialize the following objects: {list(pickler.errors.values())}\n"
-                "Please mark these as external data by using `external_data={'key': ...}`"
+                f"{_EXTERNAL_DATA_HINT}"
             )
         return AOTCompileSaveResult(serialized_data=buf.getvalue())
 
@@ -287,8 +602,16 @@ class AOTCompiledFunction:
         data: bytes,
         f_globals: dict[str, object] | None = None,
         external_closure_data: dict[str, Any] | None = None,
+        *,
+        guard_globals: dict[str, object] | None = None,
     ) -> "AOTCompiledFunction":
-        from torch._dynamo.package import SerializedCode
+        # f_globals and guard_globals have distinct contracts and must not be
+        # conflated: f_globals is MERGED over the scope reconstructed from the
+        # serialized bytecode (extra names the compiled fn may reference), so a
+        # name it omits still resolves to the baked-in value. guard_globals
+        # REPLACES the guard scope with no such fallback -- a name it lacks
+        # fails the guard rather than resolving to a serialized value -- so it
+        # is the live namespace global guards are re-rooted at on load.
 
         f = io.BytesIO(data)
         f.seek(0)
@@ -305,7 +628,7 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
-        return cls(artifacts, _extra_globals=f_globals)
+        return cls(artifacts, _extra_globals=f_globals, _guard_globals=guard_globals)
 
     def disable_guard_check(self) -> None:
         self._guard_check_enabled = False
@@ -352,6 +675,14 @@ def aot_compile_fullgraph(
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
+                # NB: dropping every global guard is what
+                # torch.compiler.skip_guard_on_globals_unsafe does explicitly,
+                # and the "unsafe" in that name applies here too: a dropped
+                # global guard does not fail, it silently reuses a graph traced
+                # under a different global value. Narrowing this default needs
+                # guard construction to resolve arbitrary global references
+                # first (today they can raise KeyError on G['...']), so callers
+                # who need a specific global guarded must pass guard_filter_fn.
                 return [
                     (
                         not (
@@ -371,7 +702,9 @@ def aot_compile_fullgraph(
         if backend_input is None:
             raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        device_type = _graph_device_type(backend_input.graph_module.graph)
+        # A graph naming no device lowers to CPU code.
+        graph_devices = _graph_device_types(backend_input.graph_module.graph)
+        device_type = next((d for d in sorted(graph_devices) if d != "cpu"), "cpu")
         if (
             backend_input.fake_mode.shape_env
             is not graph_capture_output.output_graph.shape_env
@@ -494,6 +827,9 @@ class AOTCompiledModel:
         return self.compiled_results[0](self.model, *args, **kwargs)
 
     def serialize(self) -> bytes:
+        # Nothing threads external_data down this path (_save_aot_compiled_module
+        # has no parameter for it either), so the guidance a failed save appends
+        # is only actionable by saving the offending function on its own.
         data: list[bytes] = []
         for result in self.compiled_results:
             data.append(AOTCompiledFunction.serialize(result).serialized_data)
