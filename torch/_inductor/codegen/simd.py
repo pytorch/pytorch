@@ -38,6 +38,7 @@ from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash, PyCodeCache
 from ..dependencies import MemoryDep, StarDep, WeakDep
+from .common import BackendFeature
 
 
 if TYPE_CHECKING:
@@ -2840,7 +2841,6 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
     supports_sub_parent_epilogue = False
-    supports_reduction_result = False
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -2868,7 +2868,9 @@ class SIMDScheduling(BaseScheduling):
             return super().can_fuse_reduction_pair(node1, node2)
         why = WhyNoFuse(node1, node2)
         nodes = [*node1.get_nodes(), *node2.get_nodes()]
-        if not self.supports_reduction_result:
+        if BackendFeature.REDUCTION_RESULT not in self.get_backend_features(
+            node1.get_device()
+        ):
             why("backend does not support ranked reduction results")
             return False
         if any(
@@ -2888,7 +2890,9 @@ class SIMDScheduling(BaseScheduling):
             return False
         _, (numel, rnumel) = reductions[0].group
         # The compact result lives in a persistent [rows, k] tile: split scans
-        # and multi-axis tilings such as native matmul cannot hold it.
+        # and multi-axis tilings such as native matmul cannot hold it. This is
+        # the same select_tiling call codegen makes later; only ranked pairs pay
+        # for it at fusion time.
         if (
             any(n.is_split_scan() for n in nodes)
             or len(self.select_tiling(nodes, numel, rnumel)) != 2
