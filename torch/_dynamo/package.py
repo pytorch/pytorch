@@ -264,15 +264,19 @@ class FunctionPicklerBase(pickle.Pickler):
         """Whether pickling fn by reference (import __module__, walk __qualname__)
         lands back on fn. False for a <locals> function, a functools.wraps
         wrapper (it carries the wrappee's names), an exec-created function, or
-        a module absent from sys.modules; those must be rebuilt from the code
-        object or pickle silently hands back a different function at load."""
+        a module absent from sys.modules; pickling those by reference raises
+        PicklingError at dump, so the caller rebuilds them from the code object
+        (or prunes them)."""
         if "<locals>" in fn.__qualname__:
             return False
         # __module__ need not be a str (a decorator can set anything); an
         # unhashable one must not TypeError out of the reducer.
-        if not (isinstance(fn.__module__, str) and fn.__module__ in sys.modules):
+        module = (
+            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
+        )
+        if module is None:
             return False
-        resolved: Any = sys.modules[fn.__module__]
+        resolved: Any = module
         for name in fn.__qualname__.split("."):
             resolved = getattr(resolved, name, None)
         return resolved is fn
