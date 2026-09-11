@@ -690,11 +690,13 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
-    def test_aot_compile_prunes_functools_wraps_wrapped(self):
-        # functools.wraps writes __wrapped__ into the wrapper's __dict__, so a
-        # helper that merely decorates another function drags the wrapped one
-        # (and anything hanging off it) into the artifact. An unpicklable value
-        # there must be pruned, not fail the save.
+    def test_aot_compile_prunes_a_lock_behind_functools_wraps_wrapped(self):
+        # functools.wraps writes __wrapped__ into the wrapper's __dict__ and
+        # copies the wrappee's __dict__ too, so a helper that merely decorates
+        # another function drags the wrapped one (and anything hanging off it)
+        # into the artifact. The lock is pruned from both, __wrapped__ itself is
+        # kept, and the save succeeds. With __dict__ carried verbatim the save
+        # fails on the lock.
         def build():
             def base(x):
                 return x * 3
@@ -720,6 +722,10 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
+        (cell,) = loaded._artifacts.runtime_env.closure
+        rebuilt = cell.cell_contents
+        self.assertFalse(hasattr(rebuilt.__wrapped__, "lock"))
+        self.assertEqual(set(rebuilt.__dict__), {"__wrapped__"})
 
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
@@ -1923,6 +1929,28 @@ from user code:
 
 
 class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
+    def test_pickler_keeps_an_external_modules_method_by_reference(self):
+        # The receiver is external data, so it is the live object at load and
+        # pickle's default getattr(receiver, name) resolves the method on it.
+        # The shared bound-method reducer would instead carry __func__ (an
+        # nn.Module defines __getattr__) and rebuild it by value, which for a
+        # local subclass fails on the __class__ cell of its super() call.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def make():
+            class LocalMod(torch.nn.Linear):
+                def forward(self, x):
+                    return super().forward(x) + 1
+
+            return LocalMod(2, 2)
+
+        mod = make()
+        buf = io.BytesIO()
+        AOTCompilePickler({"mod": mod}, buf).dump(mod.forward)
+        out = AOTCompileUnpickler({"mod": mod}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.__func__, type(mod).forward)
+        self.assertIs(out.__self__, mod)
+
     def test_pickler_does_not_prune_an_unpicklable_kwdefault(self):
         # Unlike __doc__/annotations, __kwdefaults__ is never pruned: a function
         # cannot be called without it, so an unpicklable kwdefault fails loudly.
@@ -1939,6 +1967,67 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
             AOTCompilePickler({}, buf).dump(fn)
         self.assertIn("cannot pickle", str(cm.exception))
+
+    def test_pickler_breaks_a_dict_cycle_between_nested_functions(self):
+        # Nested functions whose __dict__ entries point at themselves and each
+        # other re-enter _dumps_cleanly mid-probe. Without the in-flight
+        # short-circuit the probe recurses until RecursionError, which it reads
+        # as "unpicklable", and the pair loses picklable entries (here `g` and
+        # `f.g` vanish); with it the cycle terminates, only the lock is pruned,
+        # and the rebuilt pair still refers to itself.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def f(x):
+                return x + 1
+
+            def g(x):
+                return x + 2
+
+            def top(x):
+                return x
+
+            f.f, f.g, g.g, g.f, g.lock = f, g, g, f, threading.Lock()
+            top.f, top.g = f, g
+            return top
+
+        top = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(top)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.g.f, out.f)
+        self.assertIs(out.f.g, out.g)
+        self.assertIs(out.f.f, out.f)
+        self.assertFalse(hasattr(out.g, "lock"))
+        self.assertEqual((out.f(1), out.g(1)), (2, 3))
+
+    def test_pickler_prunes_an_unmarked_module_from_a_nested_functions_dict(self):
+        # persistent_id records an nn.Module rather than raising, so a Module
+        # reached through a nested function's __dict__ would dump here and then
+        # poison serialize(); _dumps_cleanly prunes it instead -- unless the user
+        # marked it as external data, in which case it is kept by reference.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        mod = torch.nn.Linear(1, 1)
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.mod = mod
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        pickler = AOTCompilePickler({}, buf)
+        pickler.dump(fn)
+        self.assertEqual(pickler.errors, {})
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "mod"))
+        buf = io.BytesIO()
+        AOTCompilePickler({"mod": mod}, buf).dump(fn)
+        out = AOTCompileUnpickler({"mod": mod}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.mod, mod)
 
     def test_pickler_rebuilds_a_nested_function_faithfully(self):
         # The pickler passed __qualname__ where FunctionType wants __name__, so
