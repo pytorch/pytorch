@@ -1745,6 +1745,21 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         outputs = torch.empty(global_size, device=self.device)
         correct_outputs = torch.empty(global_size, device=self.device)
         counter = CompileCounter()
+
+        fullgraph_compiled = torch.compile(
+            func, backend=CompileCounter(), fullgraph=True
+        )
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            fullgraph_compiled(inputs, outputs, pg=GroupMember.WORLD)
+        message = str(cm.exception)
+        self.assertIn(
+            "Dynamo can only remap synchronous torch.distributed collectives",
+            message,
+        )
+        self.assertIn("set async_op=False", message)
+        self.assertIn("torch.distributed._functional_collectives", message)
+        self.assertIn("https://github.com/pytorch/pytorch/issues/119890", message)
+
         compiled = torch.compile(func, backend=counter)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
