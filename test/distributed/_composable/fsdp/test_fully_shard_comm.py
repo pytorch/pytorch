@@ -47,6 +47,10 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -71,6 +75,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -2045,6 +2050,54 @@ class TestFullyShardForceSumReduction(FSDPTest):
         # Now we should also have SUM
         self.assertRegex(logs, reduce_scatter_sum_re)
         self.assertRegex(logs, all_reduce_sum_re)
+
+
+class TestMixedDtypeChunkCat(TestCase):
+    def test_mixed_dtype_chunk_cat(self, device):
+        num_chunks = 4
+        inputs = [
+            torch.randn(2, 17, 3, device=device, dtype=torch.bfloat16),
+            torch.randn(2, 10, 3, device=device, dtype=torch.float32),
+        ]
+        fp32_inputs = [tensor.float() for tensor in inputs]
+        expected = torch._chunk_cat(fp32_inputs, dim=1, num_chunks=num_chunks)
+        actual = torch.empty_like(expected)
+        torch.ops.fsdp.chunk_cat(inputs, dim=1, num_chunks=num_chunks, out=actual)
+        self.assertEqual(actual, expected)
+
+    def test_mixed_dtype_chunk_cat_functionalization(self, device):
+        inputs = [
+            torch.arange(3, device=device, dtype=torch.bfloat16),
+            torch.arange(4, device=device, dtype=torch.float32),
+        ]
+        expected = torch._chunk_cat(
+            [tensor.float() for tensor in inputs], dim=0, num_chunks=2
+        )
+        out = torch.empty_like(expected)
+
+        def func(tensors, output):
+            torch._chunk_cat(tensors, dim=0, num_chunks=2, out=output)
+            return output
+
+        actual = torch.func.functionalize(func)(inputs, out)
+        self.assertEqual(actual, expected)
+        self.assertEqual(out, expected)
+
+    @onlyCUDA
+    def test_mixed_dtype_chunk_cat_rejects_overlap(self, device):
+        out = torch.empty((2, 2), device=device)
+        inputs = [
+            torch.tensor([1, 2], device=device, dtype=torch.bfloat16),
+            out.flatten()[:2],
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "single memory location"):
+            torch._chunk_cat(inputs, dim=0, num_chunks=2, out=out)
+
+
+instantiate_device_type_tests(
+    TestMixedDtypeChunkCat, globals(), only_for=("cpu", "cuda", "xpu")
+)
 
 
 @instantiate_parametrized_tests

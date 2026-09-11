@@ -134,17 +134,17 @@ class AllGatherState(NamedTuple):
 
 
 class ReduceScatterState(NamedTuple):
-    reduce_scatter_input: torch.Tensor
+    reduce_scatter_input: torch.Tensor | tuple[torch.Tensor, ...]
     event: torch.Event | None  # reduce-scatter event
 
 
 class AllReduceState(NamedTuple):
-    # Holding all_reduce_input (the reduce-dtype AR buffer) keeps the
+    # Holding all_reduce_input (the reduce-dtype AR buffer or buffers) keeps the
     # caching allocator from reusing the block across layers. This is a
     # structural invariant, not bookkeeping: without it, the next layer's
     # RS can reuse the same physical block before this layer's AR finishes
     # under slow AR, causing gradient aliasing. See PR #140044, PR #180900.
-    all_reduce_input: torch.Tensor
+    all_reduce_input: torch.Tensor | tuple[torch.Tensor, ...]
     event: torch.Event | None  # all-reduce event
 
 
@@ -153,6 +153,7 @@ class FSDPParamGroup:
 
     _orig_dtype: torch.dtype | None
     _reduce_dtype: torch.dtype | None
+    _has_uniform_reduce_dtype: bool
 
     def __init__(
         self,
@@ -176,7 +177,7 @@ class FSDPParamGroup:
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,
-                mp_policy,
+                mp_policy._resolve_for_param(param),
                 offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
@@ -185,7 +186,6 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.device_handle = _get_device_handle(device.type)
-        self.mp_policy = mp_policy
         self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
@@ -260,8 +260,10 @@ class FSDPParamGroup:
 
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
-        self._partial_reduce_output: torch.Tensor | None = None
-        # Holds the reduce-dtype AR buffer + completion event across
+        self._partial_reduce_output: (
+            torch.Tensor | dict[torch.dtype, torch.Tensor] | None
+        ) = None
+        # Holds the reduce-dtype AR buffer(s) + completion event across
         # layers in HSDP+AR with reduce_dtype != orig_dtype (e.g., bf16
         # reduce + fp32 params). Structural invariant: the live Python
         # ref keeps the buffer off the caching allocator's free list,
@@ -273,35 +275,43 @@ class FSDPParamGroup:
     # Initialization #
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_dtype_attrs(self.mp_policy)
+            fsdp_param.init_dtype_attrs(fsdp_param.mp_policy)
+        floating_params = [
+            p for p in self.fsdp_params if p.orig_dtype.is_floating_point
+        ]
         trainable_params: list[FSDPParam] = [
-            p for p in self.fsdp_params if p.sharded_param.requires_grad
+            p for p in floating_params if p.sharded_param.requires_grad
         ]
         if trainable_params:
-            params_for_dtype = trainable_params
+            params_for_orig_dtype = trainable_params
         else:
-            params_for_dtype = [
-                p for p in self.fsdp_params if p.orig_dtype.is_floating_point
-            ]
-        orig_dtypes = {p.orig_dtype for p in params_for_dtype}
-        reduce_dtypes = {p.reduce_dtype for p in params_for_dtype}
+            params_for_orig_dtype = floating_params
+        orig_dtypes = {p.orig_dtype for p in params_for_orig_dtype}
+        reduce_dtypes = {p.reduce_dtype for p in floating_params}
+        effective_reduce_dtypes = {
+            p.reduce_dtype or p.param_dtype or p.orig_dtype for p in floating_params
+        }
         if len(trainable_params) > 0 and len(orig_dtypes) != 1:
             # Models may have no grad params
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
-        if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
-            # This can be relaxed if we issue one reduce-scatter per reduce
-            # dtype (but we would need a way for users to specify multiple
-            # reduce dtypes)
-            raise AssertionError(
-                f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
+        self._orig_dtype = next(iter(orig_dtypes)) if len(orig_dtypes) == 1 else None
+        self._has_uniform_reduce_dtype = len(effective_reduce_dtypes) <= 1
+        if len(reduce_dtypes) == 1:
+            self._reduce_dtype = next(iter(reduce_dtypes))
+        elif len(effective_reduce_dtypes) == 1:
+            self._reduce_dtype = next(iter(effective_reduce_dtypes))
+        else:
+            self._reduce_dtype = None
+        if self._all_reduce_hook is not None:
+            self._validate_all_reduce_hook()
+
+    def _validate_all_reduce_hook(self) -> None:
+        if not self._has_uniform_reduce_dtype:
+            raise NotImplementedError(
+                "FSDP all-reduce hooks do not support multiple reduce dtypes"
             )
-        dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
-        self._orig_dtype = next(iter(orig_dtypes)) if dtype_sets_are_uniform else None
-        self._reduce_dtype = (
-            next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
-        )
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -603,6 +613,89 @@ class FSDPParamGroup:
             if default_prefetch:
                 self._backward_prefetch()
 
+    def _foreach_reduce_multi_dtype(
+        self,
+        fsdp_params: list[FSDPParam],
+        unsharded_grads: list[torch.Tensor],
+        reduce_scatter_group: dist.ProcessGroup | None,
+        all_reduce_group: dist.ProcessGroup | None,
+        all_reduce_stream: torch.Stream,
+    ):
+        if self._all_reduce_hook is not None:
+            self._validate_all_reduce_hook()
+        buckets: dict[torch.dtype, tuple[list[FSDPParam], list[torch.Tensor]]] = {}
+        for fsdp_param, grad in zip(fsdp_params, unsharded_grads):
+            reduce_dtype = fsdp_param.reduce_dtype or grad.dtype
+            bucket_params, bucket_grads = buckets.setdefault(reduce_dtype, ([], []))
+            bucket_params.append(fsdp_param)
+            bucket_grads.append(grad)
+        unsharded_grads.clear()
+
+        partial_reduce_outputs = self._partial_reduce_output
+        if partial_reduce_outputs is not None and not isinstance(
+            partial_reduce_outputs, dict
+        ):
+            raise AssertionError(
+                "Expected per-dtype partial reduce outputs for mixed reduce dtypes"
+            )
+        if partial_reduce_outputs is not None and set(partial_reduce_outputs) != set(
+            buckets
+        ):
+            raise RuntimeError(
+                "FSDP requires the same reduce dtype buckets when accumulating "
+                "HSDP gradients"
+            )
+
+        reduce_scatter_inputs: list[torch.Tensor] = []
+        all_reduce_inputs: list[torch.Tensor] = []
+        new_partial_reduce_outputs: dict[torch.dtype, torch.Tensor] = {}
+        reduce_scatter_event = None
+        post_reduce_stream = self.comm_ctx.reduce_scatter_stream
+        post_reduce_event = None
+        all_reduce_event = None
+        for reduce_dtype, (bucket_params, bucket_grads) in buckets.items():
+            (
+                reduce_scatter_input,
+                reduce_scatter_event,
+                post_reduce_stream,
+                post_reduce_event,
+                all_reduce_input,
+                all_reduce_event,
+                partial_reduce_output,
+            ) = foreach_reduce(
+                bucket_params,
+                bucket_grads,
+                reduce_scatter_group,
+                self.comm_ctx.reduce_scatter_stream,
+                self._reduce_scatter_comm,
+                self._orig_dtype,
+                reduce_dtype,
+                self.device,
+                self.gradient_divide_factor,
+                all_reduce_group,
+                all_reduce_stream,
+                self.all_reduce_grads,
+                None
+                if partial_reduce_outputs is None
+                else partial_reduce_outputs[reduce_dtype],
+                None,
+                self.force_sum_reduction_for_comms,
+            )
+            reduce_scatter_inputs.append(reduce_scatter_input)
+            if all_reduce_input is not None:
+                all_reduce_inputs.append(all_reduce_input)
+            if partial_reduce_output is not None:
+                new_partial_reduce_outputs[reduce_dtype] = partial_reduce_output
+        return (
+            tuple(reduce_scatter_inputs),
+            reduce_scatter_event,
+            post_reduce_stream,
+            post_reduce_event,
+            tuple(all_reduce_inputs) if all_reduce_inputs else None,
+            all_reduce_event,
+            new_partial_reduce_outputs or None,
+        )
+
     @_dynamo_disable
     def post_backward(self, *unused: Any):
         with _spmd_no_typecheck():
@@ -701,6 +794,43 @@ class FSDPParamGroup:
                     all_reduce_stream = self.comm_ctx.all_reduce_stream
 
                 self._wait_for_post_backward()
+                reduce_scatter_group = (
+                    # pyrefly: ignore [bad-argument-type]
+                    self._reduce_scatter_process_group
+                    if isinstance(self.mesh_info, FSDPMeshInfo)
+                    else None  # pyre-fixme[6]
+                )
+                if self._has_uniform_reduce_dtype:
+                    if isinstance(self._partial_reduce_output, dict):
+                        raise AssertionError(
+                            "Expected one partial reduce output for a uniform "
+                            "reduce dtype"
+                        )
+                    reduce_result = foreach_reduce(
+                        fsdp_params_with_grad,
+                        unsharded_grads,
+                        reduce_scatter_group,
+                        self.comm_ctx.reduce_scatter_stream,
+                        self._reduce_scatter_comm,
+                        self._orig_dtype,
+                        self._reduce_dtype,
+                        self.device,
+                        self.gradient_divide_factor,
+                        all_reduce_pg,
+                        all_reduce_stream,
+                        self.all_reduce_grads,
+                        self._partial_reduce_output,
+                        self._all_reduce_hook,
+                        self.force_sum_reduction_for_comms,
+                    )
+                else:
+                    reduce_result = self._foreach_reduce_multi_dtype(
+                        fsdp_params_with_grad,
+                        unsharded_grads,
+                        reduce_scatter_group,
+                        all_reduce_pg,
+                        all_reduce_stream,
+                    )
                 (
                     reduce_scatter_input,
                     reduce_scatter_event,
@@ -709,32 +839,7 @@ class FSDPParamGroup:
                     all_reduce_input,
                     all_reduce_event,
                     self._partial_reduce_output,
-                ) = foreach_reduce(
-                    fsdp_params_with_grad,
-                    unsharded_grads,
-                    (
-                        # pyrefly: ignore [bad-argument-type]
-                        self._reduce_scatter_process_group
-                        if isinstance(self.mesh_info, FSDPMeshInfo)
-                        else None  # pyre-fixme[6]
-                    ),
-                    self.comm_ctx.reduce_scatter_stream,
-                    self._reduce_scatter_comm,
-                    self._orig_dtype,
-                    self._reduce_dtype,
-                    self.device,
-                    self.gradient_divide_factor,
-                    (
-                        self._all_reduce_process_group
-                        if isinstance(self.mesh_info, DDPMeshInfo)
-                        else None
-                    ),
-                    all_reduce_stream,
-                    self.all_reduce_grads,
-                    self._partial_reduce_output,
-                    self._all_reduce_hook,
-                    self.force_sum_reduction_for_comms,
-                )
+                ) = reduce_result
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
                 )

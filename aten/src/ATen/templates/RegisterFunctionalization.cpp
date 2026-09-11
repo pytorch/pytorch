@@ -6,6 +6,7 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/ViewMetaClasses.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/native/TypeProperties.h>
 #include <torch/library.h>
 
 #include <c10/util/env.h>
@@ -93,6 +94,23 @@ inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optiona
   outputs.reserve(t_list.size());
   for (const ::std::optional<Tensor>& t_list_elem : t_list) {
     outputs.push_back(to_meta(t_list_elem));
+  }
+  return outputs;
+}
+
+inline std::vector<Tensor> cast_tensor_list_to_dtype(
+    at::TensorList tensors,
+    at::ScalarType dtype) {
+  if (!tensors.empty()) {
+    TORCH_CHECK_TYPE(
+        at::canCast(at::native::result_type(tensors), dtype),
+        "torch.cat(): input types can't be cast to the desired output type ",
+        dtype);
+  }
+  std::vector<Tensor> outputs;
+  outputs.reserve(tensors.size());
+  for (const Tensor& tensor : tensors) {
+    outputs.push_back(tensor.scalar_type() == dtype ? tensor : tensor.to(dtype));
   }
   return outputs;
 }

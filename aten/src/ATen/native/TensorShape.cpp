@@ -3332,8 +3332,8 @@ Tensor& _chunk_cat_out(
     int64_t dim,
     int64_t num_chunks,
     Tensor& out) {
-  auto wrapped_dim =
-      at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
+  auto wrapped_dim = at::native::preprocess_chunk_cat_inputs(
+      tensors, dim, num_chunks, /*require_same_dtype=*/false);
   at::cat_out(
       out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim + 1);
   return out;
