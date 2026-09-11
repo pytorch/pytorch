@@ -40,6 +40,11 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.remote_device import _remote_device
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -47,6 +52,7 @@ from torch.testing._internal.common_distributed import (
     tp_transports,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -504,17 +510,19 @@ class TestLocalTensor(ShardedTensorTestBase):
 
 
 class TestShardedTensorChunked(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharded_tensor_metadata(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_tensor_metadata(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
 
@@ -556,16 +564,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_complete_world_size(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_complete_world_size(self, device):
         for dim in [0, -2]:
             spec = ChunkShardingSpec(
                 dim=dim,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
-                    "rank:2/cuda:2",
-                    "rank:3/cuda:3",
+                    f"rank:0/{self.device_type}:0",
+                    f"rank:1/{self.device_type}:1",
+                    f"rank:2/{self.device_type}:2",
+                    f"rank:3/{self.device_type}:3",
                 ],
             )
             st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
@@ -574,7 +582,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             local_shards = st.local_shards()
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(self.device_type, self.rank), local_shard.device
+            )
             if self.rank == 3:
                 self.assertEqual((1, 20), local_shard.size())
             else:
@@ -592,7 +602,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 else:
                     self.assertEqual([3, 20], shard_metadata.shard_sizes)
                 self.assertEqual(
-                    f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement)
+                    f"rank:{rank}/{self.device_type}:{rank}",
+                    str(shard_metadata.placement),
                 )
 
             # Validate remote shards.
@@ -605,7 +616,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                     self.assertEqual(rpc_rank, remote_shard.owner().id)
                     shard = remote_shard.to_here()
                     self.assertEqual(
-                        f"rank:{rpc_rank}/cuda:{rpc_rank}",
+                        f"rank:{rpc_rank}/{self.device_type}:{rpc_rank}",
                         str(shard.metadata.placement),
                     )
                     if rpc_rank == 3:
@@ -615,17 +626,17 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_create_sharded_tensor_with_ones(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_create_sharded_tensor_with_ones(self, device):
         """Test sharded_tensor.ones(...)"""
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 10, 20
@@ -635,7 +646,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         local_shards = st.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        self.assertEqual(torch.device(self.device_type, self.rank), local_shard.device)
         # The split: for rank!=3 ceil(h/4)=3  for rank=3 1
         expected_h = 1 if self.rank == 3 else math.ceil(h / 4)
         self.assertEqual((expected_h, w), local_shard.size())
@@ -643,17 +654,17 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_gather_even(self) -> None:
+    @requires_capabilities(Capability.distributed.backend)
+    def test_gather_even(self, device) -> None:
         """Test _sharded_tensor.gather(...) with evenly distributed._shards"""
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 10, 20
@@ -665,7 +676,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             full_tensor = torch.zeros(
                 h,
                 w,
-                device=torch.device(f"cuda:{dst}"),
+                device=torch.device(self.device_type, dst),
             )
         st.gather(dst, full_tensor)
 
@@ -676,18 +687,18 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_gather_uneven(self) -> None:
+    @requires_capabilities(Capability.distributed.backend)
+    def test_gather_uneven(self, device) -> None:
         """Test _sharded_tensor.gather(...) with unevenly distributed._shards"""
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
+                f"rank:0/{self.device_type}:0",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
             ],
         )
         h, w = 10, 20
@@ -699,7 +710,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             full_tensor = torch.zeros(
                 h,
                 w,
-                device=torch.device(f"cuda:{dst}"),
+                device=torch.device(self.device_type, dst),
             )
         st.gather(dst, full_tensor)
 
@@ -710,17 +721,17 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_create_sharded_tensor_with_zeros(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_create_sharded_tensor_with_zeros(self, device):
         """Test sharded_tensor.zeros(...)"""
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 10, 20
@@ -730,7 +741,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         local_shards = st.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        self.assertEqual(torch.device(self.device_type, self.rank), local_shard.device)
         # The split: for rank!=3 ceil(h/4)=3  for rank=3 1
         expected_h = 1 if self.rank == 3 else math.ceil(h / 4)
         self.assertEqual((expected_h, w), local_shard.size())
@@ -738,24 +749,24 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_create_sharded_tensor_with_rand(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_create_sharded_tensor_with_rand(self, device):
         """Test sharded_tensor.rand(...)/randn(...)"""
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 8, 2
         seed = 1234
 
         expected_h = 2
-        expected_device = torch.device(f"cuda:{self.rank}")
+        expected_device = torch.device(self.device_type, self.rank)
         dtype = torch.double
         torch.manual_seed(seed)
         # Test sharded_tensor.rand creation
@@ -789,17 +800,17 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_create_sharded_tensor_with_full(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_create_sharded_tensor_with_full(self, device):
         """Test sharded_tensor.full(...)"""
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 10, 20
@@ -812,7 +823,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         local_shards = st.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        self.assertEqual(torch.device(self.device_type, self.rank), local_shard.device)
         # The split: for rank!=3 ceil(h/4)=3  for rank=3 1
         expected_h = 1 if self.rank == 3 else math.ceil(h / 4)
         self.assertEqual((expected_h, w), local_shard.size())
@@ -823,24 +834,24 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_create_sharded_tensor_like(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_create_sharded_tensor_like(self, device):
         """Test tensor like methods, i.e. torch.zeros_like(...), torch.full_like, etc."""
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         h, w = 8, 8
         expected_h = 2
         seed = 1234
         dtype = torch.double
-        expected_device = torch.device(f"cuda:{self.rank}")
+        expected_device = torch.device(self.device_type, self.rank)
         st = sharded_tensor.rand(spec, (h, w), dtype=dtype)
         tensor_like_ops = {
             torch.zeros_like: torch.zeros,
@@ -877,13 +888,13 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_partial_world_size(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_partial_world_size(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
@@ -893,7 +904,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank >= 2:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(self.device_type, self.rank), local_shard.device
+            )
             self.assertEqual((5, 20), local_shard.size())
         else:
             self.assertEqual(0, len(local_shards))
@@ -907,7 +920,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             self.assertEqual([shard_rank * 5, 0], shard_metadata.shard_offsets)
             self.assertEqual([5, 20], shard_metadata.shard_sizes)
             self.assertEqual(
-                f"rank:{shard_rank + 2}/cuda:{shard_rank + 2}",
+                f"rank:{shard_rank + 2}/{self.device_type}:{shard_rank + 2}",
                 str(shard_metadata.placement),
             )
 
@@ -924,20 +937,21 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 shard = remote_shard.to_here()
                 self.assertEqual(
-                    f"rank:{rpc_rank}/cuda:{rpc_rank}", str(shard.metadata.placement)
+                    f"rank:{rpc_rank}/{self.device_type}:{rpc_rank}",
+                    str(shard.metadata.placement),
                 )
                 self.assertEqual((5, 20), shard.tensor.size())
 
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_new_group(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_new_group(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
 
@@ -949,7 +963,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank >= 2:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(self.device_type, self.rank), local_shard.device
+            )
             self.assertEqual((5, 20), local_shard.size())
         else:
             self.assertEqual(0, len(local_shards))
@@ -963,7 +979,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             self.assertEqual([shard_rank * 5, 0], shard_metadata.shard_offsets)
             self.assertEqual([5, 20], shard_metadata.shard_sizes)
             self.assertEqual(
-                f"rank:{shard_rank + 2}/cuda:{shard_rank + 2}",
+                f"rank:{shard_rank + 2}/{self.device_type}:{shard_rank + 2}",
                 str(shard_metadata.placement),
             )
 
@@ -980,26 +996,27 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 self.assertEqual(
-                    f"rank:{rpc_rank}/cuda:{rpc_rank}", str(shard.metadata.placement)
+                    f"rank:{rpc_rank}/{self.device_type}:{rpc_rank}",
+                    str(shard.metadata.placement),
                 )
                 self.assertEqual((5, 20), shard.tensor.size())
 
     @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_multiple_local_shards(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_multiple_local_shards(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         st = sharded_tensor.empty(spec, 16, 20, init_rrefs=True)
@@ -1009,7 +1026,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(2, len(local_shards))
         for local_shard in local_shards:
             self.assertEqual(
-                torch.device(f"cuda:{self.rank}"), local_shard.tensor.device
+                torch.device(self.device_type, self.rank), local_shard.tensor.device
             )
             self.assertEqual((2, 20), local_shard.tensor.size())
 
@@ -1022,7 +1039,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             self.assertEqual([shard_idx * 2, 0], shard_metadata.shard_offsets)
             self.assertEqual([2, 20], shard_metadata.shard_sizes)
             self.assertEqual(
-                f"rank:{shard_idx % 4}/cuda:{shard_idx % 4}",
+                f"rank:{shard_idx % 4}/{self.device_type}:{shard_idx % 4}",
                 str(shard_metadata.placement),
             )
 
@@ -1037,18 +1054,18 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharding_columns(self):
-        self.init_pg()
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharding_columns(self, device):
+        self.init_pg(backend=self.backend)
 
         for dim in [1, -1]:
             spec = ChunkShardingSpec(
                 dim=dim,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
-                    "rank:2/cuda:2",
-                    "rank:3/cuda:3",
+                    f"rank:0/{self.device_type}:0",
+                    f"rank:1/{self.device_type}:1",
+                    f"rank:2/{self.device_type}:2",
+                    f"rank:3/{self.device_type}:3",
                 ],
             )
 
@@ -1058,7 +1075,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             local_shards = st.local_shards()
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(self.device_type, self.rank), local_shard.device
+            )
             self.assertEqual((10, 8), local_shard.size())
 
             # Validate global metadata.
@@ -1070,32 +1089,37 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual([0, rank * 8], shard_metadata.shard_offsets)
                 self.assertEqual([10, 8], shard_metadata.shard_sizes)
                 self.assertEqual(
-                    f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement)
+                    f"rank:{rank}/{self.device_type}:{rank}",
+                    str(shard_metadata.placement),
                 )
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_invalid_sharding(self):
-        self.init_pg()
+    @requires_capabilities(Capability.distributed.backend)
+    def test_invalid_sharding(self, device):
+        self.init_pg(backend=self.backend)
 
         with self.assertRaisesRegex(
             NotImplementedError, "does not support named dimension"
         ):
-            spec = ChunkShardingSpec(dim="H", placements=["rank:1/cuda:1"])
+            spec = ChunkShardingSpec(
+                dim="H", placements=[f"rank:1/{self.device_type}:1"]
+            )
             sharded_tensor.empty(spec, 10, 20)
 
         for dim in [2, 3, 4, -3, -4, -5]:
-            spec = ChunkShardingSpec(dim=dim, placements=["rank:1/cuda:1"])
+            spec = ChunkShardingSpec(
+                dim=dim, placements=[f"rank:1/{self.device_type}:1"]
+            )
             with self.assertRaisesRegex(ValueError, "Invalid sharding dim"):
                 sharded_tensor.empty(spec, 10, 20)
 
-        spec = ChunkShardingSpec(dim=0, placements=["rank:5/cuda:1"])
+        spec = ChunkShardingSpec(dim=0, placements=[f"rank:5/{self.device_type}:1"])
         with self.assertRaisesRegex(
             ValueError, "Global rank 5 does not exist in input process group"
         ):
             sharded_tensor.empty(spec, 10, 20)
 
-        spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
+        spec = ChunkShardingSpec(dim=0, placements=[f"rank:0/{self.device_type}:1"])
         st = sharded_tensor.empty(spec, 10, 20)
         tensor = torch.empty(10, 20)
         with self.assertRaisesRegex(
@@ -1103,26 +1127,26 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         ):
             torch.add(st, tensor)
 
-        spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
+        spec = ChunkShardingSpec(dim=0, placements=[f"rank:0/{self.device_type}:1"])
         with self.assertRaisesRegex(
             ValueError, "Only torch.strided layout is currently supported"
         ):
             sharded_tensor.empty(spec, 10, 20, layout=torch.sparse_coo)
 
-        spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
+        spec = ChunkShardingSpec(dim=0, placements=[f"rank:0/{self.device_type}:1"])
         with self.assertRaisesRegex(
             ValueError,
             "Only torch.contiguous_format memory_format is currently supported",
         ):
             sharded_tensor.empty(spec, 10, 20, memory_format=torch.channels_last)
 
-        spec = ChunkShardingSpec(dim=0, placements=["worker0/cuda:1"])
+        spec = ChunkShardingSpec(dim=0, placements=[f"worker0/{self.device_type}:1"])
         with self.assertRaisesRegex(
             RuntimeError, "RPC framework needs to be initialized"
         ):
             sharded_tensor.empty(spec, 10, 20)
 
-        spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
+        spec = ChunkShardingSpec(dim=0, placements=[f"rank:0/{self.device_type}:1"])
         with self.assertRaisesRegex(
             RuntimeError, "RPC Framework needs to be initialized"
         ):
@@ -1135,14 +1159,14 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             st.remote_shards()
 
         self.init_rpc()
-        spec = ChunkShardingSpec(dim=0, placements=["workerfoo/cuda:1"])
+        spec = ChunkShardingSpec(dim=0, placements=[f"workerfoo/{self.device_type}:1"])
         with self.assertRaisesRegex(ValueError, "Invalid worker name"):
             sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_invalid_pg_rpc_ranks(self):
-        self.init_pg()
+    @requires_capabilities(Capability.distributed.backend)
+    def test_invalid_pg_rpc_ranks(self, device):
+        self.init_pg(backend=self.backend)
 
         # Init RPC with different ranks.
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
@@ -1157,24 +1181,24 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             rpc_backend_options=rpc_backend_options,
         )
 
-        spec = ChunkShardingSpec(dim=0, placements=["rank:1/cuda:1"])
+        spec = ChunkShardingSpec(dim=0, placements=[f"rank:1/{self.device_type}:1"])
         with self.assertRaisesRegex(
             ValueError, "Default ProcessGroup and RPC ranks must be the same"
         ):
             sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_insufficient_sharding_dims(self):
-        self.init_pg()
+    @requires_capabilities(Capability.distributed.backend)
+    def test_insufficient_sharding_dims(self, device):
+        self.init_pg(backend=self.backend)
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
         st = sharded_tensor.empty(spec, 2, 20)
@@ -1184,12 +1208,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank <= 1:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(self.device_type, self.rank), local_shard.device
+            )
             self.assertEqual((1, 20), local_shard.size())
         else:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(self.device_type, self.rank), local_shard.device
+            )
             self.assertEqual(local_shard.numel(), 0)
 
         # Validate global metadata.
@@ -1200,7 +1228,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         for shard_rank, shard_metadata in enumerate(shards_metadata):
             self.assertEqual([shard_rank, 0], shard_metadata.shard_offsets)
             self.assertEqual(
-                f"rank:{shard_rank}/cuda:{shard_rank}", str(shard_metadata.placement)
+                f"rank:{shard_rank}/{self.device_type}:{shard_rank}",
+                str(shard_metadata.placement),
             )
             if shard_rank <= 1:
                 self.assertEqual([1, 20], shard_metadata.shard_sizes)
@@ -1209,15 +1238,15 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharded_tensor_sizes(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_tensor_sizes(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
 
@@ -1264,15 +1293,15 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_state_dict(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_state_dict(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
 
@@ -1310,15 +1339,15 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_state_dict_new_group(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_state_dict_new_group(self, device):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:2/cuda:0",
-                "rank:3/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:2/{self.device_type}:0",
+                f"rank:3/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
 
@@ -1351,8 +1380,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_state_dict_no_sharded_tensors(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_state_dict_no_sharded_tensors(self, device):
         # Verify hooks don't affect modules with no ShardedTensors.
         m = torch.nn.Linear(10, 10)
 
@@ -1376,12 +1405,12 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(m.bias, module_load.bias)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_load_state_dict_errors(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_load_state_dict_errors(self, device):
         self.init_rpc()
 
         dist.init_process_group(
-            backend="nccl",
+            backend=self.backend,
             world_size=self.world_size,
             rank=self.rank,
             init_method=f"file://{self.file_name}",
@@ -1390,10 +1419,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
+                f"rank:2/{self.device_type}:2",
+                f"rank:3/{self.device_type}:3",
             ],
         )
 
@@ -1431,16 +1460,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_cleanup(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_cleanup(self, device):
         def create_tensors():
             spec = ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
-                    "rank:2/cuda:2",
-                    "rank:3/cuda:3",
+                    f"rank:0/{self.device_type}:0",
+                    f"rank:1/{self.device_type}:1",
+                    f"rank:2/{self.device_type}:2",
+                    f"rank:3/{self.device_type}:3",
                 ],
             )
             sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
@@ -3574,6 +3603,11 @@ class TestCreateTensorNoProcessGroupMode(TestCase):
             local_shards=st_local_shards,
             sharded_tensor_metadata=st_metadata,
         )
+
+
+instantiate_device_type_tests(
+    TestShardedTensorChunked, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
