@@ -111,6 +111,336 @@ class SerializedCode:
         )
 
 
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers for objects pickle cannot rebuild by reference: code objects,
+    closure cells, python modules, bound methods, and functions rebuilt from
+    their code object.
+
+    GuardsStatePickler and AOTCompilePickler each keep their own dispatch and
+    decide what a rebuilt function carries; this class fixes HOW it is rebuilt,
+    so a fix here cannot be missed in one pickler.
+
+    Defaults, kwdefaults, __doc__, __dict__, __annotations__ and __type_params__
+    travel as pickle STATE, applied after memoization, so `wrapper.me = wrapper`
+    cycles end. A closure cell and the globals snapshot are reduce ARGUMENTS: a
+    function closing over itself, or stored in its own module snapshot, is
+    reduced twice, and save_reduce's recursive-object fallback (present in both
+    the C and the pure-Python pickler) drops the outer copy.
+    """
+
+    # The reducers stay classmethods: pickle reduces a bound classmethod to
+    # getattr(owner, name), so an artifact names the subclass and resolves the
+    # reducer through its MRO. A staticmethod would pickle by __qualname__ and
+    # change the artifact.
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @classmethod
+    def _set_cell_contents(cls, cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    @classmethod
+    def _build_function(
+        cls,
+        f_globals: dict[str, Any],
+        module: Any,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        fn = types.FunctionType(code, f_globals, name, None, closure)
+        # FunctionType derives __module__ from f_globals["__name__"], which is
+        # not what the live function had (functools.wraps copied it, a decorator
+        # set it, or it is None), so restore the recorded value unconditionally
+        # rather than relying on the scope. Only the stub objects to a non-str;
+        # the runtime setter accepts any object.
+        fn.__module__ = module  # type: ignore[assignment]
+        fn.__qualname__ = qualname
+        return fn
+
+    @classmethod
+    def _unpickle_fn_from_module(
+        cls,
+        scope: Any,
+        module: Any,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # `scope` is the __name__ of the module dict the code was compiled
+        # against (fn.__globals__), which is what the body reads at call time;
+        # `module` is fn.__module__, restored as an attribute. functools.wraps
+        # copies __module__ from the wrappee, so the two differ for a wrapper
+        # defined in another file, and a function whose __module__ is None still
+        # has a scope. A pickler that guards __globals__ sends the snapshot
+        # variant instead. Importing here runs that module's top-level code at
+        # load if it is not loaded yet; for a wraps wrapper that is the
+        # decorator's module, almost always already imported. A scope that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # comes back empty: safe on the guard-serialization path, which reads
+        # attributes off the rebuilt function without calling it; a pickler
+        # whose functions are CALLED after load (AOTCompilePickler, once it is
+        # on this base) sees an empty scope as a NameError at first call, not a
+        # load error. A scope of "__main__" imports the LOADING process's
+        # __main__, the same module pickle itself resolves a by-reference
+        # __main__ function against; right in-process, and cross-process only
+        # as right as the two scripts agree.
+        f_globals: dict[str, Any]
+        # Not every __name__ is importable: a <locals>/exec function can carry
+        # None or "" (bare globals with no __name__), and a relative name
+        # (".rel") or a module whose body raises fails import with something
+        # other than ImportError. None of those should fail the load, so require
+        # a non-empty str and swallow any import failure into the empty scope.
+        f_globals = {}
+        why: Any = f"scope {scope!r} is not an importable name"
+        if isinstance(scope, str) and scope:
+            try:
+                f_globals = importlib.import_module(scope).__dict__
+            except Exception as e:
+                why = e
+        if not f_globals:
+            logger.debug("rebuilding %s with an empty scope: %s", qualname, why)
+        return cls._build_function(f_globals, module, code, qualname, name, closure)
+
+    @classmethod
+    def _unpickle_fn_from_snapshot(
+        cls,
+        scope: dict[str, Any],
+        module: Any,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # The scope is a reduce ARGUMENT: every function rebuilt against one
+        # module dict shares this one object, which pickle fills in as its items
+        # load, so a function reached while the dict is still loading (a
+        # module-scope wrapper is itself an item of its own snapshot) still sees
+        # the complete scope once the load finishes. Applied as pickle STATE it
+        # would have been a copy of whatever had loaded by then.
+        return cls._build_function(scope, module, code, qualname, name, closure)
+
+    @classmethod
+    def _apply_function_state(
+        cls, fn: types.FunctionType, state: tuple[Any, ...]
+    ) -> None:
+        # Every write here must stay idempotent: for a function that is an item
+        # of its own globals snapshot (or closes over itself) the pure-Python
+        # pickler applies the state on both save_reduce passes; the C pickler
+        # drops the outer pass after the memo fetch, so it runs once there.
+        defaults, kwdefaults, attributes, doc, annotations, type_params = state
+        fn.__defaults__ = defaults
+        fn.__kwdefaults__ = kwdefaults
+        # FunctionType() takes __doc__ from the code object and leaves
+        # __annotations__/__type_params__ empty (the compiler sets them on the
+        # function after creating it);
+        # functools.wraps overwrote them on the live function and a guard rooted
+        # there rebakes, so restore what the reducer captured.
+        fn.__doc__ = doc
+        fn.__annotations__ = annotations
+        # On Python < 3.12 there is no __type_params__ slot, so both a live
+        # function's __type_params__ and the write below land in __dict__.
+        # Assign __dict__ first so the reducer's (possibly pruned) type_params
+        # wins over whatever the carried __dict__ holds under that key.
+        fn.__dict__ = attributes
+        if type_params is not None:
+            fn.__type_params__ = type_params
+
+    @staticmethod
+    def _is_literal(value: object) -> bool:
+        # An always-picklable constant: the singletons and scalars dynamo treats
+        # as constants, NOT every common_constant_type (torch.finfo/iinfo do not
+        # pickle). The guard pickler carries these whether or not a guard reads
+        # them: pruning buys nothing and, since _keep matches by id, would make
+        # the rebuilt state depend on whether some unrelated guard happened to
+        # register the interned value. The AOT pickler skips probing them.
+        if value is None or value is Ellipsis or value is NotImplemented:
+            return True
+        return type(value) in (
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+        )
+
+    @staticmethod
+    def _fqn_resolves(fn: types.FunctionType) -> bool:
+        """Whether pickling fn by reference (import __module__, walk __qualname__)
+        lands back on fn. False for a <locals> function, a functools.wraps
+        wrapper (it carries the wrappee's names), an exec-created function, or
+        a module absent from sys.modules; pickling those by reference fails at
+        dump (PicklingError, or a bare AttributeError from the C pickler for a
+        <locals> name), so the caller rebuilds them from the code object (or
+        prunes them). Conservative on purpose: pickle would import a module that
+        is not in sys.modules yet, this reports False for it (guards.py explains
+        why on its caller), and a "<locals>" qualname component is refused like
+        pickle refuses it. GuardsStatePickler handles <locals> on its own branch
+        before asking; AOTCompilePickler dispatches on this alone."""
+        if "<locals>" in fn.__qualname__.split("."):
+            return False
+        # __module__ need not be a str (a decorator can set anything); an
+        # unhashable one must not TypeError out of the reducer.
+        module = (
+            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
+        )
+        if module is None:
+            return False
+        resolved: Any = module
+        for name in fn.__qualname__.split("."):
+            resolved = getattr(resolved, name, None)
+        return resolved is fn
+
+    @staticmethod
+    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+        # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
+        # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the
+        # FORWARDREF format instead: it evaluates what it can and falls back to
+        # proxies only for names that do not resolve, returning a COPY either
+        # way. A ForwardRef proxy carries its owner and may not pickle (it does
+        # not for a local function), so the caller prunes any it does not need.
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            return annotationlib.get_annotations(
+                obj, format=annotationlib.Format.FORWARDREF
+            )
+        return obj.__annotations__
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
+
+    def _reduce_bound_method(
+        self, method: types.MethodType, *, receiver_is_live: bool = False
+    ) -> tuple[Any, ...] | None:
+        # pickle rebuilds a bound method by getattr() on self at load, which is
+        # wrong when that does not resolve back to the same bound method; those
+        # carry the function and self explicitly. `receiver_is_live` says the
+        # receiver is the SAME object at load (a persistent_id reference), so
+        # only the probe below decides: the per-instance and __getattr__ gates
+        # exist for a receiver that is rebuilt, possibly as a different type.
+        receiver = method.__self__
+        cls = type(receiver)
+        func = method.__func__
+        # __name__ is not guaranteed: MethodType accepts any callable, so
+        # method.__func__ may be a functools.partial with no __name__. Fall
+        # through to the explicit reduce rather than raising out of the reducer.
+        name = getattr(func, "__name__", None)
+        # A name served PER-INSTANCE (an instance __dict__ monkeypatch such as
+        # m.forward = MethodType(f, m), or a __slots__ member) is carried as
+        # func+self explicitly: getattr() at load hands back whatever the dict
+        # or slot holds, a raw function or a method bound elsewhere, never a
+        # method over this pair, and in the self-cycle case the slot is not even
+        # restored yet. A class defining __getattr__ (nn.Module included) takes
+        # the pair too, without probing: the probe would run that user code, and
+        # a subclass may rebuild such a receiver as a DIFFERENT type at load
+        # (GuardsStatePickler._unpickle_module turns a non-referenceable module
+        # into a bare torch.nn.Module), on which getattr() would not resolve
+        # the method. A type receiver (classmethod) is exempt: its namespace is
+        # restored with the class. issubclass(cls, ...) rather than isinstance
+        # so a raising __getattribute__ cannot escape before the try below.
+        explicit = (type(self)._unpickle_bound_method, (func, receiver))
+        is_type = issubclass(cls, type) or receiver_is_live
+        try:
+            if not is_type and hasattr(cls, "__getattr__"):
+                return explicit
+            self_dict = getattr(receiver, "__dict__", None)
+            if not is_type and (
+                (isinstance(self_dict, dict) and name in self_dict)
+                or (
+                    name is not None
+                    and isinstance(
+                        inspect.getattr_static(cls, name, None),
+                        types.MemberDescriptorType,
+                    )
+                )
+            ):
+                return explicit
+            inner = getattr(receiver, name, None) if name is not None else None
+        except Exception:
+            # A probe that raises anything -- a __getattribute__ override, a
+            # metaclass __getattr__ (which hasattr(cls, ...) also reaches), a
+            # property -- falls back to the explicit reduce, which is always
+            # correct.
+            return explicit
+        # Only a method BOUND to this receiver over this function proves the
+        # class MRO resolves back to it. getattr can also hand back the raw
+        # function (a staticmethod under that name), and pickle's default
+        # getattr() reconstruction would then load a function where a method was.
+        if (
+            inspect.ismethod(inner)
+            and inner.__func__ is func
+            and inner.__self__ is receiver
+        ):
+            return None
+        return explicit
+
+    def _reduce_function(
+        self,
+        fn: types.FunctionType,
+        *,
+        defaults: tuple[Any, ...] | None,
+        kwdefaults: dict[str, Any] | None,
+        closure: tuple[types.CellType, ...] | None,
+        attributes: dict[str, Any],
+        doc: Any,
+        annotations: dict[str, Any],
+        type_params: tuple[Any, ...] | None,
+        globals_snapshot: dict[str, Any] | None,
+    ) -> tuple[Any, ...]:
+        # Everything is passed in rather than read off fn: the subclass decides
+        # what the rebuilt function carries, and the guard pickler prunes what
+        # no guard reads so an unpicklable local class in an annotation -- or a
+        # __doc__ reassigned to an unpicklable object -- cannot fail the whole
+        # dump (a failure there silently bypasses the package).
+        # Both unpicklers take (scope, module, code, qualname, name, closure):
+        # the scope is the module NAME to import or the snapshot dict itself.
+        args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
+        if globals_snapshot is None:
+            unpickle = type(self)._unpickle_fn_from_module
+            args = (fn.__globals__.get("__name__"), *args)
+        else:
+            unpickle = type(self)._unpickle_fn_from_snapshot
+            args = (globals_snapshot, *args)
+        state = (defaults, kwdefaults, attributes, doc, annotations, type_params)
+        return unpickle, args, state, None, None, type(self)._apply_function_state
+
+
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
     """
@@ -224,7 +554,15 @@ class _DynamoCodeCacheEntry:
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.
       9. A boolean flag indicating whether the function has a compile id.
-      10. Whether or not this code entry was bypassed
+      10. Whether the entry currently has nothing installable: every compile of
+         it was bypassed (its guards could not be serialized), or a backend
+         artifact was missing when the package was saved. install() then leaves
+         the frame to be traced fresh rather than skipping it as trivial.
+         Cleared once a compile records a guarded code. The save-time writer,
+         PrecompileCacheEntry.from_cache_entry, flags the whole entry when any
+         one of its backend artifacts is missing; CompilePackage.initialize then
+         loads it without its stale guarded codes and backend ids, every variant
+         of that code object included, since install() would have used none.
     """
 
     python_code: SerializedCode
@@ -636,6 +974,10 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
+        # Backend ids the compile inside the current code_context NEWLY added
+        # to the entry, so a bypass drops exactly those and never a backend an
+        # earlier, installed variant of the same code object still needs.
+        self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
         self._device_type = "cpu"
@@ -686,6 +1028,17 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            for key, code in self._codes.items():
+                if code.bypassed:
+                    # install() skips a bypassed entry entirely, so its guarded
+                    # codes and backend ids are dead; start from a copy without
+                    # them so the fresh compile's record replaces them and the
+                    # next save writes an installable entry. A copy, not a
+                    # clear: the caller's entry may be a store's own object
+                    # (InMemoryDynamoStore hands out what it holds).
+                    self._codes[key] = dataclasses.replace(
+                        code, guarded_codes=[], backend_ids=[]
+                    )
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -764,11 +1117,13 @@ class CompilePackage:
 
         entry = self._codes[code]
         self._current_entry = entry
+        self._current_backend_ids = []
         try:
             yield
         finally:
             entry.has_compile_id = True
             self._current_entry = None
+            self._current_backend_ids = []
 
     def add_guarded_code(
         self,
@@ -777,21 +1132,18 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_guarded_code")
-        if self._current_entry.bypassed:
-            return
         guarded_code_entry = _GuardedCodeCacheEntry(
             guards_state=guards_state,
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
+        self._current_entry.bypassed = False
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_inlined_source")
-        if self._current_entry.bypassed:
-            return
         for code in sources:
             if code in self._resume_codes:
                 continue
@@ -800,10 +1152,25 @@ class CompilePackage:
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         self._device_type = _graph_device_type(graph)
 
-    def bypass_current_entry(self) -> None:
+    def bypass_current_compile(self) -> None:
+        """Drop the backend ids the current compile registered on its entry.
+
+        Only this compile is lost: its guarded code is never recorded
+        (convert_frame consults output.package, which bypass_package clears,
+        before add_guarded_code) and the backend ids it registered go with it. Guarded
+        codes an earlier compile of the same code object recorded stay
+        installable, so a reload keeps them and only re-traces the inputs that
+        would have matched the dropped one. An entry left with no guarded code
+        is marked bypassed so install() re-traces the frame instead of skipping
+        it as trivial.
+        """
         if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in bypass_current_entry")
-        self._current_entry.bypassed = True
+            raise AssertionError("_current_entry is not set in bypass_current_compile")
+        for backend_id in self._current_backend_ids:
+            self._current_entry.backend_ids.remove(backend_id)
+            self._cached_backends.pop(backend_id, None)
+        self._current_backend_ids = []
+        self._current_entry.bypassed = not self._current_entry.guarded_codes
 
     def add_resume_function(
         self,
@@ -831,6 +1198,7 @@ class CompilePackage:
             raise AssertionError("_current_entry is not set in add_backend_id")
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
+            self._current_backend_ids.append(backend_id)
         if backend is not None:
             self._cached_backends[backend_id] = backend
 
