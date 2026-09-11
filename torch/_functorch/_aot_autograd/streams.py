@@ -76,7 +76,14 @@ def get_roofline_estimate(node: Node) -> float:
     return (
         max(
             get_transfer_time(flat_args_kwargs, flat_outs, device=device),
-            get_compute_time(func, mapped_args, mapped_kwargs, out, out_dtypes),
+            get_compute_time(
+                func,
+                mapped_args,
+                mapped_kwargs,
+                out,
+                out_dtypes,
+                device=device,
+            ),
         )
         / 1e6
     )
