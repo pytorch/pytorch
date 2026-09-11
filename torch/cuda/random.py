@@ -100,13 +100,9 @@ def manual_seed(seed: int) -> None:
         to get determinism.  To seed all GPUs, use :func:`manual_seed_all`.
 
     .. note::
-        Seeding makes device-side sampling reproducible run to run on the same
-        GPU model. Tensors larger than one launch wave, i.e. more than
-        ``256 * multiProcessorCount * (maxThreadsPerMultiProcessor // 256)``
-        elements, are drawn along a mapping of elements to Philox counters that
-        follows the device's number of SMs, so the same seed gives different
-        values on GPUs with a different SM count, including MIG partitions.
-        See :ref:`reproducibility`.
+        Seeding makes device-side sampling reproducible on the same GPU; the same
+        seed is not guaranteed to give the same values on a different GPU model or
+        on a MIG partition. See :ref:`reproducibility`.
     """
     seed = int(seed)
 
@@ -126,11 +122,6 @@ def manual_seed_all(seed: int) -> None:
 
     Args:
         seed (int): The desired seed.
-
-    .. note::
-        Seeding makes device-side sampling reproducible run to run on the same
-        GPU model, not across GPU models with a different number of SMs (see
-        :func:`manual_seed` and :ref:`reproducibility`).
     """
     seed = int(seed)
 

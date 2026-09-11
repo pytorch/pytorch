@@ -14320,13 +14320,6 @@ Arguments:
 Returns:
     Generator: An torch.Generator object.
 
-.. note::
-    A CUDA generator's stream is reproducible on the same GPU model. For tensors
-    larger than one launch wave, i.e. more than
-    ``256 * multiProcessorCount * (maxThreadsPerMultiProcessor // 256)`` elements,
-    the same seed produces different values on GPUs with a different number of
-    SMs, including MIG partitions of one card. See :ref:`reproducibility`.
-
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
