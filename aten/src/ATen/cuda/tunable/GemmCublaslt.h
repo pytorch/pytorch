@@ -295,39 +295,6 @@ class CublasltStandardGemmProblem : public CublasltGemmProblemBase {
         set_epilogue_attribute_(set_epilogue_attribute) {
     at::cuda::blas::detail::cublasAdjustLdLevel3(
         transa, transb, m_, n_, k_, &lda_, &ldb_, &ldc_);
-    initialize();
-  }
-
-  cublasLtMatrixLayout_t heuristic_bdesc() const {
-    return lie_to_cublaslt_ ? fake_bdesc_->descriptor() : bdesc();
-  }
-
-  cublasLtMatrixLayout_t heuristic_cdesc() const {
-    return lie_to_cublaslt_ ? fake_cdesc_->descriptor() : cdesc();
-  }
-
-  cublasLtMatrixLayout_t heuristic_ddesc() const {
-    return heuristic_cdesc();
-  }
-
-  const T* a() const {
-    return a_;
-  }
-
-  const T* b() const {
-    return b_;
-  }
-
-  C_Dtype* c() const {
-    return c_;
-  }
-
-  C_Dtype* d() const {
-    return c_;
-  }
-
- private:
-  void initialize() {
     alpha_ptr_ = &alpha_;
     beta_ptr_ = &beta_;
     if constexpr (std::is_same_v<T, at::Half>) {
@@ -452,6 +419,35 @@ class CublasltStandardGemmProblem : public CublasltGemmProblemBase {
     }
   }
 
+  cublasLtMatrixLayout_t heuristic_bdesc() const {
+    return lie_to_cublaslt_ ? fake_bdesc_->descriptor() : bdesc();
+  }
+
+  cublasLtMatrixLayout_t heuristic_cdesc() const {
+    return lie_to_cublaslt_ ? fake_cdesc_->descriptor() : cdesc();
+  }
+
+  cublasLtMatrixLayout_t heuristic_ddesc() const {
+    return heuristic_cdesc();
+  }
+
+  const T* a() const {
+    return a_;
+  }
+
+  const T* b() const {
+    return b_;
+  }
+
+  C_Dtype* c() const {
+    return c_;
+  }
+
+  C_Dtype* d() const {
+    return c_;
+  }
+
+ private:
   int64_t m_;
   int64_t n_;
   int64_t k_;
@@ -548,39 +544,6 @@ class CublasltScaledGemmProblem : public CublasltGemmProblemBase {
             ScalarTypeToCudaDataType(params->bias_dtype),
             ScalarTypeToCudaDataType(params->c_dtype)),
         params_(params) {
-    initialize();
-  }
-
-  // Scaled GEMM has a distinct D layout, so it does not alias C.
-  cublasLtMatrixLayout_t ddesc() const {
-    return ddesc_->descriptor();
-  }
-
-  cublasLtMatrixLayout_t heuristic_ddesc() const {
-    return ddesc();
-  }
-
-  const void* a() const {
-    return params_->a;
-  }
-
-  const void* b() const {
-    return params_->b;
-  }
-
-  // cuBLASLt requires a non-null C pointer even when beta is zero. Match the
-  // non-tunable scaled_gemm path by passing an input pointer; beta = 0 means
-  // C is never read.
-  const void* c() const {
-    return params_->a;
-  }
-
-  void* d() const {
-    return params_->c;
-  }
-
- private:
-  void initialize() {
     compute_desc_.setAttribute(
         CUBLASLT_MATMUL_DESC_TRANSA,
         at::cuda::blas::detail::cublasOpFromChar(params_->transa));
@@ -658,6 +621,35 @@ class CublasltScaledGemmProblem : public CublasltGemmProblemBase {
         CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspace_.size);
   }
 
+  // Scaled GEMM has a distinct D layout, so it does not alias C.
+  cublasLtMatrixLayout_t ddesc() const {
+    return ddesc_->descriptor();
+  }
+
+  cublasLtMatrixLayout_t heuristic_ddesc() const {
+    return ddesc();
+  }
+
+  const void* a() const {
+    return params_->a;
+  }
+
+  const void* b() const {
+    return params_->b;
+  }
+
+  // cuBLASLt requires a non-null C pointer even when beta is zero. Match the
+  // non-tunable scaled_gemm path by passing an input pointer; beta = 0 means
+  // C is never read.
+  const void* c() const {
+    return params_->a;
+  }
+
+  void* d() const {
+    return params_->c;
+  }
+
+ private:
   const ScaledGemmParams<CT>* params_;
   std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> ddesc_;
   float alpha_val_ = 1.0f;

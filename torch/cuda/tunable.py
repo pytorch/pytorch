@@ -746,8 +746,10 @@ def _parse_cuda_scaled_gemm_options(
         else _get_dtype_from_string(fields["bias"], dtype_dict, "bias_dtype")
     )
     return _ScaledGemmOptions(
-        dtypeA=_get_dtype_from_string(fields["a"], dtype_dict, "dtypeA"),
-        dtypeB=_get_dtype_from_string(fields["b"], dtype_dict, "dtypeB"),
+        # cublasCommonArgs represents a row-major result as B.T @ A.T, so
+        # its A and B operands are the second and first _scaled_mm inputs.
+        dtypeA=_get_dtype_from_string(fields["b"], dtype_dict, "dtypeA"),
+        dtypeB=_get_dtype_from_string(fields["a"], dtype_dict, "dtypeB"),
         dtypeC=_get_dtype_from_string(fields["c"], dtype_dict, "dtypeC"),
         rowwise=fields["ast"] == "1",
         bias_dtype=bias_dtype,

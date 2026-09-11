@@ -193,6 +193,22 @@ def parse_tunable_log(log):
 
 
 class TestLinalg(TestCase):
+    def test_parse_cuda_scaled_gemm_options_preserves_input_dtype_order(self):
+        tokens = ["nt", "16", "32", "64", "ld", "64", "16", "16", "a", "Float8", "e5m2", "b", "Float8", "e4m3fn", "c", "BFloat16", "as", "Float", "bs", "Float", "ast", "0", "bst", "0", "dscale", "0", "fast", "0", "bias", "None"]
+        dtype_dict = {
+            "BFloat16": torch.bfloat16,
+            "Float": torch.float32,
+            "Float8_e4m3fn": torch.float8_e4m3fn,
+            "Float8_e5m2": torch.float8_e5m2,
+        }
+
+        options = torch.cuda.tunable._parse_cuda_scaled_gemm_options(
+            tokens, dtype_dict
+        )
+
+        self.assertEqual(options.dtypeA, torch.float8_e4m3fn)
+        self.assertEqual(options.dtypeB, torch.float8_e5m2)
+
     def setUp(self):
         super().setUp()
         # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
@@ -10901,8 +10917,6 @@ class TestLinalgCudaOnly(TestCase):
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
     )
@@ -10932,10 +10946,8 @@ class TestLinalgCudaOnly(TestCase):
                 self.assertIsNotNone(
                     find_tunableop_result(results, op_signature, params_signature)
                 )
-=======
-=======
+
     @skipIfRocm
->>>>>>> c7c7446a373 (Refactor blockwise test)
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_msg)
     def test_scaled_gemm_blockwise_tunableop(self, device):
         # Exercise the block-scaled scaled GEMM recipes (MXFP8 and NVFP4)
@@ -11050,20 +11062,6 @@ class TestLinalgCudaOnly(TestCase):
             (tuned, result.stdout),
         )
 
-<<<<<<< HEAD
-        with self._tunableop_ctx():
-            torch.cuda.tunable.set_rotating_buffer_size(0)
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            ref_num_results = len(torch.cuda.tunable.get_results())
-            for gemm in gemms:
-                gemm()
-            total_num_results = len(torch.cuda.tunable.get_results())
-
-            # Each recipe has a distinct problem signature, so each adds one result.
-            self.assertEqual((total_num_results - ref_num_results), len(gemms))
->>>>>>> 524aff9c632 (Add block-scaled TunableOp test)
-=======
         for key, info in tuned.items():
             if not info["timings"]:
                 continue
@@ -11071,7 +11069,6 @@ class TestLinalgCudaOnly(TestCase):
             winner_time = info["timings"][info["winner"]]
             fastest_time = min(info["timings"].values())
             self.assertEqual(winner_time, fastest_time, (key, info))
->>>>>>> c7c7446a373 (Refactor blockwise test)
 
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
