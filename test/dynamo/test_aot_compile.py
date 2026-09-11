@@ -724,7 +724,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         # the bare co_name).
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             compiled_fn.save_compiled_function(self.path())
-        self.assertEqual(len(logs.output), 2)
+        self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
         self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
         self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
         if sys.version_info >= (3, 11):
@@ -2139,9 +2139,63 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         fn = outer()
         buf = io.BytesIO()
-        AOTCompilePickler({}, buf).dump(fn)
+        dumps = [0]
+        real_dump = AOTCompilePickler.dump
+
+        def counting_dump(self, obj):
+            dumps[0] += 1
+            return real_dump(self, obj)
+
+        with patch.object(AOTCompilePickler, "dump", counting_dump):
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertEqual(dumps[0], 1)  # a literal entry is not probed
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.tag, 2.0)
+
+    def test_pickler_warns_once_for_a_function_reduced_twice(self):
+        # A function that closes over itself is reduced twice (the closure is a
+        # reduce ARGUMENT, so the second pass finds it not yet memoized); the
+        # real dump's per-function memo keeps the drop to one probe and one
+        # warning.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner(x):
+                return inner if x is None else x
+
+            inner.lock = threading.Lock()
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        self.assertEqual(len([l for l in logs.output if "dropping" in l]), 1)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "lock"))
+        self.assertEqual(out(5), 5)
+
+    def test_pickler_names_the_modules_inside_a_dropped_container(self):
+        # A picklable container holding unmarked Modules is dropped whole; the
+        # warning names the container's type and every Module inside it.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.mods = [torch.nn.Linear(1, 1), torch.nn.ReLU()]
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompilePickler({}, buf).dump(fn)
+        (line,) = [l for l in logs.output if "dropping" in l]
+        self.assertIn("helper.mods (list)", line)
+        self.assertIn("not marked as external data (Linear, ReLU)", line)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "mods"))
 
     def test_pickler_does_not_persist_a_wrong_false_across_an_inflight_seed(self):
         # An in-flight probe must not leave a wrong False in the shared cache.
@@ -2216,7 +2270,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         with patch.object(AOTCompilePickler, "dump", counting_dump):
             AOTCompilePickler({}, buf).dump(top)
-        self.assertLess(dumps[0], 100)
+        self.assertLess(dumps[0], 32)  # 16 today; quadratic on 8 nodes is 64
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertFalse(hasattr(out, "f0"))
         self.assertFalse(hasattr(out.f1, "f0"))
