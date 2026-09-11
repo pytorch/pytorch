@@ -17,6 +17,8 @@ jobs:
       id-token: write
     secrets: inherit
     with:
+      # Large reviews were hitting the reusable workflow's 60-minute default.
+      timeout_minutes: 120
       # Commenters opt into Fable by including "fable" in the comment (e.g.
       # "@claude fable review"); default stays Opus. Branch on event_name so an
       # issue/PR body mentioning "fable" doesn't affect an unrelated @claude comment.
@@ -34,7 +36,7 @@ jobs:
            (github.event_name == 'issues' && contains(github.event.issue.body, 'effort=low'))) && 'low' ||
           'medium'
         }}
-      # Surface stalled Bedrock requests before the one-hour job timeout.
+      # Surface stalled Bedrock requests before the job timeout above.
       settings: '{"outputStyle":"Concise","alwaysThinkingEnabled":true,"env":{"API_TIMEOUT_MS":"180000","CLAUDE_CODE_MAX_RETRIES":"2","CLAUDE_ENABLE_STREAM_WATCHDOG":"1"}}'
       # These logs are public and may include assistant messages and tool output.
       show_full_output: true
