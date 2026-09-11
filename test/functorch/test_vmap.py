@@ -5645,7 +5645,9 @@ class TestVmapOperatorsOpInfoDevice(TestCase):
 
 
 @markDynamoStrictTest
-class TestRandomness(TestCase):
+class TestRandomnessDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _reset_random(self, generator, orig_state, use_generator, seed):
         return (
             generator.set_state(orig_state)
@@ -5796,15 +5798,15 @@ class TestRandomness(TestCase):
         if randomness == "different":
             for i in range(B0):
                 expected = torch.randperm(10, **kwargs)
-                # RNG differs between eager and via dynamo trace on CUDA
-                if TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda":
+                # RNG differs between eager and via dynamo trace on CUDA/XPU
+                if TEST_WITH_TORCHDYNAMO and torch.device(device).type != "cpu":
                     self._assert_all_slices_unique(vmap_result)
                 else:
                     self.assertEqual(vmap_result[i], expected)
         else:
             expected = torch.randperm(10, **kwargs)
-            # RNG differs between eager and via dynamo trace on CUDA
-            if TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda":
+            # RNG differs between eager and via dynamo trace on CUDA/XPU
+            if TEST_WITH_TORCHDYNAMO and torch.device(device).type != "cpu":
                 self._assert_all_slices_equal(vmap_result)
             else:
                 for i in range(B0):
@@ -6022,8 +6024,8 @@ class TestRandomness(TestCase):
                 expected = op(passed, 0)
 
                 self._assert_all_slices_unique(vmap_result)
-                # RNG differs between eager and via dynamo trace on CUDA
-                if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda"):
+                # RNG differs between eager and via dynamo trace on CUDA/XPI
+                if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type != "cpu"):
                     self.assertEqual(expected, vmap_result)
                 return
 
@@ -6035,8 +6037,8 @@ class TestRandomness(TestCase):
                 passed = passed[0]
             expected = op(passed, 0)
             self._assert_all_slices_equal(vmap_result)
-            # RNG differs between eager and via dynamo trace on CUDA
-            if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda"):
+            # RNG differs between eager and via dynamo trace on CUDA/XPU
+            if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type != "cpu"):
                 for i in range(B0):
                     self.assertEqual(expected, vmap_result[i])
 
@@ -6815,9 +6817,11 @@ instantiate_device_type_tests(
     only_for=only_for + ("xpu",),
     allow_xpu=True,
 )
+instantiate_device_type_tests(
+    TestRandomnessDevice, globals(), only_for=only_for + ("xpu",), allow_xpu=True
+)
 
 instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
-instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
 
