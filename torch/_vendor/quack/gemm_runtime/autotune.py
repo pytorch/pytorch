@@ -58,7 +58,7 @@ from torch._vendor.quack.gemm_config import (
     get_all_configs,
 )
 
-__all__ = ["tuned_mod_gemm", "sink_arg_shapes", "TunedModGemm"]
+__all__ = ["tuned_mod_gemm", "sink_arg_shapes", "TunedModGemm", "ModProblem", "legal_mod_configs", "mod_b_kn"]
 
 
 class TunedModGemm(NamedTuple):
@@ -69,6 +69,15 @@ class TunedModGemm(NamedTuple):
 
 def _cdiv(a, b):
     return (a + b - 1) // b
+
+
+def mod_b_kn(device, concat_layout):
+    """Whether an EpiMod call reads B as (K, N): SM90+ and no concat layout.
+
+    concat reads B (k, n) through per-call views, so it vetoes the b_kn
+    trace-time relabel (the interleave lives in mod.gemm).
+    """
+    return get_device_capacity(device)[0] >= 9 and not concat_layout
 
 
 def _config_space(mod, device):
@@ -159,22 +168,66 @@ def _slice_sinks(mod, epi_args, config, lead, n_gemm, blockscaled=False, num_seq
     return views
 
 
+class ModProblem(NamedTuple):
+    """The call metadata EpiMod config pruning reads.
+
+    ``from_args`` extracts it from the tensor argument map; callers that only
+    know shapes (compile-time selection) build it directly.
+    """
+
+    device: torch.device
+    m: int
+    n: int
+    lead: tuple = ()  # (l, m) or (m,), matching EpiMod._lead_shape; read with sink_shapes
+    b_kn: bool = False
+    varlen_m: bool = False
+    gather_A: bool = False
+    blockscaled: bool = False
+    concat: bool = False
+    n_full: int | None = None  # transform_a padded N
+    sink_shapes: dict = {}  # sink name -> caller buffer shape
+
+    @classmethod
+    def from_args(cls, mod, transform_a, named_args):
+        A, B = named_args["A"], named_args["B"]
+        A_idx = named_args.get("A_idx")
+        m_gemm, n_gemm = _gemm_mn(A, B, named_args.get("b_kn", False))
+        if A_idx is not None:
+            m_gemm = A_idx.shape[0]
+        sink_shapes = {
+            name: tuple(named_args[name].shape)
+            for name, op in mod.sinks.items()
+            if getattr(op, "sink_alloc_shape", None) is not None and named_args.get(name) is not None
+        }
+        return cls(
+            device=A.device,
+            m=m_gemm,
+            n=n_gemm,
+            lead=_lead(A, A_idx, m_gemm),
+            b_kn=named_args.get("b_kn", False),
+            varlen_m=named_args.get("cu_seqlens_m") is not None,
+            gather_A=A_idx is not None,
+            blockscaled=named_args.get("SFA") is not None,
+            concat=bool(named_args.get("concat_layout")),
+            n_full=transform_a.padded_n(B) if transform_a is not None else None,
+            sink_shapes=sink_shapes,
+        )
+
+
 def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
-    kwargs = named_args | kwargs
-    A, B = kwargs["A"], kwargs["B"]
-    n_full = transform_a.padded_n(B) if transform_a is not None else None
-    cap = get_device_capacity(A.device)[0]
-    A_idx = kwargs.get("A_idx")
-    m_gemm, n_gemm = _gemm_mn(A, B, kwargs.get("b_kn", False))
-    if A_idx is not None:
-        m_gemm = A_idx.shape[0]
+    return prune_mod_configs(
+        mod, transform_a, configs, ModProblem.from_args(mod, transform_a, named_args | kwargs)
+    )
+
+
+def prune_mod_configs(mod, transform_a, configs, problem):
+    """Keep the ``configs`` (AutotuneConfig) legal for ``mod`` on ``problem``."""
+    cap = get_device_capacity(problem.device)[0]
+    m_gemm, n_gemm, n_full = problem.m, problem.n, problem.n_full
     has_out = bool(mod.outputs)
     survivors = []
-    b_kn_call = kwargs.get("b_kn", False)
-    varlen_m = kwargs.get("cu_seqlens_m") is not None
-    varlen_or_gather = varlen_m or A_idx is not None
-    blockscaled = kwargs.get("SFA") is not None
-    has_concat = bool(kwargs.get("concat_layout"))
+    varlen_or_gather = problem.varlen_m or problem.gather_A
+    blockscaled = problem.blockscaled
     epi_ops = tuple(
         dict.fromkeys(
             (
@@ -189,7 +242,7 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
         c = conf.kwargs["config"]
         if c.device_capacity != cap:
             continue
-        if not config_supports(c, gather_A=A_idx is not None, varlen_m=varlen_m):
+        if not config_supports(c, gather_A=problem.gather_A, varlen_m=problem.varlen_m):
             continue
         if transform_a is not None:
             if not transform_a.config_ok(c):
@@ -211,10 +264,10 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
         if blockscaled and not blockscaled_config_ok(c):
             continue
         if c.swap_ab and (
-            not b_kn_call
+            not problem.b_kn
             or n_gemm % 8
             or varlen_or_gather
-            or has_concat
+            or problem.concat
             or not mod.supports_swap_ab()
         ):
             continue
@@ -230,11 +283,11 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
                 ragged = n_gemm % c.tile_n if getattr(op, "dim", 0) == 0 else m_gemm % cta_tile_m
                 if ragged:
                     ok = False
-            buf = kwargs.get(name)
+            buf_shape = problem.sink_shapes.get(name)
             alloc = getattr(op, "sink_alloc_shape", None)
-            if buf is not None and alloc is not None:
-                need = alloc(_lead(A, A_idx, m_gemm), n_gemm, cta_tile_m, c.tile_n)
-                if any(b < s for b, s in zip(buf.shape, need)):
+            if buf_shape is not None and alloc is not None:
+                need = alloc(problem.lead, n_gemm, cta_tile_m, c.tile_n)
+                if any(b < s for b, s in zip(buf_shape, need)):
                     ok = False  # caller's partial buffer too small for this tiling
         if ok:
             survivors.append(conf)
@@ -446,11 +499,19 @@ def mod_selection_args(
 
 def _legal_mod_configs(mod, device, named_args, *, preferred_config=None, transform_a=None):
     """Return every supported native config, with the preferred one first when legal."""
+    problem = ModProblem.from_args(mod, transform_a, named_args)
+    return legal_mod_configs(
+        mod, device, problem, preferred_config=preferred_config, transform_a=transform_a
+    )
+
+
+def legal_mod_configs(mod, device, problem, *, preferred_config=None, transform_a=None):
+    """``_legal_mod_configs`` from a ``ModProblem`` instead of tensors."""
     configs = _config_space(mod, device)
     if preferred_config in configs:
         configs = [preferred_config, *(config for config in configs if config != preferred_config)]
     candidates = [AutotuneConfig(config=config) for config in configs]
-    survivors = _prune_for_mod(mod, transform_a, candidates, named_args)
+    survivors = prune_mod_configs(mod, transform_a, candidates, problem)
     return [candidate.kwargs["config"] for candidate in survivors]
 
 

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import threading
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
@@ -22,6 +23,10 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import FlexGemmEpiModSource
+    from torch._inductor.kernel.flex_gemm.runtime import FlexGemmRuntimeLocalReducePlan
+
+
+_PRECOMPILE_LOCK = threading.Lock()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,6 +58,7 @@ class FlexGemmEpilogueLocalReduceConfig:
     finalize: str | None = None
     finalize_operands: tuple[str, ...] = ()
     store_finalize: str | None = None
+    binary_store_finalize: bool = False
     prepass_combine: str | None = None
     prepass_finalize: str | None = None
 
@@ -75,8 +81,34 @@ class FlexGemmEpilogueLocalReduceConfig:
             source.local_reduce_finalize,
             source.local_reduce_finalize_operands,
             source.local_reduce_store_finalize,
+            source.local_reduce_binary_store_finalize,
             source.local_reduce_prepass_combine,
             source.local_reduce_prepass_finalize,
+        )
+
+    def selection_plan(self) -> "FlexGemmRuntimeLocalReducePlan":
+        """The runtime plan with generated callbacks replaced, for config selection."""
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            FlexGemmRuntimeLocalReducePlan,
+            selection_callback,
+        )
+
+        def callback(name: str | None) -> Any:
+            return name if name in (None, "mean") else selection_callback
+
+        return FlexGemmRuntimeLocalReducePlan(
+            self.geometry,
+            stores=self.out_index is not None,
+            feeds_main=self.feeds_main,
+            combine=self.combine,
+            finalize=callback(self.finalize),
+            finalize_operands=self.finalize_operands,
+            store_finalize=callback(self.store_finalize),
+            binary_store_finalize=self.binary_store_finalize,
+            prepass=None if self.prepass_combine is None else selection_callback,
+            prepass_combine=self.prepass_combine,
+            prepass_finalize=callback(self.prepass_finalize),
+            output_layout=self.output_layout,
         )
 
 
@@ -91,8 +123,8 @@ class FlexGemmEpilogueConfig:
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
         blockscaled: Shared block-scaled format and SFA/SFB input positions.
-        quack_config: Exact QuACK GemmConfig fields pinned for this choice, or
-            None to take QuACK's untuned default within the constraints.
+        quack_config: Exact QuACK GemmConfig fields pinned for this choice;
+            None only before lowering has selected the candidates.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
@@ -218,7 +250,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         geometry = self._local_reduce_geometry(local_reduce)
         plan = f"FlexGemmRuntimeLocalReducePlan({geometry}"
         if local_reduce.out_index is not None:
-            plan += f", out={input_args[local_reduce.out_index]}"
+            plan += f", stores=True, out={input_args[local_reduce.out_index]}"
         if local_reduce.output_layout is not None:
             plan += f", output_layout={local_reduce.output_layout.codegen_reference()}"
         if local_reduce.feeds_main:
@@ -233,6 +265,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 ", store_finalize="
                 f"{self._callback_reference(local_reduce.store_finalize)}"
             )
+        if local_reduce.binary_store_finalize:
+            plan += ", binary_store_finalize=True"
         if local_reduce.prepass_combine is not None:
             plan += (
                 f", prepass={epilogue_name}{LOCAL_REDUCE_PREPASS_FN_SUFFIX}, "
@@ -250,9 +284,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     ) -> str:
         """Render captured tensor and aux-output kwargs for runtime dispatch."""
         epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
-        kwargs = []
-        if config.quack_config is not None:
-            kwargs.append(f", config={config.quack_config!r}")
+        if config.quack_config is None:
+            raise AssertionError("rendered FlexGEMM choices require a pinned config")
+        kwargs = [f", config={config.quack_config!r}"]
         if config.blockscaled is not None:
             kwargs.append(
                 f", SFA={input_args[config.blockscaled.sfa_index]}, "
@@ -296,14 +330,16 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
         return f"CuteDSL template {name} (QUACK config={description})"
 
     def precompile(self) -> None:
-        """Compile this choice's pinned QuACK kernel in-process."""
-        from torch._inductor.kernel.flex_gemm.runtime import precompile_flex_gemm_kernel
+        """Compile this choice's pinned QuACK kernel in-process.
 
-        inputs = [meta.to_tensor() for meta in self.bmreq.input_tensor_meta]
-        run = self.bmreq.make_run_fn(
-            *inputs, out=self.bmreq.output_tensor_meta.to_tensor()
-        )
-        precompile_flex_gemm_kernel(run)
+        The cold ``jit_cache`` miss compiles on first run. CuTeDSL compilation is
+        serialized because Inductor precompiles choices from several threads;
+        allocating inside the lock keeps waiting threads from holding buffers.
+        """
+        with _PRECOMPILE_LOCK:
+            inputs = [meta.to_tensor() for meta in self.bmreq.input_tensor_meta]
+            out = self.bmreq.output_tensor_meta.to_tensor()
+            self.bmreq.make_run_fn(*inputs, out=out)()
 
 
 class FlexGemmEpilogueTemplate(CuteDSLTemplate):
