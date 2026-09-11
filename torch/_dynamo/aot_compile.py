@@ -71,7 +71,13 @@ class CompileArtifacts:
         # cached info as receiver they skip only when the artifact itself
         # recorded no Triton/GPU, requiring a match otherwise -- the correct
         # direction for a compatibility check.
-        self.system_info.check_compatibility(SystemInfo.current(), self.device_type)
+        current = SystemInfo.current(
+            cpu_codegen=(
+                self.device_type == "cpu"
+                and self.system_info.cpu_codegen_target is not None
+            )
+        )
+        self.system_info.check_compatibility(current, self.device_type)
 
 
 @dataclasses.dataclass

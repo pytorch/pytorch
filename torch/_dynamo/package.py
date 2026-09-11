@@ -801,6 +801,62 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     )
 
 
+def _cpu_codegen_target_problem(
+    cached: _CpuCodegenTarget, current: _CpuCodegenTarget | None
+) -> str | None:
+    """Why code generated for ``cached`` cannot be built and run here, or None.
+
+    The artifact carries kernel source tiled for the ISA pick_vec_isa() made at
+    codegen, and the loading host compiles that source with the flags of its
+    own pick_vec_isa(). The gate is the *resolved* target -- (machine, vec_isa,
+    vec_isa_width, vec_isa_macro) -- because pick_vec_isa() already folds
+    cpp.simdlen and ATEN_CPU_CAPABILITY into the ISA it returns: a simdlen that
+    caps the width picks a narrower ISA, so the width and macro already reflect
+    it. march does not gate for a different reason: it does not change the
+    tiling the kernel source was generated for -- which is what the
+    masked-load/zero-fill hazard across ISAs is about -- it only changes how
+    that same source is compiled, the same class of variation as the compiler
+    version, which is likewise unchecked. (pick_vec_isa() folds in simdlen and
+    ATEN_CPU_CAPABILITY but never reads cpp.march, and the default -march=native
+    is host-specific by definition, so gating on the recorded value would catch
+    nothing anyway.) Comparing the resolved triple is therefore complete, and
+    comparing the raw simdlen/march knobs on top of it is not just
+    redundant, it is wrong -- it rejects an artifact whose kernels this host can
+    reproduce merely because the knob that got there differs (an artifact built
+    under cpp.simdlen=256 is loadable on any host that resolves to the same
+    256-bit ISA, whether via its default or via ATEN_CPU_CAPABILITY), and it
+    makes the escape hatch ineffective, since setting cpp.simdlen to fix an ISA
+    mismatch would only trade it for a simdlen mismatch. The name and width must
+    both agree (VecSVE(128)/VecSVE(256) share the name "asimd"), and the build
+    macros disambiguate further (VecNEON and VecSVE(128) share name and width
+    but compile with different capability macros). A wider host ISA is not a
+    superset: its masked loads zero-fill the lanes the narrower tiling never
+    wrote. simdlen and march stay in the recorded tuple for diagnostics but do
+    not gate.
+    """
+    if current is None:
+        # No current tuple to compare against, so no component-level reason is
+        # available -- the host simply reports no target of its own.
+        return (
+            "This host reports no CPU codegen target (no C++ toolchain, no "
+            "supported vector ISA, or a torch._inductor.config.cpp.simdlen that "
+            "matches no available ISA width), so it cannot reproduce the target "
+            "the artifact's CPU kernels were built for."
+        )
+    machine, vec_isa, vec_isa_width, vec_isa_macro = cached[:4]
+    if machine != current[0]:
+        return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
+    if (vec_isa, vec_isa_width, vec_isa_macro) != (current[1], current[2], current[3]):
+        return (
+            f"The artifact's CPU kernels were generated for vector ISA {vec_isa!r} "
+            f"({vec_isa_width}-bit, macros {list(vec_isa_macro)}); this host would "
+            f"compile them for {current[1]!r} ({current[2]}-bit, macros "
+            f"{list(current[3])}). Set ATEN_CPU_CAPABILITY or "
+            "torch._inductor.config.cpp.simdlen so the host picks the same ISA."
+        )
+    return None
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
@@ -861,6 +917,20 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
+        # A cached None means the artifact recorded no vector ISA -- it predates
+        # this field (for a release build, every artifact already on disk), or it
+        # was captured with vectorization disabled (cpp.simdlen=1, or any width
+        # no valid ISA has) -- so there is nothing to compare.
+        if device_type == "cpu" and self.cpu_codegen_target is not None:
+            problem = _cpu_codegen_target_problem(
+                self.cpu_codegen_target, other.cpu_codegen_target
+            )
+            if problem is not None:
+                raise RuntimeError(
+                    "Compile package was created for a CPU codegen target this host "
+                    f"cannot run: cached={self.cpu_codegen_target}, "
+                    f"current={other.cpu_codegen_target}. {problem}"
+                )
         if device_type in self.CHECK_GPUS:
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
@@ -907,7 +977,12 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
+        current_system_info = SystemInfo.current(
+            cpu_codegen=(
+                self.device_type == "cpu"
+                and self.system_info.cpu_codegen_target is not None
+            )
+        )
         self.system_info.check_compatibility(current_system_info, self.device_type)
 
     def debug_info(self) -> dict[str, Any]:
