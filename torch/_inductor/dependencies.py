@@ -667,7 +667,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             return
         rank, rank_size = result_range
         if rank == 0:
-            # Projected dependency queries omit the reduction coordinate.
+            # SchedulerNode.pointwise_or_reduction_read_writes projects the
+            # reduction coordinate to zero; treat the store as scalar there. A
+            # real ranked store always passes its rank loop variable.
             self.store(name, index, value)
             return
         if not isinstance(rank, sympy.Symbol) or rank not in self._var_ranges:
