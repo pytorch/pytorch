@@ -43,6 +43,7 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    has_free_symbols,
     TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
@@ -3131,14 +3132,25 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
             raise NotImplementedError("Blackwell BMM requires rank-3 operands")
 
+        mat1_size = mat1.get_size()
+        mat2_size = mat2.get_size()
+        sizes = (*mat1_size, *mat2_size)
+        # The current bounded configs require concrete dimensions, and CUDA
+        # tensor-map dimensions must be positive.
+        if has_free_symbols(sizes):
+            return
+
+        batch, m, k = map(int, mat1_size)
+        batch_b, k_b, n = map(int, mat2_size)
+        if min(batch, m, n, k) <= 0:
+            return
+
         # Each logical batch is addressed through a rank-2 TMA descriptor.  In
         # particular, every matrix-leading stride and every per-batch base must
         # retain the 16-byte alignment required by TMA.
         if not can_use_tma(mat1, mat2):
             return
 
-        batch, _, k = map(int, mat1.get_size())
-        batch_b, k_b, _ = map(int, mat2.get_size())
         if batch != batch_b or k != k_b:
             raise NotImplementedError(
                 "Blackwell BMM does not broadcast logical batches"
