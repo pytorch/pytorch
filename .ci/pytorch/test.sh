@@ -465,9 +465,8 @@ test_cpuset_num_threads() {
   assert_git_not_dirty
 }
 
-# Shared H100/B200 list prevents drift. All suites, including host-only ones, require
-# install_flash_attn_cute through @skipIfNoCuteDSL. Both sm_90+ architectures matter:
-# H100 reproduced all 112 B200-generated hashes.
+# H100 needs a targeted list; B200 discovers all python_native suites below. Install
+# CuTeDSL before either run. H100 reproduced all 112 B200-generated hashes.
 PYTHON_NATIVE_CUTEDSL_SUITES=(
   python_native/test_cutedsl_smoketest
   python_native/test_sum_cutedsl
@@ -511,7 +510,6 @@ test_python_smoke_b200() {
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
-      "${PYTHON_NATIVE_CUTEDSL_SUITES[@]}" \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \

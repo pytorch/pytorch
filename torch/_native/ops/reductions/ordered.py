@@ -6,8 +6,7 @@ import cutlass
 
 import torch
 
-from .._cutedsl import traits as T
-from . import kernel_rowtile as rt
+from . import kernel_rowtile as rt, traits as T
 
 
 def _acc(dtype):

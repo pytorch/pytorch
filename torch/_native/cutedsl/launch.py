@@ -17,12 +17,12 @@ def sym(divisibility: int = 1):
     return cute.sym_int(divisibility=divisibility)
 
 
-def fake_compact(dtype, shape, *, order=None, align=None):
-    """Describe a compact compile-time operand. `order` follows Tensor.dim_order
-    (0 is stride-1); the pointer must satisfy `align`.
+def fake_compact(dtype, shape, *, stride_order=None, align=None):
+    """Describe a compact compile-time operand. `stride_order` gives each mode's
+    compactness rank (0 is stride-1); the pointer must satisfy `align`.
     """
     return cute.runtime.make_fake_compact_tensor(
-        dtype, tuple(shape), stride_order=order, assumed_align=align
+        dtype, tuple(shape), stride_order=stride_order, assumed_align=align
     )
 
 
