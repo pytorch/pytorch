@@ -116,10 +116,9 @@ class FunctionPicklerBase(pickle.Pickler):
     closure cells, python modules, bound methods, and functions rebuilt from
     their code object.
 
-    GuardsStatePickler is the one subclass today and decides what a rebuilt
-    function carries; this class fixes HOW it is rebuilt. AOTCompilePickler
-    keeps its own copies of these reducers until it is moved onto this base
-    separately; once both share it, a fix here cannot be missed in one pickler.
+    GuardsStatePickler and AOTCompilePickler each keep their own dispatch and
+    decide what a rebuilt function carries; this class fixes HOW it is rebuilt,
+    so a fix here cannot be missed in one pickler.
 
     Defaults, kwdefaults, __doc__, __dict__, __annotations__ and __type_params__
     travel as pickle STATE, applied after memoization, so `wrapper.me = wrapper`
@@ -198,12 +197,12 @@ class FunctionPicklerBase(pickle.Pickler):
         # existed in sys.modules at save (exec-created, transformers_modules.*)
         # comes back empty: safe on the guard-serialization path, which reads
         # attributes off the rebuilt function without calling it; a pickler
-        # whose functions are CALLED after load (AOTCompilePickler, once it is
-        # on this base) sees an empty scope as a NameError at first call, not a
-        # load error. "__main__" imports the LOADING process's __main__, as
-        # pickle's own by-reference path does; a module that swapped a proxy
-        # into sys.modules (torch.backends.cudnn) imports as that proxy, as the
-        # old import of __module__ did.
+        # whose functions are CALLED after load (AOTCompilePickler) sees an
+        # empty scope as a NameError at first call, not a load error. "__main__"
+        # imports the LOADING process's __main__, as pickle's own by-reference
+        # path does; a module that swapped a proxy into sys.modules
+        # (torch.backends.cudnn) imports as that proxy, as the old import of
+        # __module__ did.
         # Not every __name__ is importable: a <locals>/exec function can carry
         # None or "" (bare globals with no __name__), and a relative name
         # (".rel") or a module whose body raises fails import with something
@@ -277,9 +276,8 @@ class FunctionPicklerBase(pickle.Pickler):
         module that is not in sys.modules yet, this reports False for it
         (guards.py explains why on its caller), and a "<locals>" qualname
         component is refused like pickle refuses it. GuardsStatePickler handles
-        <locals> on its own branch before asking; the helper keeps the check so
-        that AOTCompilePickler can dispatch on it alone once it moves onto this
-        base."""
+        <locals> on its own branch before asking; AOTCompilePickler dispatches
+        on this alone."""
         if "<locals>" in fn.__qualname__.split("."):
             return False
         # __module__ need not be a str (a decorator can set anything); an
@@ -325,10 +323,16 @@ class FunctionPicklerBase(pickle.Pickler):
             type(self)._set_cell_contents,
         )
 
-    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+    def _reduce_bound_method(
+        self, method: types.MethodType, *, receiver_is_live: bool = False
+    ) -> tuple[Any, ...] | None:
         # pickle rebuilds a bound method by getattr() on self at load, which is
         # wrong when that does not resolve back to the same bound method; those
-        # carry the function and self explicitly.
+        # carry the function and self explicitly. `receiver_is_live` says
+        # getattr() on the load-time receiver serves names as it does here (it
+        # is handed over as external data, a persistent_id reference), so only
+        # the probe below decides; the per-instance and __getattr__ gates exist
+        # for a receiver that is rebuilt, possibly as a different type.
         receiver = method.__self__
         cls = type(receiver)
         func = method.__func__
@@ -346,16 +350,18 @@ class FunctionPicklerBase(pickle.Pickler):
         # a subclass may rebuild such a receiver as a DIFFERENT type at load
         # (GuardsStatePickler._unpickle_module turns a non-referenceable module
         # into a bare torch.nn.Module), on which getattr() would not resolve
-        # the method. A type receiver (classmethod) is exempt: its namespace is
-        # restored with the class. issubclass(cls, ...) rather than isinstance
-        # so a raising __getattribute__ cannot escape before the try below.
+        # the method. Both gates are skipped for a type receiver (a classmethod;
+        # its namespace is restored with the class) and for a live receiver,
+        # whose names getattr() serves at load exactly as it does now; those
+        # are probed. issubclass(cls, ...) rather than isinstance so a raising
+        # __getattribute__ cannot escape before the try below.
         explicit = (type(self)._unpickle_bound_method, (func, receiver))
-        is_type = issubclass(cls, type)
+        exempt = issubclass(cls, type) or receiver_is_live
         try:
-            if not is_type and hasattr(cls, "__getattr__"):
+            if not exempt and hasattr(cls, "__getattr__"):
                 return explicit
             self_dict = getattr(receiver, "__dict__", None)
-            if not is_type and (
+            if not exempt and (
                 (isinstance(self_dict, dict) and name in self_dict)
                 or (
                     name is not None
