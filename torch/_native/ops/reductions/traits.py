@@ -160,11 +160,16 @@ class WelfordOps:
     def combine(self, a, b):
         ma, m2a, na = a
         mb, m2b, nb = b
-        nn = na + nb
-        nb_over_n = (nb / nn) if (nn > self.acc(0.0)) else self.acc(0.0)
-        delta = mb - ma
-        mean = ma + delta * nb_over_n
-        m2 = m2a + m2b + delta * delta * na * nb_over_n
+        zero = self.acc(0.0)
+        mean, m2, nn = ma, m2a, na
+        if na == zero:
+            mean, m2, nn = mb, m2b, nb
+        elif nb != zero:
+            nn = na + nb
+            nb_over_n = nb / nn
+            delta = mb - ma
+            mean = ma + delta * nb_over_n
+            m2 = m2a + m2b + delta * delta * na * nb_over_n
         return (mean, m2, nn)
 
     @cute.jit
@@ -649,6 +654,8 @@ def _offsets(threads_per_row):
     # PyTorch/Triton use decreasing offsets; ATen's tile merge uses ascending offsets.
     # The direction changes association and is part of the numerical contract.
     n = min(threads_per_row, WARP)
+    if n <= 0 or n & (n - 1):
+        raise ValueError(f"butterfly width must be a positive power of two, got {n}")
     offs = []
     o = n // 2
     while o > 0:

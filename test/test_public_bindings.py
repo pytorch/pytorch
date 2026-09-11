@@ -423,7 +423,7 @@ class TestPublicBindings(TestCase):
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
                 "torch._native.cutedsl.",
-                "torch._native.ops._cutedsl",
+                "torch._native.ops.reductions.traits",
                 "torch._native.ops.foreach_mm.",
                 "torch._native.ops.polar.",
                 "torch._native.ops.reductions.inner_tree_kernel",
