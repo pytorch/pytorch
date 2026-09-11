@@ -1000,7 +1000,18 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function.
+        f_globals: Optional global scope enclosing the compiled function. Guards
+                   are evaluated against this dict by reference, so a global
+                   rebound after loading is seen on the next call, and a guarded
+                   global the dict lacks fails the guard (there is no fallback to
+                   the values serialized with the artifact). There is a single
+                   compiled graph: a rebound global that fails its guard raises
+                   ``RuntimeError: GuardManager check failed`` on the next call
+                   rather than selecting a different graph. The bytecode runs
+                   against a snapshot built at load time in which ``f_globals``
+                   entries override the globals captured with the artifact. (An
+                   ``nn.Module`` artifact differs: its bytecode reads only the
+                   globals serialized at capture.)
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
@@ -1011,4 +1022,6 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+    return AOTCompiledFunction.deserialize(
+        data, f_globals, external_data, guard_globals=f_globals
+    )
