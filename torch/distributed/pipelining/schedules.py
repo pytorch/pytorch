@@ -7,7 +7,7 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -1653,6 +1653,46 @@ def _merge_bw(
     return merged_actions
 
 
+def _add_send_waits(
+    comm_actions: dict[int, list[_Action]],
+    max_outstanding_sends: int,
+) -> dict[int, list[_Action]]:
+    """Wait for the oldest send before issuing more than the configured limit."""
+    send_types = (SEND_F, SEND_B)
+    wait_to_send = {WAIT_SEND_F: SEND_F, WAIT_SEND_B: SEND_B}
+    result: dict[int, list[_Action]] = {}
+
+    for rank, actions in comm_actions.items():
+        pending: deque[_Action] = deque()
+        lowered: list[_Action] = []
+        for action in actions:
+            comp_type = action.computation_type
+            if comp_type in send_types:
+                if len(pending) == max_outstanding_sends:
+                    send = pending.popleft()
+                    wait_type = (
+                        WAIT_SEND_F if send.computation_type == SEND_F else WAIT_SEND_B
+                    )
+                    lowered.append(
+                        _Action(send.stage_index, wait_type, send.microbatch_index)
+                    )
+                pending.append(action)
+            elif comp_type in wait_to_send:
+                send = _Action(
+                    action.stage_index,
+                    wait_to_send[comp_type],
+                    action.microbatch_index,
+                )
+                try:
+                    pending.remove(send)
+                except ValueError as exc:
+                    raise ValueError(f"{action} has no pending send") from exc
+            lowered.append(action)
+        result[rank] = lowered
+
+    return result
+
+
 def _add_send_recv(
     compute_actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
@@ -2532,6 +2572,15 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
         self._max_active_stages: int = kwargs.pop("max_active_stages", 3)
         self._defer_reduce_grad_wait: bool = kwargs.pop("defer_reduce_grad_wait", False)
+        self._max_outstanding_sends: int | None = kwargs.pop(
+            "max_outstanding_sends", None
+        )
+        if self._max_outstanding_sends is not None and (
+            not isinstance(self._max_outstanding_sends, int)
+            or isinstance(self._max_outstanding_sends, bool)
+            or self._max_outstanding_sends < 1
+        ):
+            raise ValueError("max_outstanding_sends must be a positive integer")
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2651,6 +2700,19 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
+
+        if self._max_outstanding_sends is not None:
+            self.pipeline_order_with_comms = _add_send_waits(
+                self.pipeline_order_with_comms,
+                self._max_outstanding_sends,
+            )
+            try:
+                self._simulate()
+            except ValueError as exc:
+                raise ValueError(
+                    f"max_outstanding_sends={self._max_outstanding_sends} "
+                    "deadlocks this pipeline schedule. Increase the limit."
+                ) from exc
 
     def _load_csv(
         self,
@@ -3055,6 +3117,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         super().__init__(
             stages=stages,
@@ -3066,6 +3129,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -3296,6 +3360,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3310,6 +3375,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3409,6 +3475,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3425,6 +3492,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3610,6 +3678,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3626,6 +3695,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3800,6 +3870,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3816,6 +3887,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -4135,6 +4207,13 @@ def _simulate_comms_compute(
             recv_type = RECV_F if forward else RECV_B
             expected_recv = _Action(peer_stage_idx, recv_type, action.microbatch_index)
             return expected_recv in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
+        elif action.computation_type in (
+            UNSHARD,
+            RESHARD,
+            REDUCE_GRAD,
+            WAIT_REDUCE_GRAD,
+        ):
+            return True
         else:
             raise ValueError(f"Unsupported action type {action}")
 
@@ -4171,6 +4250,8 @@ def _simulate_comms_compute(
                 if action is not None:
                     _schedule[rank][-1] = action
                     _prev_ops_rank[rank].add(action)
+                    for sub_action in action.sub_actions or ():
+                        _prev_ops_rank[rank].add(sub_action)
                 pipeline_order[rank].pop(0)
 
         for i in sorted(pipeline_order, reverse=True):

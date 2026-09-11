@@ -28,6 +28,7 @@ from torch.distributed.pipelining.schedules import (
     _Action,
     _add_reduce_grad,
     _add_send_recv,
+    _add_send_waits,
     _add_unshard_reshard,
     _batch_p2p,
     _defer_recv_ops,
@@ -745,6 +746,65 @@ class TestSchedulePlan(TestCase):
         actions[0][1:3] = reversed(actions[0][1:3])
         with self.assertRaisesRegex(ValueError, "Schedule is not progressing"):
             _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
+
+    def test_add_send_waits_uses_one_shared_limit(self):
+        actions = {
+            0: [
+                _Action(0, SEND_F, 0),
+                _Action(1, SEND_B, 0),
+                _Action(0, SEND_F, 1),
+                _Action(1, SEND_B, 1),
+            ]
+        }
+
+        self.assertEqual(
+            _add_send_waits(actions, max_outstanding_sends=2)[0],
+            [
+                _Action(0, SEND_F, 0),
+                _Action(1, SEND_B, 0),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, SEND_F, 1),
+                _Action(1, WAIT_SEND_B, 0),
+                _Action(1, SEND_B, 1),
+            ],
+        )
+
+    def test_add_send_waits_respects_existing_waits(self):
+        actions = {
+            0: [
+                _Action(0, SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(1, SEND_B, 0),
+            ]
+        }
+        self.assertEqual(_add_send_waits(actions, max_outstanding_sends=1), actions)
+
+    def test_max_outstanding_sends_validation(self):
+        for value in (0, -1, 1.5, True):
+            with self.assertRaisesRegex(ValueError, "positive integer"):
+                _PipelineScheduleRuntime([], 1, max_outstanding_sends=value)
+
+    def test_max_outstanding_sends_applies_to_interleaved_schedule(self):
+        stages = [
+            MockPipelineStage(group_size=2, group_rank=0, num_stages=4)
+            for _ in range(2)
+        ]
+        schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=4,
+            max_outstanding_sends=2,
+        )
+
+        for actions in schedule.pipeline_order_with_comms.values():
+            outstanding = 0
+            peak = 0
+            for action in actions:
+                if action.computation_type in (SEND_F, SEND_B):
+                    outstanding += 1
+                    peak = max(peak, outstanding)
+                elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+                    outstanding -= 1
+            self.assertLessEqual(peak, 2)
 
     def test_defer_reduce_grad_wait_lowering(self):
         actions = [
