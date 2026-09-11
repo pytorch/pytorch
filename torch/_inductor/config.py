@@ -2422,6 +2422,40 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
+    # CUDA graph mode for AOTI.
+    #
+    #   "off"      -- no cuda graph (default).
+    #   "whole"    -- capture the ENTIRE lowered component as a single cuda
+    #                 graph, re-capturing on demand for each distinct dynamic
+    #                 shape. Requires the whole graph to be capture-safe;
+    #                 lowering hard-errors listing every offending node if it
+    #                 is not.
+    #   "regional" -- partition the graph and capture only eligible regions.
+    #                 Added by the follow-up stack; rejected here.
+    #
+    # Defaults to "off" because "whole" fails the lowering outright on a model
+    # containing anything uncapturable, rather than silently running
+    # uncaptured. It is therefore opted into per model (via
+    # aot_inductor_config) once that model is known to be clean.
+    cudagraph_mode: Literal["off", "whole", "regional"] = os.environ.get(
+        "AOT_INDUCTOR_CUDAGRAPH_MODE", "off"
+    )  # type: ignore[assignment]
+
+    # Maximum number of distinct dynamic shapes captured per model instance.
+    # Every capture reserves memory in that instance's private graph pool, so an
+    # unbounded count lets a model with a variable serving batch reserve without
+    # limit. Past the cap a request at a new shape runs UNCAPTURED -- correct,
+    # just without the launch saving -- and warns once. Raise it for models with
+    # many hot shapes; lower it to cap upfront GPU reservation.
+    #
+    # This is only the DEFAULT baked into the generated .so. The same env var
+    # read here is re-read at serving time by AOTICUDAGraphManager and wins
+    # over the baked value, so an already-published model can be retuned (or,
+    # with 0, have cuda graph switched off) without re-lowering.
+    cudagraph_max_captures: int = int(
+        os.environ.get("AOT_INDUCTOR_CUDAGRAPH_MAX_CAPTURES", "64")
+    )
+
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
