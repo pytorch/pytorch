@@ -277,8 +277,8 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
             )
 
         k, n = 8193, 128
-        a = torch.randn(k, m, device="cuda", dtype=torch.bfloat16).T
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
 
         def fn(x, y):
             partial = blackwell_decompose_k_partial(x, y, two_ctas)
@@ -326,8 +326,8 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
         self, outer_backends: str, nested_backends: str | None
     ) -> str:
         m, k, n = 256, 131072, 128
-        a = torch.randn(k, m, device="cuda", dtype=torch.bfloat16).T
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
         patch = {
             "max_autotune_gemm": True,
             "max_autotune_gemm_backends": outer_backends,
@@ -372,8 +372,8 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
 
     def test_complete_plan_forced_triton_codegen(self):
         m, k, n = 256, 8193, 128
-        a = torch.randn(k, m, device="cuda", dtype=torch.bfloat16).T
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
         decompose_k = torch._dynamo.dont_skip_tracing(blackwell_decomposeK)
         with config.patch(
             compile_threads=1,
