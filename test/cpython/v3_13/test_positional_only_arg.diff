@@ -1,0 +1,49 @@
+diff --git a/test/cpython/v3_13/test_positional_only_arg.py b/test/cpython/v3_13/test_positional_only_arg.py
+index 1a193814d7535df1ef96a86a2767ce41d998625d..d22106ad27b1a5538437276fc078b95ad75e1cd8 100644
+--- a/test/cpython/v3_13/test_positional_only_arg.py
++++ b/test/cpython/v3_13/test_positional_only_arg.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_positional_only_arg.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for the positional only argument syntax specified in PEP 570."""
+ 
+ import dis
+@@ -16,7 +34,7 @@ def global_pos_only_and_normal(a, /, b):
+ def global_pos_only_defaults(a=1, /, b=2):
+     return a, b
+ 
+-class PositionalOnlyTestCase(unittest.TestCase):
++class PositionalOnlyTestCase(CPythonTestCase):
+ 
+     def assertRaisesSyntaxError(self, codestr, regex="invalid syntax"):
+         with self.assertRaisesRegex(SyntaxError, regex):
+@@ -433,6 +451,7 @@ class PositionalOnlyTestCase(unittest.TestCase):
+ 
+         self.assertEqual(C().method(), sentinel)
+ 
++    @unittest.skip("asserts on bytecode via dis.get_instructions")
+     def test_annotations_constant_fold(self):
+         def g():
+             def f(x: not (int is int), /): ...
+@@ -446,4 +465,4 @@ class PositionalOnlyTestCase(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

@@ -3104,10 +3104,9 @@ class GuardBuilder(GuardBuilderBase):
     def BUILTIN_MATCH(self, guard: Guard) -> None:
         if self.save_guards:
             # Record which builtin variables are used for pruning later.
-            if isinstance(guard.originating_source, DictGetItemSource):
-                self.check_fn_manager.used_builtin_vars.add(
-                    guard.originating_source.index
-                )
+            source = guard.originating_source
+            if isinstance(source, DictGetItemSource) and isinstance(source.index, str):
+                self.check_fn_manager.used_builtin_vars.add(source.index)
         return self.id_match_unchecked(guard)
 
     @register_guard_check_spec(

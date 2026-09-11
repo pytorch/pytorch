@@ -80,6 +80,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 from torch.testing._internal.inductor_utils import skipCUDAIf
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 c10d_ops = torch.ops.c10d
@@ -2046,10 +2047,33 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, all_reduce_sum_re)
 
 
+@instantiate_parametrized_tests
 class TestFullyShardReduceOpWorldSize1(FSDPTest):
     @property
     def world_size(self) -> int:
         return 1
+
+    @parametrize("divide_factor", [None, 1.0, 2.0])
+    def test_singleton_copy_division(self, divide_factor):
+        divisions = []
+
+        class RecordDivisions(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.div.Tensor:
+                    divisions.append(func)
+                return func(*args, **(kwargs or {}))
+
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        fully_shard(model, mesh=init_device_mesh(device_type.type, (1,)))
+        if divide_factor is not None:
+            model.set_gradient_divide_factor(divide_factor)
+        inp = torch.ones(3, 8, device=device_type)
+        loss = model(inp).sum()
+        with RecordDivisions():
+            loss.backward()
+        self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
+        self.assertEqual(model.weight.grad.to_local(), expected)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp
