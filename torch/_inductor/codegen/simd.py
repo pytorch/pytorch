@@ -2857,6 +2857,12 @@ class SIMDScheduling(BaseScheduling):
 
         Dependency matching proves each fused read hits the position that was
         written; these rules only keep nodes in stages that can hold their values.
+
+        Other passes decline ranked results at their own entry points rather
+        than here: the nested-reduction planners, foreach kernels, the loop
+        rewrites in Scheduler._can_fuse that re-express a consumer over the
+        candidate domain, coalescing analysis, and non-default tiling. A new
+        pass that assumes one result per row must add its own decline.
         """
         if not (node1.has_reduction_result() or node2.has_reduction_result()):
             return super().can_fuse_reduction_pair(node1, node2)
@@ -3094,6 +3100,10 @@ class SIMDScheduling(BaseScheduling):
                     f"got {rnumel1} and {rnumel2}"
                 )
             ordinary_fusion = False
+            # A pointwise node over rows*k is a valid partner for a ranked
+            # (rows, N) reduction: it runs in the k-wide result stage. The
+            # precondition above admits it; this keeps the ordinary numel
+            # check from rejecting it.
             stage_rnumel = rnumel2
             if node2.has_reduction_result():
                 result_size = self._reduction_result_size(node2.get_nodes())
