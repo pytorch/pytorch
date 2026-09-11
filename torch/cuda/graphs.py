@@ -567,11 +567,18 @@ class CUDAGraph(_CUDAGraph):
             return
         if self._annotation_key_by == "source":
             # Annotations stay keyed to the capture graph: the consumer reads CUPTI's
-            # sourceGraphNodeId, which reports the node each exec node came from, so no
-            # exec id ever has to be tracked. The capture id still goes to the destroy
-            # hooks, which is what purges these entries when the graph dies.
+            # sourceGraphNodeId, which reports the node each exec node came from. Host and
+            # memcpy nodes are the exception -- CUPTI reports no source id for those, so
+            # they still need an exec-keyed copy (see alias_sourceless_to_exec_graph). The
+            # capture id, and any exec id an alias landed under, go to the destroy hooks,
+            # which is what purges these entries when the graph dies.
+            from torch.cuda._graph_annotations import alias_sourceless_to_exec_graph
+
             self._recorded_exec_ids.add(self._capture_graph_id)
             self._recorded_exec_ids |= self._annotated_body_graph_ids
+            aliased_exec_id = alias_sourceless_to_exec_graph(self)
+            if aliased_exec_id is not None:
+                self._recorded_exec_ids.add(aliased_exec_id)
             return
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
