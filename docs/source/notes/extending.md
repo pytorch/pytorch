@@ -144,49 +144,10 @@ directly into an existing partial sum and returning ``None``.
 
 During a first-order {meth}`~torch.Tensor.backward` call without an ``inputs``
 argument, ``ctx.input_grad_buffers`` provides a tuple aligned with the inputs to
-{meth}`~Function.forward`. Each entry is either ``None`` or the autograd engine's
-current accumulation buffer for that input. For example, ``x`` has another forward
-use here, while ``weight`` does not::
-
-    loss = Matmul.apply(x, weight).sum() + other_op(x).sum()
-
-The custom backward can conditionally fuse only its contribution to ``x``.
-Here, ``matmul_backward_input_acc`` represents a kernel that computes the input
-gradient matmul and accumulates it into ``out``::
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        x, weight = ctx.saved_tensors
-        x_buffer, _ = ctx.input_grad_buffers
-
-        if x_buffer is not None:
-            matmul_backward_input_acc(grad_output, weight, out=x_buffer)
-            grad_x = None
-        else:
-            grad_x = matmul_backward_input(grad_output, weight)
-
-        grad_weight = matmul_backward_weight(grad_output, x)
-        return grad_x, grad_weight
-
-If ``other_op`` produces its contribution first, ``x_buffer`` can expose that
-partial sum. If this custom backward runs first, ``x_buffer`` is ``None`` and it
-returns a separate tensor instead. The gradient for ``weight`` always follows the
-normal return path. Buffer availability follows backward execution order: a buffer
-is exposed only after another producer has contributed to that input. The fallback
-above allows the function to work under either ordering.
-
-The buffer may only be used synchronously while that custom ``backward`` method is
-running. Do not retain it: later producers may replace the engine's buffer, making a
-retained tensor stale. All producers that use or subsequently update an exposed
-buffer must execute on the same device, engine thread, and stream. PyTorch diagnoses
-engine-visible violations, but a custom function that launches work on another
-thread or stream is responsible for synchronizing it before returning.
-
-This interface is unavailable with {func}`torch.autograd.grad`, the ``inputs``
-argument to ``backward``, ``create_graph=True``, anomaly detection, or a post-hook on
-the producing autograd node. It only exposes the engine's per-backward ``InputBuffer``;
-for a leaf, the completed buffer still passes through ``AccumulateGrad`` and its normal
-tensor and post-accumulate hooks before becoming ``.grad``.
+{meth}`~Function.forward`. Each entry is either ``None`` or the engine's current
+accumulation buffer for that input. See
+{attr}`~torch.autograd.function.FunctionCtx.input_grad_buffers` for an example and
+the complete availability, lifetime, and synchronization contract.
 
 In addition to ``ctx`` methods, the {class}`~Function` class supports the following
 class attributes:

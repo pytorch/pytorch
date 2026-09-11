@@ -36,7 +36,88 @@ _P = ParamSpec("_P")
 
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
+    _input_grad_buffers: tuple[torch.Tensor | None, ...]
     output_grad_dtypes: "tuple[torch.dtype | None, ...] | None"
+
+    @property
+    def input_grad_buffers(self) -> tuple[torch.Tensor | None, ...]:
+        r"""Return existing buffers for accumulating gradients of this Function's inputs.
+
+        The tuple is aligned with the inputs passed to :meth:`~Function.forward`.
+        Each entry is ``None`` or the autograd engine's current ``InputBuffer`` for
+        that input. A non-``None`` buffer contains gradient contributions already
+        produced during the current backward. A custom backward may accumulate its
+        contribution directly into the buffer and return ``None`` for that input,
+        fusing gradient computation with accumulation and avoiding a separate
+        gradient tensor.
+
+        A buffer is exposed only after another producer has contributed to that
+        input, so availability follows backward execution order and is independent
+        for each input. An entry may also be ``None`` when its buffer cannot be
+        safely exposed.
+
+        For example, ``x`` has another forward use while ``weight`` does not. The
+        custom backward conditionally fuses accumulation only for ``grad_x``::
+
+            >>> # xdoctest: +SKIP
+            >>> class Matmul(torch.autograd.Function):
+            >>>     @staticmethod
+            >>>     def forward(ctx, x, weight):
+            >>>         ctx.save_for_backward(x, weight)
+            >>>         return x @ weight
+            >>>
+            >>>     @staticmethod
+            >>>     def backward(ctx, grad_output):
+            >>>         x, weight = ctx.saved_tensors
+            >>>         x_buffer, _ = ctx.input_grad_buffers
+            >>>         if x_buffer is not None:
+            >>>             # Computes grad_x and adds it to the existing buffer.
+            >>>             matmul_backward_input_acc(
+            >>>                 grad_output, weight, out=x_buffer
+            >>>             )
+            >>>             grad_x = None
+            >>>         else:
+            >>>             grad_x = matmul_backward_input(grad_output, weight)
+            >>>         grad_weight = matmul_backward_weight(grad_output, x)
+            >>>         return grad_x, grad_weight
+            >>>
+            >>> loss = Matmul.apply(x, weight).sum() + other_op(x).sum()
+
+        If ``other_op`` produces its contribution first, ``x_buffer`` can expose
+        that partial sum. If ``Matmul`` runs first, ``x_buffer`` is ``None`` and it
+        returns a separate tensor instead. The fallback lets the function work
+        under either ordering.
+
+        .. warning::
+            A returned buffer is valid only while the current custom ``backward``
+            invocation is running. Mutate it synchronously and do not retain it.
+            A later producer may replace the engine's buffer, making a retained
+            tensor stale.
+
+            All producers that use or subsequently update an exposed buffer must
+            execute on the same device, autograd engine thread, and stream. PyTorch
+            diagnoses engine-visible violations. A custom function that launches
+            work on another thread or stream is responsible for synchronizing it
+            before returning.
+
+        This property is available only while a Python custom ``backward`` is
+        executing during an eager, first-order :meth:`~torch.Tensor.backward` call
+        without an ``inputs`` argument. It is unavailable with
+        :func:`torch.autograd.grad`, ``create_graph=True``, anomaly detection, a
+        post-hook on the producing autograd node, or stale capture stream overrides.
+
+        .. note::
+            This property never exposes a leaf's ``.grad``. For a leaf input, the
+            completed buffer still passes through ``AccumulateGrad`` and its hooks
+            before becoming ``.grad``.
+
+            A custom backward that instead accumulates directly into a
+            preinitialized leaf ``.grad`` and returns ``None`` does not use this
+            interface. It is responsible for the ``.grad`` buffer's initialization
+            and lifetime, synchronization with all other producers, and any
+            ``AccumulateGrad`` hook behavior bypassed by the direct write.
+        """
+        return self._input_grad_buffers
 
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.backward`.

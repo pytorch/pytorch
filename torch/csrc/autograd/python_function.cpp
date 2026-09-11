@@ -2315,7 +2315,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr,
      nullptr},
-    {"input_grad_buffers",
+    {"_input_grad_buffers",
      (getter)THPFunction_input_grad_buffers,
      nullptr,
      nullptr,
