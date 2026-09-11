@@ -1,20 +1,26 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from types import SimpleNamespace
 
 import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters
+from torch._inductor import utils as inductor_utils
 from torch._inductor.fx_passes.pad_mm import (
+    _pad_mm_trace_device,
     can_pad,
+    check_device,
     get_alignment_size,
     get_pad_cache,
     get_padded_length,
+    is_mm_compute_bound,
     should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -716,6 +722,141 @@ class PadMMTest(TestCase):
         compiled = torch.compile(fn)(x, y)
         self.assertEqual(compiled, expected)
         self.assertEqual(compiled.stride(), expected.stride())
+
+
+class PadMMDeviceAgnosticTest(TestCase):
+    """
+    The pad decisions in pad_mm must key off the device of the tensors being
+    compiled, not off which accelerators happen to be visible to the process.
+    These cases run anywhere, including on CPU-only machines.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    # Mirrors test_pad_mm_bf16: bf16, K > M, K > N, N odd and K above the pad
+    # threshold, so the only thing left to decide is the device.
+    M, K, N = 2, 15691904, 13
+    PAD_OPTIONS = {"pad_aten_mm_pass": {"k_threshold_to_pad": 8388608}}
+
+    def test_check_device_accepts_any_accelerator(self):
+        # check_device only reads `.device.type`, so these stand-ins keep the
+        # accelerator cases free of hardware.
+        def tensor_on(device_type):
+            return SimpleNamespace(device=SimpleNamespace(type=device_type))
+
+        for device_type in ("cuda", "xpu", "npu", "privateuseone"):
+            same_device = check_device(tensor_on(device_type), tensor_on(device_type))
+            self.assertTrue(same_device, f"{device_type} tensors should be paddable")
+        self.assertFalse(check_device(tensor_on("cuda"), tensor_on("cpu")))
+        self.assertFalse(check_device(tensor_on("npu"), tensor_on("cuda")))
+
+        # Real tensors: cpu never pads, and neither does the meta device that
+        # pattern-matcher inputs carry.
+        self.assertFalse(check_device(torch.empty(4, 4), torch.empty(4, 4)))
+        meta = torch.empty(4, 4, device="meta")
+        self.assertFalse(check_device(meta, meta))
+
+    @inductor_config.patch(post_grad_fusion_options=PAD_OPTIONS)
+    def test_should_pad_mm_bf16_asks_only_the_compiled_device(self):
+        args = (torch.bfloat16, self.M, self.N, self.K)
+        with (
+            unittest.mock.patch(
+                "torch.cuda.get_device_capability", return_value=(8, 0)
+            ) as cuda_cap,
+            unittest.mock.patch("torch.xpu.is_available", return_value=True) as xpu_ok,
+        ):
+            self.assertTrue(should_pad_mm_bf16(*args, device_type="cuda"))
+            self.assertEqual(cuda_cap.call_count, 1)
+            self.assertEqual(xpu_ok.call_count, 0)
+            # xpu answers from the device table; every other accelerator takes
+            # the default of "this regression was never seen here".
+            self.assertTrue(should_pad_mm_bf16(*args, device_type="xpu"))
+            self.assertFalse(should_pad_mm_bf16(*args, device_type="npu"))
+            self.assertFalse(should_pad_mm_bf16(*args, device_type="privateuseone"))
+            self.assertEqual(cuda_cap.call_count, 1)
+            self.assertEqual(xpu_ok.call_count, 0)
+
+    @inductor_config.patch(post_grad_fusion_options=PAD_OPTIONS)
+    def test_should_pad_mm_bf16_skips_pad_on_hopper(self):
+        args = (torch.bfloat16, self.M, self.N, self.K)
+        with unittest.mock.patch(
+            "torch.cuda.get_device_capability", return_value=(9, 0)
+        ):
+            self.assertFalse(should_pad_mm_bf16(*args, device_type="cuda"))
+
+    @inductor_config.patch(post_grad_fusion_options=PAD_OPTIONS)
+    def test_should_pad_mm_bf16_defaults_to_process_wide_probe(self):
+        # Callers with no device to ask (e.g. test_pad_mm_bf16) keep the
+        # historical behavior of probing every accelerator in the process.
+        args = (torch.bfloat16, self.M, self.N, self.K)
+        xpu_available = "torch.xpu.is_available"
+        cuda_capability = "torch.cuda.get_device_capability"
+        with (
+            unittest.mock.patch(cuda_capability, return_value=(9, 0)) as cuda_cap,
+            unittest.mock.patch(xpu_available, return_value=True) as xpu_ok,
+        ):
+            self.assertTrue(should_pad_mm_bf16(*args))
+        self.assertEqual(cuda_cap.call_count, 0)
+        self.assertEqual(xpu_ok.call_count, 1)
+
+    def test_is_mm_compute_bound_bf16_large_k_is_device_specific(self):
+        # These rates make the shape bandwidth bound, so a True can only come
+        # from the device-specific bf16 large-K override.
+        args = (self.M, self.K, self.N, torch.bfloat16)
+        tflops = unittest.mock.patch.object(
+            inductor_utils, "get_device_tflops", return_value=100.0
+        )
+        gbps = unittest.mock.patch.object(
+            inductor_utils, "get_gpu_dram_gbps", return_value=2000.0
+        )
+        with tflops, gbps:
+            with unittest.mock.patch(
+                "torch.cuda.get_device_capability", return_value=(8, 0)
+            ) as cuda_cap:
+                self.assertTrue(is_mm_compute_bound(*args, device_type="cuda"))
+                self.assertFalse(is_mm_compute_bound(*args, device_type="npu"))
+                self.assertEqual(cuda_cap.call_count, 1)
+            with unittest.mock.patch(
+                "torch.cuda.get_device_capability", return_value=(9, 0)
+            ):
+                self.assertFalse(is_mm_compute_bound(*args, device_type="cuda"))
+            with unittest.mock.patch(
+                "torch.xpu.is_available", return_value=True
+            ) as xpu_ok:
+                self.assertTrue(is_mm_compute_bound(*args, device_type="xpu"))
+                self.assertFalse(is_mm_compute_bound(*args, device_type="npu"))
+                self.assertEqual(xpu_ok.call_count, 0)
+
+    def test_pad_mm_trace_device_uses_default_accelerator(self):
+        # current_accelerator() is patched throughout for determinism: on a GPU
+        # machine it answers cuda before the probe chain gets a turn.
+        accelerator = "torch.accelerator.current_accelerator"
+        none = unittest.mock.patch(accelerator, return_value=None)
+        # torch.device("npu") needs torch_npu loaded, so ask about the generic
+        # PrivateUse1 name instead; only the device type is read here.
+        with unittest.mock.patch(
+            accelerator, return_value=torch.device("privateuseone")
+        ):
+            self.assertEqual(_pad_mm_trace_device(), "privateuseone")
+
+        with (
+            none,
+            unittest.mock.patch("torch.cuda.is_available", return_value=True),
+            unittest.mock.patch("torch.xpu.is_available", return_value=True),
+        ):
+            self.assertEqual(_pad_mm_trace_device(), "cuda")
+        with (
+            none,
+            unittest.mock.patch("torch.cuda.is_available", return_value=False),
+            unittest.mock.patch("torch.xpu.is_available", return_value=True),
+        ):
+            self.assertEqual(_pad_mm_trace_device(), "xpu")
+        with (
+            none,
+            unittest.mock.patch("torch.cuda.is_available", return_value=False),
+            unittest.mock.patch("torch.xpu.is_available", return_value=False),
+        ):
+            self.assertEqual(_pad_mm_trace_device(), "cpu")
 
 
 if __name__ == "__main__":
