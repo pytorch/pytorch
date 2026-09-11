@@ -200,20 +200,16 @@ class FunctionPicklerBase(pickle.Pickler):
         # attributes off the rebuilt function without calling it; a pickler
         # whose functions are CALLED after load (AOTCompilePickler, once it is
         # on this base) sees an empty scope as a NameError at first call, not a
-        # load error. A scope of "__main__" imports the LOADING process's
-        # __main__, the same module pickle itself resolves a by-reference
-        # __main__ function against; right in-process, and cross-process only
-        # as right as the two scripts agree. A module that replaced its own
-        # sys.modules entry with a proxy (torch.backends.cudnn) imports as a
-        # small dict that is not empty, so a global read from it fails at call
-        # without the log below; the old import of __module__ landed on the
-        # same object.
+        # load error. "__main__" imports the LOADING process's __main__, as
+        # pickle's own by-reference path does; a module that swapped a proxy
+        # into sys.modules (torch.backends.cudnn) imports as that proxy, as the
+        # old import of __module__ did.
         # Not every __name__ is importable: a <locals>/exec function can carry
         # None or "" (bare globals with no __name__), and a relative name
         # (".rel") or a module whose body raises fails import with something
         # other than ImportError. None of those should fail the load, so require
         # a non-empty str and swallow any Exception from the import into the
-        # empty scope (a SystemExit or KeyboardInterrupt still propagates).
+        # empty scope (SystemExit/KeyboardInterrupt still propagate).
         f_globals: dict[str, Any] = {}
         why: str | Exception = f"scope {scope!r} is not an importable name"
         if isinstance(scope, str) and scope:
