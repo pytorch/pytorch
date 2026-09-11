@@ -200,6 +200,22 @@ class StrictNumericsCompileTest(TestCase):
         self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
         self.assertIn("div_rn", "\n".join(codes))
 
+    @parametrize(
+        "dtype", (torch.int32, torch.int64), name_fn=lambda d: str(d).split(".")[-1]
+    )
+    def test_relu_integer(self, device, dtype):
+        limits = torch.iinfo(dtype)
+        values = [limits.min, -1, 0, 1, 2**24 + 1, limits.max - 1, limits.max]
+        if dtype == torch.int64:
+            values += [2**40 + 1, 2**53 + 1]
+        x = torch.tensor(values, dtype=dtype, device=device)
+        with config.patch(force_disable_caches=True):
+            compiled = torch.compile(
+                torch.relu, fullgraph=True, options={"numerics": "strict"}
+            )
+            result = compiled(x)
+        self.assertEqual(result, torch.relu(x))
+
     @parametrize("case", ("tail", "mixed", "scalar", "broadcast", "nan"))
     def test_erfcx_branch_selection(self, device, case):
         dtype = torch.float32
@@ -837,9 +853,6 @@ POINTWISE_XFAIL = frozenset(
         ("nn_functional_relu6", "bfloat16"),
         ("nn_functional_relu6", "float16"),
         ("nn_functional_relu6", "float32"),
-        ("nn_functional_relu", "bfloat16"),
-        ("nn_functional_relu", "float16"),
-        ("nn_functional_relu", "float32"),
         ("nn_functional_softplus", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
