@@ -71,6 +71,10 @@ class _ProbeState:
     # id(value) -> the unmarked nn.Modules the probe reached inside it, so the
     # warning can name the actual reason and the offending modules.
     unmarked_modules: dict[int, list[Any]] = dataclasses.field(default_factory=dict)
+    # id(value) -> the exception type that failed its probe, so the warning
+    # tells a value that does not pickle from a reducer bug (an AttributeError
+    # out of this file's own machinery, a RecursionError).
+    failures: dict[int, str] = dataclasses.field(default_factory=dict)
     # id(function) -> its picklable __dict__ entries; a function that closes
     # over itself is reduced twice, and the second pass must not re-probe or
     # re-warn.
@@ -156,7 +160,9 @@ class AOTCompilePickler(FunctionPicklerBase):
     def _warn_dropped(self, obj: Any, slot: str, value: Any) -> None:
         # The body may read a pruned attribute (`with helper.lock:`), so the
         # drop is a warning that names the fix, not a silent debug line; the
-        # user can hand the object over as external data and it is kept. The
+        # user can hand the object over as external data and it is kept. It
+        # names the exception type too: a reducer bug then reads as one in a
+        # bug report instead of as the user's value not pickling. The
         # function is named by its code object: functools.wraps overwrites
         # __qualname__ with the wrappee's, which would make the two drops of a
         # wrapper and its wrappee indistinguishable.
@@ -168,7 +174,10 @@ class AOTCompilePickler(FunctionPicklerBase):
             names = ", ".join(type(m).__name__ for m in modules)
             reason = f"it holds nn.Module(s) not marked as external data ({names})"
         else:
-            reason = "it does not pickle"
+            failure = self._probe_state.failures.get(id(value))
+            reason = (
+                f"it does not pickle ({failure})" if failure else "it does not pickle"
+            )
         # co_qualname is 3.11+; the bare co_name on 3.10 cannot tell a wraps
         # wrapper from its wrappee, but __qualname__ could not either.
         log.warning(
@@ -249,6 +258,7 @@ class AOTCompilePickler(FunctionPicklerBase):
                 type(value).__name__,
                 exc,
             )
+            state.failures[vid] = type(exc).__name__
             result = False
         else:
             # persistent_id records an unmarked nn.Module rather than raising, so
@@ -265,9 +275,10 @@ class AOTCompilePickler(FunctionPicklerBase):
         finally:
             state.inflight.discard(vid)
             # The lean travels back through this shared flag because the nested
-            # probe is reached through pickle's own dump stack, not a return
-            # value; restore it here so an aborting dump cannot leave the
-            # child's value behind.
+            # probe is reached through pickle's own dump stack (probe.dump ->
+            # reducer_override -> _pickleable_attributes -> _dumps_cleanly), so
+            # no return value of the child can reach this frame; restore it here
+            # so an aborting dump cannot leave the child's value behind.
             leaned = state.leaned
             state.leaned = leaned_before or leaned
         # A False that leaned on an in-flight True may be a false negative, so
