@@ -15,9 +15,9 @@ from cutlass import const_expr, Float32, Float64, Int32, Int64
 
 import torch
 
+from ...cutedsl import launch as _L
 from ...cutedsl.dtypes import torch2cute
-from .._cutedsl import launch as _L
-from .._cutedsl.plan_cache import cached_plan
+from ...cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
     kernel_rowtile as _rt,
@@ -269,7 +269,10 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
     def _fake_in():
         # Dynamic 2D row-major descriptor, with inner extent divisible by vector width.
         return _L.fake_compact(
-            torch2cute[x.dtype], (_L.sym(), _L.sym(svec)), order=(1, 0), align=align
+            torch2cute[x.dtype],
+            (_L.sym(), _L.sym(svec)),
+            stride_order=(1, 0),
+            align=align,
         )
 
     def _fake_1d(dtype):

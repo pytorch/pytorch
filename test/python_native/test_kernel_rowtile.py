@@ -16,8 +16,7 @@ class TestKernelRowTile(TestCase):
     def test_reduce_row_tile(self):
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile
+        from torch._native.ops.reductions import kernel_rowtile, traits as T
 
         x = torch.randn(128, 512, device="cuda")
         (out,) = kernel_rowtile.reduce_row_tile(
@@ -28,8 +27,7 @@ class TestKernelRowTile(TestCase):
     def test_one_kernel_per_vec_class(self):
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile
+        from torch._native.ops.reductions import kernel_rowtile, traits as T
 
         trait = T.SumOps(acc=cutlass.Float32)
         kernel_rowtile._CACHE.clear()
@@ -52,8 +50,7 @@ class TestKernelRowTile(TestCase):
         # nouts=2 stores values and indices projected from one accumulator.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         x = torch.randn(64, 512, device="cuda")
         vals, idx = rt.reduce_row_tile(
@@ -71,8 +68,7 @@ class TestKernelRowTile(TestCase):
         # final=False stores raw accumulators; Welford's count must equal the row length.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         x = torch.randn(32, 256, device="cuda")
         trait = T.WelfordOps(acc=cutlass.Float32)
@@ -128,8 +124,7 @@ class TestKernelRowTile(TestCase):
         # position and leave clean rows to check values too.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         M, N = 64, 512
         half = M // 2
@@ -152,8 +147,7 @@ class TestKernelRowTile(TestCase):
         # correction >= n divides by zero (+inf like ATen), never a negative denominator.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         n = 128
         x = torch.randn(16, n, device="cuda")
@@ -176,8 +170,7 @@ class TestKernelRowTile(TestCase):
 
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         # Both Ns pad lanes; N=3 uses only 3 of 32.
         for n in (3, 127):
@@ -205,8 +198,7 @@ class TestKernelRowTile(TestCase):
         # the identity into the result.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         x = torch.randint(-(2**20), 2**20, (32, 256), device="cuda", dtype=torch.int32)
         for trait, ref in ((T.AMaxOps, x.amax(dim=1)), (T.AMinOps, x.amin(dim=1))):
@@ -220,7 +212,7 @@ class TestKernelRowTile(TestCase):
         # Import locally so this module loads without the DSL.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import traits as T
 
         return T.SumOps(acc=cutlass.Float32)
 
@@ -228,8 +220,7 @@ class TestKernelRowTile(TestCase):
         # tpr=1 assigns each row to one thread without lane merging.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile
+        from torch._native.ops.reductions import kernel_rowtile, traits as T
 
         x = torch.randn(8192, 16, device="cuda")
         (out,) = kernel_rowtile.reduce_row_tile(
@@ -247,8 +238,7 @@ class TestKernelRowTile(TestCase):
         # rotated values retain their logical columns.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile
+        from torch._native.ops.reductions import kernel_rowtile, traits as T
 
         if not kernel_rowtile.tma_ok(32, 4, 65536, torch.device("cuda")):
             self.skipTest("TMA path not applicable on this device")
@@ -348,8 +338,7 @@ class TestKernelRowTile(TestCase):
         # No lane merge lets tpr=1 serve three-field and two-output traits.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         x = torch.randn(1 << 16, 16, device="cuda")
         (var,) = rt.reduce_row_tile(
@@ -378,10 +367,10 @@ class TestKernelRowTile(TestCase):
 
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             kernel_general as kg,
             kernel_rowtile as rt,
+            traits as T,
         )
 
         m, n = 1 << 20, 32
@@ -404,8 +393,7 @@ class TestKernelRowTile(TestCase):
         # so validate it even when caller-set use_tma bypasses tma_ok.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         self.assertFalse(rt.tma_ok(24, 4, 256), "the gate should decline this N")
         x = torch.randn(256, 24, device="cuda")
@@ -436,8 +424,7 @@ class TestKernelRowTile(TestCase):
         # Dynamic extents must handle unit inner stride with a gapped row pitch.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         x = torch.randn(4, 512, device="cuda")[::2]
         (got,) = rt.reduce_row_tile(
@@ -450,8 +437,7 @@ class TestKernelRowTile(TestCase):
         # cache key does not reuse its wider claim and fault.
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         trait = T.SumOps(acc=cutlass.Float32)
         aligned = torch.randn(2, 512, device="cuda")
@@ -470,8 +456,7 @@ class TestKernelRowTile(TestCase):
         # Three warps would drop the third partial (256 instead of 384 at N=384).
         import cutlass
 
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.ones(8, 384, device="cuda")

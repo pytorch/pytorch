@@ -11,11 +11,11 @@ from cutlass import Float32, Float64, Int32, Int64
 import torch
 from torch._tensor_iterator import reduce_op
 
+from ...cutedsl import launch as _L
 from ...cutedsl.dtypes import torch2cute
-from .._cutedsl import launch as _L
-from .._cutedsl.plan_cache import cached_plan
-from .._cutedsl.traits import WARP
+from ...cutedsl.plan_cache import cached_plan
 from . import tile
+from .traits import WARP
 
 
 # (extent, element-stride) pairs from TensorIterator, fastest dim first.
