@@ -1772,8 +1772,10 @@ target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_
 
 # Include nlohmann-json
 add_library(nlohmann INTERFACE IMPORTED)
-include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
+target_include_directories(nlohmann SYSTEM INTERFACE
+    ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
 
 # Include moodycamel
 add_library(moodycamel INTERFACE IMPORTED)
-include_directories(moodycamel SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/concurrentqueue)
+target_include_directories(moodycamel SYSTEM INTERFACE
+    ${PROJECT_SOURCE_DIR}/third_party/concurrentqueue)

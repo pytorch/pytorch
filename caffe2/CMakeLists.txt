@@ -1400,9 +1400,6 @@ endif()
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/cpp-httplib)
 
-target_include_directories(torch_cpu PRIVATE
-  ${TORCH_ROOT}/third_party/nlohmann/include)
-
 # The native .pftrace encoder's only extra build dep (perfetto) is pulled in
 # just when the CUPTI stubs were generated above (CUPTI_STUBS_GENERATED): the
 # encoder is useless without Cuspy, which is unavailable at runtime
