@@ -4665,7 +4665,10 @@ class SIMDScheduling(BaseScheduling):
             multi_kernel = SizeHintMultiKernel(kernels)
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
             self.codegen_comment(node_schedule, multi_kernel.kernel_name)
-            multi_kernel.call_kernel(multi_kernel.kernel_name)
+            with V.graph.wrapper_code.kernel_profile_scope(
+                multi_kernel.kernel_name, node_schedule
+            ):
+                multi_kernel.call_kernel(multi_kernel.kernel_name)
             V.graph.removed_buffers |= multi_kernel.removed_buffers
             V.graph.inplaced_to_remove |= multi_kernel.inplaced_to_remove
             self.free_buffers_in_scheduler()
@@ -4696,7 +4699,10 @@ class SIMDScheduling(BaseScheduling):
 
                 node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
                 self.codegen_comment(node_schedule, kernel.kernel_name)
-                kernel.call_kernel(kernel.kernel_name, template_node.node)
+                with V.graph.wrapper_code.kernel_profile_scope(
+                    kernel.kernel_name, node_schedule
+                ):
+                    kernel.call_kernel(kernel.kernel_name, template_node.node)
 
                 V.graph.removed_buffers |= kernel.removed_buffers
                 V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
@@ -5299,7 +5305,10 @@ class SIMDScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
-            kernel.call_kernel(kernel_name)
+            with V.graph.wrapper_code.kernel_profile_scope(
+                kernel_name, combo_kernel_node.snodes
+            ):
+                kernel.call_kernel(kernel_name)
 
         self.free_buffers_in_scheduler()
 
