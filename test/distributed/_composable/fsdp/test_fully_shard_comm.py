@@ -46,7 +46,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -1794,13 +1794,13 @@ class TestFullyShardAllocFromPG(FSDPTest):
         fully_shard(model)
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertNotRegex(f.read(), self.MEMORY_REGISTER_RE)
@@ -1814,7 +1814,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
@@ -1921,11 +1921,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         super()._run(*args, **kwargs)
 
     # Test reduce-scatter only on plain FSDP on 2 GPUs
-    # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
-    )
     def test_fully_shard_force_sum_reduce_scatter(self):
         torch.manual_seed(42)
         model_args = ModelArgs()
@@ -1946,13 +1942,13 @@ class TestFullyShardForceSumReduction(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -1969,7 +1965,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -1977,11 +1973,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, reduce_scatter_sum_re)
 
     # Test both reduce-scatter and all-reduce on HSDP (DDP+FSDP) on 4 GPUs
-    # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(
-        not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
-    )
     def test_fully_shard_force_sum_both_reductions(self):
         mesh = init_device_mesh(
             device_type.type, (2, self.world_size // 2), mesh_dim_names=("ddp", "fsdp")
@@ -2012,13 +2004,13 @@ class TestFullyShardForceSumReduction(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -2037,7 +2029,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
