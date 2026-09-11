@@ -1007,9 +1007,7 @@ class PythonPrinter(_PythonPrinter):
 
 
 class OpDecompositions:
-    """
-    Decomposes inductor ops
-    """
+    r"""Decompose Inductor pointwise ops into backend-independent ops expressions."""
 
     @staticmethod
     def identity(value: OpVarT) -> OpVarT:
@@ -1035,9 +1033,9 @@ class OpDecompositions:
         return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
 
     @staticmethod
-    def _chbevl(x: OpVarT, coefficients: tuple[float, ...]) -> OpVarT:
+    def _chbevl(x: OpVarT, coefficients: tuple[float, ...]) -> OpsValue:
         b0 = ops.constant(coefficients[0], torch.float32)
-        b1 = ops.constant(0.0, torch.float32)
+        b1 = b2 = ops.constant(0.0, torch.float32)
         for coefficient in coefficients[1:]:
             b2, b1 = b1, b0
             b0 = ops.fma(x, b1, ops.neg(b2))
@@ -1048,7 +1046,7 @@ class OpDecompositions:
         )
 
     @staticmethod
-    def i0(x: OpVarT) -> OpVarT:
+    def _aten_i0_fp32(x: OpVarT) -> OpVarT:
         a = (
             -4.41534164647933937950e-18,
             3.33079451882223809783e-17,
@@ -1123,7 +1121,11 @@ class OpDecompositions:
         return ops.where(ops.isinf(abs_x), ops.sub(x, x), result)
 
     @staticmethod
-    def i1(x: OpVarT) -> OpVarT:
+    def _aten_i1_fp32(x: OpVarT) -> OpVarT:
+        r"""_aten_i1_fp32(x) -> OpsValue
+
+        Evaluate I1 using ATen's float32 Chebyshev recurrences.
+        """
         a = (
             2.77791411276104639959e-18,
             -2.11142121435816608115e-17,
