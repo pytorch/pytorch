@@ -1192,10 +1192,11 @@ Tensor logcumsumexp_backward(
 Tensor logcumsumexp_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
+    const Tensor& result,
     int64_t dim) {
-  // JVP of y = logcumsumexp(x) along dim:
-  //   y_t[0] = exp(x[0] - y[0]) * x_t[0]   (= x_t[0] for real inputs)
-  //   y_t[i] = exp(y[i-1] - y[i]) * y_t[i-1] + exp(x[i] - y[i]) * x_t[i]
+  // JVP: y'_i = sum_{j<=i} exp(x_j - y_i) * x'_j
+  // with y = logcumsumexp(x). Compute via a pos/neg log-domain split
+  // (same idea as logcumsumexp_backward) so early prefixes stay well scaled.
   //
   // The previous formula copied logsumexp_jvp's single max-along-dim shift.
   // That underflows early prefixes when a later element is much larger, so
@@ -1203,28 +1204,27 @@ Tensor logcumsumexp_jvp(
 
   TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
 
-  dim = at::maybe_wrap_dim(dim, self_p.dim());
-  const auto n = self_p.size(dim);
-  if (n == 0) {
-    return at::empty_like(self_t);
-  }
+  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      at::typeMetaToScalarType(self_t.dtype()),
+      "logcumsumexp_jvp",
+      []() { return c10::Scalar(std::numeric_limits<scalar_t>::lowest()); });
 
-  auto y = at::logcumsumexp(self_p, dim);
-  auto result = at::empty_like(self_t);
-  result.select(dim, 0).copy_(
-      (self_p.select(dim, 0) - y.select(dim, 0)).exp() *
-      self_t.select(dim, 0));
-
-  for (const auto i : c10::irange(1, n)) {
-    auto y_i = y.select(dim, static_cast<int64_t>(i));
-    auto z_i =
-        (y.select(dim, static_cast<int64_t>(i - 1)) - y_i).exp() *
-            result.select(dim, static_cast<int64_t>(i - 1)) +
-        (self_p.select(dim, static_cast<int64_t>(i)) - y_i).exp() *
-            self_t.select(dim, static_cast<int64_t>(i));
-    result.select(dim, static_cast<int64_t>(i)).copy_(z_i);
+  if (!at::is_complex(self_p)) {
+    auto t_min = at::scalar_tensor(scalar_min, self_t.options());
+    auto log_abs_t = self_t.abs().log();
+    auto log_t_pos = at::where(self_t > 0, log_abs_t, t_min);
+    auto log_t_neg = at::where(self_t < 0, log_abs_t, t_min);
+    auto pos = (at::logcumsumexp(self_p + log_t_pos, dim) - result).exp();
+    auto neg = (at::logcumsumexp(self_p + log_t_neg, dim) - result).exp();
+    return pos - neg;
+  } else {
+    // Same multiplicative structure as the old complex path, but centered on
+    // the forward result so prefixes do not depend on a global max.
+    auto log_t = self_t.log();
+    return (at::logcumsumexp(self_p + log_t, dim) - result).exp();
   }
-  return result;
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
