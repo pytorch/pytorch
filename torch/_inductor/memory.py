@@ -856,6 +856,91 @@ def topological_sort_lpmf(
     return schedule
 
 
+def topological_sort_eager_free(
+    nodes: list[BaseSchedulerNode],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+    name_to_buf: dict[str, SchedulerBuffer],
+    graph_outputs: OrderedSet[str],
+) -> list[BaseSchedulerNode]:
+    """Stably pull ready nodes that reduce live memory ahead of baseline order.
+
+    This is deliberately more conservative than LPMF: absent a currently-ready
+    node whose last-use frees exceed its output allocations, the original node
+    order is retained.
+    """
+
+    class NodeInfo(TypedDict):
+        indegree: int
+        memory_to_free: int
+
+    node_info: dict[BaseSchedulerNode, NodeInfo] = {
+        node: {
+            "indegree": len(node.mpi_node.pred_nodes),
+            "memory_to_free": 0,
+        }
+        for node in nodes
+    }
+    buf_outdegree = {
+        buf: len(buf.mpi_buffer.succ_nodes)
+        + (1 if buf.get_name() in graph_outputs else 0)
+        for buf in list(name_to_buf.values())
+        + list(name_to_freeable_input_buf.values())
+    }
+    nodes_to_schedule = OrderedSet(
+        node for node in nodes if node_info[node]["indegree"] == 0
+    )
+
+    for node in nodes:
+        for buf in node.mpi_node.pred_buffers:
+            if buf_outdegree[buf] == 1:
+                node_info[node]["memory_to_free"] += buf.mpi_buffer.size_free
+        for buf in node.get_outputs():
+            if buf_outdegree[buf] == 0:
+                node_info[node]["memory_to_free"] += buf.mpi_buffer.size_free
+
+    schedule: list[BaseSchedulerNode] = []
+    while nodes_to_schedule:
+        eager_nodes = [
+            node
+            for node in nodes_to_schedule
+            if node.mpi_node.size - node_info[node]["memory_to_free"] < 0
+        ]
+        if eager_nodes:
+            selected_node = min(
+                eager_nodes,
+                key=lambda node: (
+                    node.mpi_node.size - node_info[node]["memory_to_free"],
+                    node.mpi_node.index,
+                ),
+            )
+        else:
+            selected_node = min(
+                nodes_to_schedule, key=lambda node: node.mpi_node.index
+            )
+
+        nodes_to_schedule.remove(selected_node)
+        schedule.append(selected_node)
+
+        for succ_node in selected_node.mpi_node.succ_nodes:
+            node_info[succ_node]["indegree"] -= 1
+            if node_info[succ_node]["indegree"] == 0:
+                nodes_to_schedule.add(succ_node)
+
+        for buf in selected_node.mpi_node.pred_buffers:
+            buf_outdegree[buf] -= 1
+            if buf_outdegree[buf] == 1:
+                for succ_node in buf.mpi_buffer.succ_nodes:
+                    node_info[succ_node]["memory_to_free"] += (
+                        buf.mpi_buffer.size_free
+                    )
+
+    if len(schedule) != len(nodes):
+        raise RuntimeError(
+            f"Failed to schedule, scheduled {len(schedule)} of {len(nodes)} nodes"
+        )
+    return schedule
+
+
 def topological_sort_bfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     A BFS topological sort that selects nodes whose dependencies are executed the
@@ -1101,6 +1186,7 @@ def reorder_for_peak_memory(
     graph_outputs: OrderedSet[str],
     methods: list[Callable[..., list[BaseSchedulerNode]]] = [  # noqa: B006
         topological_sort_lpmf,
+        topological_sort_eager_free,
         topological_sort_bfs,
         topological_sort_dfs,
     ],
@@ -1150,7 +1236,7 @@ def reorder_for_peak_memory(
     # other methods
     for method in methods:
         try:
-            if method is topological_sort_lpmf:
+            if method in (topological_sort_lpmf, topological_sort_eager_free):
                 order = method(
                     nodes, name_to_freeable_input_buf, name_to_buf, graph_outputs
                 )

@@ -137,6 +137,81 @@ class TestMemoryPlanningAliases(TestCase):
         peak, _ = memory.estimate_peak_memory(timeline_nodes, {}, graph_outputs)
         self.assertEqual(peak, 4000)
 
+    def test_eager_free_preserves_baseline_except_for_memory_reducing_nodes(self):
+        class Node:
+            def __init__(self, name, index):
+                self.name = name
+                self.outputs = []
+                self.mpi_node = memory.MemoryPlanningInfoForNode(index=index)
+
+            def get_name(self):
+                return self.name
+
+            def get_outputs(self):
+                return self.outputs
+
+        class Buffer:
+            def __init__(self, name, producer, size, successors):
+                self.name = name
+                self.node = SimpleNamespace(layout=object())
+                self.mpi_buffer = memory.MemoryPlanningInfoForBuffer(
+                    size_alloc=size,
+                    size_free=size,
+                    succ_nodes=OrderedSet(successors),
+                    succ_nodes_for_ordering=OrderedSet(successors),
+                )
+                producer.outputs.append(self)
+
+            def get_name(self):
+                return self.name
+
+        start = Node("start", 0)
+        produce = Node("produce", 1)
+        consume_whole = Node("consume_whole", 2)
+        large_alloc = Node("large_alloc", 3)
+        compact_alias = Node("compact_alias", 4)
+
+        gate = Buffer("gate", start, 0, [produce])
+        owner = Buffer("owner", produce, 1664, [consume_whole, compact_alias])
+        competing = Buffer("competing", produce, 2000, [large_alloc])
+        Buffer("whole_result", consume_whole, 0, [])
+        Buffer("large_result", large_alloc, 1011, [])
+        Buffer("compact_result", compact_alias, 326, [])
+
+        start.mpi_node.succ_nodes = OrderedSet([produce])
+        produce.mpi_node.pred_buffers = OrderedSet([gate])
+        produce.mpi_node.pred_nodes = OrderedSet([start])
+        produce.mpi_node.succ_nodes = OrderedSet(
+            [consume_whole, large_alloc, compact_alias]
+        )
+        produce.mpi_node.size = 3664
+        consume_whole.mpi_node.pred_buffers = OrderedSet([owner])
+        consume_whole.mpi_node.pred_nodes = OrderedSet([produce])
+        consume_whole.mpi_node.succ_nodes = OrderedSet([large_alloc, compact_alias])
+        large_alloc.mpi_node.pred_buffers = OrderedSet([competing])
+        large_alloc.mpi_node.pred_nodes = OrderedSet([produce, consume_whole])
+        large_alloc.mpi_node.size = 1011
+        compact_alias.mpi_node.pred_buffers = OrderedSet([owner])
+        compact_alias.mpi_node.pred_nodes = OrderedSet([produce, consume_whole])
+        compact_alias.mpi_node.size = 326
+
+        nodes = [start, produce, consume_whole, large_alloc, compact_alias]
+        buffers = {
+            buf.get_name(): buf for node in nodes for buf in node.get_outputs()
+        }
+        graph_outputs = OrderedSet(["large_result", "compact_result"])
+        eager_order = memory.topological_sort_eager_free(
+            nodes, {}, buffers, graph_outputs
+        )
+
+        self.assertEqual(
+            [node.get_name() for node in eager_order],
+            ["start", "produce", "consume_whole", "compact_alias", "large_alloc"],
+        )
+        baseline_peak, _ = memory.estimate_peak_memory(nodes, {}, graph_outputs)
+        eager_peak, _ = memory.estimate_peak_memory(eager_order, {}, graph_outputs)
+        self.assertLess(eager_peak, baseline_peak)
+
 
 class Foo(torch.nn.Module):
     """
