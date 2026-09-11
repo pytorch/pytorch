@@ -1072,8 +1072,8 @@ static Tensor convolution_same(
               "stride cannot broadcast to ", dim, " dimensions");
   TORCH_CHECK(dilation.size() == dim || dilation.size() == 1U,
               "dilation cannot broadcast to ", dim, " dimensions");
-  for (auto i: c10::irange(stride.size())) {
-    TORCH_CHECK(stride[i] == 1, "padding='same' is not supported for strided convolutions");
+  for (const auto& stride_elem : stride) {
+    TORCH_CHECK(stride_elem == 1, "padding='same' is not supported for strided convolutions");
   }
 
   // Calculate the correct padding
