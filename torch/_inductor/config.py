@@ -2422,6 +2422,91 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
+    # CUDA graph mode for AOTI.
+    #
+    #   "off"      -- no cuda graph (default).
+    #   "whole"    -- capture the ENTIRE lowered component as a single cuda
+    #                 graph, re-capturing on demand for each distinct dynamic
+    #                 shape. Requires the whole graph to be capture-safe;
+    #                 lowering hard-errors listing every offending node if it
+    #                 is not.
+    #   "regional" -- partition the graph and capture only eligible regions.
+    #                 Added by the follow-up stack; rejected here.
+    #
+    # Defaults to "off" because "whole" fails the lowering outright on a model
+    # containing anything uncapturable, rather than silently running
+    # uncaptured. It is therefore opted into per model (via
+    # aot_inductor_config) once that model is known to be clean.
+    cudagraph_mode: Literal["off", "whole", "regional"] = os.environ.get(
+        "AOT_INDUCTOR_CUDAGRAPH_MODE", "off"
+    )  # type: ignore[assignment]
+
+    # Maximum number of distinct dynamic shapes captured per model instance.
+    # Every capture reserves memory in that instance's private graph pool, so an
+    # unbounded count lets a model with a variable serving batch reserve without
+    # limit. Past the cap a request at a new shape runs UNCAPTURED -- correct,
+    # just without the launch saving -- and warns once. Raise it for models with
+    # many hot shapes; lower it to cap upfront GPU reservation.
+    #
+    # This is only the DEFAULT baked into the generated .so. The same env var
+    # read here is re-read at serving time by AOTICUDAGraphManager and wins
+    # over the baked value, so an already-published model can be retuned (or,
+    # with 0, have cuda graph switched off) without re-lowering.
+    cudagraph_max_captures: int = int(
+        os.environ.get("AOT_INDUCTOR_CUDAGRAPH_MAX_CAPTURES", "64")
+    )
+
+    # Every cudagraph_* knob below is read at LOWERING time only. Each one
+    # decides what code or what memory layout gets emitted, so its env var has
+    # no effect on an already-built .so -- changing one means re-lowering.
+    # cudagraph_max_captures above is the sole exception: it is a plain runtime
+    # value, so the serving process re-reads it and wins over the baked default.
+
+    # --- regional-mode-only knobs (cudagraph_mode="regional") ---
+
+    # Minimum number of post-fusion scheduler nodes (a fused node counts as 1,
+    # NOT emitted kernels) in a cudagraph-eligible partition for it to be
+    # captured; smaller eligible clusters are demoted to eager. Capturing a tiny
+    # partition costs per-replay staging + launch overhead that outweighs the
+    # kernel-launch saving over only a few kernels, and each captured partition
+    # also costs a persistent slab. Distinct from
+    # triton.cudagraph_min_partition_size (which counts kernels for JIT
+    # cudagraph-trees). Values below 3 are pathological -- tiny partitions
+    # explode the partition count so boundary copy-in + replay-dispatch overhead
+    # dominates; higher values trade a little capture coverage for less memory.
+    # Tune per model. Default 8 favors lower CG memory (fewer, larger captured
+    # partitions -> fewer persistent slabs); set 4 to favor capture coverage on
+    # models with hot small partitions.
+    cudagraph_min_partition_size: int = 8
+
+    # Drop eager-transient (non-boundary) outer-wrapper buffers from the
+    # persistent regional-cudagraph slab. With regional capture on, the OUTER
+    # wrapper's MemoryPlanner slab-caches EVERY pool into a persistent,
+    # per-instance, address-stable slab. Only boundary buffers (inputs/outputs of
+    # captured partitions) actually need that address stability; eager-transient
+    # buffers (used only in eager regions, never read/written by a captured
+    # graph) are wastefully persisted. When on, those are routed into ordinary
+    # transient pools (normal empty_strided, freed each forward) so the
+    # per-instance slab shrinks. ON by default: without it the persistent slab is
+    # dominated by eager-transient buffers (~38% larger on measured models), and
+    # the exclusion is latency-neutral and IMA-clean on the validated
+    # architectures. Set False to opt out if a new architecture surfaces a
+    # boundary-classification gap.
+    cudagraph_exclude_eager_transient: bool = (
+        os.environ.get("AOT_INDUCTOR_CUDAGRAPH_EXCLUDE_EAGER_TRANSIENT", "1") == "1"
+    )
+
+    # Cross-partition memory planning: intra-partition scratch of captured
+    # partitions shares ONE global slab (partition-interval liveness, offsets
+    # frozen to max) instead of a disjoint slab per partition, dropping runtime
+    # peak from SUM-of-per-partition toward the global working set. Off =
+    # per-partition-disjoint (byte-identical to not having this). Measured a NET
+    # memory LOSS on top of cudagraph_exclude_eager_transient, which already
+    # subsumes its target, so it stays off unless a model shows otherwise.
+    cudagraph_cross_partition_memory: bool = (
+        os.environ.get("AOT_INDUCTOR_CUDAGRAPH_CROSS_PARTITION_MEMORY", "0") == "1"
+    )
+
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
