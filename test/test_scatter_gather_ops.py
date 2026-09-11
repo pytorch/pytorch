@@ -600,6 +600,57 @@ class TestScatterGatherDevice(TestCase):
                 res = inp.clone().scatter_add_(d, idx, src)
             self.assertEqual(res, ref)
 
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_scatter_out_variant_dynamic_shapes(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103
+
+        def scatter_src(x, index, src, out):
+            return torch.scatter(x, 1, index, src, out=out)
+
+        def scatter_add(x, index, src, out):
+            return torch.scatter_add(x, 1, index, src, out=out)
+
+        def scatter_value(x, index, out):
+            return torch.scatter(x, 1, index, 1.0, out=out)
+
+        for fn, needs_src in (
+            (scatter_src, True),
+            (scatter_add, True),
+            (scatter_value, False),
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+            for width in (2, 3, 5):
+                x = torch.zeros(1, width, device=device, dtype=dtype)
+                index = torch.arange(width, device=device).unsqueeze(0)
+                src = torch.ones(1, width, device=device, dtype=dtype)
+                eager_out = torch.empty_like(x)
+                compiled_out = torch.empty_like(x)
+                args = (x, index, src, eager_out) if needs_src else (x, index, eager_out)
+                compiled_args = (
+                    (x, index, src, compiled_out) if needs_src else (x, index, compiled_out)
+                )
+                fn(*args)
+                compiled(*compiled_args)
+                self.assertEqual(eager_out, compiled_out)
+
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_scatter_add_out_dynamic_shapes_empty_index(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103.
+        def scatter_add(x, index, src, out):
+            return torch.scatter_add(x, 1, index, src, out=out)
+
+        compiled = torch.compile(scatter_add, backend="eager", fullgraph=True, dynamic=True)
+        for width in (2, 3, 0, 5):
+            x = torch.zeros(1, width, device=device, dtype=dtype)
+            index = torch.arange(width, device=device).unsqueeze(0)
+            src = torch.ones(1, width, device=device, dtype=dtype)
+            eager_out = torch.empty_like(x)
+            compiled_out = torch.empty_like(x)
+            scatter_add(x, index, src, eager_out)
+            compiled(x, index, src, compiled_out)
+            self.assertEqual(eager_out, compiled_out)
 
 # ---------------------------------------------------------------------------
 # CuTeDSL scatter_add override tests. Two surfaces:
