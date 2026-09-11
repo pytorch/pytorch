@@ -27,7 +27,11 @@ from torch.distributed.debug._frontend import (
     Response,
     Route,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 try:
@@ -53,6 +57,8 @@ def _reset_debug_server_state() -> None:
 
 
 class TestDebug(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         _reset_debug_server_state()
@@ -101,7 +107,8 @@ class TestDebug(TestCase):
             self.assertIn("Memberships", fetch("/fr_trace"))
             self.assertIn("pg_status", fetch("/fr_trace_json"))
 
-            if torch.cuda.is_available():
+            if torch.accelerator.is_available() and dist.get_default_backend_for_device(
+                torch.accelerator.current_accelerator().type) == "nccl":
                 self.assertIn("Memberships", fetch("/fr_trace_nccl"))
                 self.assertIn("pg_status", fetch("/fr_trace_nccl_json"))
 
@@ -197,6 +204,8 @@ class _ErrorHandler(DebugHandler):
 
 
 class TestPeriodicDumper(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_writes_dump_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             h = _StubHandler("mystub", "hello world")
@@ -276,6 +285,8 @@ class TestPeriodicDumper(TestCase):
 
 
 class TestFetchUnavailableWorkers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _get_refused_port() -> int:
         """Return a port that will refuse connections."""
@@ -366,6 +377,8 @@ class TestFetchUnavailableWorkers(TestCase):
 
 
 class TestFormatFetchSummary(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_all_success_returns_none(self) -> None:
         addrs = ["http://host0:1", "http://host1:1"]  # @lint-ignore
         resps = [Response(200, "ok"), Response(200, "ok")]
@@ -399,6 +412,8 @@ class TestFormatFetchSummary(TestCase):
 
 
 class TestFetchTimeout(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_handler_default_fetch_timeout(self) -> None:
         from torch.distributed.debug._frontend import _DEFAULT_FETCH_TIMEOUT
 
@@ -419,6 +434,8 @@ class TestFetchTimeout(TestCase):
 
 
 class TestHandlerPartialDumps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     import torch.distributed.debug._debug_handlers
 
     @patch("torch.distributed.debug._debug_handlers.fetch_all")
@@ -480,6 +497,8 @@ class TestHandlerPartialDumps(TestCase):
 
 
 class TestTorchCommsHealthCheckHandler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
