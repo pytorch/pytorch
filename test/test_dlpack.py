@@ -8,8 +8,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     instantiate_device_type_tests,
-    onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     skipCUDAIfNotRocm,
@@ -21,6 +19,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
@@ -54,6 +53,96 @@ class TensorDLPackWrapper:
 
 
 class TestTorchDlPack(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # These tests exercise the parts of the DLPack protocol that don't depend on
+    # where the tensor lives: export rejections, stride handling and the NumPy
+    # producer path.
+
+    def test_dlpack_invalid_cpu_stream(self):
+        x = make_tensor((5,), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(AssertionError, r"stream should be None on cpu."):
+            x.__dlpack__(stream=0)
+
+    # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
+    def test_dlpack_export_requires_grad(self):
+        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
+        with self.assertRaisesRegex(BufferError, r"require gradient"):
+            x.__dlpack__()
+
+    def test_dlpack_export_is_conj(self):
+        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+        y = torch.conj(x)
+        with self.assertRaisesRegex(BufferError, r"conjugate bit"):
+            y.__dlpack__()
+
+    def test_dlpack_export_non_strided(self):
+        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
+        y = torch.conj(x)
+        with self.assertRaisesRegex(BufferError, r"strided"):
+            y.__dlpack__()
+
+    def test_dlpack_normalize_strides(self):
+        x = torch.rand(16)
+        y = x[::3][:1]
+        self.assertEqual(y.shape, (1,))
+        self.assertEqual(y.stride(), (3,))
+        z = from_dlpack(y)
+        self.assertEqual(z.shape, (1,))
+        # Stride normalization has been removed, strides should be preserved
+        self.assertEqual(z.stride(), (3,))
+
+    @xfailIfTorchDynamo
+    def test_from_dlpack_negative_strides(self):
+        # torch.from_dlpack() on a NumPy array with negative strides used to
+        # abort the process instead of raising a catchable Python exception.
+        # See https://github.com/pytorch/pytorch/issues/188023.
+        import numpy as np
+
+        # 1-D negative stride
+        a1 = np.arange(8.0)[::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a1)
+
+        # 2-D, one negative axis
+        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a2)
+
+    def test_dlpack_copy_fallback(self):
+        """Test that copy parameter works even with producers that don't support it"""
+        import numpy as np
+
+        # Test copy=True - should work even if NumPy doesn't support copy parameter
+        np_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        t = from_dlpack(np_array, copy=True)
+
+        # Verify it's a copy by modifying tensor and checking NumPy unchanged
+        t[0] = 999.0
+        self.assertEqual(np_array[0], 1.0)
+
+        # Test copy=None (default) - should be zero-copy view
+        np_array2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+        t2 = from_dlpack(np_array2)
+        t2[0] = 999.0
+        self.assertEqual(np_array2[0], 999.0)
+
+    def test_dlpack_unsupported_dtype_error(self):
+        inp = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
+
+        with self.assertRaisesRegex(
+            BufferError, ".* types are not supported by dlpack"
+        ):
+            from_dlpack(inp)
+
+
+class TestTorchDlPackDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     exact_dtype = True
 
     @skipMeta
@@ -205,44 +294,6 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(y5, y5_dl)
 
     @skipMeta
-    @onlyCUDA
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
-        # DLPack protocol helps establish a correct stream order
-        # (hence data dependency) at the exchange boundary.
-        # the `tensor.__dlpack__` method will insert a synchronization event
-        # in the current stream to make sure that it was correctly populated.
-        with torch.cuda.stream(stream_a):
-            x = make_tensor((5,), dtype=dtype, device=device) + 1
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
-            stream_a.synchronize()
-        stream_b.synchronize()
-        self.assertEqual(z, x)
-
-    @skipMeta
-    @onlyCUDA
-    @dtypes(
-        torch.float8_e5m2,
-        torch.float8_e5m2fnuz,
-        torch.float8_e4m3fn,
-        torch.float8_e4m3fnuz,
-        torch.float8_e8m0fnu,
-        torch.float4_e2m1fn_x2,
-    )
-    def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
-        with torch.cuda.stream(stream_a):
-            x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
-            x = x.view(dtype)
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
-            stream_a.synchronize()
-        stream_b.synchronize()
-        self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
-
-    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(
         *all_types_and_complex_and(
@@ -262,112 +313,12 @@ class TestTorchDlPack(TestCase):
             raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipMeta
-    @onlyCUDA
-    def test_dlpack_default_stream(self, device):
-        class DLPackTensor:
-            def __init__(self, tensor):
-                self.tensor = tensor
-
-            def __dlpack_device__(self):
-                return self.tensor.__dlpack_device__()
-
-            def __dlpack__(self, stream=None):
-                if torch.version.hip is None:
-                    if stream != 1:
-                        raise AssertionError(f"expected stream=1, got {stream}")
-                else:
-                    if stream != 0:
-                        raise AssertionError(f"expected stream=0, got {stream}")
-                capsule = self.tensor.__dlpack__(stream=stream)
-                return capsule
-
-        # CUDA-based tests runs on non-default streams
-        with torch.cuda.stream(torch.cuda.default_stream()):
-            x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
-            from_dlpack(x)
-
-    @skipMeta
-    @onlyCUDA
-    def test_dlpack_convert_default_stream(self, device):
-        # tests run on non-default stream, so _sleep call
-        # below will run on a non-default stream, causing
-        # default stream to wait due to inserted syncs
-        torch.cuda.default_stream().synchronize()
-        # run _sleep call on a non-default stream, causing
-        # default stream to wait due to inserted syncs
-        side_stream = torch.cuda.Stream()
-        with torch.cuda.stream(side_stream):
-            x = torch.zeros(1, device=device)
-            torch.cuda._sleep(2**20)
-            self.assertTrue(torch.cuda.default_stream().query())
-            # ROCm uses stream 0 for default stream, CUDA uses stream 1
-            default_stream_id = 0 if torch.version.hip else 1
-            x.__dlpack__(stream=default_stream_id)
-        # check that the default stream has work (a pending cudaStreamWaitEvent)
-        self.assertFalse(torch.cuda.default_stream().query())
-
-    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
         with self.assertRaises(TypeError):
             x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
-
-    @skipMeta
-    @onlyCUDA
-    def test_dlpack_cuda_per_thread_stream(self, device):
-        # Test whether we raise an error if we are trying to use per-thread default
-        # stream, which is currently not supported by PyTorch.
-        x = make_tensor((5,), dtype=torch.float32, device=device)
-
-        if TEST_WITH_ROCM:
-            context = self.assertRaisesRegex(
-                AssertionError, r"unsupported stream on ROCm: 2"
-            )
-        else:
-            context = self.assertRaisesRegex(
-                BufferError, "per-thread default stream is not supported"
-            )
-
-        with context:
-            x.__dlpack__(stream=2)
-
-    @skipMeta
-    @onlyCUDA
-    @skipCUDAIfNotRocm
-    def test_dlpack_invalid_rocm_streams(self, device):
-        # Test that we correctly raise errors on unsupported ROCm streams.
-        def test(x, stream):
-            with self.assertRaisesRegex(
-                AssertionError, r"unsupported stream on ROCm: \d"
-            ):
-                x.__dlpack__(stream=stream)
-
-        x = make_tensor((5,), dtype=torch.float32, device=device)
-        test(x, stream=1)
-        test(x, stream=2)
-
-    @skipMeta
-    @onlyCUDA
-    def test_dlpack_invalid_cuda_streams(self, device):
-        x = make_tensor((5,), dtype=torch.float32, device=device)
-
-        if TEST_WITH_ROCM:
-            # On ROCm, stream=0 is valid (default stream).
-            self.assertIsNotNone(x.__dlpack__(stream=0))
-        else:
-            # CUDA raises AssertionError for stream=0
-            with self.assertRaisesRegex(
-                AssertionError, r"unsupported stream on CUDA: \d"
-            ):
-                x.__dlpack__(stream=0)
-
-    @skipMeta
-    def test_dlpack_invalid_cpu_stream(self):
-        x = make_tensor((5,), dtype=torch.float32, device="cpu")
-        with self.assertRaisesRegex(AssertionError, r"stream should be None on cpu."):
-            x.__dlpack__(stream=0)
 
     @skipMeta
     @onlyOn(["xpu", "cuda"])
@@ -384,66 +335,11 @@ class TestTorchDlPack(TestCase):
             with torch.accelerator.device_index(torch.device(dev1).index):
                 x.__dlpack__()
 
-    # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
-    @skipMeta
-    def test_dlpack_export_requires_grad(self):
-        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
-        with self.assertRaisesRegex(BufferError, r"require gradient"):
-            x.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_export_is_conj(self):
-        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
-        y = torch.conj(x)
-        with self.assertRaisesRegex(BufferError, r"conjugate bit"):
-            y.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_export_non_strided(self):
-        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
-        y = torch.conj(x)
-        with self.assertRaisesRegex(BufferError, r"strided"):
-            y.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_normalize_strides(self):
-        x = torch.rand(16)
-        y = x[::3][:1]
-        self.assertEqual(y.shape, (1,))
-        self.assertEqual(y.stride(), (3,))
-        z = from_dlpack(y)
-        self.assertEqual(z.shape, (1,))
-        # Stride normalization has been removed, strides should be preserved
-        self.assertEqual(z.stride(), (3,))
-
-    @xfailIfTorchDynamo
-    @skipMeta
-    @onlyCPU
-    def test_from_dlpack_negative_strides(self, device):
-        # torch.from_dlpack() on a NumPy array with negative strides used to
-        # abort the process instead of raising a catchable Python exception.
-        # See https://github.com/pytorch/pytorch/issues/188023.
-        import numpy as np
-
-        # 1-D negative stride
-        a1 = np.arange(8.0)[::-1]
-        with self.assertRaisesRegex(
-            RuntimeError, "Storage size calculation overflowed"
-        ):
-            torch.from_dlpack(a1)
-
-        # 2-D, one negative axis
-        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
-        with self.assertRaisesRegex(
-            RuntimeError, "Storage size calculation overflowed"
-        ):
-            torch.from_dlpack(a2)
-
     @skipMeta
     @onlyNativeDeviceTypes
     def test_automatically_select_in_creation(self, device):
         # Create a new tensor, and wrap it using TensorDLPackWrapper.
-        tensor = torch.rand(10)
+        tensor = torch.rand(10, device=device)
         wrap = TensorDLPackWrapper(tensor)
         # Create a new tensor from the wrapper.
         # This should identify that the wrapper class provides the DLPack methods
@@ -483,41 +379,6 @@ class TestTorchDlPack(TestCase):
         # Consumer should still be able to process a smaller version capsule.
         test(device, max_version=(2, 0))
 
-    @skipMeta
-    @onlyCPU
-    @dtypes(
-        # Note: NumPy DLPack bool support only landed in 1.25.
-        *all_types_and_complex_and(
-            torch.half,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
-        )
-    )
-    def test_numpy_dlpack_protocol_conversion(self, device, dtype):
-        import numpy as np
-
-        t = make_tensor((5,), dtype=dtype, device=device)
-
-        if hasattr(np, "from_dlpack"):
-            # DLPack support only available from NumPy 1.22 onwards.
-            # Here, we test having another framework (NumPy) calling our
-            # Tensor.__dlpack__ implementation.
-            np_from_dlpack = np.from_dlpack(t)
-            np_from_copy = t.numpy()
-            self.assertEqual(np_from_dlpack, np_from_copy)
-
-        # We can't use the array created above as input to from_dlpack.
-        # That's because DLPack imported NumPy arrays are read-only.
-        # Thus, we need to convert it to NumPy by using the numpy() method.
-        t_arr = t.numpy()
-
-        # Transform the NumPy array back using DLPack.
-        res = from_dlpack(t_arr)
-
-        self.assertEqual(t, res)
-        self.assertEqual(t.data_ptr(), res.data_ptr())
-
     def _test_from_dlpack(self, device, out_device=None, copy=None):
         if isinstance(device, str):
             device = torch.device(device)
@@ -543,7 +404,7 @@ class TestTorchDlPack(TestCase):
             self.assertNotEqual(inp.data_ptr(), out.data_ptr())
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
     def test_copy(self, device):
         # Force-copy same device tensor.
         self._test_from_dlpack(device, copy=True)
@@ -563,28 +424,10 @@ class TestTorchDlPack(TestCase):
         self._test_from_dlpack(device, out_device=device, copy=False)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
     def test_needs_copy_error(self, device):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
-
-    def test_dlpack_copy_fallback(self):
-        """Test that copy parameter works even with producers that don't support it"""
-        import numpy as np
-
-        # Test copy=True - should work even if NumPy doesn't support copy parameter
-        np_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-        t = from_dlpack(np_array, copy=True)
-
-        # Verify it's a copy by modifying tensor and checking NumPy unchanged
-        t[0] = 999.0
-        self.assertEqual(np_array[0], 1.0)
-
-        # Test copy=None (default) - should be zero-copy view
-        np_array2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
-        t2 = from_dlpack(np_array2)
-        t2[0] = 999.0
-        self.assertEqual(np_array2[0], 999.0)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -597,20 +440,9 @@ class TestTorchDlPack(TestCase):
         ):
             inp.__dlpack__(max_version=(1, 0), dl_device=(dl_device_type, 0))
 
-    @skipMeta
-    @onlyCPU
-    def test_dlpack_unsupported_dtype_error(self, device):
-        inp = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
-
-        with self.assertRaisesRegex(
-            BufferError, ".* types are not supported by dlpack"
-        ):
-            from_dlpack(inp)
-
     @xfailCUDAIfSM89OrLaterOnWindows
     @skipMeta
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")
     def test_dlpack_exchange_api(self, device):
         """Comprehensive test of all DLPack Exchange API functions using inline C++"""
         # Check that the C API capsule exists and get it
@@ -922,9 +754,175 @@ class TestTorchDlPack(TestCase):
         self.assertNotEqual(t0.device, t1.device)
 
 
+# NumPy is the other end of every exchange below, so CPU is a real dependency
+# rather than an untested restriction.
+class TestTorchDlPackCPUOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    @dtypes(
+        # Note: NumPy DLPack bool support only landed in 1.25.
+        *all_types_and_complex_and(
+            torch.half,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
+    def test_numpy_dlpack_protocol_conversion(self, device, dtype):
+        import numpy as np
+
+        t = make_tensor((5,), dtype=dtype, device=device)
+
+        if hasattr(np, "from_dlpack"):
+            # DLPack support only available from NumPy 1.22 onwards.
+            # Here, we test having another framework (NumPy) calling our
+            # Tensor.__dlpack__ implementation.
+            np_from_dlpack = np.from_dlpack(t)
+            np_from_copy = t.numpy()
+            self.assertEqual(np_from_dlpack, np_from_copy)
+
+        # We can't use the array created above as input to from_dlpack.
+        # That's because DLPack imported NumPy arrays are read-only.
+        # Thus, we need to convert it to NumPy by using the numpy() method.
+        t_arr = t.numpy()
+
+        # Transform the NumPy array back using DLPack.
+        res = from_dlpack(t_arr)
+
+        self.assertEqual(t, res)
+        self.assertEqual(t.data_ptr(), res.data_ptr())
+
+
+class TestTorchDlPackStreams(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    # DLPack stream exchange is only specified for CUDA and ROCm; the sentinel
+    # stream values below have no meaning on any other backend.
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_dlpack_conversion_with_diff_streams(self, device, dtype):
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+        # DLPack protocol helps establish a correct stream order
+        # (hence data dependency) at the exchange boundary.
+        # the `tensor.__dlpack__` method will insert a synchronization event
+        # in the current stream to make sure that it was correctly populated.
+        with torch.cuda.stream(stream_a):
+            x = make_tensor((5,), dtype=dtype, device=device) + 1
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            stream_a.synchronize()
+        stream_b.synchronize()
+        self.assertEqual(z, x)
+
+    @dtypes(
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
+    )
+    def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+        with torch.cuda.stream(stream_a):
+            x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
+            x = x.view(dtype)
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            stream_a.synchronize()
+        stream_b.synchronize()
+        self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
+
+    def test_dlpack_default_stream(self, device):
+        class DLPackTensor:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __dlpack_device__(self):
+                return self.tensor.__dlpack_device__()
+
+            def __dlpack__(self, stream=None):
+                if torch.version.hip is None:
+                    if stream != 1:
+                        raise AssertionError(f"expected stream=1, got {stream}")
+                else:
+                    if stream != 0:
+                        raise AssertionError(f"expected stream=0, got {stream}")
+                capsule = self.tensor.__dlpack__(stream=stream)
+                return capsule
+
+        # CUDA-based tests runs on non-default streams
+        with torch.cuda.stream(torch.cuda.default_stream()):
+            x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
+            from_dlpack(x)
+
+    def test_dlpack_convert_default_stream(self, device):
+        # tests run on non-default stream, so _sleep call
+        # below will run on a non-default stream, causing
+        # default stream to wait due to inserted syncs
+        torch.cuda.default_stream().synchronize()
+        # run _sleep call on a non-default stream, causing
+        # default stream to wait due to inserted syncs
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream):
+            x = torch.zeros(1, device=device)
+            torch.cuda._sleep(2**20)
+            self.assertTrue(torch.cuda.default_stream().query())
+            # ROCm uses stream 0 for default stream, CUDA uses stream 1
+            default_stream_id = 0 if torch.version.hip else 1
+            x.__dlpack__(stream=default_stream_id)
+        # check that the default stream has work (a pending cudaStreamWaitEvent)
+        self.assertFalse(torch.cuda.default_stream().query())
+
+    def test_dlpack_cuda_per_thread_stream(self, device):
+        # Test whether we raise an error if we are trying to use per-thread default
+        # stream, which is currently not supported by PyTorch.
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+
+        if TEST_WITH_ROCM:
+            context = self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: 2"
+            )
+        else:
+            context = self.assertRaisesRegex(
+                BufferError, "per-thread default stream is not supported"
+            )
+
+        with context:
+            x.__dlpack__(stream=2)
+
+    @skipCUDAIfNotRocm
+    def test_dlpack_invalid_rocm_streams(self, device):
+        # Test that we correctly raise errors on unsupported ROCm streams.
+        def test(x, stream):
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: \d"
+            ):
+                x.__dlpack__(stream=stream)
+
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        test(x, stream=1)
+        test(x, stream=2)
+
+    def test_dlpack_invalid_cuda_streams(self, device):
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+
+        if TEST_WITH_ROCM:
+            # On ROCm, stream=0 is valid (default stream).
+            self.assertIsNotNone(x.__dlpack__(stream=0))
+        else:
+            # CUDA raises AssertionError for stream=0
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on CUDA: \d"
+            ):
+                x.__dlpack__(stream=0)
+
+
 instantiate_device_type_tests(
-    TestTorchDlPack, globals(), allow_mps=True, allow_xpu=True
+    TestTorchDlPackDevice, globals(), allow_mps=True, allow_xpu=True
 )
+instantiate_device_type_tests(TestTorchDlPackCPUOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(TestTorchDlPackStreams, globals(), only_for="cuda")
 
 
 # ReadOnlyTensorWrapper is an eager, runtime-only export shim that rejects all
@@ -935,6 +933,8 @@ instantiate_device_type_tests(
     "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
 )
 class TestReadOnlyDLPack(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # These tests exercise the read-only DLPack export path and the
     # ReadOnlyTensorWrapper subclass. The behavior (const_data_ptr export, the
     # READ_ONLY flag, copy-on-write preservation, op rejection) is device
