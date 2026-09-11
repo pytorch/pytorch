@@ -28,6 +28,7 @@ from ._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_mesh,
     _init_param_group,
+    _resolve_offload_policy,
     _validate_mesh,
     _validate_module,
 )
@@ -35,7 +36,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator, Mapping
 
     from torch.distributed.tensor import DeviceMesh
 
@@ -68,7 +69,7 @@ def fully_shard(
     reshard_after_forward: bool | int | None = ...,
     shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
-    offload_policy: OffloadPolicy = ...,
+    offload_policy: OffloadPolicy | Mapping[str, OffloadPolicy] = ...,
     ignored_params: set[nn.Parameter] | None = ...,
     dp_mesh_dims: DataParallelMeshDims | None = ...,
 ) -> FSDPModule: ...
@@ -83,7 +84,7 @@ def fully_shard(
     reshard_after_forward: bool | int | None = ...,
     shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
-    offload_policy: OffloadPolicy = ...,
+    offload_policy: OffloadPolicy | Mapping[str, OffloadPolicy] = ...,
     ignored_params: set[nn.Parameter] | None = ...,
     dp_mesh_dims: DataParallelMeshDims | None = ...,
 ) -> list[FSDPModule]: ...
@@ -102,7 +103,7 @@ def fully_shard(
     reshard_after_forward: bool | int | None = None,
     shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
-    offload_policy: OffloadPolicy = OffloadPolicy(),
+    offload_policy: OffloadPolicy | Mapping[str, OffloadPolicy] = OffloadPolicy(),
     ignored_params: set[nn.Parameter] | None = None,
     dp_mesh_dims: DataParallelMeshDims | None = None,
 ):
@@ -221,9 +222,15 @@ def fully_shard(
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
-        offload_policy (OffloadPolicy): This controls the offloading policy,
-            which offers parameter/gradient/optimizer state offloading. See
-            :class:`OffloadPolicy` and its subclasses for details.
+        offload_policy (OffloadPolicy | Mapping[str, OffloadPolicy]): This
+            controls the offloading policy, which offers
+            parameter/gradient/optimizer state offloading. Pass a single
+            :class:`OffloadPolicy` to apply one policy to every parameter, or a
+            mapping from parameter FQN (relative to this module) to
+            :class:`OffloadPolicy` to offload only selected parameters, such as
+            the map returned by :func:`cpu_offload_by_budget`. FQNs absent from
+            the mapping are not offloaded. See :class:`OffloadPolicy` and its
+            subclasses for details.
         ignored_params: Optional(Set[nn.Parameter]): The set of parameters to be
             ignored by FSDP. They will not be sharded, nor moved to the device
             during init, nor have their gradients reduced in backward.
@@ -266,6 +273,7 @@ def fully_shard(
     arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
         module, device, ignored_params
     )
+    offload_policy = _resolve_offload_policy(offload_policy, modules, params)
     state = fully_shard.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy, auto_reshard_after_forward)
 
