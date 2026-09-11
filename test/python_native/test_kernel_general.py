@@ -19,8 +19,11 @@ if not TEST_CUTEDSL:
 
 import cutlass
 
-from torch._native.ops._cutedsl import traits as T
-from torch._native.ops.reductions import kernel_general as kg, kernel_xcta as xc
+from torch._native.ops.reductions import (
+    kernel_general as kg,
+    kernel_xcta as xc,
+    traits as T,
+)
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
