@@ -575,6 +575,12 @@ def region_activation_memory_budget(
     .. warning::
         This is a prototype feature and is subject to change.
 
+        Using this API with regions that remain as opaque higher-order operators,
+        such as ``torch.compiler.nested_compile_region``, is not recommended. An
+        opaque higher-order operator and its enclosing graph may be partitioned
+        independently, which can cause unexpected interactions such as duplicated
+        recomputation. This behavior is subject to change.
+
     Under :func:`torch.compile`, the min-cut partitioner chooses which
     activations to save versus recompute in the backward pass to stay under a
     memory budget. ``budget`` is a ratio in ``[0, 1]``: ``0.0`` corresponds to
