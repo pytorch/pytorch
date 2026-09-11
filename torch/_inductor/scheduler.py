@@ -9898,6 +9898,20 @@ class Scheduler:
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
         """
+        # Matching indices do not imply matching values outside a store's mask.
+        # Materialize masked outputs before consumers can read those lanes.
+        masked_outputs = OrderedSet(
+            name
+            for node in node1.get_nodes()
+            if isinstance(node, SchedulerNode)
+            and node._body is not None
+            and node._body.has_op("set_store_mask")
+            for name in node.get_buffer_names()
+        )
+        if masked_outputs and masked_outputs & _real_dep_names(node2.read_writes.reads):
+            WhyNoFuse(node1, node2)("masked stores require materialized outputs")
+            return False
+
         if isinstance(node2, FusedNestedReductions):
             return False
 
