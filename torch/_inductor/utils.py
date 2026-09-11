@@ -3049,6 +3049,8 @@ def use_decompose_k_choice(
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
         and config.triton.num_decompose_k_splits > 0
+        # Callers rely on False to retain the regular MM fallback.
+        and bool(get_k_splits(m, n, k))
     )
 
 
@@ -5439,6 +5441,18 @@ def tlx_only_cuda_options() -> list[str]:
         from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
 
         return tlx_only_cuda_options
+
+    except ImportError:
+        return []
+
+
+@lru_cache
+def tlx_only_hip_options() -> list[str]:
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor.registry import tlx_only_hip_options
+
+        return tlx_only_hip_options
 
     except ImportError:
         return []
