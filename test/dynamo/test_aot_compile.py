@@ -40,6 +40,7 @@ from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallab
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
+from torch._dynamo.output_graph import get_builtins_dict
 from torch._dynamo.package import DynamoCache, load_guards_state
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
@@ -659,6 +660,25 @@ def _subprocess_aot_compile_module():
                     raise AssertionError(
                         f"Expected tensors to be close, got {actual} vs {expected}"
                     )
+
+
+def _subprocess_save_child_module_artifact(path):
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = ParentWithChildModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(4, 4),), kwargs={}, contexts=[])]
+        )
+        model._save_aot_compiled_module(path)
+        torch.save(mod.state_dict(), path + ".state_dict")
 
 
 class RedistributeModel(torch.nn.Module):
@@ -1752,6 +1772,96 @@ from user code:
                 loaded(x)
         finally:
             globals()["AOT_POOL_MODE"] = saved
+
+    def test_aot_compile_module_import_alias_guard_survives_reload(self):
+        # Dynamo mints __import_* aliases into the TRACING process's globals and
+        # roots guards at them. A process that only loads never traced, so the
+        # live module dict this artifact guards against has none of them -- and
+        # every call died on KeyError on G['__import_torch_dot_nn_dot_modules_
+        # dot_module'] before the aliases were seeded. The existing scope tests
+        # cannot see it: the capture in the same process already leaked those
+        # names into this module's globals, so they resolve. Pop them to get
+        # what a fresh process sees.
+        mod = ParentWithChildModule()
+        x = torch.randn(4, 4)
+        expected = mod(x)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        g = globals()
+        aliases = {k: g.pop(k) for k in [k for k in g if k.startswith("__import_")]}
+        self.assertTrue(aliases, "capture leaked no aliases; the test cannot bite")
+        preexisting = frozenset(g)
+        try:
+            fresh = ParentWithChildModule()
+            fresh.load_state_dict(mod.state_dict())
+            reloaded = torch.compile(
+                fresh,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), expected)
+        finally:
+            for k in [k for k in g if k not in preexisting]:
+                del g[k]
+            g.update(aliases)
+
+    def test_aot_compile_module_import_alias_guard_loads_across_processes(self):
+        # The real deployment shape: the artifact is captured by a process that
+        # never runs here, so the __import_* aliases its guards are rooted at
+        # have to be seeded into this module's globals by the load itself.
+        path = self.path()
+        _run_in_subprocess(
+            functools.partial(_subprocess_save_child_module_artifact, path)
+        )
+        mod = ParentWithChildModule()
+        mod.load_state_dict(torch.load(path + ".state_dict"))
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        # A sibling in-process capture may have already leaked __import_*/
+        # __builtins_dict__ aliases into this module's globals; pop them so the
+        # load genuinely has to seed them (otherwise the assertions below pass
+        # trivially against a pre-leaked name). Restore the originals and strip
+        # whatever the load adds in cleanup so sibling tests do not inherit them.
+        g = globals()
+        leaked = {
+            k: g.pop(k)
+            for k in [k for k in g if k.startswith(("__import_", "__builtins_dict__"))]
+        }
+        preexisting = frozenset(g)
+
+        def _restore_globals() -> None:
+            for k in [k for k in g if k not in preexisting]:
+                del g[k]
+            g.update(leaked)
+
+        self.addCleanup(_restore_globals)
+        self.assertNotIn("__import_torch_dot_nn_dot_modules_dot_module", g)
+        with open(path, "rb") as f:
+            model._load_aot_compiled_module(f.read())
+        (result,) = model.forward.compiled_results
+        import_sources = result._artifacts.runtime_env.import_sources
+        self.assertIn("__import_torch_dot_nn_dot_modules_dot_module", import_sources)
+        for alias, module_name in import_sources.items():
+            self.assertIs(globals()[alias], importlib.import_module(module_name))
+        guards_state = load_guards_state(result._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertTrue(builtins_key)
+        self.assertIs(globals()[builtins_key], get_builtins_dict(globals()))
+        x = torch.randn(4, 4)
+        self.assertEqual(model(x), mod(x))
 
     def test_load_seeds_exactly_the_recorded_import_aliases(self):
         # Loading may add only the aliases the artifact recorded, and must not
