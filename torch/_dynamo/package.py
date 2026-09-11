@@ -325,9 +325,17 @@ class FunctionPicklerBase(pickle.Pickler):
         if sys.version_info >= (3, 14):
             import annotationlib
 
-            return annotationlib.get_annotations(
-                obj, format=annotationlib.Format.FORWARDREF
-            )
+            # FORWARDREF reruns the annotate function with every NAME lookup
+            # proxied, so it absorbs a missing name, a raising attribute or a
+            # raising call, but a sub-expression with no name in it (an
+            # f-string, `()[0]`) still raises out of it; that would fail the
+            # dump for a slot the prune exists to make optional.
+            try:
+                return annotationlib.get_annotations(
+                    obj, format=annotationlib.Format.FORWARDREF
+                )
+            except Exception:
+                return {}
         return obj.__annotations__
 
     def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:

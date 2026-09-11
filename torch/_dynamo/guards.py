@@ -111,6 +111,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._functools import cache_method
 from torch.utils._indented_buffer import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
@@ -4195,12 +4196,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
-        # above _keep. Required, because omitting it silently prunes every
-        # container per value.
+        # above _keep. Required, because omitting it would carry no plain
+        # tuple verbatim.
         self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
-        self._missing_cache: dict[str, _Missing] = {}
         self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
 
@@ -4358,11 +4358,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Identity match; an interned value that collides is kept, harmlessly."""
         return id(value) in self.guard_tree_values
 
+    @cache_method
     def _missing(self, reason: str) -> _Missing:
-        """One sentinel per reason; a snapshot prunes a whole module dict."""
-        if reason not in self._missing_cache:
-            self._missing_cache[reason] = _Missing(reason)
-        return self._missing_cache[reason]
+        """One sentinel per reason; a pruned container shares them."""
+        return _Missing(reason)
 
     def _prune(self, value: object, reason: str) -> object:
         if self._is_literal(value) or self._keep(value):
@@ -4373,13 +4372,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Whether a function container (__defaults__/__dict__/...) is carried whole
         rather than pruned per value; the rule and its reasons are in the Note
         [Reconstructing a function a guard is rooted at] above."""
-        if not self._keep(container):
-            return False
-        if type(container) is dict:
-            return False
+        # The tuple case is decided on the recording alone. A recorded tuple is
+        # also in guard_tree_values today (EQUALS_MATCH registers the value it
+        # reads), but the failure mode of that second invariant breaking would
+        # be the silent forever-miss this rule exists to prevent.
         if type(container) is tuple:
             return id(container) in self.value_guarded_containers
-        return True
+        if type(container) is dict:
+            return False
+        return self._keep(container)
 
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
         """Built once per module dict, so every function rebuilt against that
@@ -4391,15 +4392,16 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in f_globals.items()
             }
             # FunctionType binds builtins from the scope's __builtins__ at
-            # creation, so that entry can never be a sentinel: a pruned one
-            # becomes the real module (pickled by reference), a kept one (the
-            # builtins dict some guard read through) stays verbatim as the
-            # keep contract says. The key set is the module dict's at save time,
-            # names Dynamo installed into it included; a guard on the dict's
-            # shape compares against the live dict at run time and is only as
-            # portable as those names (see the commit message).
-            if isinstance(snapshot.get("__builtins__"), _Missing):
-                snapshot["__builtins__"] = builtins
+            # creation, so that entry is always the real module (pickled by
+            # reference): for an imported module it is builtins.__dict__, the
+            # very dict any compile that guards a builtin registers, so keeping
+            # it "as read" would carry all of builtins (~6 KB) in every snapshot
+            # next to the filtered copy G already holds. The key set is the
+            # module dict's at save time, names Dynamo installed into it
+            # included; a guard on the dict's shape compares against the live
+            # dict at run time and is only as portable as those names (see the
+            # commit message).
+            snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
 
