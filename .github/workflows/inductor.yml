@@ -18,6 +18,11 @@ on:
     tags:
       - ciflow/inductor/*
   workflow_dispatch:
+    inputs:
+      triton_sha:
+        description: Triton commit to build and test on A10G
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
@@ -102,7 +107,7 @@ jobs:
       runner: linux.4xlarge.memory
       test-matrix: |
         { include: [
-          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", only_models: "vit_base_patch16_siglip_256", a10g_bisect: true, triton_kernel_dump: "1" },
+          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", only_models: "vit_base_patch16_siglip_256", a10g_bisect: true, triton_kernel_dump: "1", triton_sha: "${{ inputs.triton_sha || '4e15616d25f3d8818a5bec92c5620cec16d72bcc' }}" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.10"

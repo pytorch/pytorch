@@ -303,6 +303,7 @@ jobs:
           TRITON_KERNEL_DUMP: ${{ matrix.triton_kernel_dump || '' }}
           TRITON_ALWAYS_COMPILE: ${{ matrix.triton_kernel_dump || '' }}
           TRITON_DUMP_DIR: ${{ github.workspace }}/test/test-reports/triton-kernel-dumps
+          A10G_BISECT_TRITON_SHA: ${{ matrix.triton_sha || '' }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -347,6 +348,21 @@ jobs:
 
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
+          if [[ -n "${A10G_BISECT_TRITON_SHA}" ]] && \
+             [[ "${A10G_BISECT_TRITON_SHA}" != "$(cat .ci/docker/ci_commit_pins/triton.txt)" ]]; then
+            TRITON_WHEEL_DIR="${RUNNER_TEMP}/a10g-bisect-triton"
+            mkdir -p "${TRITON_WHEEL_DIR}"
+            TRITON_SHORT_SHA="${A10G_BISECT_TRITON_SHA:0:8}"
+            (
+              cd "${TRITON_WHEEL_DIR}"
+              python "${GITHUB_WORKSPACE}/.github/scripts/build_triton_wheel.py" \
+                --device cuda \
+                --commit-hash "${A10G_BISECT_TRITON_SHA}" \
+                --triton-version "$(cat "${GITHUB_WORKSPACE}/.ci/docker/triton_version.txt")+git${TRITON_SHORT_SHA}"
+            )
+            python3 -m pip install --force-reinstall --no-deps "${TRITON_WHEEL_DIR}"/triton-*.whl
+          fi
+          python3 -c 'import triton; print("A10G bisect Triton:", triton.__version__, triton.__file__)'
           ${TEST_COMMAND}
 
       - name: Record A10G bisect metadata
@@ -354,7 +370,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p test/test-reports/a10g-bisect
-          cp .ci/docker/ci_commit_pins/triton.txt test/test-reports/a10g-bisect/triton-sha.txt
+          cp .ci/docker/ci_commit_pins/triton.txt test/test-reports/a10g-bisect/pinned-triton-sha.txt
+          printf '%s\n' '${{ matrix.triton_sha }}' > test/test-reports/a10g-bisect/tested-triton-sha.txt
           git rev-parse HEAD > test/test-reports/a10g-bisect/pytorch-sha.txt
           nvidia-smi -q > test/test-reports/a10g-bisect/nvidia-smi.txt
 
