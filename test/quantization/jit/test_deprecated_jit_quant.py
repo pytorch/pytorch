@@ -3,10 +3,13 @@
 
 import torch
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.jit_utils import JitTestCase
 
 
 class TestDeprecatedJitQuantized(JitTestCase):
+    hw_classification = HardwareClassification.CPU
+
     @skipIfNoFBGEMM
     def test_rnn_cell_quantized(self):
         d_in, d_hid = 2, 2
@@ -113,43 +116,42 @@ class TestDeprecatedJitQuantized(JitTestCase):
                     cell, dtype=torch.float16
                 )
 
-    if "fbgemm" in torch.backends.quantized.supported_engines:
+    @skipIfNoFBGEMM
+    def test_quantization_modules(self):
+        K1, N1 = 2, 2
 
-        def test_quantization_modules(self):
-            K1, N1 = 2, 2
+        class FooBar(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = torch.nn.Linear(K1, N1).float()
 
-            class FooBar(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.linear1 = torch.nn.Linear(K1, N1).float()
+            def forward(self, x):
+                x = self.linear1(x)
+                return x
 
-                def forward(self, x):
-                    x = self.linear1(x)
-                    return x
+        fb = FooBar()
+        fb.linear1.weight = torch.nn.Parameter(
+            torch.tensor([[-150, 100], [100, -150]], dtype=torch.float),
+            requires_grad=False,
+        )
+        fb.linear1.bias = torch.nn.Parameter(
+            torch.zeros_like(fb.linear1.bias), requires_grad=False
+        )
 
-            fb = FooBar()
-            fb.linear1.weight = torch.nn.Parameter(
-                torch.tensor([[-150, 100], [100, -150]], dtype=torch.float),
-                requires_grad=False,
-            )
-            fb.linear1.bias = torch.nn.Parameter(
-                torch.zeros_like(fb.linear1.bias), requires_grad=False
-            )
+        x = (torch.rand(1, K1).float() - 0.5) / 10.0
+        value = torch.tensor([[100, -150]], dtype=torch.float)
 
-            x = (torch.rand(1, K1).float() - 0.5) / 10.0
-            value = torch.tensor([[100, -150]], dtype=torch.float)
+        y_ref = fb(value)
 
-            y_ref = fb(value)
+        with self.assertRaisesRegex(
+            RuntimeError, "quantize_linear_modules function is no longer supported"
+        ):
+            fb_int8 = torch.jit.quantized.quantize_linear_modules(fb)
 
-            with self.assertRaisesRegex(
-                RuntimeError, "quantize_linear_modules function is no longer supported"
-            ):
-                fb_int8 = torch.jit.quantized.quantize_linear_modules(fb)
-
-            with self.assertRaisesRegex(
-                RuntimeError, "quantize_linear_modules function is no longer supported"
-            ):
-                fb_fp16 = torch.jit.quantized.quantize_linear_modules(fb, torch.float16)
+        with self.assertRaisesRegex(
+            RuntimeError, "quantize_linear_modules function is no longer supported"
+        ):
+            fb_fp16 = torch.jit.quantized.quantize_linear_modules(fb, torch.float16)
 
     @skipIfNoFBGEMM
     def test_erase_class_tensor_shapes(self):
