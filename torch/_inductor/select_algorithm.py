@@ -661,6 +661,7 @@ class TritonTemplateKernel(TritonKernel):
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
         # input buffers which we are fusing into, which preserve a zero mask
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
+        self.prologue_descriptor_vars: dict[str, str] = {}
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -1335,6 +1336,9 @@ class TritonTemplateKernel(TritonKernel):
         other: float | int | None = 0.0,
         indent_width: int = 4,
         index_shape: tuple[str] | None = None,
+        unfused_load: str | None = None,
+        prologue_descriptor_offsets: tuple[str, ...] | None = None,
+        prologue_descriptor_block_shape: tuple[str, ...] | None = None,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1345,7 +1349,18 @@ class TritonTemplateKernel(TritonKernel):
             mask (Optional[str]): An optional mask to use for the load operation.
             other (Optional[Union[float, int]]): The value to use for masked elements. Default is 0.0.
             indent_width (int): The number of spaces to use for indentation.
+            prologue_descriptor_offsets: Descriptor offsets for source loads in
+                a fused prologue. Must be paired with prologue_descriptor_block_shape.
+            prologue_descriptor_block_shape: Descriptor block shape for source
+                loads in a fused prologue.
         """
+
+        if (prologue_descriptor_offsets is None) != (
+            prologue_descriptor_block_shape is None
+        ):
+            raise AssertionError(
+                "descriptor offsets and block shape must be provided together"
+            )
 
         input_node = self.named_input_nodes[input_name]
         if not self.prologue_loads_all_inputs:
@@ -1406,6 +1421,20 @@ class TritonTemplateKernel(TritonKernel):
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
                 name = "StoreOutputSubstitution"
+
+                def load(self, name: str, index: sympy.Expr):
+                    if prologue_descriptor_offsets is not None:
+                        if prologue_descriptor_block_shape is None:
+                            raise AssertionError("missing descriptor block shape")
+                        return V.kernel.load_prologue_descriptor(
+                            name,
+                            index,
+                            tuple(indices),
+                            tuple(lengths),
+                            prologue_descriptor_offsets,
+                            prologue_descriptor_block_shape,
+                        )
+                    return super().load(name, index)
 
                 def store(
                     self,
@@ -1496,14 +1525,90 @@ class TritonTemplateKernel(TritonKernel):
                 self.codegen_body()
                 self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
-                    if load_code is None:
+                    if unfused_load is not None:
+                        self.body.writeline(f"{output_name} = {unfused_load}")
+                    elif load_code is None:
                         raise AssertionError("load_code must not be None")
-                    self.body.writeline(load_code)
+                    else:
+                        self.body.writeline(load_code)
 
                 result = self.body.getvalue()
                 if indent_width:
                     result = textwrap.indent(result, " " * indent_width)
                 return result.strip()
+
+        return self._register_hook(hook_key, hook)
+
+    def load_prologue_descriptor(
+        self,
+        name: str,
+        index: sympy.Expr,
+        index_names: tuple[str, ...],
+        expected_size: tuple[sympy.Expr, ...],
+        offsets: tuple[str, ...],
+        block_shape: tuple[str, ...],
+    ) -> CSEVariable:
+        """Load a contiguous rank-2 FP32 or BF16 prologue source through TMA."""
+        buffer = V.graph.get_buffer(name)
+        size = tuple(V.graph.sizevars.simplify(s) for s in buffer.get_size())
+        stride = tuple(V.graph.sizevars.simplify(s) for s in buffer.get_stride())
+        expected_index = sympy_dot(
+            stride,
+            [sympy.Symbol(index_name, integer=True) for index_name in index_names],
+        )
+        if (
+            len(size) != 2
+            or len(stride) != 2
+            or buffer.get_dtype() not in (torch.float32, torch.bfloat16)
+            or size != expected_size
+            or not V.graph.sizevars.statically_known_equals(stride[1], 1)
+            or not V.graph.sizevars.statically_known_equals(stride[0], size[1])
+            or not V.graph.sizevars.statically_known_equals(
+                buffer.get_layout().offset, 0
+            )
+            # CSEProxy canonicalizes the exact contiguous expression to xindex.
+            or not (
+                str(index) == "xindex"
+                or V.graph.sizevars.statically_known_equals(index, expected_index)
+            )
+        ):
+            return super().load(name, index)
+
+        descriptor = self.prologue_descriptor_vars.get(name)
+        if descriptor is None:
+            descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
+            self.prologue_descriptor_vars[name] = descriptor
+            var = self.args.input(name)
+            shape_str = ", ".join(texpr(self.rename_indexing(s)) for s in size)
+            stride_str = ", ".join(texpr(self.rename_indexing(s)) for s in stride)
+            block_shape_str = ", ".join(block_shape)
+            self.prologue.writeline(
+                f"{descriptor} = tl.make_tensor_descriptor("
+                f"{var}, shape=[{shape_str}], strides=[{stride_str}], "
+                f"block_shape=[{block_shape_str}])"
+            )
+
+        return self.cse.generate(
+            self.loads,
+            f"{descriptor}.load([{', '.join(offsets)}])",
+            dtype=buffer.get_dtype(),
+            shape=block_shape,
+        )
+
+    def unfused_input(
+        self,
+        input_name: str,
+        code: str,
+        indent_width: int = 4,
+    ) -> str:
+        """Emit ``code`` only when ``input_name`` was not prologue-fused."""
+        input_node = self.named_input_nodes[input_name]
+        hook_key = f"<UNFUSED_INPUT_{input_name}_{self._gen_tmp_var()}>"
+
+        def hook() -> str:
+            if input_node.get_name() in self.prologue_fused_inputs:
+                return ""
+            return textwrap.indent(code, " " * indent_width).strip()
 
         return self._register_hook(hook_key, hook)
 
@@ -1878,6 +1983,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.stride,
                 self.store_output,
                 self.load_input,
+                self.unfused_input,
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,

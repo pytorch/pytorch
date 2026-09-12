@@ -71,6 +71,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         description: str,
         make_fx_graph: Callable[..., Any],
         input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
+        inline_after_autotune: bool = False,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
 
@@ -115,6 +116,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         # Cached decomposition info for range-based dispatch (set via cache_decomposition)
         self.decomposition: Callable[..., Any] | None = None
         self.decomposition_kwargs: dict[str, Any] = {}
+        self.inline_after_autotune = inline_after_autotune
         # Config patches to apply during kernel codegen (e.g., coordinate_descent_tuning)
         self.config_patches: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
@@ -301,6 +303,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def output_node(self) -> ir.TensorBox:
         if self.gm is None:
             raise AssertionError("expected self.gm to be set")
+        if self.inline_after_autotune:
+            return inline_subgraph_to_ir_nodes(self.gm, self.input_nodes, self.name)
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,

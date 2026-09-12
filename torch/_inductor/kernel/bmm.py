@@ -160,7 +160,6 @@ blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
     grid=blackwell_bmm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_inputs=True,
 )
 
 

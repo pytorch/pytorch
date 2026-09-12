@@ -111,11 +111,15 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         m_hint, n_hint, k_hint = V.graph.sizevars.guard_int_seq((m, n, k))
         device_properties = DeviceProperties.create(kernel_inputs.device())
         # Keep the Triton search to one M/N-specific schedule family and its
-        # one- and two-wave splits. Narrow-N and one-M-tile cases use the 1CTA
-        # BK128 schedule; wider outputs with at least two M tiles use 2CTA
-        # BN256. The whole-plan autotuner retains direct and exact ATen
-        # fallbacks.
-        config_index = 2 if m_hint > 128 and n_hint > 128 else 0
+        # one- and two-wave splits. The M=128, N=256 producer-fusion target uses
+        # a deeper 1CTA BK64 pipeline; other one-M-tile and narrow-N cases use
+        # 1CTA BK128, while wider outputs with at least two M tiles use 2CTA
+        # BN256. The whole-plan autotuner retains direct and exact ATen fallbacks.
+        has_b_producer = mat2.get_name() not in V.graph.graph_inputs
+        if m_hint == 128 and n_hint == 256 and has_b_producer:
+            config_index = 6
+        else:
+            config_index = 2 if m_hint > 128 and n_hint > 128 else 0
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
         for k_split in get_blackwell_decompose_k_splits(
             m_hint,
