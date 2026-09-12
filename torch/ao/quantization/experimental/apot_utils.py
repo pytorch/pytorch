@@ -6,6 +6,8 @@ using APoT nonuniform quantization methods.
 
 import math
 
+import torch
+
 
 r"""Converts floating point input into APoT number
     based on quantization levels
@@ -32,6 +34,25 @@ def float_to_apot(x, levels, indices, alpha):
             best_idx = idx
 
     return best_idx
+
+
+def float_to_apot_device(
+    tensor: torch.Tensor,
+    levels: torch.Tensor,
+    indices: torch.Tensor,
+    alpha: torch.Tensor,
+) -> torch.Tensor:
+    r"""Converts a floating point tensor into APoT numbers on its device."""
+    alpha = alpha.reshape(())
+    level_deltas = torch.abs(tensor.unsqueeze(-1) - levels)
+    nearest_level_indices = indices[level_deltas.argmin(dim=-1)]
+    nearest_level_indices = torch.where(
+        torch.isnan(tensor),
+        torch.zeros_like(nearest_level_indices),
+        nearest_level_indices,
+    )
+    quantized = torch.where(tensor < -alpha, -alpha, nearest_level_indices)
+    return torch.where(tensor > alpha, alpha, quantized)
 
 
 r"""Converts floating point input into
