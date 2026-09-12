@@ -6,6 +6,14 @@
 #include <metal_simdgroup>
 #include <metal_stdlib>
 
+#if __METAL_VERSION__ >= 400 && \
+    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#define HAS_MPP 1
+#else
+#define HAS_MPP 0
+#endif
+
 using namespace metal;
 #include <ATen/native/mps/kernels/Gemv.h>
 
@@ -1264,9 +1272,7 @@ kernel void applyPanelTRSM(
 INSTANTIATE_APPLY_PANEL_TRSM(U, true)
 INSTANTIATE_APPLY_PANEL_TRSM(L, false)
 
-#if __METAL_VERSION__ >= 400 && \
-    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
-#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#if HAS_MPP
 
 template <bool upper, int BM, int BN, int NSG>
 kernel void applySYRKTrailing(
@@ -1417,7 +1423,7 @@ INSTANTIATE_SYRK_TRAILING(L, false, 32, 64, 2)
 INSTANTIATE_SYRK_TRAILING(U, true, 32, 128, 4)
 INSTANTIATE_SYRK_TRAILING(L, false, 32, 128, 4)
 
-#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
+#endif // HAS_MPP
 
 // LU factorization with partial pivoting (mirrors LAPACK sgetrf), in place on a
 // row-major fp32 (B, M, N) buffer. The host (lu_factor_panel_encode in
@@ -2357,9 +2363,7 @@ kernel void gemmSimdLU(
   }
 }
 
-#if __METAL_VERSION__ >= 400 && \
-    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
-#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#if HAS_MPP
 
 template <int BM, int BN, int NSG>
 kernel void int_mm_mpp(
@@ -2514,7 +2518,7 @@ kernel void gemmLU(
 INSTANTIATE_GEMM_LU(64, 64, 4)
 INSTANTIATE_GEMM_LU(32, 64, 2)
 
-#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
+#endif // HAS_MPP
 
 template <typename T, bool upper, bool unit, short TS>
 kernel void trsmDiagSolveLU(
