@@ -486,6 +486,7 @@ class MetalOverrides(OpOverrides):
             "erf",
             "erfc",
             "erfinv",
+            "ndtri",
             "i0",
             "i0e",
             "i1",
