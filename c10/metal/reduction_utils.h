@@ -120,9 +120,11 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_sum(T val) {
 
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
+  // Fill must be the product identity (1). A 0 fill zeros the product.
+  const auto fill = as_type<int2>(T(1));
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
     val *= as_type<T>(
-        ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
+        ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), fill, i));
   }
   return simd_broadcast(val, 0);
 }
@@ -498,6 +500,49 @@ struct MinOp {
       uint tid,
       uint tptg) {
     return c10::metal::threadgroup_min(shared, val, tid, tptg);
+  }
+};
+
+// Product reduction. Identity is T(1) for real types and (1, 0) for
+// complex. simd_prod / threadgroup_prod already live above; ProdOp is
+// the value_reduction functor used by native MPS prod.
+template <typename T>
+struct ProdOp {
+  static inline constexpr T identity() {
+    return T(1);
+  }
+  static inline T combine(T a, T b) {
+    return a * b;
+  }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_prod(val);
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_prod(shared, val, tid, tptg);
+  }
+};
+
+template <>
+struct ProdOp<float2> {
+  static inline float2 identity() {
+    return float2(1, 0);
+  }
+  static inline float2 combine(float2 a, float2 b) {
+    return c10::metal::mul(a, b);
+  }
+  static inline float2 simd_reduce(float2 val) {
+    return c10::metal::simd_prod(val);
+  }
+  static inline float2 threadgroup_reduce(
+      threadgroup float2* shared,
+      float2 val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_prod(shared, val, tid, tptg);
   }
 };
 
