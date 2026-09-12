@@ -51,17 +51,21 @@ def find_free_port():
         host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
     )
 
+    last_error: OSError | None = None
     for addr in addrs:
         family, type, proto, _, _ = addr
+        s = None
         try:
             s = socket.socket(family, type, proto)
             s.bind(("localhost", 0))
             s.listen(0)
             return s
         except OSError as e:
-            s.close()  # type: ignore[possibly-undefined]
+            last_error = e
+            if s is not None:
+                s.close()
             print(f"Socket creation attempt failed: {e}")
-    raise RuntimeError("Failed to create a socket")
+    raise RuntimeError("Failed to create a socket") from last_error
 
 
 def stop_etcd(subprocess, data_dir: str | None = None):
