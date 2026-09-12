@@ -5,6 +5,13 @@
 #include <c10/metal/float8.h>
 #include <metal_array>
 #define C10_METAL_CONSTEXPR constant constexpr
+#if __METAL_VERSION__ >= 400 && \
+    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#define C10_METAL_HAS_MPP 1
+#else
+#define C10_METAL_HAS_MPP 0
+#endif
 #else
 #include <c10/util/complex.h>
 #include <array>
