@@ -16616,6 +16616,11 @@ class TestConsistency(TestCaseMPS):
             return (7e-4, 2e-3)
         if op.name == "native_layer_norm":
             return (1e-4, 1.3e-5)
+        if op.name.startswith('fft.') and op.name not in ('fft.fftshift', 'fft.ifftshift') and dtype == torch.float16:
+            # MPS runs fp16 FFTs natively as a single fused transform that rounds
+            # differently than the CPU reference (which normalizes in a separate
+            # step), so multi-dim transforms need looser fp16 tolerances.
+            return (3e-2, 3e-2)
         if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
