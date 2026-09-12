@@ -811,15 +811,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   MTLCompileOptions* options = compile_options;
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
-    if (is_macos_at_least(MacOSVersion::MACOS_26_0)) {
-      // Metal-4.0 allows tensor template arguments
-      [options setLanguageVersion:MTLLanguageVersion4_0];
-    } else if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
-      // Metal-3.2 allows lambdas in shader code
-      [options setLanguageVersion:MTLLanguageVersion3_2];
-    } else {
-      [options setLanguageVersion:MTLLanguageVersion3_1];
-    }
+    [options setLanguageVersion:static_cast<MTLLanguageVersion>(metal_language_version())];
     if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
       options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
       options.mathFloatingPointFunctions =
@@ -917,8 +909,8 @@ class BundledShaderLibrary : public MetalShaderLibrary {
       NSError* error = nil;
 #ifdef CAN_BUILD_METAL_4
       // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
-      // cooperative-tensor ABI), so only load it on 26.2+.
-      const auto section_name = is_macos_at_least(MacOSVersion::MACOS_26_2) ? "metal_40" : "metal_basic";
+      // cooperative-tensor ABI) and holds the only kernels has_mpp() gates.
+      const auto section_name = has_mpp() ? "metal_40" : "metal_basic";
 #else
       const auto section_name = "metal_basic";
 #endif
