@@ -57,7 +57,8 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
-    skipIfRocm,
+    NAVI_ARCH,
+    runOnRocmArch,
     skipIfTorchDynamo,
     subtest,
     suppress_warnings,
@@ -2365,7 +2366,7 @@ class TestSparseCSR(TestCase):
                         self.assertEqual(res_in, res_in_dense)
                         self.assertEqual(res_out, res_in)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/167783")
+    @runOnRocmArch(NAVI_ARCH)
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
