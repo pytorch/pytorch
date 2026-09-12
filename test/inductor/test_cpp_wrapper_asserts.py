@@ -193,6 +193,103 @@ class CppWrapperAssertTests(InductorTestCase):
         self.assertEqual(compiled(sample), fn(sample))
 
 
+class CppWrapperMpsDeviceTypeTests(InductorTestCase):
+    """Tests that CppWrapperMps consumes the class-level device_type attribute.
+
+    Companion to the device_type attribute in codegen/mps.py. The guard in
+    _generate_kernel_call_helper and the device filter in
+    codegen_additional_funcs are driven directly (production code paths, not
+    copies). The wrapper is built with object.__new__ to avoid the full
+    __init__ chain, which requires a complete graph lowering.
+    """
+
+    def _make_wrapper(self, cls=None):
+        from types import SimpleNamespace
+
+        from torch._inductor.codegen.cpp_wrapper_mps import CppWrapperMps
+        from torch._inductor.utils import make_codegen_buffer
+        from torch._inductor.virtualized import V
+        from torch.utils._ordered_set import OrderedSet
+
+        V.set_graph_handler(
+            SimpleNamespace(
+                is_dual_wrapper_mode=False,
+                aot_mode=False,
+                cpp_wrapper=True,
+            )
+        )
+
+        if cls is None:
+            cls = CppWrapperMps
+        wrapper = object.__new__(cls)
+        wrapper._used_kernel_names = OrderedSet()
+        wrapper._lambda_counter = 0
+        wrapper._cpu_triton_kernel_names = OrderedSet()
+        wrapper.lines = []
+        wrapper.prefix = make_codegen_buffer()
+        return wrapper
+
+    def _make_kernel_call_line(self, device_type):
+        from torch._inductor.codegen.wrapper import KernelCallLine
+
+        return KernelCallLine(
+            wrapper=None,
+            kernel_name="mps_lib_0",
+            call_args=(),
+            raw_keys=(),
+            raw_args=(),
+            arg_types=[],
+            triton=False,
+            triton_meta=None,
+            inductor_meta=None,
+            device=torch.device(device_type),
+            graph_name="graph_0",
+            original_fxnode_name="l0",
+            current_stream_idx=None,
+        )
+
+    def test_guard_error_message_uses_device_type(self):
+        wrapper = self._make_wrapper()
+        # xpu (not cpu, not mps) reaches the class guard without taking the
+        # CppWrapperCpu delegation path that cpu would take.
+        with self.assertRaisesRegex(
+            AssertionError, "expected device.type == 'mps', got xpu"
+        ):
+            wrapper._generate_kernel_call_helper(
+                device=torch.device("xpu"),
+                kernel_name="mps_lib_0",
+                call_args=[],
+                arg_types=[],
+            )
+
+    def test_subclass_device_type_override_passes_guard(self):
+        from torch._inductor.codegen.cpp_wrapper_mps import CppWrapperMps
+
+        class CppWrapperXpu(CppWrapperMps):
+            device_type = "xpu"
+
+        wrapper = self._make_wrapper(CppWrapperXpu)
+        # The guard must read the subclass attribute: an mps device fails for
+        # the subclass with the parameterized message (and would pass for the
+        # base class), proving the attribute is actually consumed.
+        with self.assertRaisesRegex(
+            AssertionError, "expected device.type == 'xpu', got mps"
+        ):
+            wrapper._generate_kernel_call_helper(
+                device=torch.device("mps"),
+                kernel_name="x_lib_0",
+                call_args=[],
+                arg_types=[],
+            )
+
+    def test_additional_funcs_filters_by_device_type(self):
+        wrapper = self._make_wrapper()
+        wrapper.lines = [self._make_kernel_call_line("xpu")]
+        # With only a non-matching device line, no shader library is emitted.
+        wrapper.codegen_additional_funcs()
+        self.assertEqual(wrapper.prefix.getvalue(), "")
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

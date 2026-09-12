@@ -18,6 +18,11 @@ class CppWrapperMps(CppWrapperGpu):
     Generates cpp wrapper for running on MPS and calls metal kernels
     """
 
+    # The device this wrapper targets. CppWrapperGpu derives ``self.device`` from
+    # get_gpu_type(), i.e. from the accelerators present on the compiling machine,
+    # so it cannot say which device a kernel call is supposed to belong to.
+    device_type = "mps"
+
     def __init__(self) -> None:
         super().__init__()
         self._used_kernel_names: OrderedSet[str] = OrderedSet()
@@ -79,8 +84,9 @@ class CppWrapperMps(CppWrapperGpu):
                 inductor_meta=inductor_meta,
             )
 
-        if device.type != "mps":
-            raise AssertionError(f"expected device.type == 'mps', got {device.type}")
+        if device.type != self.device_type:
+            msg = f"expected device.type == '{self.device_type}', got {device.type}"
+            raise AssertionError(msg)
 
         if arg_types is None:
             raise AssertionError("expected arg_types to not be None")
@@ -263,7 +269,7 @@ class CppWrapperMps(CppWrapperGpu):
         for line in self.lines:
             if not isinstance(line, KernelCallLine):
                 continue
-            if line.device.type != "mps":
+            if line.device.type != self.device_type:
                 continue
 
             # Extract library name from kernel name (e.g., "mps_lib_0" from kernel calls)
