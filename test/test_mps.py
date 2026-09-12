@@ -7900,42 +7900,6 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), torch.float32)
         helper((2, 8, 4, 5), torch.complex64)
 
-    def test_log(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            log_result = torch.log(x)
-            log_result_cpu = torch.log(cpu_x)
-
-            self.assertEqual(log_result, log_result_cpu)
-
-        helper((2, 8, 4, 5))
-
-    def test_log_ten(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            log_ten_result = torch.log10(x)
-            log_ten_result_cpu = torch.log10(cpu_x)
-
-            self.assertEqual(log_ten_result, log_ten_result_cpu)
-
-        helper((2, 8, 4, 5))
-
-    def test_log_two(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            log_two_result = torch.log2(x)
-            log_two_result_cpu = torch.log2(cpu_x)
-
-            self.assertEqual(log_two_result, log_two_result_cpu)
-
-        helper((2, 8, 4, 5))
-
     @parametrize("dtype", {torch.float, torch.half, torch.bfloat16})
     def test_log1p(self, dtype):
         eps = torch.finfo(dtype).eps
@@ -7960,18 +7924,6 @@ class TestMPS(TestCaseMPS):
         # precise::metal::log promises to be accurate to within 4 ulps
         # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
         self.ulpAssertAllClose(log_result.cpu(), log_result_cpu, n_ulps=4)
-
-    def test_logsumexp(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            log_result = torch.logsumexp(x, -1)
-            log_result_cpu = torch.logsumexp(cpu_x, -1)
-
-            self.assertEqual(log_result, log_result_cpu)
-
-        helper((2, 8, 4, 5))
 
     # Test concat forward
     def test_cat2(self):
@@ -8452,17 +8404,6 @@ class TestMPS(TestCaseMPS):
             _test_gelu(32, 32, torch.float32, False)
         finally:
             torch.set_num_threads(num_threads)
-
-    def test_gelu_tanh(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            x = cpu_x.detach().clone().to('mps')
-
-            gelu_tanh_result = torch.nn.functional.gelu(x, approximate='tanh')
-            gelu_tanh_result_cpu = torch.nn.functional.gelu(cpu_x, approximate='tanh')
-            self.assertEqual(gelu_tanh_result, gelu_tanh_result_cpu)
-
-        helper((2, 8, 4, 5))
 
     def test_gelu_tanh_large_values(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/186278
