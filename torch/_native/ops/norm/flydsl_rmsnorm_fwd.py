@@ -14,7 +14,7 @@ from flydsl.runtime.device import is_rdna_arch
 
 import torch
 from torch._native.flydsl.compile_args import make_compile_arg, read_only_tensor
-from torch._native.flydsl_utils import _resolve_rocm_arch
+from torch._native.flydsl_utils import _pinned_compile_arch, _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 from torch._native.ops.norm.flydsl_rmsnorm_utils import (
     normalized_shape_1d,
@@ -276,17 +276,18 @@ def _compile_rmsnorm_fwd(
     # module/function handles and must be cached per device.
     del backend, device_index
     input_2d, weight, output_2d, rstd, rows_m, eps, stream = compile_args
-    launch = _build_rmsnorm_module(n, dtype, arch)
-    return flyc.compile(
-        launch,
-        make_compile_arg(input_2d, read_only=True),
-        flyc.from_torch_tensor(read_only_tensor(weight)),
-        make_compile_arg(output_2d),
-        make_compile_arg(rstd),
-        rows_m,
-        eps,
-        stream,
-    )
+    with _pinned_compile_arch(arch):
+        launch = _build_rmsnorm_module(n, dtype, arch)
+        return flyc.compile(
+            launch,
+            make_compile_arg(input_2d, read_only=True),
+            flyc.from_torch_tensor(read_only_tensor(weight)),
+            make_compile_arg(output_2d),
+            make_compile_arg(rstd),
+            rows_m,
+            eps,
+            stream,
+        )
 
 
 def rmsnorm_fwd(

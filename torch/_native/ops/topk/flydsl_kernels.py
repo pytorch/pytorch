@@ -46,7 +46,7 @@ import torch
 from torch._native.flydsl.cache import CachedCompile, CacheInfo
 from torch._native.flydsl.compile_args import make_compile_arg, read_only_tensor
 from torch._native.flydsl.intrinsics import atomic_add, maxsi, minsi
-from torch._native.flydsl_utils import _resolve_rocm_arch
+from torch._native.flydsl_utils import _pinned_compile_arch, _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 
 
@@ -624,15 +624,16 @@ def _compile_register_topk(
     # be cached per device.
     del backend, device_index
     input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_register_topk_module(n, k, arch)
-    return flyc.compile(
-        launch,
-        make_compile_arg(input_2d, read_only=True),
-        make_compile_arg(values_2d),
-        make_compile_arg(indices_2d),
-        rows_m,
-        stream,
-    )
+    with _pinned_compile_arch(arch):
+        launch = _build_register_topk_module(n, k, arch)
+        return flyc.compile(
+            launch,
+            make_compile_arg(input_2d, read_only=True),
+            make_compile_arg(values_2d),
+            make_compile_arg(indices_2d),
+            rows_m,
+            stream,
+        )
 
 
 def topk_register_out(
@@ -686,15 +687,16 @@ def _compile_radix_select_topk(
 ) -> flyc.CompiledFunction:
     del backend, device_index  # cache keys only; see _compile_register_topk
     input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_radix_select_topk_module(n, k, deterministic, arch)
-    return flyc.compile(
-        launch,
-        make_compile_arg(input_2d, read_only=True),
-        make_compile_arg(values_2d),
-        make_compile_arg(indices_2d),
-        rows_m,
-        stream,
-    )
+    with _pinned_compile_arch(arch):
+        launch = _build_radix_select_topk_module(n, k, deterministic, arch)
+        return flyc.compile(
+            launch,
+            make_compile_arg(input_2d, read_only=True),
+            make_compile_arg(values_2d),
+            make_compile_arg(indices_2d),
+            rows_m,
+            stream,
+        )
 
 
 def topk_radix_out(

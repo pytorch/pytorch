@@ -1,9 +1,12 @@
 """Runtime and dispatcher helpers for optional FlyDSL native operators."""
 
+import contextlib as _contextlib
 import functools
 import logging
 import sys
+from collections.abc import Iterator as _Iterator
 from os import environ as _environ
+from threading import RLock as _RLock
 from typing import cast
 
 from torch._vendor.packaging.version import Version
@@ -110,29 +113,79 @@ def _get_flydsl_device_arch(device_index: int) -> str | None:
     return None
 
 
+# Held across a compile pin, and around the one read that a pin can be seen by.
+# Reentrant so that a future caller reaching _resolve_rocm_arch from inside a
+# pin gets today's answer rather than a deadlock.
+_compile_arch_pin = _RLock()
+
+
 @functools.cache
 def _resolve_rocm_arch(device_index: int) -> str | None:
     """Return the gfx name to compile for, or None if it cannot be determined.
 
     FLYDSL_GPU_ARCH wins, then HSA_OVERRIDE_GFX_VERSION, then the device's
-    cached gcnArchName. The normalized result is cached per device.
+    cached gcnArchName. The normalized result is cached per device, so this
+    reads the environment once and holds that answer for the process; taking
+    the pin lock keeps that one read from landing inside another device's
+    _pinned_compile_arch window and caching its arch forever.
     """
-    env = _environ.get("FLYDSL_GPU_ARCH")
-    if env:
-        return env.split(":", 1)[0]
+    with _compile_arch_pin:
+        env = _environ.get("FLYDSL_GPU_ARCH")
+        if env:
+            return env.split(":", 1)[0]
 
-    hsa = _environ.get("HSA_OVERRIDE_GFX_VERSION")
-    if hsa:
-        if hsa.startswith("gfx"):
-            return hsa.split(":", 1)[0]
-        if hsa.count(".") == 2:
-            major, minor, stepping = hsa.split(".")
-            try:
-                return f"gfx{major}{minor}{int(stepping):x}"
-            except ValueError:
-                log.debug("Ignoring invalid HSA_OVERRIDE_GFX_VERSION=%s", hsa)
+        hsa = _environ.get("HSA_OVERRIDE_GFX_VERSION")
+        if hsa:
+            if hsa.startswith("gfx"):
+                return hsa.split(":", 1)[0]
+            if hsa.count(".") == 2:
+                major, minor, stepping = hsa.split(".")
+                try:
+                    return f"gfx{major}{minor}{int(stepping):x}"
+                except ValueError:
+                    log.debug("Ignoring invalid HSA_OVERRIDE_GFX_VERSION=%s", hsa)
 
     return _get_flydsl_device_arch(device_index)
+
+
+@_contextlib.contextmanager
+def _pinned_compile_arch(arch: str | None) -> _Iterator[None]:
+    """Compile for the arch the dispatcher gated on, not the one FlyDSL guesses.
+
+    FlyDSL picks its own compile target in flydsl/runtime/device.py:
+    FLYDSL_GPU_ARCH, then HSA_OVERRIDE_GFX_VERSION, then `rocm_agent_enumerator`
+    -- and a hard-coded "gfx942" whenever that subprocess raises or times out,
+    which it does wherever the tool is not on PATH. That silent fallback
+    disagrees with _resolve_rocm_arch, and the HIP loader then rejects the code
+    object with hipErrorNoBinaryForGpu.
+
+    One knob still outranks this one: flydsl's own `env.compile.arch`, read
+    from a bare `ARCH` (flydsl/utils/env.py declares it with an explicit
+    env_var, so it is not prefixed) and consulted first by
+    `RocmBackend.detect_target`. A process that already exports `ARCH` defeats
+    the pin, and every ROCm host flydsl works on today leaves it unset.
+
+    The handoff is one process-global variable, and flydsl_jit_cache locks per
+    specialization so different specializations do compile at once. The lock is
+    therefore load-bearing: without it whichever pin finishes first restores the
+    variable out from under a compile that is still running, which is the same
+    wrong-ISA artifact this is here to prevent. Each specialization compiles
+    once, so serializing them costs less than caching a bad code object.
+    """
+    if not arch:
+        yield
+        return
+
+    with _compile_arch_pin:
+        previous = _environ.get("FLYDSL_GPU_ARCH")
+        _environ["FLYDSL_GPU_ARCH"] = arch
+        try:
+            yield
+        finally:
+            if previous is None:
+                _environ.pop("FLYDSL_GPU_ARCH", None)
+            else:
+                _environ["FLYDSL_GPU_ARCH"] = previous
 
 
 @functools.cache
