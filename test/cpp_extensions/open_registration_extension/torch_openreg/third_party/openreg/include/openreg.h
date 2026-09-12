@@ -66,6 +66,31 @@ orPointerGetAttributes(orPointerAttributes* attributes, const void* ptr);
 OPENREG_EXPORT orError_t orMemoryUnprotect(void* devPtr);
 OPENREG_EXPORT orError_t orMemoryProtect(void* devPtr);
 
+// IPC via POSIX shared memory (not available on Windows)
+#ifndef _WIN32
+// Max byte length of the shm name string (including null terminator).
+#define OR_IPC_HANDLE_MAX_LEN 64
+
+// Snapshot devPtr's allocation into a POSIX shm object; write its name into
+// name_out (name_buf_len >= OR_IPC_HANDLE_MAX_LEN required) and the byte
+// delta from the allocation base to devPtr into *offset_out.
+OPENREG_EXPORT orError_t orGetIpcMemHandle(
+    void* devPtr,
+    char* name_out,
+    size_t name_buf_len,
+    ptrdiff_t* offset_out);
+
+// Open the shm, mmap it, and unlink the name. *ptr_out is the mapped base;
+// *size_out is the page-aligned block size. Call orCloseIpcMemHandle to unmap.
+OPENREG_EXPORT orError_t orOpenIpcMemHandle(
+    void** ptr_out,
+    const char* name,
+    size_t* size_out);
+
+// Unmap the region. size must equal *size_out from orOpenIpcMemHandle.
+OPENREG_EXPORT orError_t orCloseIpcMemHandle(void* ptr, size_t size);
+#endif // !_WIN32
+
 // Device
 OPENREG_EXPORT orError_t orGetDeviceCount(int* count);
 OPENREG_EXPORT orError_t orSetDevice(int device);
