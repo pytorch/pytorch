@@ -85,6 +85,9 @@ size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
 )
 
+class_private_mangling_regex = re.compile(r"^_[A-Za-z0-9_]+?__")
+non_word_char_regex = re.compile(r"[^\w]")
+
 
 def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
     env_vars = [
@@ -151,6 +154,15 @@ def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
     # Must be called between _compile_start and _compile_end
     if _triton_kernel_metrics is not None:
         _triton_kernel_metrics[kernel_name] = info
+
+
+def _sanitize_kernel_name(name: str) -> str:
+    # Strip Python class-private attribute mangling (e.g., _ClassName__kernel_name -> kernel_name)
+    name = class_private_mangling_regex.sub("", name)
+
+    # Sanitization logic
+    name = non_word_char_regex.sub("_", name)
+    return name
 
 
 def _emit_triton_kernel_compile_metric(
@@ -673,7 +685,9 @@ class AsyncCompile:
     def _load_kernel_wrapper(self, kernel_name, main_suffix, wrapper_cls, key, path):
         """Reload a kernel module from PyCodeCache and wrap the entry point."""
         mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-        main_func_name = f"{kernel_name}_{main_suffix}"
+        sanitized_name = _sanitize_kernel_name(kernel_name)
+        main_func_name = f"{sanitized_name}_{main_suffix}"
+        # f"{kernel_name}_{main_suffix}"
         return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
 
     def cutedsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
@@ -730,8 +744,9 @@ class AsyncCompile:
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+            sanitized_name = _sanitize_kernel_name(kernel_name)
+            main_func_name = f"{sanitized_name}_{MAIN_SUFFIX}"
 
-            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
@@ -827,7 +842,9 @@ class AsyncCompile:
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
             # Find our special entry point named function
-            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            sanitized_name = _sanitize_kernel_name(kernel_name)
+            main_func_name = f"{sanitized_name}_{MAIN_SUFFIX}"
+
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
@@ -865,6 +882,8 @@ class AsyncCompile:
             MAIN_SUFFIX,
         )
 
+        kernel_name = _sanitize_kernel_name(kernel_name)  # <--- SANITIZE HERE ONCE
+
         kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
         _compile_start()
 
@@ -900,8 +919,8 @@ class AsyncCompile:
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-
             main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
