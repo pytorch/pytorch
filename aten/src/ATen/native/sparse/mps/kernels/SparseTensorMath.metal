@@ -494,6 +494,10 @@ INSTANTIATE_DENSE_SPARSE_MUL(float2);
       uint3               gid           [[thread_position_in_grid]]);
 
 INSTANTIATE_FOR_ALL_TYPES(INSTANTIATE_FUSED_GATHER_MUL);
+// INSTANTIATE_FOR_ALL_TYPES covers neither bool nor complex half, both of which
+// sparse mul is reachable with.
+INSTANTIATE_FUSED_GATHER_MUL(bool);
+INSTANTIATE_FUSED_GATHER_MUL(half2);
 
 
 #define INSTANTIATE_SPMM_BMM_COO_ROWS_GROUPED(DTYPE)                         \

@@ -396,6 +396,7 @@ inline bool isSparseCsr(Backend b) {
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
     case Backend::SparseCsrHIP:
+    case Backend::SparseCsrMPS:
     case Backend::SparseCsrVE:
     case Backend::SparseCsrPrivateUse1:
       return true;
