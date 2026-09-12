@@ -9207,6 +9207,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_empty_lines=True,
         )
 
+    def test_remove_noop_slice_negative_start(self):
+        """Negative start normalizing to zero should be treated as noop (#196358)."""
+
+        def f(x):
+            x = x + 1
+            # start=-4 on dim 0 of size 4 normalizes to start=0, so full-range
+            y = torch.ops.aten.slice(x, 0, -4, 4, 1)
+            return y + 1
+
+        f = torch.compile(f)
+
+        x = torch.ones((4, 8), device=self.device)
+
+        post_grad_graph = get_post_grad_graph(f, (x,))
+        expected_graph = f"""\
+def forward(self, arg0_1: "f32[4, 8][8, 1]{str(x.device)}"):
+        add: "f32[4, 8][8, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+        add_9: "f32[4, 8][8, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
+        return (add_9,)"""
+        self.assertExpectedInline(
+            post_grad_graph,
+            expected_graph,
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151381",
