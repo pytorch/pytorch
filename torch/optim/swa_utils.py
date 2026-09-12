@@ -510,7 +510,7 @@ class SWALR(LRScheduler):
         return (lr - alpha * swa_lr) / (1 - alpha)
 
     @override
-    def get_lr(self):
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
