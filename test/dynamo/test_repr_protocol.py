@@ -114,6 +114,27 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, obj), compiled(x, obj))
 
+    def test_object_dunder_repr_ignores_user_defined_repr(self):
+        class CustomRepr:
+            def __repr__(self):
+                return "USER_REPR"
+
+        def fn(obj):
+            return object.__repr__(obj)
+
+        obj = CustomRepr()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        out = compiled(obj)
+        self.assertEqual(fn(obj), out)
+        self.assertNotEqual(out, "USER_REPR")
+
+    def test_object_dunder_repr_on_builtin_function(self):
+        def fn():
+            return object.__repr__(len)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled())
+
     def test_repr_returning_non_string_raises(self):
         class BadRepr:
             def __repr__(self):
@@ -416,6 +437,15 @@ class TpReprTests(TestCase):
             l = [1, 2, 3]
             l[0] = l
             return repr(l)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(compiled(), fn())
+
+    def test_list_dunder_repr_self_ref(self):
+        def fn():
+            l = [1, 2, 3]
+            l[0] = l
+            return list.__repr__(l)
 
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
