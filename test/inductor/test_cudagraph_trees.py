@@ -4935,7 +4935,10 @@ if HAS_CUDA_AND_TRITON:
             self.assertIsNotNone(self.get_manager())
 
         @torch._inductor.config.patch("triton.slow_path_cudagraph_asserts", True)
+        @torch._inductor.config.patch("triton.cudagraph_or_error", True)
         def test_kernel_free_allocation_uses_cudagraph_pool(self):
+            counters.clear()
+
             def fn(x):
                 return torch.empty_like(x)
 
@@ -4956,6 +4959,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertFalse(
                     any("CUDA Graph is empty" in str(w.message) for w in caught)
                 )
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward(self):
@@ -6322,6 +6326,56 @@ if HAS_CUDA_AND_TRITON:
 
             with self.assertRaises(RuntimeError):
                 f(torch.tensor(1, device="cuda"))
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cudagraph_or_error(self):
+            # With no cudagraphable partition, cudagraphify is never reached, so
+            # the skip has to be reported before returning early.
+            @torch.library.custom_op(
+                "mylib::cudagraph_unsafe_mul",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def cudagraph_unsafe_mul(x: torch.Tensor) -> torch.Tensor:
+                return x * 2.0
+
+            @cudagraph_unsafe_mul.register_fake
+            def _(x):
+                return torch.empty_like(x)
+
+            def f(x):
+                return cudagraph_unsafe_mul(x)
+
+            msg = "skipping cudagraphs as no graph partition is cudagraphable"
+
+            with torch._inductor.config.patch("triton.cudagraph_or_error", True):
+                f_error = torch.compile(f, mode="reduce-overhead")
+
+                # Match the branch-specific message: an unrelated RuntimeError or
+                # another skip path would pass a broader assertion.
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    f_error(torch.randn(4, device="cuda"))
+
+            torch._dynamo.reset()
+            counters.clear()
+            torch._dynamo.utils.clear_compilation_metrics()
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
+                f_report = torch.compile(f, mode="reduce-overhead")
+                f_report(torch.randn(4, device="cuda"))
+
+            FileCheck().check(msg).run(log_stream.getvalue())
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            self.assertIn(
+                msg,
+                [
+                    metric.cudagraph_skip_reason
+                    for metric in torch._dynamo.utils.get_compilation_metrics()
+                ],
+            )
 
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
