@@ -27,6 +27,9 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#ifdef USE_MPS
+#include <ATen/ops/_gru_mps.h>
+#endif
 #include <ATen/ops/_lstm_mps.h>
 #include <ATen/ops/_thnn_differentiable_gru_cell_backward_native.h>
 #include <ATen/ops/_thnn_differentiable_lstm_cell_backward_native.h>
@@ -174,6 +177,14 @@ bool use_cudnn(const Tensor& t) {
   bool bfloat16_cond = st == kBFloat16 && at::detail::getCUDAHooks().supportsBFloat16RNNWithCuDNN();
   return acceptable && (bfloat16_cond || st == kDouble || st == kFloat || st == kHalf);
 }
+
+#ifdef USE_MPS
+bool use_mps_gru(const Tensor& input) {
+  const auto dtype = input.scalar_type();
+  return input.is_mps() && input.numel() > 0 &&
+      (dtype == kFloat || dtype == kHalf || dtype == kBFloat16);
+}
+#endif
 
 template<typename T>
 using pair_of = std::pair<T, T>;
@@ -1267,6 +1278,29 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
 // PUBLIC FUNCTIONS
 ////////////////////////////////////////////////////////////////////////////////
 
+template <typename CellType>
+std::optional<std::tuple<Tensor, Tensor>> try_mps_rnn(
+    const Tensor& input,
+    const Tensor& hx,
+    TensorList params,
+    bool has_biases,
+    int64_t num_layers,
+    double dropout_p,
+    bool train,
+    bool bidirectional,
+    bool batch_first) {
+#ifdef USE_MPS
+  if constexpr (std::is_same_v<CellType, GRUCell<CellParams>>) {
+    if (use_mps_gru(input)) {
+      auto output = at::_gru_mps(
+          input, hx, params, has_biases, num_layers, dropout_p, train, bidirectional, batch_first);
+      return std::make_tuple(std::move(std::get<0>(output)), std::move(std::get<1>(output)));
+    }
+  }
+#endif
+  return std::nullopt;
+}
+
 #define ONE_HIDDEN_RNN(NAME, CELL)                                          \
   DEFINE_DISPATCH(NAME##_cudnn_stub);                                       \
   DEFINE_DISPATCH(NAME##_miopen_stub);                                      \
@@ -1329,6 +1363,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       }                                                                     \
     }                                                                       \
     check_attributes(_input, _params, hx);                                  \
+    if (auto mps_output = try_mps_rnn<CELL>(                                \
+            _input,                                                         \
+            hx,                                                             \
+            _params,                                                        \
+            has_biases,                                                     \
+            num_layers,                                                     \
+            dropout_p,                                                      \
+            train,                                                          \
+            bidirectional,                                                  \
+            batch_first)) {                                                 \
+      return std::move(*mps_output);                                        \
+    }                                                                       \
     auto input = batch_first ? _input.transpose(0, 1) : _input;             \
     auto params = gather_params(_params, has_biases);                       \
     auto results =                                                          \
