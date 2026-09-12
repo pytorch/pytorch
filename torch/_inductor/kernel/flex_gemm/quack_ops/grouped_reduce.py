@@ -122,6 +122,10 @@ import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Float32
 
+from torch._inductor.kernel.flex_gemm.constraints import (
+    LOCAL_REDUCE_COMBINE_NAMES,
+    LOCAL_REDUCE_FINALIZE_NAMES,
+)
 from torch._vendor.quack import layout_utils
 from torch._vendor.quack.epilogue.ops import (
     _callable_config_key,
@@ -169,6 +173,8 @@ _COMBINE_IDENTITIES = {
     "max": -math.inf,
     "min": math.inf,
 }
+if _COMBINE_FNS.keys() != LOCAL_REDUCE_COMBINE_NAMES:
+    raise AssertionError("LOCAL_REDUCE_COMBINE_NAMES is out of sync with _COMBINE_FNS")
 
 
 def feed_main_capable(axis: int, group: int) -> bool:
@@ -546,7 +552,11 @@ class GroupedReduceBase(EpiOp):
             )
         if combine is not None and not (isinstance(combine, str) or callable(combine)):
             raise TypeError("combine must be a name, a 2-argument callable, or None")
-        if not (finalize is None or finalize == "mean" or callable(finalize)):
+        if not (
+            finalize is None
+            or finalize in LOCAL_REDUCE_FINALIZE_NAMES
+            or callable(finalize)
+        ):
             raise TypeError("finalize must be None, 'mean', or a callable")
         finalize_operands = tuple(finalize_operands)
         if not all(isinstance(name, str) for name in finalize_operands):
@@ -1488,7 +1498,11 @@ class GroupedLocalReducePrepass(GroupedColStatsBase):
             raise ValueError(
                 f"unsupported combine {combine!r}; use {sorted(_COMBINE_FNS)}"
             )
-        if not (finalize is None or finalize == "mean" or callable(finalize)):
+        if not (
+            finalize is None
+            or finalize in LOCAL_REDUCE_FINALIZE_NAMES
+            or callable(finalize)
+        ):
             raise TypeError("finalize must be None, 'mean', or a 1-argument callable")
         self.axis = axis
         self.group = group
