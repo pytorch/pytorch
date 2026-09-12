@@ -117,7 +117,6 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
@@ -188,6 +187,7 @@ def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.variables.constant import ConstantVariable
 
 
 _STANDARD_SETATTRS: tuple[Any, ...] = (object.__setattr__, BaseException.__setattr__)
@@ -4531,8 +4531,6 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
     """
     Represents user-defined objects that subclass immutable constant types
     (int, float, str).
-
-    Uses a ConstantVariable as _base_vt for the underlying constant value.
     """
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
@@ -4542,9 +4540,15 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
                 self._constant_base = base
                 self._base_methods = _constant_base_methods[base]
                 break
+        else:
+            raise AssertionError(f"No constant base type found in MRO of {type(value)}")
 
     def as_python_constant(self) -> Any:
         return self.value
+
+    def as_proxy(self) -> Any:
+        # Put the plain builtin in the graph, not the user subclass instance.
+        return self._constant_base(self.value)
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):

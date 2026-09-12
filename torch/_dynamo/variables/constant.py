@@ -230,12 +230,11 @@ class ConstantVariable(VariableTracker):
 
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
-        # __mro__ always ends ..., <builtin base>, object, no matter how many
-        # subclass levels sit on top (a user-defined int/float/str subclass
-        # included) -- so the entry just before object is always the actual
-        # immutable builtin whose own __hash__ we want, bypassing any
-        # Python-level __hash__ override further down the MRO.
-        base = cast(Any, type(self.value).__mro__[-2])
+        from .user_defined import _CONSTANT_BASE_TYPES
+
+        value_type = cast(Any, type(self.value))
+        mro = value_type.__mro__
+        base = next((c for c in mro if c in _CONSTANT_BASE_TYPES), value_type)
         return base.__hash__(self.value), False
 
     def tp_richcompare_impl(
