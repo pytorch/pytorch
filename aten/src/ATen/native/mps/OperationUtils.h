@@ -54,6 +54,7 @@ struct MPSScalar {
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
     at::BFloat16 bf16;
+    c10::Float8_e4m3fn f8;
   } value{};
 };
 
