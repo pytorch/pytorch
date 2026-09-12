@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -205,6 +206,7 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
   if (get_multicast_ptr() != nullptr) {
     multimem_barrier_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
         static_cast<uint32_t*>(pai_->signal_pads_[rank_]),
@@ -250,6 +252,7 @@ void CUDASymmetricMemory::put_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
   put_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -285,6 +288,7 @@ void CUDASymmetricMemory::wait_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
   wait_signal_kernel<<<
       1,
       at::cuda::warp_size(),
