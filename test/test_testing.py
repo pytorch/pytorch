@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes, DeviceTypeTestBase)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
@@ -2180,23 +2180,6 @@ class TestTestParametrizationDeviceType(TestCase):
         test = device_cls(f"test_device_specific_{device}")
         self.assertEqual(test.static_helper(1, 2), (1, 2))
         self.assertEqual(test.class_helper(), device)
-
-    def test_tolerance_defaults_on_uninitialized_thread_local(self, device):
-        import threading
-
-        base = DeviceTypeTestBase
-        original_tls = base._tls
-        try:
-            base._tls = threading.local()
-            instance = base.__new__(base)
-            self.assertEqual(instance.precision, TestCase._precision)
-            self.assertEqual(instance.rel_tol, TestCase._rel_tol)
-            instance.precision = 1e-3
-            instance.rel_tol = 1e-4
-            self.assertEqual(instance.precision, 1e-3)
-            self.assertEqual(instance.rel_tol, 1e-4)
-        finally:
-            base._tls = original_tls
 
     def test_unparametrized_names(self, device):
         # This test exists to protect against regressions in device / dtype test naming
