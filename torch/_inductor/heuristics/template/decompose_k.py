@@ -76,25 +76,18 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             backend.strip().upper()
             for backend in config.triton.decompose_k_bmm_backends.split(",")
         )
-        if "ATEN" in bmm_backends:
-            device_properties = DeviceProperties.create(kernel_inputs.device())
-            if device_properties.type == "cuda" and device_properties.major == 10:
-                aten_k_splits = get_k_splits(
-                    m,
-                    n,
-                    k,
-                    num_sms=device_properties.multi_processor_count,
-                    ctas_per_tile=2,
-                    max_workspace_bytes=128 * 1024 * 1024,
-                )
-            else:
-                aten_k_splits = get_k_splits(m, n, k)
+        k_splits = get_k_splits(m, n, k)
+        exact_k_splits = [
+            k_split
+            for k_split in k_splits
+            if V.graph.sizevars.statically_known_true(
+                sympy.Eq(sympy.Mod(k, k_split), 0)
+            )
+        ]
 
-            for k_split in aten_k_splits:
-                if V.graph.sizevars.statically_known_true(
-                    sympy.Eq(sympy.Mod(k, k_split), 0)
-                ):
-                    yield {"k_split": k_split, "bmm_backend": "aten"}
+        if "ATEN" in bmm_backends:
+            for k_split in exact_k_splits:
+                yield {"k_split": k_split, "bmm_backend": "aten"}
 
         if "TRITON" not in bmm_backends:
             return
