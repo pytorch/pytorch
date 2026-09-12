@@ -5,7 +5,10 @@ from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 
 import torch
 import torch.distributed as c10d
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -16,63 +19,64 @@ from torch.testing._internal.common_utils import (
 NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
-
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = c10d.get_default_backend_for_device(device_type)
 
 # Skip dev-asan as torch + multiprocessing spawn have known issues
 if not TEST_WITH_DEV_DBG_ASAN:
 
     class TestDistributedNNFunctionsNccl(TestDistributedNNFunctions):
         # Test Common Ops First.
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_broadcast(self):
-            self._test_broadcast("nccl")
+            self._test_broadcast(backend)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_reduce(self):
-            self._test_reduce("nccl")
+            self._test_reduce(backend)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_allreduce(self):
-            self._test_allreduce("nccl")
+            self._test_allreduce(backend)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_all_gather(self):
-            self._test_all_gather("nccl")
+            self._test_all_gather(backend)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_all_to_all(self):
-            self._test_all_to_all("nccl")
+            self._test_all_to_all(backend)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_all_to_all_single(self):
-            self._test_all_to_all_single("nccl")
+            self._test_all_to_all_single(backend)
 
         # Test Ops only supported in NCCL.
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
@@ -82,9 +86,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
             # This is required because these functions calls directly to the .dist and needs
             # the world to be initialized
             c10d.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
+                store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"cuda:{self.rank}")
+            device = torch.device(f"{device_type}:{self.rank}")
             x0 = torch.ones(5, 5, device=device) + self.rank
             x1 = torch.ones(5, 5, device=device) + self.rank + 1
             x0.requires_grad = True
@@ -104,7 +108,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self.assertEqual(x0.grad, x_s_0)
             self.assertEqual(x1.grad, x_s_1)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
@@ -114,9 +118,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
             # This is required because these functions calls directly to the .dist and needs
             # the world to be initialized
             c10d.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
+                store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"cuda:{self.rank}")
+            device = torch.device(f"{device_type}:{self.rank}")
 
             class NonContiguousGrad(torch.autograd.Function):
                 @staticmethod
@@ -135,7 +139,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             y = torch.distributed.nn.reduce_scatter(y, [x0, x1])
             NonContiguousGrad.apply(y).sum().backward()
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
@@ -145,9 +149,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
             # This is required because these functions calls directly to the .dist and needs
             # the world to be initialized
             c10d.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
+                store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"cuda:{self.rank}")
+            device = torch.device(f"{device_type}:{self.rank}")
 
             class NonContiguousGrad(torch.autograd.Function):
                 @staticmethod
@@ -163,7 +167,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             y = torch.distributed.nn.all_reduce(x)
             NonContiguousGrad.apply(y).sum().backward()
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
@@ -171,10 +175,10 @@ if not TEST_WITH_DEV_DBG_ASAN:
         def test_all_gather_base(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             c10d.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
+                store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
 
-            device = torch.device(f"cuda:{self.rank}")
+            device = torch.device(f"{device_type}:{self.rank}")
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
 
