@@ -811,14 +811,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   MTLCompileOptions* options = compile_options;
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
-    const auto metal_version = max_metal_language_version();
-    if (metal_version >= 40) {
-      [options setLanguageVersion:MTLLanguageVersion4_0];
-    } else if (metal_version >= 32) {
-      [options setLanguageVersion:MTLLanguageVersion3_2];
-    } else {
-      [options setLanguageVersion:MTLLanguageVersion3_1];
-    }
+    [options setLanguageVersion:static_cast<MTLLanguageVersion>(metal_language_version())];
     if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
       options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
       options.mathFloatingPointFunctions =

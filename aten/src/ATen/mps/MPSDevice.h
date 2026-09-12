@@ -31,6 +31,13 @@ enum class MacOSVersion : uint32_t {
   MACOS_27_0,
 };
 
+// Metal language version to compile shaders with; values match MTLLanguageVersion
+enum class MetalLanguageVersion : uint32_t {
+  METAL_3_1 = (3 << 16) + 1,
+  METAL_3_2 = (3 << 16) + 2, // allows lambdas in shader code
+  METAL_4_0 = (4 << 16) + 0, // allows tensor template arguments
+};
+
 // Helper enum for GPU-family-gated workarounds
 enum class AppleGPUFamily : uint32_t {
   APPLE_7_PLUS = 1007, // M1
@@ -92,11 +99,10 @@ class TORCH_API MPSDevice {
 TORCH_API bool is_available();
 TORCH_API bool is_macos_at_least(MacOSVersion version);
 TORCH_API bool is_apple_family_or_newer(AppleGPUFamily family);
-// Highest Metal language version usable at runtime, as major * 10 + minor.
-// Derived from the OS version, but can be lowered via PYTORCH_MPS_METAL_VERSION
-// (e.g. `3.1`) to opt out of the Metal 4.0 code paths on hosts where they are
-// broken, such as virtualized macOS
-TORCH_API unsigned max_metal_language_version();
+// Metal language version to compile shaders with. Derived from the OS version,
+// but PYTORCH_MPS_METAL_VERSION overrides it outright, so requesting a version
+// the host cannot provide fails rather than silently falling back
+TORCH_API MetalLanguageVersion metal_language_version();
 // Whether MetalPerformancePrimitives (cooperative tensors) is usable, i.e. the
 // OS is new enough, the Metal 4.0 shaders were compiled into this binary and
 // PYTORCH_MPS_METAL_VERSION did not ask for an older language version
