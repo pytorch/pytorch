@@ -301,7 +301,7 @@ manual_torch_name_rule_map: dict[
     "torch._functorch.vmap._process_batched_inputs": UserFunctionVariable,
     "torch._functorch.vmap._unwrap_batched": UserFunctionVariable,
     "torch._functorch.vmap._validate_and_get_batch_size": UserFunctionVariable,
-    "torch._functorch.vmap.doesnt_support_saved_tensors_hooks": UserFunctionVariable,
+    "torch._functorch.vmap.disable_saved_tensors_hooks_for_higher_order": UserFunctionVariable,
     "torch._functorch.vmap.get_chunk_sizes": UserFunctionVariable,
     # lazy_load_decompositions uses a lock that is not supported yet in dynamo
     # "torch._functorch.vmap.lazy_load_decompositions": UserFunctionVariable,
