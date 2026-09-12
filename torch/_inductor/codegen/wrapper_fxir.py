@@ -1,3 +1,4 @@
+import abc
 import dataclasses
 import functools
 import logging
@@ -13,6 +14,10 @@ import torch
 from torch._export.passes._node_metadata_hook import (
     _node_metadata_hook,
     _set_node_metadata_hook,
+)
+from torch._higher_order_ops.compiled_kernel_wrap import (
+    compiled_kernel_side_table,
+    compiled_kernel_wrapper_mutation,
 )
 from torch._higher_order_ops.triton_kernel_wrap import (
     TraceableTritonKernelWrapper,
@@ -118,6 +123,86 @@ class TritonKernel:
 
     tuner: CachingAutotuner
     wrapped: TraceableTritonKernelWrapper
+
+
+class CompiledKernelBackend(abc.ABC):
+    """Teaches FxConverter how to embed one class of non-Triton compiled fused
+    kernel as a compiled_kernel_wrapper_mutation HOP node.
+
+    A backend claims a kernel-definition line (handles_definition), compiles it to
+    a callable (compile_kernel), and reports which call args the kernel writes
+    (mutated_arg_indices). The mutation rule is backend-specific -- a CPU cpp
+    kernel encodes write-ness in its arg_types (non-const pointers), but another
+    compiler's call line may not -- so it is injected here rather than hardcoded
+    in the converter. Out-of-tree backends register via
+    register_compiled_kernel_backend; CppCompiledKernelBackend is the built-in.
+    """
+
+    @abc.abstractmethod
+    def handles_definition(self, line: KernelDefinitionLine) -> bool:
+        """True if this backend owns the given kernel definition."""
+
+    @abc.abstractmethod
+    def compile_kernel(
+        self, converter: "FxConverter", line: KernelDefinitionLine
+    ) -> Callable[..., Any]:
+        """Compile the kernel to a callable taking the flat positional args and
+        writing its outputs in place (the contract the HOP's dense impl calls)."""
+
+    @abc.abstractmethod
+    def mutated_arg_indices(self, line: KernelCallLine) -> tuple[int, ...]:
+        """Positions in the call args the kernel writes (for functionalization)."""
+
+
+_compiled_kernel_backends: list[CompiledKernelBackend] = []
+
+
+def register_compiled_kernel_backend(backend: CompiledKernelBackend) -> None:
+    """Register a CompiledKernelBackend. The first registered backend that claims
+    a kernel wins, so register more specific backends before more general ones."""
+    _compiled_kernel_backends.append(backend)
+
+
+def _select_compiled_kernel_backend(
+    line: KernelDefinitionLine,
+) -> CompiledKernelBackend | None:
+    for backend in _compiled_kernel_backends:
+        if backend.handles_definition(line):
+            return backend
+    return None
+
+
+class CppCompiledKernelBackend(CompiledKernelBackend):
+    """Built-in backend for CPU cpp_fused_* pybinding kernels."""
+
+    def handles_definition(self, line: KernelDefinitionLine) -> bool:
+        return not line.gpu
+
+    def compile_kernel(
+        self, converter: "FxConverter", line: KernelDefinitionLine
+    ) -> Callable[..., Any]:
+        kernel_code = PythonWrapperCodegen._format_kernel_definition(
+            line.kernel_name, line.kernel_body, metadata=line.metadata
+        )
+        mod = PyCodeCache.load("\n".join([converter.prologue, kernel_code]))
+        kernel = getattr(mod, line.kernel_name)
+        if isinstance(kernel, LambdaFuture):
+            kernel = kernel.result()
+        return kernel
+
+    def mutated_arg_indices(self, line: KernelCallLine) -> tuple[int, ...]:
+        # cpp_argdefs() emits writeable buffers (inplace + output) as 'T*' and
+        # read-only inputs with a leading-const 'const T*'; sizevars have no '*'.
+        # This classification keys on that leading-'const' form and must stay
+        # consistent with what cpp_argdefs() produces.
+        return tuple(
+            i
+            for i, t in enumerate(line.arg_types)
+            if isinstance(t, str) and "*" in t and not t.strip().startswith("const")
+        )
+
+
+register_compiled_kernel_backend(CppCompiledKernelBackend())
 
 
 def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
@@ -307,6 +392,8 @@ class FxConverter:
             str | None, torch.fx.Node
         ] = {}  # Symbol table for codegen.
         self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
+        # Non-Triton compiled kernels: name -> (side-table idx, owning backend).
+        self.compiled_kernels: dict[str, tuple[int, CompiledKernelBackend]] = {}
         self._unique_symbol_ids: Counter[str] = Counter()
         self.tracer = torch.fx.proxy.GraphAppendingTracer(graph)
         self.expr_to_proxy: dict[sympy.Expr, torch.fx.Proxy] = {}
@@ -1342,21 +1429,48 @@ class FxConverter:
     def _generate_kernel_call(self, line: WrapperLine) -> None:
         if not isinstance(line, KernelCallLine):
             raise AssertionError(f"expected KernelCallLine, got {type(line)}")
+        if line.kernel_name in self.compiled_kernels:
+            self._generate_compiled_kernel_call(line)
+            return
         if not line.triton:
             raise NotImplementedError("FX conversion only supports Triton kernels.")
 
         self._generate_triton_call(line)
 
+    def _generate_compiled_kernel_call(self, line: KernelCallLine) -> None:
+        """Emit a compiled_kernel_wrapper_mutation node for a non-Triton compiled
+        kernel. The kernel writes its outputs in place; the owning backend reports
+        which call args it writes."""
+        kernel_idx, backend = self.compiled_kernels[line.kernel_name]
+        self.gm.graph.call_function(
+            compiled_kernel_wrapper_mutation,
+            kwargs={
+                "kernel_idx": kernel_idx,
+                "mutated_arg_indices": tuple(backend.mutated_arg_indices(line)),
+                "args": tuple(self._lookup_args(line.call_args)),
+            },
+        )
+
     def _generate_kernel_definition(self, line: WrapperLine) -> None:
         if not isinstance(line, KernelDefinitionLine):
             raise AssertionError(f"expected KernelDefinitionLine, got {type(line)}")
 
-        # Generate code for the kernel.
+        # A non-Triton compiled kernel (e.g. CPU cpp_fused_*) claimed by a
+        # registered backend: compile it to a callable, store it in the global
+        # side table, and remember the owning backend so the call line can become
+        # a compiled_kernel_wrapper_mutation HOP node with the backend's mutation
+        # rule.
+        backend = _select_compiled_kernel_backend(line)
+        if backend is not None:
+            kernel = backend.compile_kernel(self, line)
+            idx = compiled_kernel_side_table.add_kernel(kernel)
+            self.compiled_kernels[line.kernel_name] = (idx, backend)
+            return
+
+        # Generate code for the Triton kernel, then import and store the JIT kernel.
         kernel_code = PythonWrapperCodegen._format_kernel_definition(
             line.kernel_name, line.kernel_body, metadata=line.metadata
         )
-
-        # Import the module and store the JIT kernel.
         tuner = self._import_kernel(kernel_code, line.kernel_name)
         wrapped = wrap_triton(tuner.fn)
         self.kernels[line.kernel_name] = TritonKernel(tuner, wrapped)
