@@ -5774,10 +5774,18 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
 Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
   auto self_pi = self * M_PI;
   auto self_squared_pi = self * self * M_PI;
-  auto out = grad *
-      ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
-  return at::where(
-      self_squared_pi == 0.0, at::scalar_tensor(0.0, grad.options()), out);
+
+  auto regular =
+      (self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi;
+
+  // Use the Taylor expansion of sinc'(x) near zero:
+  // sinc'(x) = -(pi^2 / 3) * x + O(x^3)
+  auto taylor = -(M_PI * M_PI / 3.0) * self;
+
+  auto out = grad * at::where(
+      self.abs() < 1e-5, taylor, regular).conj();
+
+  return out;
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p

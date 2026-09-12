@@ -1144,6 +1144,14 @@ class TestUnaryUfuncs(TestCase):
         )
         gradcheck(torch.sinc, a)
 
+    def test_sinc_gradgrad_at_zero(self, device):
+        x = torch.tensor(0.0, dtype=torch.double, device=device, requires_grad=True)
+
+        y = torch.sinc(x)
+        grad, = torch.autograd.grad(y, x, create_graph=True)
+        gradgrad, = torch.autograd.grad(grad, x)
+
+        self.assertEqual(gradgrad, -torch.pi**2 / 3)
     # The order-1 Bessel gradients are indeterminate at x = 0 as written: 0/0 for
     # j1/i1 (limit 1/2) and (-inf) - (-inf) for y1 (limit +inf). OpInfo sample
     # generation does not reliably emit exact zeros, and y1's domain floors samples
