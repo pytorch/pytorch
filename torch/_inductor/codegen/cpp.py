@@ -69,6 +69,8 @@ from .common import (
 from .cpp_utils import (
     _get_dtype_from_loopbodies,
     _get_loop_body,
+    capture_exceptions_in_parallel_region,
+    catch_exceptions_inside_parallel_region,
     cexpr,
     cexpr_index,
     codegen_rand,
@@ -78,6 +80,7 @@ from .cpp_utils import (
     INDEX_TYPE,
     LocalBufferContext,
     may_unify_binary_op_mask_type,
+    ParallelExceptionCapture,
     promote_args,
     template_fusion_with_epilogues_supported,
     unify_mask_base_type,
@@ -2110,6 +2113,10 @@ class CppKernel(Kernel):
         # Indicate when this kernel is active, for example
         # {x0, {24, 26}} -> this kernel is active when x0 >= 24 and x0 < 26
         self.active_ranges: dict[sympy.Expr, tuple[sympy.Expr, ...]] = {}
+        # Set when this kernel emits something that can throw (a bounds check).
+        # Only such kernels need the OpenMP exception plumbing; see
+        # ParallelExceptionCapture and pytorch#195402.
+        self._may_throw = False
         # Indicate this kernel will be moved under the inner for-loop
         # See move_code_under_inner_loop
         self.inner_itervars: list[sympy.Symbol] = []
@@ -2306,6 +2313,7 @@ class CppKernel(Kernel):
         line = self.indirect_assert(
             csevar, "0" if lower else None, size_str, self._load_mask
         )
+        self._may_throw = True
         self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
@@ -2584,6 +2592,16 @@ class CppKernel(Kernel):
         return V.graph.sizevars.optimization_hint(expr)
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
+        """Emit the C++ loop nest around this kernel's body.
+
+        Decides how deep to parallelize, opens or reuses the OpenMP region via
+        `worksharing`, then walks the nest emitting loops, reduction
+        prefixes/suffixes and finally the kernel body at the leaf.
+
+        Loops carrying a throwing bounds check are wrapped in a try/catch so
+        the exception cannot escape the OpenMP region; see
+        ParallelExceptionCapture and pytorch#195402.
+        """
         if not isinstance(self, CppKernelProxy):
             raise AssertionError("expected isinstance(self, CppKernelProxy)")
         threads = parallel_num_threads()
@@ -2613,6 +2631,16 @@ class CppKernel(Kernel):
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
+                    # `omp single` still sits inside the enclosing parallel
+                    # region, so a throw here would escape it too.  The region
+                    # was opened by an earlier kernel in this group, which is
+                    # why its declarations are deferred rather than decided
+                    # when it was opened.
+                    capture = worksharing.exception_capture
+                    if capture is not None and loop_nest.get_kernel().may_throw():
+                        stack.enter_context(
+                            catch_exceptions_inside_parallel_region(code, capture)
+                        )
 
             def gen_kernel(_loop_nest: LoopNest):
                 def is_parallel_reduction():
@@ -2699,6 +2727,15 @@ class CppKernel(Kernel):
                         return
                     code.writelines(loop_lines)
                     stack.enter_context(code.indent())
+                    if loop.catch_exception:
+                        capture = worksharing.exception_capture
+                        if capture is None:
+                            raise AssertionError(
+                                "expected an open parallel region around a guarded loop"
+                            )
+                        stack.enter_context(
+                            catch_exceptions_inside_parallel_region(code, capture)
+                        )
                     gen_loop_nest(_loop_nest, depth + 1, loop.is_reduction)
 
             def gen_loop_nest(
@@ -2749,6 +2786,10 @@ class CppKernel(Kernel):
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
+
+    def may_throw(self) -> bool:
+        """Whether the body generated for this kernel contains a throwing check."""
+        return self._may_throw
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         if self.call_ranges is None:
@@ -4961,6 +5002,11 @@ class CppKernelProxy(CppKernel):
         for kernel in self.kernels:
             kernel.update_stores_with_parallel_reduction()
 
+    def may_throw(self) -> bool:
+        # The bounds check is emitted while running the body under one of the
+        # sub-kernels, so the flag lands there rather than on the proxy.
+        return self._may_throw or any(kernel.may_throw() for kernel in self.kernels)
+
     def gen_body(self, code: BracesBuffer | None = None):
         if code is None:
             raise AssertionError("expected code is not None")
@@ -5069,6 +5115,11 @@ class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: list[LoopNest] = []
+
+    def may_throw(self) -> bool:
+        return self._may_throw or any(
+            loop_nest.get_kernel().may_throw() for loop_nest in self.inner
+        )
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         kernels_parallel_depth = []
@@ -6186,6 +6237,11 @@ class WorkSharing:
         self.in_parallel = False
         self.num_threads = None
         self.stack = contextlib.ExitStack()
+        # Exception plumbing for the region currently open, if any.  Guards
+        # emitted inside the region are handed this so they can name its
+        # variables and mark it as actually needed.
+        self.exception_capture: ParallelExceptionCapture | None = None
+        self.num_regions = 0
 
     def parallel(self, threads):
         if self.in_parallel and threads != self.num_threads:
@@ -6206,6 +6262,13 @@ class WorkSharing:
                 # Thread count differs from system (user probably set it so hardcode)
                 use_dynamic = False
 
+            # The declarations are emitted in the enclosing scope, so name them
+            # per region: a function may contain more than one.  They are
+            # deferred lines and disappear entirely if no guard is emitted.
+            self.exception_capture = self.stack.enter_context(
+                capture_exceptions_in_parallel_region(self.code, f"_{self.num_regions}")
+            )
+            self.num_regions += 1
             if use_dynamic or config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
             else:
@@ -6223,6 +6286,7 @@ class WorkSharing:
     def close(self):
         self.stack.close()
         self.in_parallel = False
+        self.exception_capture = None
 
     def __enter__(self):
         self.stack.__enter__()
@@ -6248,6 +6312,8 @@ class LoopLevel:
     tiled_size: sympy.Expr = sympy.S.Zero
     steps: sympy.Expr = sympy.S.One
     parallel: int = 0
+    # guard this loop's body so a throw cannot escape the OpenMP region
+    catch_exception: bool = False
     simd_omp: bool = False
     simd_vec: bool = False
     collapsed: bool = False
@@ -6439,6 +6505,13 @@ class LoopNest:
             raise AssertionError("expected len(self.loops) >= par_depth.parallel_depth")
         loop = self.loops[par_depth.start_depth]
         loop.parallel = par_depth.parallel_depth
+        if self.get_kernel().may_throw():
+            # collapse(n) needs the n loops perfectly nested, so the guard has to
+            # go in the innermost one rather than around the whole nest.
+            innermost_parallel = max(
+                par_depth.start_depth, par_depth.parallel_depth - 1
+            )
+            self.loops[innermost_parallel].catch_exception = True
         if loop.is_reduction:
             # pyrefly: ignore [bad-assignment]
             metrics.parallel_reduction_count += 1
