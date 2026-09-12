@@ -4344,6 +4344,76 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertFalse(dv.isnan().any())
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    @onlyCUDA
+    @unittest.skipIf(not isSM90Device, "requires SM90")
+    def test_cudnn_attention_low_lse_bprop_gate_196678(self, device):
+        # https://github.com/pytorch/pytorch/issues/196678
+        cudnn_version = torch.backends.cudnn.version() or 0
+
+        def can_use(seq_kv, *, is_causal=False, query_requires_grad=True):
+            query = torch.randn(
+                1, 1, 64, 64,
+                device=device,
+                dtype=torch.float16,
+                requires_grad=query_requires_grad,
+            )
+            key = torch.randn(1, 1, seq_kv, 64, device=device, dtype=torch.float16, requires_grad=True)
+            value = torch.randn(1, 1, seq_kv, 64, device=device, dtype=torch.float16, requires_grad=True)
+            params = SDPAParams(query, key, value, None, 0.0, is_causal, False)
+            return torch.backends.cuda.can_use_cudnn_attention(params)
+
+        # The affected shape must be rejected before 9.26. Adjacent sequence
+        # lengths, causal attention, and forward-only queries remain eligible.
+        self.assertEqual(can_use(64), cudnn_version >= 92600)
+        self.assertTrue(can_use(63))
+        self.assertTrue(can_use(65))
+        self.assertTrue(can_use(64, is_causal=True))
+        self.assertTrue(can_use(64, query_requires_grad=False))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    @onlyCUDA
+    @unittest.skipIf(not isSM90Device, "requires SM90")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("mask_type", ["none", "bool", "float"])
+    @parametrize("seq_len", [64, 704])
+    def test_cudnn_attention_low_lse_mask_grad_196678(self, device, dtype, mask_type, seq_len):
+        # https://github.com/pytorch/pytorch/issues/196678
+        head_dim = 64
+        shape = (1, 1, seq_len, head_dim)
+        q = torch.randn(shape, device=device, dtype=dtype) * 0.1
+        k = torch.randn(shape, device=device, dtype=dtype) * 0.1
+        v = torch.randn(shape, device=device, dtype=dtype)
+        q[..., 0] = 1.0
+        k[..., 0] = -120 * math.sqrt(head_dim)
+        q.requires_grad_()
+        k.requires_grad_()
+        v.requires_grad_()
+        if mask_type == "none":
+            mask = None
+        elif mask_type == "bool":
+            mask = torch.ones(seq_len, seq_len, device=device, dtype=torch.bool)
+        else:
+            mask = torch.zeros(seq_len, seq_len, device=device, dtype=dtype)
+
+        cudnn_version = torch.backends.cudnn.version() or 0
+        params = SDPAParams(q, k, v, mask, 0.0, False, False)
+        self.assertEqual(
+            torch.backends.cuda.can_use_cudnn_attention(params),
+            cudnn_version >= 92600,
+        )
+        backend_context = (
+            sdpa_kernel(SDPBackend.CUDNN_ATTENTION)
+            if cudnn_version >= 92600
+            else contextlib.nullcontext()
+        )
+        with backend_context:
+            out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        grads = torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+
+        for name, result in zip(("output", "grad_q", "grad_k", "grad_v"), (out, *grads)):
+            self.assertTrue(result.isfinite().all(), f"{name} contains non-finite values")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_mask_broken_177842(self):
         # https://github.com/pytorch/pytorch/issues/177842
         q = torch.randn(1, 10, 8, 8, dtype=torch.bfloat16, device='cuda')
