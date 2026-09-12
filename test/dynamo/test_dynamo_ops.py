@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
     skip,
     skipOps,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.common_methods_invocations import op_db
 
 
@@ -54,6 +55,8 @@ class TestTensorMetaProp(torch._dynamo.test_case.TestCase):
     """
     Test that inplace operations correctly propagate tensor metadata during Dynamo tracing.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @ops([op for op in op_db if op.get_inplace() is not None])
     @skipOps(test_inplace_ops_propagate_requires_grad_metadata_skips)
