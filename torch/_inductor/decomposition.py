@@ -504,6 +504,11 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    # A zero scalar means its operand is ignored entirely, so NaN/inf in it must
+    # not propagate, which multiplying by zero cannot guarantee.
+    if beta == 0 or alpha == 0:
+        return NotImplemented
+
     def add_input(out: torch.Tensor) -> torch.Tensor:
         if alpha != 1:
             out = alpha * out
@@ -512,8 +517,6 @@ def addmm(
         return out + self
 
     if mat1.device.type not in ["cpu", "mps"]:
-        if beta == 0 and mat1.device.type == "cuda":
-            return NotImplemented
         if (
             statically_known_true(mat1.size(-1) == 1)
             and statically_known_true(mat1.size(0) != 1)
