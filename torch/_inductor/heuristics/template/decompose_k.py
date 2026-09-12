@@ -13,6 +13,7 @@ from ...ir import get_free_symbols
 from ...kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     decompose_k_subgraph_template,
+    get_cat2_fp32_prologue_sources,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...utils import get_k_splits, use_triton_blackwell_tma_template
@@ -108,9 +109,12 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # dynamic dimensions must be specialized explicitly. Unbacked symbols
         # were rejected above.
         m_hint, n_hint, k_hint = V.graph.sizevars.guard_int_seq((m, n, k))
-        config_indices = [0, 3]
-        if m_hint > 128:
-            config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
+        if get_cat2_fp32_prologue_sources(mat2) is not None:
+            config_indices = [6]
+        else:
+            config_indices = [0, 3]
+            if m_hint > 128:
+                config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
 
         for k_split in exact_k_splits:
             for config_index in config_indices:
