@@ -16,6 +16,8 @@ import torch
 from torch._higher_order_ops import flex_gemm
 from torch._higher_order_ops.flex_gemm import _SUPPORTED_FLEX_GEMM_OP_NAMES
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
+from torch._inductor import config as inductor_config
+from torch._inductor.exc import InductorError
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import is_fake
@@ -282,7 +284,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         def build(dtype):
             return runtime.flex_gemm_epimod(
                 epilogue_fn,
-                (torch.empty(1, 8, dtype=dtype),),
+                (dtype,),
                 ("row",),
                 0,
                 None,
@@ -293,6 +295,100 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             fp32 = build(torch.float32)
             self.assertIs(fp32, build(torch.float32))
             self.assertIsNot(fp32, build(torch.bfloat16))
+
+    @staticmethod
+    def searchSpaceKey(
+        tile_m,
+        tile_n,
+        cluster_m,
+        cluster_n,
+        dynamic,
+        *,
+        swap_ab=False,
+        device_capacity=10,
+    ):
+        fields = dict(
+            tile_m=tile_m,
+            tile_n=tile_n,
+            cluster_m=cluster_m,
+            cluster_n=cluster_n,
+            is_dynamic_persistent=dynamic,
+            swap_ab=swap_ab,
+            pingpong=False,
+            device_capacity=device_capacity,
+            tile_k=None,
+            num_warps=None,
+            cluster_k=1,
+            split_k=1,
+            max_swizzle_size=8,
+            use_tma_gather=False,
+        )
+        return tuple(sorted(fields.items()))
+
+    def test_flex_gemm_search_space(self):
+        from torch._inductor.heuristics.template.flex_gemm import flex_gemm_search_space
+
+        key = self.searchSpaceKey
+        default = key(256, 256, 2, 1, True)
+        legal = (
+            default,
+            key(128, 32, 1, 1, True),
+            key(128, 128, 1, 1, False),
+            key(128, 256, 2, 1, True, swap_ab=True),
+            key(128, 256, 2, 1, True),
+        )
+        self.assertEqual(
+            flex_gemm_search_space(legal),
+            (key(128, 256, 2, 1, True), default, key(128, 128, 1, 1, False)),
+        )
+        with inductor_config.patch(max_autotune_gemm_search_space="EXHAUSTIVE"):
+            self.assertEqual(flex_gemm_search_space(legal), legal)
+
+        no_match = (
+            key(128, 256, 2, 1, True, swap_ab=True),
+            key(128, 32, 1, 1, True),
+        )
+        self.assertEqual(flex_gemm_search_space(no_match), no_match)
+        odd_default = (
+            key(128, 32, 1, 1, True),
+            key(128, 128, 1, 1, False),
+        )
+        self.assertEqual(flex_gemm_search_space(odd_default), odd_default)
+        sm120 = tuple(
+            key(128, tile_n, 1, 1, True, device_capacity=12)
+            for tile_n in range(16, 256 + 1, 16)
+        )
+        self.assertEqual(flex_gemm_search_space(sm120), sm120[:12])
+
+    def test_flex_gemm_dense_default_config_by_shape(self):
+        from torch._inductor.heuristics.template.flex_gemm import (
+            flex_gemm_default_config,
+        )
+
+        key = self.searchSpaceKey
+        quack_default = key(256, 256, 2, 1, True)
+        default, skinny = key(128, 256, 2, 1, True), key(128, 192, 2, 1, True)
+        large_rect, large = quack_default, key(256, 256, 2, 2, True)
+        legal = (quack_default, key(128, 32, 1, 1, True), large, skinny, default)
+        cases = {
+            (256, 4096): skinny,
+            (1024, 1024): skinny,
+            (4096, 768): large,
+            (4096, 1024): large_rect,
+            (2048, 2048): large,
+            (1024, 2048): default,
+        }
+        for shape, expected in cases.items():
+            with self.subTest(shape=shape):
+                self.assertEqual(
+                    flex_gemm_default_config(legal, dense_shape=shape), expected
+                )
+        self.assertEqual(flex_gemm_default_config(legal), quack_default)
+        # Unranked legal sets keep QuACK's default.
+        unranked = (quack_default, key(128, 32, 1, 1, True))
+        self.assertEqual(
+            flex_gemm_default_config(unranked, dense_shape=(256, 256)), quack_default
+        )
 
     @parametrize(
         "reduction_type",
@@ -1011,19 +1107,16 @@ class FlexGemmTestCase(TestCase):
 
     @contextlib.contextmanager
     def limitEpiModAutotune(self):
-        """Limit tests after production legality pruning has selected candidates."""
-        import torch._vendor.quack.gemm_runtime.autotune as epi_autotune
+        """Limit tests after production search-space selection."""
+        from torch._inductor.kernel.flex_gemm import lowering
 
-        prune = epi_autotune._prune_for_mod
+        search_space = lowering.flex_gemm_search_space
 
-        def limited_prune(*args, **kwargs):
-            return prune(*args, **kwargs)[:2]
+        def limited_search_space(configs):
+            return search_space(configs)[:2]
 
-        with (
-            mock.patch.object(
-                epi_autotune, "_prune_for_mod", side_effect=limited_prune
-            ),
-            mock.patch.object(epi_autotune, "_MOD_TUNERS", {}),
+        with mock.patch.object(
+            lowering, "flex_gemm_search_space", side_effect=limited_search_space
         ):
             yield
 
@@ -1058,8 +1151,9 @@ class FlexGemmTestCase(TestCase):
             FileCheck()
             .check("from torch._inductor.kernel.flex_gemm.runtime import (")
             .check("gemm_epilogue as flex_gemm_epilogue")
+            .check("@cute.jit")
             .check("flex_gemm_epilogue(")
-            .check("tuned=")
+            .check("config=((")
             .check("stream=stream")
             .check_not("config_key=")
             .check_not("epilogue_source=")
@@ -1297,10 +1391,11 @@ class TestFlexGemmAnalysis(TestCase):
         with self.assertRaisesRegex(RuntimeError, "local_reduce_out"):
             FlexGemmRuntimeLocalReducePlan(axis0, combine="add")
         with self.assertRaisesRegex(RuntimeError, "require a combine"):
-            FlexGemmRuntimeLocalReducePlan(axis0, out=torch.empty(1))
+            FlexGemmRuntimeLocalReducePlan(axis0, stores=True, out=torch.empty(1))
         with self.assertRaisesRegex(RuntimeError, "prepass finalizers"):
             FlexGemmRuntimeLocalReducePlan(
                 axis0,
+                stores=True,
                 out=torch.empty(1),
                 combine="add",
                 prepass_finalize="mean",
@@ -1312,7 +1407,9 @@ class TestFlexGemmAnalysis(TestCase):
             prepass=lambda acc: {"local_reduce0": acc},
             prepass_combine="add",
         )
-        FlexGemmRuntimeLocalReducePlan(axis0, out=torch.empty(1), combine="max")
+        FlexGemmRuntimeLocalReducePlan(
+            axis0, stores=True, out=torch.empty(1), combine="max"
+        )
 
     @parametrize(
         "case",
@@ -1727,6 +1824,256 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_flex_gemm_route_uses_only_vendored_quack(self):
+        # A pip `quack` may be installed; the fused route must not load it.
+        script = (
+            "import sys, torch\n"
+            "from torch._higher_order_ops.flex_gemm import flex_gemm\n"
+            "a = torch.randn(64, 32, device='cuda', dtype=torch.bfloat16)\n"
+            "b = torch.randn(32, 64, device='cuda', dtype=torch.bfloat16)\n"
+            "fn = torch.compile(lambda a, b: flex_gemm(torch.mm, (a, b), torch.relu,"
+            " kernel_options={'backend': 'QUACK', 'tuned': True}), fullgraph=True)\n"
+            "fn(a, b)\n"
+            "assert 'quack' not in sys.modules, 'pip quack was imported'\n"
+            "assert 'cloudpickle' not in sys.modules, 'cloudpickle was imported'\n"
+        )
+        subprocess.run([sys.executable, "-c", script], check=True, timeout=900)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @inductor_config.patch(force_disable_caches=True)
+    def test_tuned_winner_is_not_recompiled_by_final_wrapper(self):
+        # QuACK keys compiled kernels by the epilogue function's module; the
+        # benchmark and output-code modules can differ, so the selected kernel
+        # must carry a stable identity or it compiles a second time. Force a
+        # distinct module per kernel load to make the mismatch deterministic:
+        # every candidate and the final wrapper must present one EpiMod digest.
+        import torch._vendor.quack.gemm_runtime.host as quack_host
+        from torch._inductor.codecache import PyCodeCache
+
+        digests: list[str] = []
+        original_compile = quack_host._compile_gemm_epi
+        original_write = PyCodeCache.write.__func__
+
+        def recording_compile(gemm_cls_ref, *args, **kwargs):
+            digests.append(gemm_cls_ref.semantic_digest)
+            return original_compile(gemm_cls_ref, *args, **kwargs)
+
+        def unique_write(cls, source_code, extra=""):
+            return original_write(cls, source_code, extra + str(id(source_code)))
+
+        a = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(128, 256, device="cuda", dtype=torch.bfloat16)
+        fn = torch.compile(
+            lambda a, b: flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            ),
+            fullgraph=True,
+        )
+        with (
+            mock.patch.object(quack_host, "_compile_gemm_epi", recording_compile),
+            mock.patch.object(PyCodeCache, "write", classmethod(unique_write)),
+        ):
+            fn(a, b)
+            torch.cuda.synchronize()
+        self.assertGreater(len(digests), 2)
+        self.assertEqual(len(set(digests)), 1)
+
+    def _tuned_compile_with_worker_pool(self, fn, *args):
+        """Compile ``fn`` tuned on cold caches.
+
+        Returns (submitted key -> worker state, in-process EpiMod compile count).
+        """
+        import traceback
+
+        import torch._vendor.quack.gemm_runtime.host as quack_host
+        import torch._vendor.quack.gemm_tvm_ffi_utils as tvm_ffi_utils
+        from torch._inductor.kernel.flex_gemm import compile_pool
+        from torch._inductor.utils import fresh_cache
+
+        in_process = []
+        original_compile = tvm_ffi_utils.cute.compile
+
+        def recording_compile(*compile_args, **kwargs):
+            if any(f.name == "_compile_gemm_epi" for f in traceback.extract_stack()):
+                in_process.append(None)
+            return original_compile(*compile_args, **kwargs)
+
+        states = {}
+        original_wait = compile_pool.InductorCompilePool.wait
+
+        def recording_wait(pool, sha):
+            succeeded = original_wait(pool, sha)
+            states[sha] = pool.poll(sha)[0]
+            return succeeded
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        # fresh_cache moves QuACK's .o cache (it lives under the Inductor cache
+        # dir); QuACK's in-memory jit cache must be cleared separately.
+        quack_host._compile_gemm_epi.cache_clear()
+        compile_pool.workers_ready.cache_clear()
+        self.addCleanup(compile_pool.workers_ready.cache_clear)
+        with (
+            fresh_cache(),
+            mock.patch.object(tvm_ffi_utils.cute, "compile", recording_compile),
+            mock.patch.object(compile_pool.InductorCompilePool, "wait", recording_wait),
+        ):
+            result = compiled(*args)
+            torch.cuda.synchronize()
+        torch.testing.assert_close(result, fn(*args), atol=0.1, rtol=0.05)
+        return states, len(in_process)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_tuned_candidates_compile_in_workers(self):
+        # Every candidate's QuACK kernel compiles in an Inductor compile worker
+        # from the shipped recipe (NOTE [FlexGEMM compile workers]); the main
+        # process only loads the .o files. A digest mismatch in the worker would
+        # fall back to in-process compiles, which the count catches. The
+        # compressed local reduction exercises generated combine/finalize
+        # callbacks in the rebuilt EpiMod.
+        from torch._inductor.async_compile import AsyncCompile
+
+        if not AsyncCompile.wait_process_pool_ready():
+            self.skipTest("Inductor compile worker pool unavailable")
+        m, k, n, group = 256, 128, 256, 32
+
+        def epilogue_fn(acc):
+            return torch.relu(acc), acc.float().view(m, -1, group).abs().amax(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        states, in_process = self._tuned_compile_with_worker_pool(fn, a, b)
+        self.assertGreater(len(states), 1)
+        self.assertEqual(set(states.values()), {"done"})
+        self.assertEqual(in_process, 0)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("failure", ["no_pool", "submit_raises"])
+    def test_tuned_candidates_compile_in_process_without_workers(self, failure):
+        # No worker pool, or a pool whose submission raises, compiles in-process.
+        from torch._inductor.async_compile import AsyncCompile
+
+        a = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(128, 256, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        if failure == "no_pool":
+            patch = mock.patch.object(
+                AsyncCompile, "wait_process_pool_ready", return_value=False
+            )
+        else:
+            if not AsyncCompile.wait_process_pool_ready():
+                self.skipTest("Inductor compile worker pool unavailable")
+            from torch._inductor.kernel.flex_gemm import compile_pool
+
+            process_pool = AsyncCompile.process_pool()
+            original_submit = type(process_pool).submit
+
+            def failing_submit(self, job_fn, *args, **kwargs):
+                if job_fn is compile_pool._compile_in_worker:
+                    raise OSError("pipe")
+                return original_submit(self, job_fn, *args, **kwargs)
+
+            patch = mock.patch.object(type(process_pool), "submit", failing_submit)
+        with patch:
+            states, in_process = self._tuned_compile_with_worker_pool(fn, a, b)
+        self.assertEqual(states, {})
+        self.assertGreater(in_process, 1)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_tuned_candidates_fall_back_when_worker_fails(self):
+        # A worker that cannot rebuild the EpiMod (digest mismatch) reports
+        # failure; the choice then compiles in-process and stays selectable.
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.kernel.flex_gemm import compile_pool
+
+        if not AsyncCompile.wait_process_pool_ready():
+            self.skipTest("Inductor compile worker pool unavailable")
+        original_submit = compile_pool.InductorCompilePool.submit
+
+        def corrupt_submit(self, sha, fn, args, kwargs, o_path):
+            args = (args[0]._replace(semantic_digest="0" * 64), *args[1:])
+            return original_submit(self, sha, fn, args, kwargs, o_path)
+
+        a = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(128, 256, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.sigmoid,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        with (
+            mock.patch.object(
+                compile_pool.InductorCompilePool, "submit", corrupt_submit
+            ),
+            self.assertLogs(compile_pool.log, level="WARNING") as logs,
+        ):
+            states, in_process = self._tuned_compile_with_worker_pool(fn, a, b)
+        self.assertGreater(len(states), 1)
+        self.assertEqual(set(states.values()), {"failed"})
+        self.assertEqual(in_process, len(states))
+        self.assertTrue(all("compiling in-process" in line for line in logs.output))
+
+    @skipIfNoCuteDSL
+    def test_quack_pool_active_is_thread_local(self):
+        import threading
+
+        from torch._vendor.quack.cache import async_compile as quack_async
+
+        pool = object()
+        seen_by_other_thread = []
+        inside = threading.Event()
+        release = threading.Event()
+
+        def other_thread():
+            inside.wait()
+            seen_by_other_thread.append(quack_async.get_active_pool())
+            release.set()
+
+        thread = threading.Thread(target=other_thread)
+        thread.start()
+        with quack_async.pool_active(pool):
+            self.assertIs(quack_async.get_active_pool(), pool)
+            inside.set()
+            release.wait()
+            with quack_async.suppress_pool():
+                self.assertIsNone(quack_async.get_active_pool())
+        thread.join()
+        self.assertEqual(seen_by_other_thread, [None])
+        self.assertIsNone(quack_async.get_active_pool())
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_compiled_uses_current_stream(self):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
@@ -1894,34 +2241,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_output_contraction_rejects_unsafe_explicit_config(self):
-        m, n, k, group = 128, 128, 64, 2
-
-        def epilogue_fn(acc):
-            grouped = acc.view(m, n // group, group)
-            return grouped.select(-1, 0) + grouped.select(-1, 1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={
-                    "backend": "QUACK",
-                    "config": {"tile_n": 256},
-                },
-            )
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        with self.assertRaisesRegex(
-            Exception, "no supported GemmConfig matches config_constraints"
-        ):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_alpha_clamp_compiled_matches_reference(self):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
@@ -2003,6 +2322,37 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     epilogue_fn(a.double() @ b.double()),
                     a.shape[1],
                 )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_dynamic_n_guards_alignment(self):
+        # The pinned config was selected from the first N; an unaligned N must
+        # recompile and reject swap_ab instead of launching the pinned kernel.
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": {"swap_ab": True}},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        for n in (128, 136):
+            b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+            self.assertMatchesLowPrecisionEager(
+                compiled(a, b),
+                epilogue_fn(a @ b),
+                epilogue_fn(a.double() @ b.double()),
+                a.shape[1],
+            )
+        b = torch.randn(64, 129, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(InductorError, "config_constraints.*swap_ab"):
+            compiled(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -2858,6 +3208,37 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_output_contraction_dynamic_n_guards_tile_n(self):
+        # GroupedMainStore requires tile_n <= physical N. A pinned tile_n=256
+        # selected at N=512 must not be reused when N shrinks below it.
+        m = k = 64
+
+        def epilogue_fn(acc):
+            lanes = acc.view(m, -1, 2)
+            return lanes[..., 0] - lanes[..., 1]
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": {"tile_n": 256}},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for index, physical_n in enumerate((512, 256)):
+            b = torch.randn(k, physical_n, device="cuda", dtype=torch.float16)
+            if index == 0:
+                torch._dynamo.mark_dynamic(b, 1)
+            torch.testing.assert_close(compiled(a, b), fn(a, b), atol=0.2, rtol=0.05)
+        b = torch.randn(k, 128, device="cuda", dtype=torch.float16)
+        with self.assertRaisesRegex(InductorError, "config_constraints.*tile_n"):
+            compiled(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("split_size", (64, 128))
     def test_mm_output_contraction_specializes_split_size(self, split_size):
         torch._dynamo.reset()
@@ -3643,7 +4024,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         from torch._higher_order_ops.inline_asm_elementwise import (
             inline_asm_elementwise,
         )
-        from torch._inductor.exc import InductorError
 
         _, pack, constraints, error = case
 
@@ -4338,7 +4718,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(
             aux, epilogue_fn(high_precision_acc)[1].float(), atol=1e-3, rtol=1e-3
         )
-        FileCheck().check("tuned=True").run(code)
+        FileCheck().check("config=((").run(code)
         self.assertLocalReduceAuxCode(code, group)
 
     @skipIfNoCuteDSL
@@ -5789,7 +6169,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             high_precision_fn(a.double() @ b.double()),
             a.shape[1],
         )
-        FileCheck().check("tuned=True").check(
+        FileCheck().check("config=((").check(
             "local_reduce=FlexGemmRuntimeLocalReducePlan"
         ).check(self.localReduceGeometryPattern(group, 1)).check(
             "feeds_main=True"
@@ -6894,7 +7274,7 @@ class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
         self.assertTrue(dw.is_contiguous())
         self.assertEqual(dw.stride(), expected[2].stride())
         self.assertEqual(dw.shape, (n, m // group))
-        FileCheck().check("tuned=True").check(
+        FileCheck().check("config=((").check(
             "output_layout=flex_gemm_output_layout.TRANSPOSED"
         ).check_not("extern_kernels.mm").run(code)
         self.assertLocalReduceAuxCode(code, group, axis=0)
@@ -7176,7 +7556,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertIn("gemm_epilogue as flex_gemm_epilogue", code)
-        self.assertIn(f"config_constraints={tuple(sorted(config_key))!r}", code)
+        self.assertIn(f"config={tuple(sorted(config_key))!r}", code)
 
     @parametrize("tuned", (False, True))
     def test_mm_partial_config_matches_reference(self, device, tuned):
@@ -7216,11 +7596,13 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertIn("gemm_epilogue as flex_gemm_epilogue", code)
-        self.assertIn("config_constraints=", code)
         for item in pinned.items():
             self.assertIn(repr(item), code)
 
-    def test_mm_emits_flex_gemm_debug_report(self, device):
+    @parametrize(
+        "tuned", (False, True), name_fn=lambda tuned: "tuned" if tuned else "untuned"
+    )
+    def test_mm_emits_flex_gemm_debug_report(self, device, tuned):
         import logging
 
         from torch._inductor.kernel.flex_gemm.debug import flex_gemm_log
@@ -7230,12 +7612,15 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 torch.relu,
-                kernel_options={"backend": "QUACK"},
+                kernel_options={"backend": "QUACK", "tuned": tuned},
             )
 
         a = torch.randn(128, 64, device=device, dtype=torch.bfloat16)
         b = torch.randn(64, 128, device=device, dtype=torch.bfloat16)
-        with self.assertLogs(flex_gemm_log, level="DEBUG") as records:
+        with (
+            self.limitEpiModAutotune(),
+            self.assertLogs(flex_gemm_log, level="DEBUG") as records,
+        ):
             actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
         self.assertEqual(actual, torch.relu(a @ b))
 
@@ -7248,13 +7633,14 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             " ===== PROBLEM =====",
             " ===== ANALYSIS =====",
             " ===== LOWERING PLAN =====",
-            " ===== SELECTION =====",
+            " ===== CONFIG CANDIDATES =====",
         )
         positions = tuple(concise.index(phase) for phase in phases)
         self.assertEqual(positions, tuple(sorted(positions)))
         self.assertIn("gemm_op: aten.mm.default", concise)
         self.assertIn("outputs:\n  main: relu", concise)
-        self.assertIn("native config selection: QuACK-owned", concise)
+        self.assertIn(f"mode: {'autotune' if tuned else 'default'}", concise)
+        self.assertIn(f"candidates: {2 if tuned else 1}", concise)
         self.assertNotIn("GENERATED EPILOGUE", concise)
 
         verbose = "\n".join(
@@ -7586,7 +7972,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(blocked, expected_blocked)
         self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
-        self.assertIn("tuned=True", code)
+        self.assertIn("config=((", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_tuple_aux_blocked_output_dynamic_shapes(self, device):
@@ -7772,7 +8158,6 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             )
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
-        self.assertIn("@cute.jit", code)
         self.assertIn("('swap_ab', True)", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
@@ -7823,18 +8208,53 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         )
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
-        self.assertIn("@cute.jit", code)
         self.assertIn("('swap_ab', True)", code)
         self.assertIn(f"group={group}", code)
 
-    def test_mm_swap_ab_rejects_unaligned_n(self, device):
-        m, n = 128, 293
+    @parametrize(
+        "case",
+        (
+            ("unaligned_n", 293, "relu", "no .*config_constraints.*swap_ab"),
+            (
+                "local_n_reduce_feed_main",
+                128,
+                "n_feed_main",
+                "no .*config_constraints.*swap_ab",
+            ),
+            (
+                "local_m_reduce",
+                128,
+                "m_reduce",
+                "no supported GemmConfig matches config_constraints",
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_swap_ab_rejects_unsupported_epilogue(self, device, case):
+        _, n, kind, error = case
+        m, group = 128, 16
+
+        def relu(acc):
+            return acc.float().relu()
+
+        def n_feed_main(acc):
+            x = acc.float().view(m, -1, group)
+            return (x * (x.sum(-1, keepdim=True) + 1.0)).view(m, n)
+
+        def m_reduce(acc):
+            return acc.relu(), acc.float().view(-1, group, n).sum(1)
+
+        epilogue_fn = {
+            "relu": relu,
+            "n_feed_main": n_feed_main,
+            "m_reduce": m_reduce,
+        }[kind]
 
         def fn(a, b):
             return flex_gemm(
                 torch.mm,
                 (a, b),
-                lambda acc: acc.float().relu(),
+                epilogue_fn,
                 kernel_options={
                     "backend": "QUACK",
                     "config": {"swap_ab": True},
@@ -7843,7 +8263,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
         a = self.makeTensor(m, 64, device=device)
         b = self.makeTensor(64, n, device=device)
-        with self.assertRaisesRegex(ValueError, "no .*config_constraints.*swap_ab"):
+        with self.assertRaisesRegex(InductorError, error):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     def test_mm_tuned_swap_candidate_captured_args_matches_reference(self, device):
@@ -7875,11 +8295,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         b = self.makeTensor(64, n, device=device)
         row = self.makeTensor(1, n, device=device, dtype=torch.float32)
         col = self.makeTensor(m, 1, device=device, dtype=torch.float32)
-        with (
-            mock.patch.object(
-                epi_autotune, "_config_space", return_value=(swap_config,)
-            ),
-            mock.patch.object(epi_autotune, "_MOD_TUNERS", {}),
+        with mock.patch.object(
+            epi_autotune, "_config_space", return_value=(swap_config,)
         ):
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True),
@@ -7894,58 +8311,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             epilogue_fn(a.double() @ b.double(), row.double(), col.double()),
             a.shape[1],
         )
-        self.assertIn("tuned=True", code)
-
-    def test_mm_swap_ab_rejects_local_n_reduce_feed_main(self, device):
-        m = n = 128
-        group = 16
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            scale = x.sum(-1, keepdim=True) + 1.0
-            return (x * scale).view(m, n)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={
-                    "backend": "QUACK",
-                    "config": {"swap_ab": True},
-                },
-            )
-
-        a = self.makeTensor(m, 64, device=device)
-        b = self.makeTensor(64, n, device=device)
-        with self.assertRaisesRegex(ValueError, "no .*config_constraints.*swap_ab"):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-
-    def test_mm_swap_ab_rejects_local_m_reduce(self, device):
-        m = n = 128
-        group = 16
-
-        def epilogue_fn(acc):
-            x = acc.float().view(-1, group, n)
-            return acc.relu(), x.sum(1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={
-                    "backend": "QUACK",
-                    "config": {"swap_ab": True},
-                },
-            )
-
-        a = self.makeTensor(m, 64, device=device)
-        b = self.makeTensor(64, n, device=device)
-        with self.assertRaisesRegex(
-            ValueError, "no supported GemmConfig matches config_constraints"
-        ):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        self.assertIn("config=((", code)
+        self.assertIn("('swap_ab', True)", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize("group", (64, 128))
@@ -7987,7 +8354,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
         self.assertLocalReduceAuxCode(code, group)
-        self.assertIn(f"config_constraints={tuple(sorted(config_key))!r}", code)
+        self.assertIn(f"config={tuple(sorted(config_key))!r}", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_tuned_local_reduce_supports_max_autotune(self, device):
@@ -8032,7 +8399,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             atol=1e-3,
             rtol=1e-3,
         )
-        FileCheck().check("tuned=True").check(
+        FileCheck().check("config=((").check(
             "local_reduce=FlexGemmRuntimeLocalReducePlan"
         ).check(self.localReduceGeometryPattern(group, 1)).run(code)
 
@@ -8135,7 +8502,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
         self.assertLocalReduceAuxCode(code, group, axis=axis)
-        self.assertIn(f"config_constraints={tuple(sorted(config_key))!r}", code)
+        self.assertIn(f"config={tuple(sorted(config_key))!r}", code)
 
 
 instantiate_device_type_tests(
