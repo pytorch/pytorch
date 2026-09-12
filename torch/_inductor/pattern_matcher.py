@@ -489,6 +489,9 @@ class MatchContext:
     pattern_to_node: dict[PatternExpr, torch.fx.Node | None]
     graph: torch.fx.Graph
     exclusive_node_set: list[NodeOrConstant]
+    # When True, patterns may match commutative binary tensor ops in either
+    # operand order. Opted into per top-level pattern (see PatternExpr).
+    match_commutative_ops: bool
 
     def __init__(
         self,
@@ -496,11 +499,13 @@ class MatchContext:
         pattern_to_node: dict[PatternExpr, torch.fx.Node] | None = None,
         *,
         graph: torch.fx.Graph,
+        match_commutative_ops: bool = False,
     ) -> None:
         self.outputs = outputs
         self.pattern_to_node = {} if pattern_to_node is None else dict(pattern_to_node)
         self.graph = graph
         self.exclusive_node_set = []
+        self.match_commutative_ops = match_commutative_ops
 
     def match(self, pattern: PatternExpr, node: NodeOrConstant) -> MatchResult:
         """wrapper to check reused nodes in patterns"""
@@ -533,9 +538,17 @@ class PatternExpr(ABC):
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
-            return MatchContext([self], graph=node.graph).match(self, node)
+            return MatchContext(
+                [self],
+                graph=node.graph,
+                match_commutative_ops=self.match_commutative_ops,
+            ).match(self, node)
         except FailedMatch as e:
             return e
+
+    # Patterns default to matching only the encoded operand order. The masked
+    # SDPA patterns opt in, since the attention-mask add is commutative.
+    match_commutative_ops: bool = False
 
     def has_multiple_users(self) -> bool:
         return False
@@ -882,6 +895,23 @@ class _TargetExpr(PatternExpr):
 _SimpleSpec = tuple[Any, ...]
 
 
+# `add`/`mul` are commutative, so `attn_mask + scores` is equivalent to
+# `scores + attn_mask`. Patterns can opt into matching both operand orders via
+# ``match_commutative_ops=True``; most patterns rely on the operand order, so
+# this must stay opt-in. Restrict this to the binary tensor overloads where
+# swapping the two tensor operands is always safe.
+_COMMUTATIVE_BINARY_TENSOR_OPS = OrderedSet(
+    [
+        torch.ops.aten.add.Tensor,
+        torch.ops.aten.mul.Tensor,
+    ]
+)
+
+
+def _is_commutative_binary_tensor_op(node: torch.fx.Node) -> bool:
+    return extract_target(node) in _COMMUTATIVE_BINARY_TENSOR_OPS
+
+
 class _TargetArgsExpr(_TargetExpr):
     """
     Base class for filtering match by node.{target,args,kwargs}
@@ -1009,6 +1039,28 @@ class _TargetArgsExpr(_TargetExpr):
         if len(node_items) != len(self_items):
             raise AssertionError("node_items and self_items length mismatch")
 
+        if (
+            ctx.match_commutative_ops
+            and _is_commutative_binary_tensor_op(node)
+            and len(_args) == len(self.args) == 2
+            # aten.add.Tensor(a, b, alpha=k) means a + k*b which is only
+            # commutative when alpha is absent or equals 1.
+            and node.kwargs.get("alpha", 1) == 1
+        ):
+            # The pattern opted into commutative matching, so e.g.
+            # `attn_mask + scores` should match the same pattern as
+            # `scores + attn_mask`. Try both operand orders, only committing
+            # the matched state to ctx on success.
+            swapped_items = list(node_items[:2][::-1]) + list(node_items[2:])
+            return self._match_commutative(
+                node, ctx, self_items, node_items, swapped_items
+            )
+
+        return self._match_args_items(node, ctx, self_items, node_items)
+
+    def _match_args_items(
+        self, node: torch.fx.Node, ctx: MatchContext, self_items, node_items
+    ) -> MatchResult:
         m = Match(ctx, self)
         for pattern, child_node in zip(self_items, node_items):
             if isinstance(pattern, PatternExpr):
@@ -1026,6 +1078,26 @@ class _TargetArgsExpr(_TargetExpr):
         m.nodes.append(node)
         m.targets[self] = node.target
         return m
+
+    def _match_commutative(
+        self,
+        node: torch.fx.Node,
+        ctx: MatchContext,
+        self_items,
+        node_items,
+        swapped_items,
+    ) -> MatchResult:
+        # Snapshot the shared match state so a failed attempt in one operand
+        # order does not poison the retry in the other order.
+        saved_pattern_to_node = dict(ctx.pattern_to_node)
+        saved_exclusive = list(ctx.exclusive_node_set)
+        result = self._match_args_items(node, ctx, self_items, node_items)
+        if is_match(result):
+            return result
+        ctx.pattern_to_node.clear()
+        ctx.pattern_to_node.update(saved_pattern_to_node)
+        ctx.exclusive_node_set[:] = saved_exclusive
+        return self._match_args_items(node, ctx, self_items, swapped_items)
 
     def find_anchor_nodes(
         self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
@@ -1143,7 +1215,10 @@ class ListOf(PatternExpr):
         matched = False
         for i, child_node in enumerate(node):
             child_ctx = MatchContext(
-                ctx.outputs, pattern_to_node, graph=child_node.graph
+                ctx.outputs,
+                pattern_to_node,
+                graph=child_node.graph,
+                match_commutative_ops=ctx.match_commutative_ops,
             )
             child_match = child_ctx.match(self.pattern, child_node)
             pattern_to_node = child_ctx.filter_multi_user_patterns()
@@ -1223,7 +1298,11 @@ class MultiOutputPattern(PatternExpr):
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
-            return MatchContext(self.outputs, graph=node.graph).match(self, node)
+            return MatchContext(
+                self.outputs,
+                graph=node.graph,
+                match_commutative_ops=self.match_commutative_ops,
+            ).match(self, node)
         except FailedMatch as e:
             return e
 
@@ -1262,9 +1341,11 @@ class RepeatedExpr(PatternExpr):
         for anchor_node in self.inner_pattern.find_anchor_nodes(
             ctx, OrderedSet([node])
         ):
-            anchor_m = MatchContext([self], graph=node.graph).match(
-                self.inner_pattern, anchor_node
-            )
+            anchor_m = MatchContext(
+                [self],
+                graph=node.graph,
+                match_commutative_ops=ctx.match_commutative_ops,
+            ).match(self.inner_pattern, anchor_node)
             if not is_match(anchor_m):
                 return anchor_m
             m.extend(anchor_m)
@@ -1841,6 +1922,7 @@ def register_replacement(
     skip_duplicates: bool = False,
     pattern_name: str | None = None,
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
+    match_commutative_ops: bool = False,
 ) -> bool:
     """
     Create a replacement rule based on example functions that get traced
@@ -1854,6 +1936,8 @@ def register_replacement(
         trace_fn: fwd_only or joint_fwd_bwd
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
+        match_commutative_ops: allow the pattern to match commutative binary
+            tensor ops (add/mul) in either operand order
     """
     argnames_static = [*inspect.signature(search_fn).parameters.keys()]
 
@@ -1996,6 +2080,7 @@ def register_replacement(
                     argnames=specific_argnames,
                     exclusive_arg_names=exclusive_arg_names,
                     scalar_workaround=scalar_workaround,
+                    match_commutative_ops=match_commutative_ops,
                 )
 
             node = match.output_nodes()[0]
@@ -2072,6 +2157,10 @@ def register_replacement(
         else:
             pattern = search_fn_pattern
             gm = None
+
+        # Opt this pattern in to matching commutative binary tensor ops (add/mul)
+        # in either operand order. Off by default; see _COMMUTATIVE_BINARY_TENSOR_OPS.
+        pattern.match_commutative_ops = match_commutative_ops
 
         for pattern_matcher_pass in (
             pass_dicts if isinstance(pass_dicts, Sequence) else [pass_dicts]
@@ -2206,6 +2295,7 @@ def gen_register_replacement(
     exclusive_arg_names: Sequence[str] = (),
     skip_duplicates: bool = False,
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
+    match_commutative_ops: bool = False,
 ) -> None:
     # Make sure the example_inputs is materialized.
     example_inputs = tuple(example_inputs)
@@ -2251,6 +2341,7 @@ def gen_register_replacement(
         skip_duplicates=skip_duplicates,
         pattern_name=unique_name,
         get_decomp_fn=get_decomp_fn,
+        match_commutative_ops=match_commutative_ops,
     )
 
 
@@ -2742,6 +2833,7 @@ def fx_to_pattern(
     argnames: Sequence[str] = (),
     scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
+    match_commutative_ops: bool = False,
 ) -> PatternExpr:
     """
     Convert an FX graph into a PatternExpr.  This is useful for simple
@@ -2856,7 +2948,9 @@ def fx_to_pattern(
         raise AssertionError(f"expected GraphModule, got {type(gm)}")
     pattern = Converter(gm).run()
     if not isinstance(pattern, PatternExpr):
-        return MultiOutputPattern(pytree.tree_leaves(pattern))
+        pattern = MultiOutputPattern(pytree.tree_leaves(pattern))
+    # Opt-in per pattern tree; only the root's flag is consulted (see .match()).
+    pattern.match_commutative_ops = match_commutative_ops
     return pattern
 
 
