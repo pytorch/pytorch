@@ -2426,7 +2426,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         else:
             allow_tf32 = False
 
-        return allow_tf32
+        return bool(allow_tf32)
 
     def get_extra_kwargs(
         self,
@@ -2986,9 +2986,9 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         allow_tf32: bool,
         template_kwargs: dict[str, Any],
     ) -> bool:
-        # PTX supports transposed TF32 only with 128-byte swizzling and 32-byte
-        # swizzle atomicity. Triton cannot currently represent/lower that
-        # shared-memory form, so reject the affected candidates before codegen.
+        # tcgen05.mma does not support transposed FP32 operands in shared
+        # memory. With the layouts emitted by this template, the unsupported
+        # case is a transposed A operand with TF32 enabled and BLOCK_M > 32.
         # BLOCK_M=32 and either orientation of B use supported MMA layouts.
         return not (
             dtype == torch.float32

@@ -793,6 +793,24 @@ if __name__ == "__main__":
 instantiate_parametrized_tests(TestPeriodicDecorator)
 
 
+# Trivial tests that give the periodic-strict workflow a passing CPU and GPU
+# test to gate on; deliberately breaking one exercises its auto-revert.
+class TestPeriodicCanary(TestCase):
+    @periodic
+    @onlyCPU
+    def test_cpu_canary(self, device):
+        self.assertEqual(torch.arange(4, device=device).sum().item(), 6)
+
+    @periodic
+    @onlyCUDA
+    def test_gpu_canary(self, device):
+        x = torch.ones(4, 4, device=device)
+        self.assertEqual(x @ x, torch.full((4, 4), 4.0, device=device))
+
+
+instantiate_device_type_tests(TestPeriodicCanary, globals(), only_for=("cpu", "cuda"))
+
+
 class TestEnvironmentDefFlag(TestCase):
     """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
 
