@@ -263,10 +263,16 @@ int munmap(void* addr, size_t length) {
   // lpMapAddress + iViewDelta, so addr can point into the middle of the view
   // while UnmapViewOfFile requires the allocation base. VirtualQuery also
   // succeeds for freed and heap addresses, so check that this really is a
-  // mapped view before unmapping it.
+  // mapped view before unmapping it. Validation failures report EFAULT and an
+  // unmap failure reports EINVAL, so that the caller's strerror() output
+  // distinguishes a bad pointer from a genuine unmap error.
   MEMORY_BASIC_INFORMATION mbi{};
   if (VirtualQuery(addr, &mbi, sizeof(mbi)) == 0 || mbi.State == MEM_FREE ||
-      mbi.Type != MEM_MAPPED || !UnmapViewOfFile(mbi.AllocationBase)) {
+      mbi.Type != MEM_MAPPED) {
+    errno = EFAULT;
+    return -1;
+  }
+  if (!UnmapViewOfFile(mbi.AllocationBase)) {
     errno = EINVAL;
     return -1;
   }
@@ -902,8 +908,6 @@ class AOTInductorModelBase {
         std::cerr << "Failed to unmap AOTInductor model constants: "
                   << std::strerror(errno) << '\n';
       }
-      self_mmap = nullptr;
-      self_mmap_size = 0;
     }
 #endif // USE_MMAP_SELF
 #ifdef USE_CUDA
