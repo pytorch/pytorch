@@ -2298,12 +2298,13 @@ test_torchtitan() {
     popd
   fi
 
-  # Neither helion nor torchtitan should pull their own copies of these from
+  # These dependencies should not pull their own copies of these from
   # PyPI, that would silently run the tests against the wrong PyTorch
   local ci_built_versions
   ci_built_versions=$(get_pkg_versions torch torchao torchcomms)
 
-  pip_install helion
+  # Qwen3.5 imports fla, which is not a base torchtitan dependency.
+  pip_install helion flash-linear-attention
 
   pushd torchtitan
   pip_install -e .
@@ -2311,7 +2312,7 @@ test_torchtitan() {
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao torchcomms)
   if [[ "${installed_versions}" != "${ci_built_versions}" ]]; then
-    echo "ERROR: installing helion or torchtitan overwrote the CI-built packages"
+    echo "ERROR: installing torchtitan dependencies overwrote the CI-built packages"
     echo "Expected:"
     echo "${ci_built_versions}"
     echo "Got:"

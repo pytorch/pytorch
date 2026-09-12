@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import ast
 import dataclasses
+import tempfile
 import typing
 import unittest
 import unittest.mock
 from collections import defaultdict
+from pathlib import Path
 
 import yaml
 from tools.autograd import gen_autograd_functions, load_derivatives
-from tools.pyi.gen_pyi import generate_type_hints
+from tools.pyi.gen_pyi import gen_pyi, generate_type_hints
 
 from torchgen import dest
-from torchgen.api.python import PythonSignatureGroup, signature
+from torchgen.api.python import argument_type_str_pyi, PythonSignatureGroup, signature
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
 from torchgen.dest import native_functions as native_functions_dest
@@ -33,13 +36,80 @@ from torchgen.model import (
     Location,
     NativeFunction,
     OperatorName,
+    Type,
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target
+from torchgen.utils import FileManager, Target
 
 
 class TestGenPyi(unittest.TestCase):
+    def test_native_module_stubs(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as output:
+            gen_pyi(
+                str(root / "aten/src/ATen/native/native_functions.yaml"),
+                str(root / "aten/src/ATen/native/tags.yaml"),
+                str(root / "tools/autograd/deprecated.yaml"),
+                FileManager(output, str(root), dry_run=False),
+            )
+            stubs = {}
+            for module in ("fft", "linalg", "special"):
+                path = Path(output) / "torch/_C" / f"_{module}.pyi"
+                self.assertTrue(path.exists(), f"Missing stub for {module}")
+                stubs[module] = path.read_text()
+                bindings = {
+                    node.name
+                    for node in ast.parse(stubs[module]).body
+                    if isinstance(node, ast.FunctionDef)
+                }
+                source = ast.parse(
+                    (root / "torch" / module / "__init__.py").read_text()
+                )
+                used = {
+                    node.attr
+                    for node in ast.walk(source)
+                    if isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == f"_{module}"
+                }
+                self.assertTrue(used)
+                self.assertLessEqual(used, bindings)
+
+            self.assertIn("tensors: Sequence[Tensor]", stubs["linalg"])
+            self.assertIn("dims: Sequence[_int | SymInt] | None", stubs["linalg"])
+            self.assertIn(
+                "dim: _int | SymInt | Sequence[_int | SymInt] | None", stubs["fft"]
+            )
+            self.assertIn("def linalg_det(A: Tensor", stubs["linalg"])
+            self.assertIn("input: Number | _complex | PySymType", stubs["special"])
+            self.assertIn("-> torch.return_types.linalg_qr", stubs["linalg"])
+            returns = (Path(output) / "torch/return_types.pyi").read_text()
+            self.assertIn("class linalg_qr(", returns)
+            self.assertNotIn("QRResult", returns)
+
+    def test_native_module_symbolic_dimensions(self) -> None:
+        for schema, expected, legacy in (
+            ("int[]", "Sequence[_int | SymInt]", "_size"),
+            ("int[]?", "Sequence[_int | SymInt] | None", "_size | None"),
+            (
+                "int[1]?",
+                "_int | SymInt | Sequence[_int | SymInt] | None",
+                "_int | _size | None",
+            ),
+            (
+                "int[2]",
+                "_int | SymInt | Sequence[_int | SymInt]",
+                "_int | _size",
+            ),
+        ):
+            with self.subTest(schema=schema):
+                argument = Type.parse(schema)
+                self.assertEqual(
+                    argument_type_str_pyi(argument, use_sequence=True), expected
+                )
+                self.assertEqual(argument_type_str_pyi(argument), legacy)
+
     def test_inplace_foreach_returns_input_container(self) -> None:
         native_function, _ = NativeFunction.from_yaml(
             {
