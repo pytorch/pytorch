@@ -585,14 +585,17 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         super().setUp()
         if IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
+        # Raises SkipTest when libtorchbind_test.so is absent, as on a wheel
+        # install. It must run here: unittest ignores SkipTest from __init__.
+        load_torchbind_test_lib()
+        self._build_fixtures()
 
-    def __init__(self, *args, **kw):
-        unittest.TestCase.__init__(self, *args, **kw)
-        try:
-            load_torchbind_test_lib()
-        except unittest.SkipTest:
-            return  # Skip in setup
-
+    # Under PYTORCH_TEST_WITH_DYNAMO the whole of `run()`, `setUp()` included,
+    # is compiled, and tracing the ScriptObject construction below fails with
+    # "haven't registered a fake class". Keep the fixtures out of the graph;
+    # they used to live in `__init__`, outside the compiled region.
+    @torch._dynamo.disable
+    def _build_fixtures(self):
         self.reference = self._reference().copy()
 
         # A (key, value) pair not in the mapping
