@@ -55,10 +55,6 @@
     num_tiles = BATCH * num_tiles_per_batch
     num_pid_in_group = GROUP_M * grid_n
     k_tiles = tl.cdiv(K, BLOCK_K)
-    # Track the epilogue tile separately to break its dependency on the
-    # prologue's loop induction variable (as in the Blackwell MM template).
-    tile_id_c = start_pid - NUM_SMS
-
     for tile_id in tl.range(
         start_pid,
         num_tiles,
@@ -102,9 +98,8 @@
                 allow_tf32=ALLOW_TF32,
             )
 
-        tile_id_c += NUM_SMS
-        batch = tile_id_c // num_tiles_per_batch
-        batch_tile_id = tile_id_c % num_tiles_per_batch
+        batch = tile_id // num_tiles_per_batch
+        batch_tile_id = tile_id % num_tiles_per_batch
         pid_m, pid_n = _blackwell_bmm_pid(
             batch_tile_id, num_pid_in_group, grid_m, GROUP_M
         )
