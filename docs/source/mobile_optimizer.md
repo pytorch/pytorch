@@ -1,4 +1,5 @@
 ---
+orphan: true
 robots: noindex
 ---
 # torch.utils.mobile_optimizer
