@@ -29,8 +29,6 @@ const ActivityTypeMap kCpuTypes{
     {libkineto::ActivityType::CPU_INSTANT_EVENT,     "CPU_INSTANT_EVENT"},
     {libkineto::ActivityType::USER_ANNOTATION,       "USER_ANNOTATION"},
     {libkineto::ActivityType::EXTERNAL_CORRELATION,  "EXTERNAL_CORRELATION"},
-    {libkineto::ActivityType::XPU_RUNTIME,           "XPU_RUNTIME"},
-    {libkineto::ActivityType::XPU_DRIVER,            "XPU_DRIVER"},
     {libkineto::ActivityType::CUDA_RUNTIME,          "CUDA_RUNTIME"},
     {libkineto::ActivityType::CUDA_DRIVER,           "CUDA_DRIVER"},
     {libkineto::ActivityType::PYTHON_FUNCTION,       "PYTHON_FUNCTION"},
@@ -54,7 +52,9 @@ const ActivityTypeMap kXpuTypes{
     {libkineto::ActivityType::GPU_MEMSET,            "GPU_MEMSET"},
     {libkineto::ActivityType::GPU_USER_ANNOTATION,   "GPU_USER_ANNOTATION"},
     {libkineto::ActivityType::CONCURRENT_KERNEL,     "CONCURRENT_KERNEL"},
-    // XPU_RUNTIME and XPU_DRIVER appear in both kCpuTypes and kXpuTypes.
+    // The host-side XPU activities belong here only, not in kCpuTypes: the CPU
+    // group is inserted unfiltered and would put them back into a filtered XPU
+    // request that deliberately left them out.
     {libkineto::ActivityType::XPU_RUNTIME,           "XPU_RUNTIME"},
     {libkineto::ActivityType::XPU_DRIVER,            "XPU_DRIVER"},
     {libkineto::ActivityType::OVERHEAD,              "OVERHEAD"},
