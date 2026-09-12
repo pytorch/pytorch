@@ -1792,6 +1792,22 @@ class CPUReproTests(TestCase):
             torch.unique(sliced_actual[:, 0]).numel(), sliced_actual.size(0)
         )
 
+    def test_randperm_full_index_add_issue_196631(self):
+        from torch._dynamo.utils import counters
+
+        def fn(x, y):
+            index = torch.randperm(x.size(0))
+            return torch.index_add(x, 0, index, y), index
+
+        x = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+        y = torch.arange(12, dtype=torch.float32).reshape(3, 4) * 10
+
+        counters.clear()
+        actual, index = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        expected = torch.index_add(x, 0, index, y)
+        self.assertEqual(actual, expected)
+
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
             einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
