@@ -252,6 +252,8 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_xpu": lambda x: assert_expected_inline(x, """4"""),
     "test_adagrad_tensor_lr_cpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adagrad_tensor_lr_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adagrad_tensor_lr_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adagrad_tensor_lr_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adagrad_tensor_lr_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adamax_tensor_lr_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adamax_tensor_lr_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
@@ -452,9 +454,8 @@ def make_test(
     def test_fn(self):
         stack = ExitStack()
         try:
-            # https://github.com/pytorch/pytorch/issues/118715 for capturable Adagrad support
             # https://github.com/pytorch/pytorch/issues/118018 for capturable SGD support
-            run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
+            run_cudagraphs = device == "cuda" and optim_cls is not SGD
             if run_cudagraphs:
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
