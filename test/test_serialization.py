@@ -1232,6 +1232,29 @@ class TestSerialization(TestCase, SerializationMixin):
             )
             torch.load(checkpoint, weights_only=True)
 
+    def test_weights_only_unpickler_malformed_input(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/127525:
+        # corrupted/truncated checkpoints fed to the weights_only unpickler must
+        # raise a clean UnpicklingError instead of leaking a bare IndexError /
+        # struct.error / KeyError out of the opcode-dispatch loop.
+        malformed = {
+            "tuple3_stack_underflow": b"\x80\x02\x87.",   # TUPLE3 with an empty stack
+            "truncated_binint": b"\x80\x02J\x01\x02",     # BININT with fewer than 4 bytes
+            "dangling_memo_get": b"\x80\x02h\x05.",       # BINGET of an unset memo id
+        }
+        for name, payload in malformed.items():
+            with self.subTest(payload=name):
+                with self.assertRaises(pickle.UnpicklingError):
+                    torch._weights_only_unpickler.load(io.BytesIO(payload))
+
+        # A well-formed payload must still load, i.e. the guard does not
+        # over-broadly mask errors from legitimate opcode handling.
+        good = pickle.dumps({"a": 1, "b": [1, 2, 3]}, protocol=2)
+        self.assertEqual(
+            torch._weights_only_unpickler.load(io.BytesIO(good)),
+            {"a": 1, "b": [1, 2, 3]},
+        )
+
     def test_weights_only_assert(self):
         class HelloWorld:
             def __reduce__(self):
