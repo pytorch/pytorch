@@ -6167,6 +6167,30 @@ class TestKL(DistributionsTestCase):
                 lambda msg: f"{msg}\nIncorrect KL({type(p).__name__}, {type(q).__name__})",
             )
 
+    def test_kl_binomial_binomial_compile_fullgraph(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194593
+        # The p.total_count < q.total_count guard in _kl_binomial_binomial is
+        # data-dependent, which used to break torch.compile(fullgraph=True).
+        def fn(p_count, p_prob, q_count, q_prob):
+            return kl_divergence(
+                Binomial(total_count=p_count, probs=p_prob),
+                Binomial(total_count=q_count, probs=q_prob),
+            )
+
+        p_count = torch.tensor([5.0])
+        p_prob = torch.tensor([0.2])
+        q_count = torch.tensor([3.0])
+        q_prob = torch.tensor([0.4])
+
+        expected = fn(p_count, p_prob, q_count, q_prob)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = compiled_fn(p_count, p_prob, q_count, q_prob)
+        self.assertEqual(actual, expected)
+
+        # Preserved eager behavior: q.total_count > p.total_count still raises.
+        with self.assertRaises(NotImplementedError):
+            fn(q_count, q_prob, p_count, p_prob)
+
     def test_kl_edgecases(self):
         self.assertEqual(kl_divergence(Bernoulli(0), Bernoulli(0)), 0)
         self.assertEqual(kl_divergence(Bernoulli(1), Bernoulli(1)), 0)
