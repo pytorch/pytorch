@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import contextlib
 import copy
 import functools
@@ -38,7 +39,7 @@ from torch._dynamo.aot_compile import (
 )
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
-from torch._dynamo.graph_utils import _graph_device_types
+from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import DynamoCache, load_guards_state
 from torch._dynamo.precompile_context import PrecompileContext
@@ -53,7 +54,10 @@ from torch.fx._graph_pickler import GraphPickler
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
@@ -62,6 +66,22 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
 EPS = torch.tensor(1e-7)
 AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
+# The global-name families a compile in this file binds into its module dict,
+# which for a function defined here is this module's dict. They are listed so a
+# leak does not linger, and because a leftover can collide with a later mint --
+# but only when it is a name that mint tries: the same prefix, at the index the
+# counter is on. The skip loop burns that index, which is what a test
+# pre-binding the next minted name is counting on. A leftover at another prefix,
+# or at an index the mint does not try, burns nothing, and a __compiled_fn name
+# carries a uuid no other counter reproduces.
+_MINTED_PREFIXES = (
+    "__builtins_dict__",
+    "__compiled_fn",
+    "__resume_at",
+    "__comprehension_",
+    "__gen_rand_values",
+    "__warnings_warn_wrapper",
+)
 
 
 def _aot_pep695_generic(body="return x"):
@@ -385,17 +405,6 @@ def global_rebind_fn(x):
     return x.mean(1) * 10.0
 
 
-@contextmanager
-def _set_pool_mode(mode):
-    global AOT_POOL_MODE
-    old = AOT_POOL_MODE
-    AOT_POOL_MODE = mode
-    try:
-        yield
-    finally:
-        AOT_POOL_MODE = old
-
-
 class ParentWithChildModule(torch.nn.Module):
     # Calling a CHILD module routes through nn.Module.__call__, whose hook-dict
     # guards are rooted at Dynamo's synthetic __import_torch_dot_nn_... alias.
@@ -405,21 +414,44 @@ class ParentWithChildModule(torch.nn.Module):
         self.lin = torch.nn.Linear(4, 4)
 
     def forward(self, x):
-        # isinstance is a builtin: its BUILTIN_MATCH guard is rooted at
-        # G['__builtins_dict___N'], the other name only the tracing process has.
+        # Dynamo records a __builtins_dict___N key on every artifact; referring
+        # to a builtin is what roots a BUILTIN_MATCH guard at it.
+        # keep_global_guards drops that guard (it derives ID_MATCH), so no kept
+        # guard is rooted at the key and a load must leave it unseeded, which is
+        # the negative test_load_seeds_exactly_the_recorded_globals pins;
+        # keep_builtin_guards keeps the guard instead, which is how the seeding
+        # itself gets pinned.
         if not isinstance(x, torch.Tensor):
             raise TypeError(type(x))
         return self.lin(x)
 
 
 def keep_global_guards(guard_entries):
-    # Same policy the guard serializer enforces: drop only what cannot be
-    # serialized, and in particular keep the global guards that the default
-    # aot_compile filter drops wholesale.
+    # Keep the global guards the default aot_compile filter drops wholesale, and
+    # drop any guard whose type or derived type the serializer rejects. That is
+    # stricter than the serializer, which lets TYPE_MATCH/BUILTIN_MATCH through
+    # despite a derived ID_MATCH -- see keep_builtin_guards below -- and looser on
+    # a TYPE_MATCH the serializer refuses for a local class.
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
         g.guard_type not in unsupported
         and not any(d in unsupported for d in g.derived_guard_types)
+        for g in guard_entries
+    ]
+
+
+def keep_builtin_guards(guard_entries):
+    # keep_global_guards drops BUILTIN_MATCH because it derives ID_MATCH; the
+    # guard serializer accepts it anyway (its TYPE_MATCH/BUILTIN_MATCH branch
+    # short-circuits before the derived-type check), so keeping it is the only
+    # way to exercise a guard ROOTED at G['__builtins_dict___N'].
+    unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+    return [
+        g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
+        or (
+            g.guard_type not in unsupported
+            and not any(d in unsupported for d in g.derived_guard_types)
+        )
         for g in guard_entries
     ]
 
@@ -1497,67 +1529,402 @@ from user code:
     def test_aot_compile_module(self):
         _run_in_subprocess(_subprocess_aot_compile_module)
 
-    def test_aot_compile_fn_guards_track_rebound_global(self):
-        # Function artifacts get their guard scope from load_compiled_function's
-        # f_globals. Same contract as the module test above: the live dict, not
-        # a copy, so a rebind after load changes the guard's answer.
-        global AOT_POOL_MODE
-        x = torch.randn(4, 8)
-        expected = {}
-        for mode in ("sum", "mean"):
-            with _set_pool_mode(mode):
-                expected[mode] = global_rebind_fn(x)
-        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+    def _hide_leaked_dynamo_globals(self):
+        # A capture in this process leaks Dynamo's generated globals into this
+        # module dict. Pop the ones _MINTED_PREFIXES names for the duration of
+        # the test, and in cleanup strip whatever the test added before putting
+        # the originals back.
+        g = globals()
+        leaked = {k: g.pop(k) for k in [k for k in g if k.startswith(_MINTED_PREFIXES)]}
+        preexisting = frozenset(g)
 
-        with _set_pool_mode("sum"):
-            compiled_fn = torch.compile(
-                global_rebind_fn,
-                fullgraph=True,
-                backend="inductor",
-                options={"guard_filter_fn": keep_global_guards},
-            ).aot_compile(((x,), {}))
+        def restore():
+            # A global the test installed carries a CleanupHook that deletes the
+            # name when its code object is dropped, so let those hooks run first:
+            # one firing after the update would take a restored name with it.
+            import gc
+
+            torch._dynamo.reset()
+            gc.collect()
+            for k in [k for k in g if k not in preexisting]:
+                del g[k]
+            g.update(leaked)
+
+        self.addCleanup(restore)
+
+    @parametrize("mint_site", ("install_global", "resume_function"))
+    def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
+        # A load in a fresh process binds names its own counter is still behind:
+        # a captured __builtins_dict___N key, and the __resume_at_* globals
+        # CompilePackage.install() re-installs. In process, unique_id is already
+        # ahead of any baked-in index, so rewinding the counter and pre-binding
+        # the name the next mint produces puts each site in the same position.
+        # Which name that is comes from the compile, not from a literal:
+        # hardcoding an index goes green covering nothing as soon as anything
+        # else burns an id first, because the retry loop then never runs. The
+        # resume name skips forward at its own generation site in
+        # symbolic_convert, since install_global_unsafe cannot hand a substitute
+        # back to callers that use the name they passed for more than the install.
+        import itertools
+
+        from torch._dynamo import bytecode_transformation
+
+        def fullgraph_fn(x):
+            return x + len(x)
+
+        def graph_breaking_fn(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        fn, fullgraph, minted_prefix = {
+            "install_global": (fullgraph_fn, True, "__builtins_dict__"),
+            "resume_function": (graph_breaking_fn, False, "__resume_at"),
+        }[mint_site]
+        self._hide_leaked_dynamo_globals()
+        g = globals()
+        taken = "taken by another process"
+        x = torch.randn(3)
+        expected = fn(x)
+
+        def compile_with_taken_names(*names):
+            # A fresh counter mints the same sequence of names on every run, so
+            # each phase learns the name the next one pre-binds. The loop drops
+            # every minted-prefix key -- both what a previous phase minted and
+            # the sentinels it pre-bound -- and the binds just below put this
+            # phase's sentinels back, so no minted-prefix binding survives a
+            # phase except by being re-bound in it. _hide_leaked_dynamo_globals
+            # already took the pre-existing ones out of the module dict.
+            torch._dynamo.reset()
+            for k in [k for k in list(g) if k.startswith(_MINTED_PREFIXES)]:
+                del g[k]
+            for name in names:
+                g[name] = taken
+            with patch.object(
+                bytecode_transformation, "_unique_id_counter", itertools.count()
+            ):
+                compiled = torch.compile(fn, fullgraph=fullgraph, backend="eager")
+                # The skipped-over name must not cost the function its result,
+                # and a later call must be SERVED rather than recompiled -- for
+                # install_global that means the builtin guards evaluate to a hit
+                # through the key the skip landed on, in a module dict that still
+                # carries the other process's binding, and for resume_function
+                # that neither the outer frame nor the resume frame recompiles.
+                # Comparing results alone would not see a guard that missed and
+                # recompiled to the same answer.
+                self.assertEqual(compiled(x), expected)
+                with torch._dynamo.config.patch(error_on_recompile=True):
+                    self.assertEqual(compiled(x), expected)
+            return [
+                k
+                for k in g
+                if k.startswith(minted_prefix) and not isinstance(g[k], str)
+            ]
+
+        # Two taken names, not one: the skip has to advance past both, so a retry
+        # that fires only once still hands the install a bound name and raises.
+        (minted,) = compile_with_taken_names()
+        (skipped_to,) = compile_with_taken_names(minted)
+        (installed,) = compile_with_taken_names(minted, skipped_to)
+        self.assertNotIn(installed, (minted, skipped_to))
+        self.assertEqual(g[minted], taken)
+        self.assertEqual(g[skipped_to], taken)
+
+    def test_kept_builtin_match_guard_reads_the_seeded_builtins_dict(self):
+        # keep_global_guards drops BUILTIN_MATCH (it derives ID_MATCH), and the
+        # seeding only writes a name some kept guard is rooted at, so under that
+        # filter the builtins half never runs. Keep the guard instead -- the
+        # serializer accepts it -- and the loaded artifact really evaluates a guard
+        # rooted at G['__builtins_dict___N'] against a scope that has neither that
+        # key, the __import_* aliases, nor even __builtins__.
+        def fn(x):
+            if isinstance(x, torch.Tensor):
+                return x + 1
+            return x
+
+        x = torch.randn(3, 3)
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_builtin_guards},
+        ).aot_compile(((x,), {}))
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertTrue(builtins_key)
+        kept = [str(g) for g in guards_state.output_graph.guards]
+        self.assertTrue(
+            any("BUILTIN_MATCH" in g for g in kept), f"no BUILTIN_MATCH kept: {kept}"
+        )
         compiled_fn.save_compiled_function(self.path())
 
         torch._dynamo.reset()
-        saved = AOT_POOL_MODE
-        try:
-            AOT_POOL_MODE = "sum"
-            with open(self.path(), "rb") as f:
-                loaded = torch.compiler.load_compiled_function(f, f_globals=globals())
-            self.assertEqual(loaded(x), expected["sum"])
-            AOT_POOL_MODE = "mean"
-            with self.assertRaisesRegex(RuntimeError, "AOT_POOL_MODE"):
-                loaded(x)
-        finally:
-            AOT_POOL_MODE = saved
+        scope: dict[str, object] = {"__name__": "fresh_module"}
+        with open(self.path(), "rb") as f:
+            loaded = AOTCompiledFunction.deserialize(f.read(), guard_globals=scope)
+        self.assertEqual(loaded(x), fn(x))
+        self.assertIn(builtins_key, scope)
+        self.assertIn("__builtins__", scope)
 
-    def test_aot_compile_fn_missing_global_hint_names_f_globals(self):
-        # Loaded without f_globals, a function artifact's guard scope is the
-        # live module dict rebuilt from the serialized bytecode; when a guarded
-        # global is then missing, the failure says how to supply it.
+        # And with no scope supplied: the guards resolve against the scope
+        # rebuilt from the artifact, which carries only what the graph lifted, so
+        # this path needs the same seeding -- it is not a caller courtesy.
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            default_loaded = AOTCompiledFunction.deserialize(f.read())
+        self.assertEqual(default_loaded(x), fn(x))
+
+    @parametrize("keeps_global_guard", (False, True))
+    def test_load_seeds_no_name_no_guard_is_rooted_at(self, keeps_global_guard):
+        # The seeding writes into a scope that may be a user module's live
+        # namespace and installs no CleanupHook, so it is gated per name on a kept
+        # guard being rooted at that name. Neither artifact here roots one at the
+        # builtins-dict key or at an alias, so both must leave the scope alone --
+        # including the keeps_global_guard artifact, whose kept guard is rooted at
+        # AOT_POOL_MODE. A gate that only asks whether SOME guard is rooted at SOME
+        # global admits that one and writes the builtins key for nothing. The
+        # artifact records the key either way, so nothing else stops it.
         x = torch.randn(4, 8)
-        with _set_pool_mode("sum"):
-            compiled_fn = torch.compile(
-                global_rebind_fn,
-                fullgraph=True,
-                backend="inductor",
-                options={"guard_filter_fn": keep_global_guards},
-            ).aot_compile(((x,), {}))
+        options = {"guard_filter_fn": keep_global_guards} if keeps_global_guard else {}
+        compiled_fn = torch.compile(
+            global_rebind_fn, fullgraph=True, backend="eager", options=options
+        ).aot_compile(((x,), {}))
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        import_sources = compiled_fn._artifacts.runtime_env.import_sources
+        self.assertTrue(builtins_key)
+        self.assertTrue(import_sources)
+        kept = [str(g) for g in guards_state.output_graph.guards]
+        self.assertEqual(any("G[" in g for g in kept), keeps_global_guard)
+        self.assertFalse(any(builtins_key in g for g in kept))
+        # The kept global guard here is rooted at AOT_POOL_MODE, not at an alias.
+        global_scope = guards_state.output_graph.global_scope
+        self.assertFalse(set(import_sources) & set(global_scope))
         compiled_fn.save_compiled_function(self.path())
 
         torch._dynamo.reset()
-        saved = globals().pop("AOT_POOL_MODE")
-        try:
-            with open(self.path(), "rb") as f:
-                loaded = torch.compiler.load_compiled_function(f)
-            with self.assertRaisesRegex(RuntimeError, "an f_globals carrying it"):
-                loaded(x)
-        finally:
-            globals()["AOT_POOL_MODE"] = saved
+        # AOT_POOL_MODE so the kept global guard can resolve.
+        scope: dict[str, object] = {"AOT_POOL_MODE": "sum"}
+        before = set(scope)
+        with open(self.path(), "rb") as f:
+            loaded = AOTCompiledFunction.deserialize(f.read(), guard_globals=scope)
+        self.assertEqual(loaded(x), global_rebind_fn(x))
+        self.assertEqual(set(scope), before)
 
-    def test_load_seeds_exactly_the_recorded_import_aliases(self):
-        # Loading may add only the aliases the artifact recorded, and must not
-        # overwrite a name the loading process already has.
+        # An EMPTY scope is a scope, not the absence of one, and there is nothing
+        # for the seeding to add to it here either: the kept global guard has no
+        # AOT_POOL_MODE to read, so it must fail rather than fall back to the
+        # value serialized with the artifact.
+        torch._dynamo.reset()
+        empty: dict[str, object] = {}
+        with open(self.path(), "rb") as f:
+            loaded = AOTCompiledFunction.deserialize(f.read(), guard_globals=empty)
+        if keeps_global_guard:
+            missing = r"KeyError on G\['AOT_POOL_MODE'\]"
+            with self.assertRaisesRegex(RuntimeError, missing):
+                loaded(x)
+        else:
+            self.assertEqual(loaded(x), global_rebind_fn(x))
+        self.assertEqual(empty, {})
+
+    def test_load_into_an_empty_scope_refuses_a_lifted_global(self):
+        # An empty guard_globals is an empty scope, not the absence of one: the
+        # load must resolve global guards against it rather than fall back to the
+        # scope rebuilt from the artifact. A LIFTED global is what makes the two
+        # distinguishable -- it is serialized with the artifact, so the rebuilt
+        # scope binds it and a guard rooted at it would pass on the baked-in
+        # value. A specialized global, as in the arm above, is absent from both
+        # scopes and fails the guard either way.
+        def fn(x):
+            return x * EPS
+
+        x = torch.randn(3, 4)
+        expected = fn(x)
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        kept = [str(guard) for guard in guards_state.output_graph.guards]
+        self.assertTrue(any("G['EPS']" in guard for guard in kept), kept)
+        self.assertIn("EPS", compiled_fn._artifacts.runtime_env.used_globals)
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = AOTCompiledFunction.deserialize(f.read(), guard_globals={})
+        # The rebuilt scope does bind EPS, so refusing is a choice this gate makes
+        # and not the only answer available.
+        self.assertIn("EPS", loaded.fn.__globals__)
+        with self.assertRaisesRegex(RuntimeError, r"KeyError on G\['EPS'\]"):
+            loaded(x)
+
+        # Passing no scope at all is the case that DOES fall back, and it serves
+        # the value serialized with the artifact.
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            default_loaded = AOTCompiledFunction.deserialize(f.read())
+        self.assertEqual(default_loaded(x), expected)
+
+    @parametrize("guard_reads_builtins", (True, False))
+    def test_load_disowns_only_a_builtins_key_a_guard_reads(self, guard_reads_builtins):
+        # The builtins-dict key a load would seed can already be bound in the
+        # target scope by a LIVE compile in that module, behind a CleanupHook that
+        # deletes the binding when its code object is collected. Both halves of the
+        # builtins branch are load-bearing there and nothing else covers them: with
+        # a guard rooted at the key, CleanupHook.disown has to strip that ownership
+        # or the artifact stops working once that compile is collected; with no
+        # guard rooted at it, the branch must not run at all, or it strips the live
+        # compile's ownership and the binding outlives the compile that made it.
+        # Rewinding the unique-id counter is what puts the two in the position a
+        # load in a fresh process is in: in process the counter is already past any
+        # index an artifact baked in, so capture under a fresh counter, then let the
+        # live compile mint the same name under another.
+        import itertools
+
+        from torch._dynamo import bytecode_transformation
+        from torch._dynamo.utils import _cleanup_owners, CleanupManager
+
+        def fn(x):
+            if isinstance(x, torch.Tensor):
+                return x + 1
+            return x
+
+        if guard_reads_builtins:
+            target, x = fn, torch.randn(3, 3)
+            options = {"guard_filter_fn": keep_builtin_guards}
+        else:
+            target, x = global_rebind_fn, torch.randn(4, 8)
+            options = {"guard_filter_fn": keep_global_guards}
+        expected = target(x)
+        self._hide_leaked_dynamo_globals()
+        g = globals()
+
+        def with_a_fresh_counter(action):
+            # Frees the minted name so the next capture's counter really lands
+            # on it, and hands back the hooks that capture registered: a hook
+            # fires when its code object is collected, and in process that is at
+            # the mercy of whatever else still references the code, so the test
+            # calls them itself. That runs the hooks, which is the half of
+            # collection this test needs; unlike CleanupManager._remove_id it
+            # leaves them registered, so real collection would fire them again.
+            torch._dynamo.reset()
+            for name in [k for k in list(g) if k.startswith("__builtins_dict__")]:
+                del g[name]
+            before = set(CleanupManager.instance.values)
+            with patch.object(
+                bytecode_transformation, "_unique_id_counter", itertools.count()
+            ):
+                result = action()
+            hooks = [
+                hook
+                for idx in set(CleanupManager.instance.values) - before
+                for hook in CleanupManager.instance.values[idx]
+            ]
+            return result, hooks
+
+        # aot_compile registers no hook with CleanupManager, so this capture's
+        # ownership of the name can only ever be superseded, never fired.
+        compiled_fn, capture_hooks = with_a_fresh_counter(
+            lambda: torch.compile(
+                target, fullgraph=True, backend="eager", options=options
+            ).aot_compile(((x,), {}))
+        )
+        self.assertEqual(capture_hooks, [])
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        kept = [str(guard) for guard in guards_state.output_graph.guards]
+        self.assertEqual(any(builtins_key in k for k in kept), guard_reads_builtins)
+        compiled_fn.save_compiled_function(self.path())
+        del compiled_fn
+
+        def compile_live():
+            live = torch.compile(target, fullgraph=True, backend="eager")
+            live(x)
+            return live
+
+        _, live_hooks = with_a_fresh_counter(compile_live)
+        # The two captures burn unique ids independently; if they ever stopped
+        # agreeing on the name there would be nothing here to disown, so pin that
+        # the live compile really owns the artifact's key rather than assume it.
+        self.assertIn((id(g), builtins_key), _cleanup_owners)
+
+        with open(self.path(), "rb") as f:
+            loaded = AOTCompiledFunction.deserialize(f.read(), guard_globals=g)
+        self.assertEqual(
+            (id(g), builtins_key) in _cleanup_owners, not guard_reads_builtins
+        )
+
+        for hook in live_hooks:
+            hook()
+        # The live compile is gone: it keeps its hands off a name the load took
+        # over, and takes back one the load had no business touching.
+        self.assertEqual(builtins_key in g, guard_reads_builtins)
+        self.assertEqual(loaded(x), expected)
+
+        # Load-then-compile in one module dict: the key the load left behind is
+        # in the way of a compile whose own counter is still behind it, which is
+        # the collision the mint skip below this commit exists for.
+        if guard_reads_builtins:
+            torch._dynamo.reset()
+            with patch.object(
+                bytecode_transformation, "_unique_id_counter", itertools.count()
+            ):
+                self.assertEqual(compile_live()(x), expected)
+
+    @parametrize("prebound", ("builtins_key", "__builtins__"))
+    def test_load_keeps_a_prebound_builtins_scope(self, prebound):
+        # Neither builtins branch may replace what the loading scope already
+        # binds: a pre-bound builtins-dict key suppresses the __builtins__
+        # insertion too (it is nested under it), and a pre-bound __builtins__ is
+        # what the inserted key is derived FROM rather than a name to overwrite.
+        # keep_builtin_guards makes the artifact really read the dict that
+        # survives; a copy of the real builtins satisfies the guard.
+        def fn(x):
+            if isinstance(x, torch.Tensor):
+                return x + 1
+            return x
+
+        x = torch.randn(3, 3)
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_builtin_guards},
+        ).aot_compile(((x,), {}))
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertTrue(builtins_key)
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        copied_builtins = dict(builtins.__dict__)
+        name = builtins_key if prebound == "builtins_key" else "__builtins__"
+        scope: dict[str, object] = {name: copied_builtins}
+        with open(self.path(), "rb") as f:
+            loaded = AOTCompiledFunction.deserialize(f.read(), guard_globals=scope)
+        self.assertEqual(loaded(x), fn(x))
+        self.assertIs(scope[name], copied_builtins)
+        self.assertIs(scope[builtins_key], copied_builtins)
+        # keep_builtin_guards leaves nothing rooted at an alias, so the builtins
+        # key is the only name this load may add.
+        if prebound == "__builtins__":
+            added = {builtins_key}
+        else:
+            added = set()
+            self.assertNotIn("__builtins__", scope)
+        self.assertEqual(set(scope) - {name}, added)
+
+    def test_load_seeds_exactly_the_recorded_globals(self):
+        # Loading may add only the aliases a kept guard is actually rooted at --
+        # the artifact records more than that, and it records a builtins-dict key
+        # no guard here reads -- and must not overwrite a name the loading process
+        # already has: the second load leaves a sentinel on the guarded alias, and
+        # the artifact then fails that guard instead of silently reading the
+        # sentinel.
         mod = ParentWithChildModule()
         x = torch.randn(4, 4)
         model = torch.compile(
@@ -1570,31 +1937,44 @@ from user code:
         data = model._save_aot_compiled_module()
         (result,) = model.forward.compiled_results
         import_sources = result._artifacts.runtime_env.import_sources
-        self.assertTrue(import_sources)
-        serialized_guards = result._artifacts.guards_state
+        guards_state = load_guards_state(result._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        # Read the guarded alias off the serialized global_scope, which is pruned
+        # to exactly the guarded names, rather than off import_sources' order.
+        guarded = set(import_sources) & set(guards_state.output_graph.global_scope)
+        self.assertLess(len(guarded), len(import_sources))
+        (kept_alias,) = guarded
+        (serialized,) = pickle.loads(data)
+        expected = mod(x)
         torch._dynamo.reset()
 
-        scope = {
+        base = {
             k: v
             for k, v in globals().items()
             if not k.startswith(("__import_", "__builtins_dict__"))
         }
-        kept_alias = next(iter(import_sources))
+        scope = dict(base)
+        before = set(scope)
+        loaded = AOTCompiledFunction.deserialize(serialized, guard_globals=scope)
+        self.assertEqual(set(scope) - before, {kept_alias})
+        self.assertNotIn(builtins_key, scope)
+        self.assertIs(
+            scope[kept_alias], importlib.import_module(import_sources[kept_alias])
+        )
+        self.assertEqual(loaded(mod, x), expected)
+
+        torch._dynamo.reset()
+        scope = dict(base)
         sentinel = object()
         scope[kept_alias] = sentinel
         before = set(scope)
-        (serialized,) = pickle.loads(data)
-        AOTCompiledFunction.deserialize(serialized, guard_globals=scope)
-        builtins_key = load_guards_state(
-            serialized_guards
-        ).output_graph.name_of_builtins_dict_key_in_fglobals
-        self.assertEqual(
-            set(scope) - before, (set(import_sources) - {kept_alias}) | {builtins_key}
-        )
+        loaded = AOTCompiledFunction.deserialize(serialized, guard_globals=scope)
+        self.assertEqual(set(scope), before)
         self.assertIs(scope[kept_alias], sentinel)
-        for alias, module_name in import_sources.items():
-            if alias != kept_alias:
-                self.assertIs(scope[alias], importlib.import_module(module_name))
+        with self.assertRaises(RuntimeError) as ctx:
+            loaded(mod, x)
+        self.assertIn("GuardManager check failed", str(ctx.exception))
+        self.assertIn(kept_alias, str(ctx.exception))
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
@@ -2117,11 +2497,38 @@ from user code:
         self.assertEqual(expected[0], actual[0])
         self.assertEqual(expected[1], actual[1])
 
+    def test_graph_device_types_scans_the_whole_graph(self):
+        # The headline property: every device the whole graph names, not the one
+        # the first meta leaf happened to live on. A graph over a cpu input and
+        # a cuda input reported whichever placeholder came first, so the cuda
+        # half of `lambda c, g: (c.sum(), g.sum())` bought no GPU check at load.
+        # The meta key here is example_value, the key a Dynamo capture actually
+        # populates and the one both callers hand this function graphs under;
+        # the three other tests in this group that fabricate meta use "val".
+        with FakeTensorMode():
+            cpu = torch.empty(2)
+            cuda = torch.empty(2, device="cuda")
+        graph = torch.fx.Graph()
+        c = graph.placeholder("c")
+        c.meta["example_value"] = cpu
+        g = graph.placeholder("g")
+        g.meta["example_value"] = cuda
+        c_sum = graph.call_function(torch.ops.aten.sum.default, (c,))
+        c_sum.meta["example_value"] = cpu
+        g_sum = graph.call_function(torch.ops.aten.sum.default, (g,))
+        g_sum.meta["example_value"] = cuda
+        graph.output((c_sum, g_sum))
+        devices = _graph_device_types(graph)
+        self.assertEqual(devices, frozenset(("cpu", "cuda")))
+        self.assertEqual(_collapse_device_types(devices), "cuda")
+
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
         # Under dynamic shapes the leading placeholder is a SymInt, which has no
         # device. Reading only the first meta value reported "cpu" for this
-        # all-accelerator graph, which armed the toolchain probe and a hard
-        # load-time refusal over CPU code the artifact does not hold.
+        # all-accelerator graph, and "cpu" buys no GPU check: availability, the
+        # toolkit, Triton and the GPU name are compared only for a device in
+        # SystemInfo.CHECK_GPUS, so the artifact loaded on a host with the wrong
+        # GPU or toolkit instead of being refused.
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             x = torch.empty(2, device="cuda")
@@ -2154,13 +2561,15 @@ from user code:
         graph.call_function(torch.ops.aten.add.Tensor, (x, 1)).meta["val"] = cpu
         self.assertEqual(_graph_device_types(graph), frozenset(("cpu",)))
 
-        # A checkpointed accelerator module enters torch.amp.autocast("cpu")
-        # unconditionally; that "cpu" string must not arm the CPU codegen gate.
+        # The other direction: a checkpointed accelerator module enters
+        # torch.amp.autocast("cpu") unconditionally, and that string must not
+        # enter the set either. The collapse would hide it here -- an accelerator
+        # wins over cpu -- so what this pins is the reported set itself.
         with FakeTensorMode():
-            cuda_meta = torch.empty(2, device="cuda")
+            cuda = torch.empty(2, device="cuda")
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
-        x.meta["val"] = cuda_meta
+        x.meta["val"] = cuda
         graph.call_function(torch.amp._enter_autocast, ("cpu", None, True, None))
         self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
 
@@ -2171,6 +2580,87 @@ from user code:
         graph.call_method("to", (x, "mps"))
         graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": "cuda"})
         self.assertEqual(_graph_device_types(graph), frozenset(("mps", "cuda")))
+
+    @parametrize("method", ("cpu", "cuda", "xpu", "ipu", "mtia"))
+    def test_graph_device_types_reads_a_device_naming_method(self, method):
+        # x.cuda() and friends name the device in the method itself, so a graph
+        # without meta has nothing else to read: without this the scan answers
+        # "no device" and the collapse turns that into "cpu", which disarms the
+        # whole SystemInfo.CHECK_GPUS branch. A Dynamo capture of x.cuda() does
+        # carry example_value, so what this pins is the meta-less graph the
+        # device positions exist for. Each method in _DEVICE_NAMING_METHODS
+        # counts, not just the two SystemInfo happens to check today -- x.cpu()
+        # included, so the reported set says cpu rather than nothing for a graph
+        # whose only device signal is that method.
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method(method, (x,))
+        devices = _graph_device_types(graph)
+        self.assertEqual(devices, frozenset((method,)))
+        self.assertEqual(_collapse_device_types(devices), method)
+
+    def test_graph_device_types_reads_a_bare_device_index(self):
+        # Dynamo emits a bare index in a device position (device=0, x.to(0)),
+        # which torch.device resolves against the accelerator the build
+        # provides -- so the answer here is whatever that resolves to, rather
+        # than a fact about the machine running the test. A Dynamo graph carries
+        # the same answer in its node meta; a graph without meta, which is what
+        # these tests build, has only the device positions to read.
+        try:
+            expected = frozenset((torch.device(0).type,))
+        except RuntimeError:
+            # A build with no accelerator has no device for index 0 to name, so
+            # this arm cannot be exercised here at all -- skip rather than
+            # assert the empty answer a helper ignoring integers also gives.
+            self.skipTest("no accelerator in this build for index 0 to name")
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method("to", (x, 0))
+        graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": 0})
+        self.assertEqual(_graph_device_types(graph), expected)
+
+    @parametrize("spec", ("not_a_device", 2**63, True))
+    def test_graph_device_types_ignores_an_unparsable_device_position(self, spec):
+        # A value torch.device rejects names no device rather than aborting an
+        # otherwise fine compile from CompilePackage.update_device_type or
+        # aot_compile_fullgraph. Every rejection counts: an unknown device name
+        # raises RuntimeError, an index too large for int64 raises ValueError,
+        # and True is not an index at all -- torch.device(True) raises TypeError,
+        # which is neither rejection the parse guards against, so treating a bool
+        # as an index would break capture outright rather than name no device.
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method("to", (x, spec))
+        self.assertEqual(_graph_device_types(graph), frozenset())
+
+    def test_graph_device_types_drops_the_meta_device(self):
+        # meta is an abstract device: a meta graph requires nothing of the host,
+        # so it must not reach the recorded device type. Kept in, it wins the
+        # collapse over cpu and records device_type="meta", a string no host
+        # check can be run for -- it is not in SystemInfo.CHECK_GPUS and there is
+        # no torch.meta to ask for availability.
+        with FakeTensorMode():
+            meta = torch.empty(2, device="meta")
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = meta
+        node = graph.call_function(
+            torch.ops.aten.ones.default, ([2],), {"device": "meta"}
+        )
+        node.meta["val"] = meta
+        self.assertEqual(_graph_device_types(graph), frozenset())
+        self.assertEqual(_collapse_device_types(_graph_device_types(graph)), "cpu")
+
+    def test_collapse_device_types_prefers_an_accelerator(self):
+        # The single string both callers record. Naming no device reads as cpu,
+        # an accelerator beats cpu, and among several accelerators the pick is
+        # alphabetical -- arbitrary, but pinned so a change of rule is not
+        # silent.
+        self.assertEqual(_collapse_device_types(frozenset()), "cpu")
+        self.assertEqual(_collapse_device_types(frozenset(("cpu",))), "cpu")
+        self.assertEqual(_collapse_device_types(frozenset(("cpu", "cuda"))), "cuda")
+        self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_aot_compile(self):

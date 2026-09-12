@@ -15,6 +15,7 @@ import unittest
 import weakref
 from collections.abc import Iterator
 from typing import Any, NamedTuple
+from unittest import mock
 
 import torch
 import torch._dynamo.testing
@@ -40,7 +41,7 @@ from torch._dynamo.symbolic_convert import (
     InstructionTranslator,
     SpeculationLog,
 )
-from torch._dynamo.utils import dynamo_timed, get_metrics_context
+from torch._dynamo.utils import CleanupHook, dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
@@ -680,9 +681,10 @@ FQN_MISMATCH_CASES = [
         name="module",
     ),
     subtest(
-        # Prunes only because the harness's guard_filter_fn drops the bind_args
-        # __defaults__ guard; in a real compile that guard registers the tuple,
-        # and until the value-guard rule below it is carried verbatim.
+        # The default prunes because no EQUALS_MATCH registers __defaults__:
+        # bind_args guards it with SEQUENCE_LENGTH, and only EQUALS_MATCH records
+        # a tuple in value_guarded_containers, so a length or type guard survives
+        # per-value pruning (test_a_length_guarded_tuple_is_pruned_per_value).
         ("EQUALS_MATCH", DecoratedUnpicklableDefaultForwardModule, ("__name__", "x")),
         name="name_beside_unpicklable_default",
     ),
@@ -1246,6 +1248,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out.__defaults__[0], Inputs)
         self.assertIsInstance(out.__defaults__[1], Inputs)
 
+    def test_a_recorded_tuple_is_kept_verbatim_without_a_tree_entry(self):
+        # The recording alone decides a plain tuple. An EQUALS_MATCH registers
+        # the value it reads, so a recorded tuple is in guard_tree_values too;
+        # omitting it here is what tells the rule from the older two-step one,
+        # whose prune of a guarded tuple would be a silent forever-miss.
+        def base(x, a=Inputs(1, 2)):
+            return x
+
+        d = base.__defaults__
+        buf = io.BytesIO()
+        GuardsStatePickler({id(base): base}, {}, {}, {id(d): d}, buf).dump({"fn": base})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIsInstance(out.__defaults__[0], Inputs)
+
     def test_a_length_guarded_tuple_is_pruned_per_value(self):
         # A tuple registered without a value guard (what bind_args installs on
         # __defaults__ for any called function with a positional default) is
@@ -1445,23 +1461,58 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(fn.__module__, torch._dynamo.testing.__name__)
         buf = io.BytesIO()
         g = fn.__globals__
+        # The wrapper is defined in THIS file, so g is the test module's own
+        # globals: run directly the module is __main__, whose __builtins__ is the
+        # builtins module, not builtins.__dict__ as an imported module's would
+        # be. Either way the slot must come back as whatever it was; the shrink
+        # itself is pinned by
+        # test_snapshot_of_an_unguarded_builtins_dict_stays_a_dict.
+        live_builtins = g["__builtins__"]
         gtv = {id(fn): fn, id(g): g}
         pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
-        # Captured before the dump: a CleanupHook for a traced code object can
-        # drop a __builtins_dict___N key out of the live dict during the load.
-        # (A band-aid: the dict is this module's live globals, so anything that
-        # installs or removes a global between here and the assertion still
-        # flips it.)
-        expected_keys = set(g)
         pickler.dump(fn)
         out = pickle.loads(buf.getvalue())
         self.assertEqual(out.__module__, torch._dynamo.testing.__name__)
         self.assertEqual(out.__globals__["__name__"], __name__)
-        # The builtins entry is the module by reference, never the ~6 KB dict.
-        self.assertIs(out.__globals__["__builtins__"], builtins)
+        # The builtins entry comes back by reference, not as a copy: a guard
+        # that walked through the slot rebakes against the loading process's own
+        # builtins either way.
+        self.assertIs(out.__globals__["__builtins__"], live_builtins)
         # And the state really did arrive, so a guard on the scope's shape
-        # (DICT_KEYS_MATCH, len) still sees the module it was captured from.
-        self.assertEqual(set(out.__globals__), expected_keys)
+        # (DICT_KEYS_MATCH, len) still sees the module it was captured from. Not
+        # a key-set equality: this is the test module's live globals, and a
+        # CleanupHook popping a __compiled_fn_N key out of it would fail the
+        # comparison without the contract having broken.
+        for name in ("global_func", "OTHER_MODULE_CONST", "WRAPPED_FROM_OTHER_MODULE"):
+            self.assertIn(name, out.__globals__)
+
+    def test_snapshot_survives_a_cleanup_hook_pop_during_the_loop(self):
+        # A CleanupHook fires from a weakref callback, so it can pop a name
+        # Dynamo installed out of a traced module's dict at any allocation point
+        # inside the snapshot loop -- including between two of its iterations,
+        # where iterating the live dict raised RuntimeError. The pop below is a
+        # real hook; only its timing is forced, since in production it depends
+        # on where the process-wide GC counter stands when the dump begins.
+        scope = {"__name__": "_scope_popped_mid_snapshot", "X": 1, "Y": 2}
+        fn = types.FunctionType(global_func.__code__, scope, "global_func")
+        hook = CleanupHook.create(scope, "__compiled_fn_0", global_func)
+        unpatched = GuardsStatePickler._prune
+        popped = False
+
+        def prune(pickler, value, reason):
+            nonlocal popped
+            if reason == "unguarded function global" and not popped:
+                popped = True
+                hook()
+            return unpatched(pickler, value, reason)
+
+        buf = io.BytesIO()
+        with mock.patch.object(GuardsStatePickler, "_prune", prune):
+            GuardsStatePickler({id(fn): fn, id(scope): scope}, {}, {}, {}, buf).dump(fn)
+        self.assertNotIn("__compiled_fn_0", scope)
+        # The snapshot's key set is the live dict's as of loop entry, which is
+        # what a guard on the scope's shape was baked against.
+        self.assertIn("__compiled_fn_0", pickle.loads(buf.getvalue()).__globals__)
 
     def test_snapshot_of_a_scope_without_builtins_stays_without(self):
         # A hand-built globals dict may lack __builtins__ (FunctionType reads
@@ -1474,6 +1525,37 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())
         self.assertNotIn("__builtins__", out.__globals__)
         self.assertEqual(set(out.__globals__), set(scope))
+
+    def test_snapshot_of_an_unguarded_builtins_dict_stays_a_dict(self):
+        # The exemption does not depend on the registration: a scope whose
+        # __builtins__ no guard read still comes back the live dict, since
+        # FunctionType and a guard walking the slot both read it as one.
+        scope = {"__name__": "_scope_with_builtins", "__builtins__": builtins.__dict__}
+        fn = types.FunctionType(global_func.__code__, scope, "global_func")
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn, id(scope): scope}, {}, {}, {}, buf).dump(fn)
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out.__globals__["__builtins__"], builtins.__dict__)
+        # By reference: carrying the dict would be ~6 KB on this scope alone.
+        self.assertLess(len(buf.getvalue()), 2000)
+
+    def test_snapshot_exempts_the_builtins_dict_under_dynamos_own_alias(self):
+        # A traced module's own globals hold builtins.__dict__ twice: under
+        # __builtins__ and under the __builtins_dict___N Dynamo installs, the
+        # same object. The exemption is on the value, so both travel by
+        # reference; keying it on the name would carry the alias as a ~6 KB copy.
+        scope = {
+            "__name__": "_scope_with_builtins_alias",
+            "__builtins__": builtins.__dict__,
+            "__builtins_dict___0": builtins.__dict__,
+        }
+        fn = types.FunctionType(global_func.__code__, scope, "global_func")
+        gtv = {id(fn): fn, id(scope): scope, id(builtins.__dict__): builtins.__dict__}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump(fn)
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out.__globals__["__builtins_dict___0"], builtins.__dict__)
+        self.assertLess(len(buf.getvalue()), 2000)
 
     def test_snapshot_keeps_the_save_time_value_of_a_guarded_global(self):
         # The guard is baked from the value the compile saw; a rebuild that
@@ -1502,12 +1584,13 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         g = a.__globals__
         gtv = {id(a): a, id(b): b, id(g): g}
         buf = io.BytesIO()
-        expected_keys = set(g)
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__globals__, out["b"].__globals__)
-        self.assertEqual(set(out["a"].__globals__), expected_keys)
-        self.assertEqual(set(out["b"].__globals__), expected_keys)
+        # Complete rather than the half-loaded copy, and not a key-set equality
+        # against the live dict, which a CleanupHook pop would flip.
+        for name in ("__name__", "global_func", "MODULE_SCOPE_CONST"):
+            self.assertIn(name, out["b"].__globals__)
         self.assertIs(out["a"].__globals__["MODULE_SCOPE_WRAPPED_A"], out["a"])
         self.assertIs(out["b"].__globals__["MODULE_SCOPE_WRAPPED_B"], out["b"])
 
@@ -1640,14 +1723,45 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(len(out.__type_params__), 1)
         self.assertIsInstance(out.__type_params__[0], _Missing)
 
+    def test_a_raising_annotation_read_drops_the_set_but_not_a_recursion_error(self):
+        # The reducer's policy for a read that raises, which on 3.14 is the
+        # FORWARDREF read hitting an annotation that does real work outside a
+        # name lookup (the rule is in _reduce_function_by_value). The read
+        # itself is dead code below 3.14 and only one CI job runs a 3.14 shard,
+        # so patch the read: an expression that raises drops the set, since the
+        # prune makes the slot optional, while a RecursionError is the dump's
+        # own limit, which pickle_guards_state reports as a bypass, so it must
+        # not become an empty set. The real read is exercised by the 3.14-only
+        # test below.
+        def fn(x: int) -> int:
+            return x
+
+        exc: Exception = TypeError("Cannot stringify annotation")
+
+        def raising_read(obj, *, evaluate=False):
+            raise exc
+
+        read = staticmethod(raising_read)
+        with mock.patch.object(GuardsStatePickler, "_read_raw_annotations", read):
+            buf = io.BytesIO()
+            with self.assertLogs("torch._dynamo.guards", level="DEBUG") as logs:
+                GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
+            self.assertTrue(any("dropping the annotations" in l for l in logs.output))
+            exc = RecursionError("maximum recursion depth exceeded")
+            with self.assertRaisesRegex(RecursionError, "maximum recursion depth"):
+                GuardsStatePickler({id(fn): fn}, {}, {}, {}, io.BytesIO()).dump(fn)
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(out.__annotations__, {})
+        self.assertEqual(out(3), 3)
+
     @unittest.skipIf(sys.version_info < (3, 14), "PEP 649 lazy annotations are 3.14+")
-    def test_reduce_prunes_a_type_checking_only_annotation(self):
+    def test_reduce_prunes_an_unresolvable_annotation_and_drops_a_raising_one(self):
         # On 3.14 reading __annotations__ evaluates them lazily and raises
-        # NameError for a name that exists only under TYPE_CHECKING; the
-        # FORWARDREF read hands back a proxy instead, which is unguarded and
-        # pruned, so the dump neither raises nor fails on the proxy. An
-        # annotation with no name in it that raises (an f-string) is caught and
-        # drops the set.
+        # NameError for a name that is not defined at read time (one written for
+        # TYPE_CHECKING, say); the FORWARDREF read hands back a proxy instead,
+        # which is unguarded and pruned, so the dump neither raises nor fails on
+        # the proxy. An annotation that formats a proxy in an f-string raises
+        # (the proxy refuses __format__); that is caught and drops the set.
         ns = {"__name__": __name__}
         exec(
             "def outer():\n"
