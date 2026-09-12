@@ -10,6 +10,7 @@ from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     decomposeK as blackwell_decomposeK,
+    get_blackwell_decompose_k_splits,
     lower_blackwell_decompose_k_partial,
 )
 from torch._inductor.lowering import lowerings, register_lowering
@@ -219,6 +220,34 @@ class TestSubgraphChoice(TestCase):
     "requires NVIDIA SM100+",
 )
 class TestBlackwellDecomposeKSubgraphChoice(TestCase):
+    def test_backend_specific_split_candidates(self):
+        one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
+        two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]
+
+        def splits(m, n, k, partial_config):
+            return get_blackwell_decompose_k_splits(m, n, k, 148, partial_config)
+
+        production_ks = (
+            10_879_109,
+            10_954_007,
+            11_091_857,
+            11_047_127,
+            11_029_264,
+        )
+        for k in production_ks:
+            self.assertEqual(splits(256, 128, k, one_cta), [74, 148])
+
+        self.assertEqual(splits(128, 128, 11_047_127, one_cta), [148, 296])
+        self.assertEqual(splits(128, 256, 969_147, one_cta), [74, 149])
+        self.assertEqual(splits(256, 424, 973_138, two_cta_wide), [37, 74])
+        self.assertEqual(splits(512, 424, 11_047_127, two_cta_wide), [19, 37])
+
+        # Exact and uneven K use the same bounded geometry-based candidates,
+        # while shallow K and a lone M tile reject the 2CTA schedule.
+        self.assertEqual(splits(256, 424, 973_248, two_cta_wide), [37, 74])
+        self.assertEqual(splits(256, 128, 8_193, one_cta), [])
+        self.assertEqual(splits(128, 424, 11_047_127, two_cta_wide), [])
+
     def _run_forced_triton_plan(
         self, two_ctas: bool, *, use_meta_ws: bool = True, m: int = 256
     ) -> None:
