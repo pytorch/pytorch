@@ -818,6 +818,7 @@ class CUDAGraph(_CUDAGraph):
                         "kernel_name": str or None,
                         "grid_dim": tuple(int, int, int) or None,
                         "block_dim": tuple(int, int, int) or None,
+                        "shared_mem_bytes": int or None,
                         "event_ptr": int,
                         "host_fn_addr": int,
                         "host_fn_name": str or None,
@@ -851,8 +852,9 @@ class CUDAGraph(_CUDAGraph):
 
         ``grid_dim`` / ``block_dim`` are the kernel launch dimensions
         ``(x, y, z)`` read from the kernel node's params, populated for kernel
-        nodes (``None`` when the params query fails). They are ``None`` for
-        other node types.
+        nodes (``None`` when the params query fails). ``shared_mem_bytes`` is
+        that launch's *dynamic* shared memory, read from the same params. All
+        three are ``None`` for other node types.
 
         Each node's ``graph_id`` is remapped to the exec graph id so that
         ``tools_id`` values match those reported by CUPTI-based profilers.
@@ -948,6 +950,7 @@ class CUDAGraph(_CUDAGraph):
             kernel_name = None
             grid_dim = None
             block_dim = None
+            shared_mem_bytes = None
             if ntype == node_types.CU_GRAPH_NODE_TYPE_KERNEL:
                 err, params = _cuda_driver.cuGraphKernelNodeGetParams(node)
                 if err == _cuda_driver.CUresult.CUDA_SUCCESS:
@@ -961,6 +964,7 @@ class CUDAGraph(_CUDAGraph):
                         int(params.blockDimY),
                         int(params.blockDimZ),
                     )
+                    shared_mem_bytes = int(params.sharedMemBytes)
                     if params.func:
                         err, name = _cuda_driver.cuFuncGetName(params.func)
                         if err == _cuda_driver.CUresult.CUDA_SUCCESS:
@@ -1009,6 +1013,7 @@ class CUDAGraph(_CUDAGraph):
                     "kernel_name": kernel_name,
                     "grid_dim": grid_dim,
                     "block_dim": block_dim,
+                    "shared_mem_bytes": shared_mem_bytes,
                     "event_ptr": event_ptr,
                     "host_fn_addr": host_fn_addr,
                     "host_fn_name": host_fn_name,
