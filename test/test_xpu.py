@@ -3026,6 +3026,104 @@ if __name__ == "__main__":
         self.assertTrue(torch.all(x == 6.0))
 
 
+def xpugraphify(fn, pool=None):
+    torch.xpu.synchronize()
+    stream = torch.xpu.Stream()
+
+    stream.wait_stream(torch.xpu.current_stream())
+    with torch.xpu.stream(stream):
+        fn()
+    stream.synchronize()
+    torch.xpu.current_stream().wait_stream(stream)
+    torch.xpu.synchronize()
+
+    graph = torch.xpu.XPUGraph()
+    with torch.xpu.graph(graph, stream=stream, pool=pool):
+        static_outputs = fn()
+
+    return graph, static_outputs
+
+
+def get_xpugraph_segments(pool_id):
+    segments = torch.xpu.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
+
+
+def live_blocks(pool_id):
+    blocks = 0
+    for segment in get_xpugraph_segments(pool_id):
+        for block in segment["blocks"]:
+            if block["state"] == "active_allocated":
+                blocks += 1
+    return blocks
+
+
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestBlockStateAbsorption(TestCase):
+    @staticmethod
+    def setCheckpointPoolState(
+        device, state, stale_storages_ptr, storages_deleters=None
+    ):
+        stale_storages_ptr = [t.untyped_storage()._cdata for t in stale_storages_ptr]
+        storages_deleters = (
+            []
+            if not storages_deleters
+            else [t.untyped_storage()._cdata for t in storages_deleters]
+        )
+        torch._C._xpu_setCheckpointPoolState(
+            device, state, stale_storages_ptr, storages_deleters
+        )
+
+    def tearDown(self):
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+        super().tearDown()
+
+    def test_tensor_dies_after_checkpoint(self):
+        def foo():
+            return (
+                torch.ones(512, device="xpu", dtype=torch.uint8),
+                torch.ones(512, device="xpu", dtype=torch.uint8),
+            )
+
+        graph, outputs = xpugraphify(foo)
+        pool_id = graph.pool()
+        device = outputs[0].device.index
+        state = torch._C._xpu_getCheckpointState(device, pool_id)
+
+        output_data_ptrs = [output.data_ptr() for output in outputs]
+
+        del outputs
+
+        self.setCheckpointPoolState(device, state, [], [])
+
+        self.assertEqual(live_blocks(pool_id), 2)
+        torch._C._xpu_xpuCachingAllocator_raw_delete(output_data_ptrs[0])
+        self.assertEqual(live_blocks(pool_id), 1)
+        torch._C._xpu_xpuCachingAllocator_raw_delete(output_data_ptrs[1])
+        self.assertEqual(live_blocks(pool_id), 0)
+
+    def test_check_pool_live_allocations(self):
+        def foo():
+            return torch.ones([4], device="xpu")
+
+        pool = torch.xpu.graph_pool_handle()
+        graph, outputs = xpugraphify(foo, pool=pool)
+        device = outputs[0].device.index
+
+        def check(live_data_ptrs):
+            return torch._C._xpu_checkPoolLiveAllocations(device, pool, live_data_ptrs)
+
+        self.assertTrue(check({outputs[0].data_ptr()}))
+        self.assertFalse(check({outputs[0].data_ptr(), 0}))
+        self.assertFalse(check(set()))
+
+        del outputs
+        self.assertTrue(check(set()))
+
+
 @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
 @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
 @unittest.skipIf(
