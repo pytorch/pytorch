@@ -3025,6 +3025,7 @@ class TestSDPAAccelerator(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention is not supported on this system")
+    @unittest.skipIf(TEST_WITH_ROCM and not PLATFORM_SUPPORTS_CK_SDPA, "ROCm empty-batch handling is CK-only")
     def test_fused_attention_empty_batch(self, device):
         # Attention over zero rows is an empty result, not an error. The composite
         # scaled_dot_product_attention short-circuits an empty input before dispatching,
