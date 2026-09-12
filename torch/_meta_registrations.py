@@ -3916,7 +3916,8 @@ def nonzero(self):
 
 @register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
-    torch._check(bool(indices), lambda: "at least one index must be provided")
+    torch._check_index(bool(indices), lambda: "at least one index must be provided")
+    has_index = any(index is not None for index in indices)
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
     result: list[Tensor | None] = []
@@ -3945,9 +3946,13 @@ def meta_index_Tensor(self, indices):
         else:
             result.append(index)
     indices = result
-    torch._check(
+    torch._check_index(
         len(indices) <= self.ndim,
         lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})",
+    )
+    torch._check_index(
+        has_index,
+        lambda: "at least one index tensor must be provided",
     )
     # expand_outplace
     import torch._refs as refs  # avoid import cycle in mypy
@@ -4981,6 +4986,15 @@ def meta_rrelu_with_noise_(
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
+    if indices:
+        torch._check_index(
+            len(indices) <= self.ndim,
+            lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})",
+        )
+        torch._check_index(
+            any(index is not None for index in indices),
+            lambda: "at least one index tensor must be provided",
+        )
     return torch.empty_like(self)
 
 
@@ -5026,6 +5040,15 @@ def meta_masked_scatter_backward(self, mask, sizes):
 
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
+    if indices:
+        torch._check_index(
+            len(indices) <= self.ndim,
+            lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})",
+        )
+        torch._check_index(
+            any(index is not None for index in indices),
+            lambda: "at least one index tensor must be provided",
+        )
     return self
 
 
