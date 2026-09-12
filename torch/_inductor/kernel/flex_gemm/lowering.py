@@ -14,8 +14,6 @@ import importlib.util
 import logging
 from typing import Any, TYPE_CHECKING
 
-import sympy
-
 import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.flex_gemm import (
@@ -30,7 +28,11 @@ from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
-from ...heuristics.template.flex_gemm import flex_gemm_search_space
+from ...heuristics.template.flex_gemm import (
+    flex_gemm_default_config,
+    flex_gemm_search_space,
+    QuackConfigKey,
+)
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering, view
 from ...utils import _IntLike, ceildiv, is_bf16x9_matmul
@@ -38,7 +40,6 @@ from ..gemm_epilogue_utils import statically_known_equal, statically_known_shape
 from .constraints import (
     aux_output_shape_error,
     FLEX_GEMM_CAPTURE_SHAPE_ERROR,
-    FlexGemmOutputContraction,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
 )
 from .debug import (
@@ -427,42 +428,26 @@ def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
 
 def flex_gemm_quack_configs(
     template_config: FlexGemmEpilogueConfig, input_nodes: list[IRNode]
-) -> tuple[tuple[tuple[str, Any], ...], ...]:
+) -> tuple[QuackConfigKey, ...]:
     """Ask QuACK which GemmConfigs this call may pin, default first.
 
     Legality is decided by the EpiOps, so the runtime's EpiMod is built here
     from metadata with a stub epilogue and pruned against the GEMM shape hints;
-    ``guard_flex_gemm_config_shapes`` guards the shape-dependent rules.
+    ``FlexGemmEpilogueCaller.output_node`` guards the shape-dependent rules.
     """
     from torch._inductor.kernel.flex_gemm.runtime import (
-        flex_gemm_epimod,
         flex_gemm_preferred_config,
         flex_gemm_problem,
-        quack_epilogue_dtype,
         selection_callback,
     )
     from torch._inductor.virtualized import V
     from torch._vendor.quack.gemm_runtime.autotune import legal_mod_configs
 
     output_contraction = template_config.output_contraction
-    local_reduce = template_config.local_reduce
-    indexed = template_config.indexed_output
-    epimod = flex_gemm_epimod(
+    epimod = template_config.epimod(
         selection_callback,
-        tuple(
-            quack_epilogue_dtype(input_nodes[index].get_dtype())
-            for index in template_config.epilogue_arg_indices
-        ),
-        template_config.epilogue_arg_kinds,
-        len(template_config.aux_out_indices),
-        None
-        if indexed is None
-        else (
-            quack_epilogue_dtype(input_nodes[indexed.out_index].get_dtype()),
-            input_nodes[indexed.indices_index].get_dtype(),
-        ),
-        None if local_reduce is None else local_reduce.selection_plan(),
-        output_contraction,
+        [node.get_dtype() for node in input_nodes],
+        lambda name: selection_callback,
     )
     sizevars = V.graph.sizevars
     mat1 = input_nodes[template_config.gemm_op.mat1_index]
@@ -482,28 +467,6 @@ def flex_gemm_quack_configs(
         tuple(sorted(dataclasses.asdict(quack_config).items()))
         for quack_config in legal
     )
-
-
-def guard_flex_gemm_config_shapes(
-    quack_configs: tuple[tuple[tuple[str, Any], ...], ...],
-    n: _IntLike,
-    output_contraction: FlexGemmOutputContraction | None,
-) -> None:
-    """Guard the problem-size rules QuACK applied to the pinned configs.
-
-    Selection pruned on concrete shape hints; these are the pruning
-    conditions that depend on physical N, so a dynamic graph recompiles instead
-    of launching a config QuACK would have rejected (``swap_ab`` needs
-    ``N % 8 == 0``; ``GroupedMainStore.supports_problem`` needs ``tile_n <= N``).
-    """
-    from torch._inductor.virtualized import V
-
-    sizevars = V.graph.sizevars
-    configs = [dict(quack_config) for quack_config in quack_configs]
-    if any(fields["swap_ab"] for fields in configs):
-        sizevars.check(sympy.Eq(sympy.Mod(n, 8), 0))
-    if output_contraction is not None:
-        sizevars.check_leq(max(fields["tile_n"] for fields in configs), n)
 
 
 def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
@@ -930,8 +893,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             config
             for config in legal_configs
             if all(
-                dict(config)[name] == value
+                type(field) is type(value) and field == value
                 for name, value in config_constraints.items()
+                for field in (dict(config)[name],)
             )
         )
         if not legal_configs:
@@ -939,14 +903,21 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 "no supported GemmConfig matches "
                 f"config_constraints={config_constraints!r} for this call"
             )
-    quack_configs = (
-        flex_gemm_search_space(legal_configs) if tuned else legal_configs[:1]
-    )
-    guard_flex_gemm_config_shapes(
-        quack_configs,
-        gemm_input_nodes[op_spec.mat2_index].get_size()[-1],
-        output_contraction,
-    )
+    if tuned:
+        quack_configs = flex_gemm_search_space(legal_configs)
+    else:
+        from torch._inductor.virtualized import V
+
+        sizevars = V.graph.sizevars
+        mat1, mat2 = (
+            gemm_input_nodes[i] for i in (op_spec.mat1_index, op_spec.mat2_index)
+        )
+        m_hint = sizevars.optimization_hint(mat1.get_size()[-2])
+        n_hint = sizevars.optimization_hint(mat2.get_size()[-1])
+        # Block-scaled calls keep QuACK's shape-aware blockscaled default.
+        dense_shape = None if blockscaled is not None else (m_hint, n_hint)
+        default = flex_gemm_default_config(legal_configs, dense_shape=dense_shape)
+        quack_configs = (default,)
     log_flex_gemm_artifact(
         "config_candidates",
         lambda: format_flex_gemm_config_candidates(quack_configs, tuned=tuned),
@@ -978,7 +949,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         # autotune_select_algorithm skips a lone tuned candidate; compile it now so
         # tuned=True never defers compilation to the first call. Untuned calls keep
         # lazy first-call compilation and allocate no example tensors.
-        choices[0].precompile()
+        choices[0].precompile(use_workers=False)
     structural_outs = {}
     if indexed_output is not None:
         structural_outs[indexed_output.node] = indexed_outs[0]
