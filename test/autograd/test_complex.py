@@ -103,6 +103,30 @@ class TestAutogradComplex(TestCase):
 
         self.assertEqual(z.grad, z1.grad)
 
+    def test_reduction_backward_real_to_complex_output_dtype(self):
+        # #192719: reducing a real input with dtype=<complex> must hand the
+        # input a real gradient (the real part of the complex grad_output)
+        # instead of failing the engine's grad dtype validation.
+        for op in (torch.sum, torch.mean, torch.prod):
+            x = torch.ones(2, 2, dtype=torch.float64, requires_grad=True)
+            y = op(x, dtype=torch.complex128)
+            y.backward(torch.ones_like(y))
+            self.assertEqual(x.grad.dtype, torch.float64)
+            self.assertEqual(
+                x.grad,
+                torch.full_like(x, 0.25 if op is torch.mean else 1.0),
+            )
+
+        for op in (torch.sum, torch.mean, torch.prod):
+            x = torch.ones(2, 2, dtype=torch.float64, requires_grad=True)
+            y = op(x, 0, dtype=torch.complex128)
+            y.backward(torch.ones_like(y))
+            self.assertEqual(x.grad.dtype, torch.float64)
+            self.assertEqual(
+                x.grad,
+                torch.full_like(x, 0.5 if op is torch.mean else 1.0),
+            )
+
 
 if __name__ == "__main__":
     run_tests()
