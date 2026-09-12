@@ -3913,11 +3913,15 @@ def create_inputs_key(input_nodes) -> str:
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    # bfx9 has no legacy equivalent, and the legacy getter may reject it.
+    if precision != "bfx9":
+        precision = torch.get_float32_matmul_precision()
     return ":".join(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            precision,
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
