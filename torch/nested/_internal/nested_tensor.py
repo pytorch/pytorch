@@ -650,15 +650,10 @@ def jagged_from_tensor_and_lengths(
     else:
         values = tensor.view(-1)
 
-    # Check if offsets and lengths make it possibly contiguous and return a regular NT
-    is_contiguous = True
-    orig_dim = tensor.shape[1]
-    if torch.any(length_list[1:-1].ne(orig_dim)):
-        is_contiguous = False
-    if torch.any(offsets[1:-2].diff().ne(orig_dim)):
-        is_contiguous = False
-    if offsets[0] + length_list[0] != orig_dim:
-        is_contiguous = False
+    # Contiguous iff selected segments abut in the flattened buffer (no gaps).
+    # The previous heuristic used length_list[1:-1] / offsets[1:-2], which is
+    # empty for batch_size <= 2 and misclassified gapped selections (#196708).
+    is_contiguous = bool(torch.all(offsets.diff() == length_list))
 
     actual_max_seqlen = int(torch.max(lengths).item())
     min_seqlen = int(torch.min(lengths).item())
