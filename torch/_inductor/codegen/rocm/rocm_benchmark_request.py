@@ -70,7 +70,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             args,
             self.extra_args,
         )
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+        stream_ptr = c_void_p(torch.accelerator.current_stream().native_handle)
         run_method = getattr(self.DLL, self.kernel_name)
         workspace_ptr = c_void_p(0)
         if self.workspace_size > 0:
@@ -99,7 +99,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+        stream_ptr = c_void_p(torch.accelerator.current_stream().native_handle)
 
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
@@ -114,7 +114,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             None,  # null workspace ptr
             stream_ptr,
         )
-        torch.cuda.synchronize()  # shake out any CUDA errors
+        torch.accelerator.synchronize()  # shake out any CUDA errors
         self.workspace_size = c_workspace_size.value
         log.debug(
             "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
