@@ -22,19 +22,6 @@ static bool needs_nd_workaround(const Tensor& input) {
   return input.dim() > 2 && is_m5_or_newer && (input.scalar_type() == kHalf || input.scalar_type() == kBFloat16);
 }
 
-// Apple7/8 (M1/M2) MPSGraph matmul intermittently returns wrong results when the
-// reduction dimension exceeds 2^15 and both output dimensions are at least 16; the
-// corruption is allocator/session-state dependent and hits contiguous and transposed
-// operands alike. Apple9+ is fine. mm/addmm already divert such shapes to the
-// stride-aware metal kernels, but linear builds its own graph, so it has to test the
-// GEMM it would form and delegate instead. Mirrors use_metal_mm in LinearAlgebra.mm.
-static bool needs_mm_overflow_fallback(int64_t m, int64_t k, int64_t n) {
-  static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
-  constexpr int64_t max_mpsgraph_dim = 32768;
-  constexpr int64_t min_matrix_dim = 16;
-  return is_affected_gpu && k > max_mpsgraph_dim && m >= min_matrix_dim && n >= min_matrix_dim;
-}
-
 static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const Tensor& bias, Tensor& output) {
   bool is_bias_defined = bias.defined();
 
@@ -155,7 +142,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
 
   // See pytorch/pytorch#177116. Delegating to addmm/mm reaches the metal kernels, which
   // take the weight's real strides, so the transposed (column-major) operand costs nothing.
-  if (!is_complex && needs_mm_overflow_fallback(input.numel() / input.size(-1), input.size(-1), weight.size(0))) {
+  if (!is_complex && mps_matmul_overreads_k(input.numel() / input.size(-1), input.size(-1), weight.size(0))) {
     const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
     // addmm fuses the bias and routes rank-1 shapes to the GEMV kernels. A multi-dim bias
     // cannot broadcast against the 2D result, so it is added after the reshape instead.
