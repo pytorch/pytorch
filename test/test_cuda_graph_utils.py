@@ -1333,6 +1333,7 @@ class TestGetGraphData(TestCase):
             self.assertIn("kernel_name", node)
             self.assertIn("grid_dim", node)
             self.assertIn("block_dim", node)
+            self.assertIn("shared_mem_bytes", node)
             self.assertIn("dependencies", node)
             self.assertIn("dependents", node)
             self.assertEqual(node["graph_id"], exec_graph_id)
@@ -1344,9 +1345,13 @@ class TestGetGraphData(TestCase):
                     for d in dims:
                         self.assertIsInstance(d, int)
                         self.assertGreater(d, 0)
+                # Dynamic shared memory may legitimately be 0.
+                self.assertIsInstance(node["shared_mem_bytes"], int)
+                self.assertGreaterEqual(node["shared_mem_bytes"], 0)
             else:
                 self.assertIsNone(node["grid_dim"])
                 self.assertIsNone(node["block_dim"])
+                self.assertIsNone(node["shared_mem_bytes"])
 
         kernel_nodes = [n for n in data["nodes"] if n["node_type"] == "kernel"]
         self.assertGreater(len(kernel_nodes), 0)
