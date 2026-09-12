@@ -8328,15 +8328,16 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   const auto interpolation =
       static_cast<GridSamplerInterpolation>(interpolation_mode);
   const auto padding_mode_enum = static_cast<GridSamplerPadding>(padding_mode);
+  const bool has_ggI = ggI.defined() && !ggI._is_zerotensor();
 
   // ggI -> d_grad_output: gather ggI at grid positions = grid_sampler_2d(ggI,
   // grid)
-  if (output_mask[0] && ggI.defined()) {
+  if (output_mask[0] && has_ggI) {
     d_grad_output = at::grid_sampler_2d(
         ggI, grid, interpolation_mode, padding_mode, align_corners);
   }
   // ggI -> d_grid: same structure as grad_grid but with ggI as "input"
-  if (output_mask[2] && ggI.defined()) {
+  if (output_mask[2] && has_ggI) {
     d_grid = std::get<1>(at::grid_sampler_2d_backward(
         grad_output,
         ggI,
@@ -8348,7 +8349,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   }
   // d_input from ggI is 0: grad_input has no dependence on input.
   // For nearest, grad_grid = 0, so all ggGrid contributions vanish.
-  if (!ggGrid.defined() || interpolation == GridSamplerInterpolation::Nearest) {
+  if (!ggGrid.defined() || ggGrid._is_zerotensor() ||
+      interpolation == GridSamplerInterpolation::Nearest) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
   auto H = input.size(2), W = input.size(3);
@@ -8390,8 +8392,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     if (output_mask[0]) {
       auto sum_dx = gs_accum_sumprod_k(I, dw_dx);
       auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
-      auto contrib = sum_dx * ggG_x.unsqueeze(1);
-      contrib.addcmul_(sum_dy, ggG_y.unsqueeze(1));
+      auto contrib =
+          (sum_dx * ggG_x.unsqueeze(1)).addcmul(sum_dy, ggG_y.unsqueeze(1));
       d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
                                               : std::move(contrib);
     }
@@ -8497,8 +8499,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     if (output_mask[0]) {
       auto sum_dx = gs_accum_sumprod_k(I_all, B_dx);
       auto sum_dy = gs_accum_sumprod_k(I_all, B_dy);
-      auto contrib = sum_dx * ggG_x_bc.unsqueeze(1);
-      contrib.addcmul_(sum_dy, ggG_y_bc.unsqueeze(1));
+      auto contrib = (sum_dx * ggG_x_bc.unsqueeze(1))
+                         .addcmul(sum_dy, ggG_y_bc.unsqueeze(1));
       d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
                                               : std::move(contrib);
     }
@@ -8584,12 +8586,13 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   const auto interpolation =
       static_cast<GridSamplerInterpolation>(interpolation_mode);
   const auto padding_mode_enum = static_cast<GridSamplerPadding>(padding_mode);
+  const bool has_ggI = ggI.defined() && !ggI._is_zerotensor();
 
-  if (output_mask[0] && ggI.defined()) {
+  if (output_mask[0] && has_ggI) {
     d_grad_output = at::grid_sampler_3d(
         ggI, grid, interpolation_mode, padding_mode, align_corners);
   }
-  if (output_mask[2] && ggI.defined()) {
+  if (output_mask[2] && has_ggI) {
     d_grid = std::get<1>(at::grid_sampler_3d_backward(
         grad_output,
         ggI,
@@ -8599,7 +8602,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
         align_corners,
         {false, true}));
   }
-  if (!ggGrid.defined() || interpolation == GridSamplerInterpolation::Nearest) {
+  if (!ggGrid.defined() || ggGrid._is_zerotensor() ||
+      interpolation == GridSamplerInterpolation::Nearest) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -8680,9 +8684,9 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto sum_dx = gs_accum_sumprod_k(I, dw_dx);
     auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
     auto sum_dz = gs_accum_sumprod_k(I, dw_dz);
-    auto d_gO = sum_dx * ggG_x.unsqueeze(1);
-    d_gO.addcmul_(sum_dy, ggG_y.unsqueeze(1));
-    d_gO.addcmul_(sum_dz, ggG_z.unsqueeze(1));
+    auto d_gO = (sum_dx * ggG_x.unsqueeze(1))
+                    .addcmul(sum_dy, ggG_y.unsqueeze(1))
+                    .addcmul(sum_dz, ggG_z.unsqueeze(1));
     d_grad_output =
         d_grad_output.defined() ? d_grad_output + d_gO : std::move(d_gO);
   }
