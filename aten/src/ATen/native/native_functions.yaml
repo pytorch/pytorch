@@ -2607,6 +2607,9 @@
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: expand_as
+    CompositeImplicitAutogradNestedTensor: expand_as_nested
 
 # decomposes to eye.m
 - func: eye(SymInt n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
