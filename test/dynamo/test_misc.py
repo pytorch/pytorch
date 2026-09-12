@@ -9150,6 +9150,286 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
+    @parametrize(
+        "spelling",
+        [
+            "single",
+            "union",
+            "tuple",
+            "union_rev",
+            "optional",
+            "mixed",
+            "nested",
+            "separate",
+            "abc_union",
+            "const_proto",
+        ],
+    )
+    def test_isinstance_runtime_checkable_protocol_classinfo(self, spelling):
+        # https://github.com/pytorch/pytorch/issues/195969
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasFoo(typing.Protocol):
+            def foo(self) -> int: ...
+
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        class Registered(abc.ABC):
+            pass
+
+        class Obj:
+            ports = (1, 2)
+
+            def foo(self) -> int:
+                return 1
+
+        class Other:
+            pass
+
+        Registered.register(Other)
+
+        checks = {
+            "single": lambda o: isinstance(o, HasPorts),
+            "union": lambda o: isinstance(o, HasPorts | HasFoo),
+            "tuple": lambda o: isinstance(o, (HasPorts, HasFoo)),
+            "union_rev": lambda o: isinstance(o, HasFoo | HasPorts),
+            "optional": lambda o: isinstance(o, HasPorts | None),
+            "mixed": lambda o: isinstance(o, (int, HasPorts)),
+            "nested": lambda o: isinstance(o, ((HasPorts,), HasFoo)),
+            "separate": lambda o: isinstance(o, HasPorts) or isinstance(o, HasFoo),
+            "abc_union": lambda o: isinstance(o, Registered | HasPorts),
+            "const_proto": lambda o: isinstance(o, HasReal | HasFoo),
+        }
+        check = checks[spelling]
+
+        def fn(x, o):
+            return x + 1 if check(o) else x - 1
+
+        x = torch.ones(3)
+        for o in (Obj(), Other(), None, 3, [1, 2]):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=repr(o))
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_isinstance_protocol_with_unspecialized_int(self):
+        # An unspecialized int is a SymNodeVariable with no wrapped object, but
+        # attribute lookup on an int cannot depend on its value, so the Protocol
+        # answer is fixed by the type and needs no graph break.
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def matches(x, n):
+            return x + 1 if isinstance(n, HasPorts | HasReal) else x - 1
+
+        def misses(x, n):
+            return x + 1 if isinstance(n, HasPorts) else x - 1
+
+        x = torch.ones(3)
+        for fn in (matches, misses):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            for n in (3, 5):
+                self.assertEqual(opt_fn(x, n), fn(x, n), msg=repr(n))
+            # The int stayed symbolic, so the two values share one graph.
+            self.assertEqual(cnt.frame_count, 1)
+
+    def test_isinstance_protocol_member_order_effects(self):
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        # A plain member matching first answers without the wrapped object, so
+        # the Protocol member is never reached and there is no graph break.
+        def plain_member_matches_first(x):
+            return x + 1 if isinstance([x], (list, HasPorts)) else x - 1
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(
+            plain_member_matches_first, backend="eager", fullgraph=True
+        )
+        self.assertEqual(opt_fn(x), plain_member_matches_first(x))
+
+        # Reaching a member with an __instancecheck__ hook realizes a lazy
+        # constant and guards its value, so it recompiles once per value. A
+        # plain member matching first keeps the weaker type-only guard.
+        def plain_first(x, v):
+            return x + 1 if isinstance(v, (str, HasReal)) else x - 1
+
+        def hooked_first(x, v):
+            return x + 1 if isinstance(v, (HasReal, str)) else x - 1
+
+        for fn, expected_frames in ((plain_first, 1), (hooked_first, 2)):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            for value in ("hello", "world"):
+                self.assertEqual(opt_fn(x, value), fn(x, value))
+            self.assertEqual(cnt.frame_count, expected_frames)
+
+    def test_isinstance_protocol_without_issubclass_graph_breaks(self):
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def fn(x):
+            def inner():
+                return x
+
+            # A function is built during tracing, so Dynamo has no Python object
+            # to run the Protocol's __instancecheck__ on, and unlike a list a
+            # function carries a __dict__, so its type does not answer either.
+            return x + 1 if isinstance(inner, HasPorts) else x - 1
+
+        x = torch.ones(3)
+        with self.assertRaisesRegex(Unsupported, "does not support issubclass"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_isinstance_value_reading_instancecheck_on_traced_list(self):
+        # This hook reads the instance, not its attributes, so answering it from
+        # a representative empty list would be wrong (here it raises IndexError).
+        # The traced list is reconstructible, so the real object answers.
+        class IndexMeta(type):
+            def __subclasscheck__(cls, subclass):
+                raise TypeError("nope")
+
+            def __instancecheck__(cls, instance):
+                return instance[0] == 1
+
+        class First1(metaclass=IndexMeta):
+            pass
+
+        def fn(x):
+            lst = [1, 2, 3]
+            return x + 1 if isinstance(lst, First1) else x - 1
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_isinstance_inherited_instancecheck_metaclass(self):
+        # __instancecheck__ resolves through the metaclass MRO, so a hook that is
+        # inherited rather than defined directly still takes the object path.
+        class Meta(abc.ABCMeta):
+            pass
+
+        class Base(metaclass=Meta):
+            pass
+
+        class Obj(Base):
+            pass
+
+        def subscripted_generic(x, o):
+            # typing._GenericAlias inherits __instancecheck__ from
+            # _BaseGenericAlias and rejects subscripted generics
+            try:
+                isinstance(o, typing.List[int])
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        def inherited_abcmeta(x, o):
+            return x + 1 if isinstance(o, Base) else x - 1
+
+        x = torch.ones(3)
+        o = Obj()
+        for fn in (subscripted_generic, inherited_abcmeta):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=fn.__name__)
+
+    def test_isinstance_protocol_on_nn_module(self):
+        @typing.runtime_checkable
+        class HasWeight(typing.Protocol):
+            weight: torch.Tensor
+
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def fn(x, mod):
+            return x + 1 if isinstance(mod, HasPorts | HasWeight) else x - 1
+
+        x = torch.ones(3)
+        mod = torch.nn.Linear(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, mod), fn(x, mod))
+
+    def test_isinstance_non_runtime_checkable_protocol_raises(self):
+        class NotRuntime(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasFoo(typing.Protocol):
+            def foo(self) -> int: ...
+
+        class Obj:
+            ports = (1, 2)
+
+        def fn(x, o):
+            try:
+                isinstance(o, NotRuntime | HasFoo)
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x = torch.ones(3)
+        o = Obj()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, o), fn(x, o))
+
+    def test_isinstance_tuple_short_circuits_before_invalid_member(self):
+        # CPython validates tuple members lazily, left to right, so a match
+        # before an invalid member returns True instead of raising.
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        class Obj:
+            ports = (1, 2)
+
+        class Other:
+            pass
+
+        class MyError(Exception):
+            pass
+
+        def fn(x, o):
+            try:
+                hit = isinstance(o, (HasPorts, 1))
+            except TypeError:
+                return x - 1
+            return x + 1 if hit else x
+
+        def fn_exc_class(x):
+            return x + 1 if isinstance(MyError, (type, 1)) else x - 1
+
+        x = torch.ones(3)
+        for o in (Obj(), Other(), 3):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=repr(o))
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn_exc_class, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn_exc_class(x))
+
     def test_tensor_isinstance_custom_instancecheck_graph_break(self):
         shape_context = threading.local()
 
