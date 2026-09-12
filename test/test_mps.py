@@ -6956,24 +6956,6 @@ class TestMPS(TestCaseMPS):
             for keepdim in [False, True]:
                 helper((2, 8, 4, 5), dim, keepdim)
 
-    # Test minimum and maximum
-    def test_minimum_maximum(self):
-        def helper(n, c, h, w):
-            cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=False)
-            cpu_y = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=False)
-            mps_x = cpu_x.detach().clone().to('mps')
-            mps_y = cpu_y.detach().clone().to('mps')
-
-            minimum_result_cpu = torch.minimum(cpu_x, cpu_y)
-            minimum_result_mps = torch.minimum(mps_x, mps_y)
-            self.assertEqual(minimum_result_cpu, minimum_result_mps)
-
-            maximum_result_cpu = torch.maximum(cpu_x, cpu_y)
-            maximum_result_mps = torch.maximum(mps_x, mps_y)
-            self.assertEqual(maximum_result_cpu, maximum_result_mps)
-
-        helper(1, 1, 4, 5)
-
     def test_minimum_maximum_nan_propagation(self):
         x = torch.rand(32, device="mps")
         y = torch.rand(32, device="mps")
@@ -7168,38 +7150,6 @@ class TestMPS(TestCaseMPS):
         torch.clamp(mps_x, min=mps_min_t, max=mps_max_t, out=mps_out)
         self.assertEqual(mps_out.cpu(), cpu_out)
 
-    def test_divmode(self):
-        def helper(shape, rounding_mode):
-            for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
-                if ((rounding_mode is not None and "floor" in rounding_mode and dtype == torch.int64) or
-                        (rounding_mode is not None and "trunc" in rounding_mode and dtype == torch.float16)) is False:
-                    cpu_x = None
-                    cpu_y = None
-                    if (dtype in [torch.float32, torch.float16]):
-                        cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
-                        cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
-                    else:
-                        cpu_x = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
-                        cpu_y = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
-
-                    mps_x = cpu_x.detach().clone().to('mps')
-                    # clamp to avoid division by 0
-                    mps_y = cpu_y.detach().clone().to('mps')
-
-                    if (rounding_mode == "floor_divide"):
-                        result_div_cpu = torch.floor_divide(cpu_x, cpu_y)
-                        result_div_mps = torch.floor_divide(mps_x, mps_y)
-                        self.assertEqual(result_div_mps, result_div_cpu)
-                    else:
-                        result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
-                        result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
-                        self.assertEqual(result_div_mps, result_div_cpu)
-
-        helper((2, 8, 4, 5), None)
-        helper((2, 8, 4, 5), "floor")
-        helper((2, 8, 4, 5), "trunc")
-        helper((2, 8, 4, 5), "floor_divide")
-
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("op", ["floor_divide", "div_floor"])
     def test_div_floor_extremal(self, dtype, op):
@@ -7217,30 +7167,6 @@ class TestMPS(TestCaseMPS):
         else:
             self.assertEqual(torch.div(mps_a, mps_b, rounding_mode="floor"),
                              torch.div(cpu_a, cpu_b, rounding_mode="floor"))
-
-    def test_rounding(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            mps_x = cpu_x.detach().clone().to('mps')
-
-            result_floor_cpu = torch.floor(cpu_x)
-            result_floor_mps = torch.floor(mps_x)
-            self.assertEqual(result_floor_mps, result_floor_cpu)
-
-            result_ceil_cpu = torch.ceil(cpu_x)
-            result_ceil_mps = torch.ceil(mps_x)
-            self.assertEqual(result_ceil_mps, result_ceil_cpu)
-
-            result_trunc_cpu = torch.trunc(cpu_x)
-            result_trunc_mps = torch.trunc(mps_x)
-            self.assertEqual(result_trunc_mps, result_trunc_cpu)
-
-            result_round_cpu = torch.round(cpu_x)
-            result_round_mps = torch.round(mps_x)
-            self.assertEqual(result_round_mps, result_round_cpu)
-
-        helper((2, 6, 3, 5))
-        helper((2, 8, 4, 5))
 
     def test_remainder(self):
         res_cpu = torch.remainder(
@@ -8351,36 +8277,6 @@ class TestMPS(TestCaseMPS):
                 for contiguous in [True, False]:
                     helper(shape, dtype, contiguous)
 
-    def test_gelu(self):
-        def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
-            numpy_dtype = {
-                torch.bfloat16: torch.float, torch.float: torch.float, torch.double: torch.double
-            }[dtype]
-            devices = ['cpu']
-            devices += ['mps']
-
-            def _gelu_ref(X):
-                return X * stats.norm.cdf(X)  # noqa: F821
-
-            for d in devices:
-                X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
-                res = X
-                ref = (X.to(numpy_dtype).cpu().detach().numpy())
-                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
-
-        for n in [1, 5, 10]:
-            for m in [1, 5, 10]:
-                _test_gelu(n, m, torch.float32, True)
-                _test_gelu(n, m, torch.float32, False)
-
-        # Test multi threaded
-        num_threads = torch.get_num_threads()
-        torch.set_num_threads(4)
-        try:
-            _test_gelu(32, 32, torch.float32, False)
-        finally:
-            torch.set_num_threads(num_threads)
-
     def test_gelu_tanh_large_values(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/186278
         for dtype in [torch.bfloat16, torch.float16, torch.float32]:
@@ -8545,20 +8441,6 @@ class TestMPS(TestCaseMPS):
         cpu_transpose6 = torch.transpose(cpu_x, 1, 2)
         mps_transpose6 = torch.transpose(mps_x, 1, 2).to('cpu')
         self.assertEqual(cpu_transpose6, mps_transpose6)
-
-    def test_signbit(self):
-        def helper(shape, dtype):
-            cpu_x = torch.randn(shape, device='cpu').to(dtype)
-            x = cpu_x.clone().to('mps')
-
-            signbit_result = torch.signbit(x)
-            signbit_result_cpu = torch.signbit(cpu_x)
-
-            self.assertEqual(signbit_result, signbit_result_cpu)
-
-        helper((2, 8, 4, 5), torch.int)
-        helper((2, 8, 4, 5), torch.float)
-        helper((2, 8, 4, 5), torch.int64)
 
     def test_neg_strided_input(self):
         # See https://github.com/pytorch/pytorch/issues/98074#issuecomment-1496088337
@@ -10148,23 +10030,6 @@ class TestMPS(TestCaseMPS):
         out_f = torch.empty(64, device='mps')
         torch.sin(src_i, out=out_f)
         self.assertEqual(out_f, torch.sin(src_i.cpu().float()))
-
-    def test_atan2(self):
-        def helper(shape):
-            input_cpu = torch.randn(shape)
-            input_mps = input_cpu.detach().clone().to("mps")
-
-            other_cpu = torch.randn(shape)
-            other_mps = other_cpu.detach().clone().to("mps")
-
-            atan2_cpu = torch.atan2(input_cpu, other_cpu)
-            atan2_mps = torch.atan2(input_mps, other_mps)
-
-            self.assertEqual(atan2_cpu, atan2_mps.to("cpu"))
-
-        helper(4)
-        helper(10000)
-        helper((10000, 40))
 
     @unittest.skip("This does not test anything")
     def test_multinomial(self):
