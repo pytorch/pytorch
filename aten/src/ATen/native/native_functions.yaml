@@ -6937,8 +6937,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: sub_out
-    MPS: sub_out_mps
+    CPU, CUDA, MPS, XPU: sub_out
     MTIA: sub_out_mtia
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sub_out_sparse
   tags: pointwise
@@ -13537,6 +13536,7 @@
   variants: method
   dispatch:
     CUDA: record_stream_cuda
+    MPS: record_stream_mps
     XPU: record_stream_xpu
 
 - func: isposinf(Tensor self) -> Tensor
