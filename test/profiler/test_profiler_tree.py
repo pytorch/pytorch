@@ -12,6 +12,7 @@ import expecttest
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_WINDOWS,
     run_tests,
@@ -41,7 +42,16 @@ PRUNE_FUNCTIONS = {
     # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
     "cudaGetDeviceCount": PRUNE_ALL,
     "cudaGetDeviceProperties_v2": PRUNE_ALL,
+    # PTI overhead markers on XPU; how many are emitted varies run to run.
+    "Instrumentation": PRUNE_ALL,
 }
+
+# On XPU the Level-Zero driver calls, and the UR allocations that sit on top of
+# them, depend on the driver version and on whether the SYCL kernel is already
+# JIT compiled and the block already cached by the allocator, so the first
+# profiled run sees many more of them than later ones. The `urEnqueue*` layer
+# above is stable, so that is what the XPU trees assert on.
+PRUNE_PATTERN = re.compile(r"ze[A-Z]\w*|urUSM\w*")
 
 # ROCTracer is currently not producing events that profiler can extract. We
 # should bring it up to parity with CUPTI Kineto / profiler integration, but in
@@ -117,6 +127,8 @@ class ProfilerTree:
                 cls.validate_node(node)
                 name = cls.fmt_name(node.name)
                 prune_level = PRUNE_FUNCTIONS.get(name.strip(), None)
+                if prune_level is None and PRUNE_PATTERN.fullmatch(name.strip()):
+                    prune_level = PRUNE_ALL
                 if prune_level is None:
                     out.append((depth, name))
                     flatten(node.children, depth + 1, out)
@@ -197,6 +209,10 @@ class ProfilerTree:
                 name,
             )
 
+        # XPU kernels are SYCL functors, so the template arguments spell out the
+        # whole operand type list rather than ending in an argument list.
+        name = re.sub(r"^(at::native::xpu::\w+)<.+>$", r"\1<...>", name)
+
         # HACK: this patches around the fact that PyBind11 improperly sets the
         # __qualname__ attribute on functions and methods; see
         # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
@@ -231,8 +247,7 @@ class ProfilerTree:
                     raise AssertionError(f"{parent_name} vs. {caller_name}")
 
 
-@unittest.skipIf(IS_ARM64, "Not working on ARM")
-class TestProfilerTree(TestCase):
+class _TestProfilerTreeBase(TestCase):
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
         #   Different platforms will have subtly different behavior for Python
@@ -274,6 +289,11 @@ class TestProfilerTree(TestCase):
                     print(msg.split("AssertionError:")[-1])
                 else:
                     raise
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCPU(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CPU
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
@@ -575,6 +595,11 @@ class TestProfilerTree(TestCase):
                   ...""",
         )
 
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTree(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("too slow")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
@@ -786,6 +811,11 @@ class TestProfilerTree(TestCase):
                 torch/profiler/profiler.py(...): stop
                   ...""",
         )
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCUDA(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
@@ -1152,6 +1182,155 @@ class TestProfilerTree(TestCase):
                         <built-in function hash>
                     ...""",
             allow_failure=ALLOW_CUDA_FAILURE,
+        )
+
+
+class TestProfilerTreeXPU(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.XPU
+
+    @unittest.skipIf(not torch.xpu.is_available(), "XPU is required")
+    @ProfilerTree.test
+    def test_profiler_experimental_tree_xpu(self):
+        with torch.profiler.profile(profile_memory=True) as p:
+            weight = torch.ones(1, device="xpu", requires_grad=True)
+            x = torch.ones(1, device="xpu")
+            y = torch.add(weight, x)
+            loss = torch.pow(y, 2)
+            loss.backward()
+            torch.optim.SGD([weight], lr=0.01, momentum=0.9).step()
+
+        self.assertTreesMatch(
+            ProfilerTree.format(p.profiler, 12),
+            """\
+            aten::ones
+              aten::empty
+                [memory]
+              aten::fill_
+                urEnqueueKernelLaunchWithArgsExp
+                  at::native::xpu::VectorizedElementwiseKernel<...>
+            aten::ones
+              aten::empty
+                [memory]
+              aten::fill_
+                urEnqueueKernelLaunchWithArgsExp
+                  at::native::xpu::VectorizedElementwiseKernel<...>
+            aten::add
+              urEnqueueKernelLaunchWithArgsExp
+                at::native::xpu::VectorizedElementwiseKernel<...>
+              [memory]
+            aten::pow
+              urEnqueueKernelLaunchWithArgsExp
+                at::native::xpu::VectorizedElementwiseKernel<...>
+              aten::result_type
+              aten::to
+              [memory]
+            aten::ones_like
+              aten::empty_like
+                aten::empty_strided
+                  [memory]
+              aten::fill_
+                urEnqueueKernelLaunchWithArgsExp
+                  at::native::xpu::VectorizedElementwiseKernel<...>
+            autograd::engine::evaluate_function: PowBackward0
+              PowBackward0
+                aten::pow
+                  aten::result_type
+                  aten::to
+                  [memory]
+                  aten::copy_
+                    urEnqueueKernelLaunchWithArgsExp
+                      at::native::xpu::VectorizedElementwiseKernel<...>
+                aten::mul
+                  [memory]
+                  aten::mul
+                    urEnqueueKernelLaunchWithArgsExp
+                      at::native::xpu::VectorizedElementwiseKernel<...>
+                    [memory]
+                  [memory]
+                aten::mul
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  [memory]
+                [memory]
+                [memory]
+            autograd::engine::evaluate_function: AddBackward0
+              AddBackward0
+            autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+              torch::autograd::AccumulateGrad
+                aten::detach
+                  detach
+            Optimizer.step#SGD.step
+              Optimizer.step#SGD.step
+              aten::detach
+                detach
+              aten::clone
+                aten::empty_strided
+                  [memory]
+                aten::copy_
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+              aten::_foreach_add_
+                urEnqueueUSMMemcpy
+                  Memcpy H2D (Host (Driver Allocated) -> Device)
+                urEnqueueUSMMemcpy
+                  Memcpy H2D (Host (Driver Allocated) -> Device)
+                urEnqueueKernelLaunchWithArgsExp
+                  at::native::xpu::MultiTensorApplyKernelFunctor<...>
+                aten::empty
+                  [memory]
+                aten::empty
+                  [memory]
+                [memory]
+                [memory]""",
+        )
+
+    @unittest.skipIf(not torch.xpu.is_available(), "XPU is required")
+    @ProfilerTree.test
+    def test_profiler_experimental_tree_xpu_with_stream(self):
+        streams = [torch.xpu.Stream() for _ in range(3)]
+        results = []
+        with torch.profiler.profile(profile_memory=True) as p:
+            x = torch.ones((4, 4), device="xpu")
+            for stream in streams:
+                with torch.xpu.stream(stream):
+                    results.append(torch.tanh(x) - x)
+        del results
+        for s in streams:
+            torch.xpu.current_stream().wait_stream(s)
+
+        self.assertTreesMatch(
+            ProfilerTree.format(p.profiler, 12),
+            """\
+            aten::ones
+              aten::empty
+                [memory]
+              aten::fill_
+                urEnqueueKernelLaunchWithArgsExp
+                  at::native::xpu::VectorizedElementwiseKernel<...>
+            aten::tanh
+              urEnqueueKernelLaunchWithArgsExp
+                at::native::xpu::VectorizedElementwiseKernel<...>
+              [memory]
+            aten::sub
+              urEnqueueKernelLaunchWithArgsExp
+                at::native::xpu::VectorizedElementwiseKernel<...>
+              [memory]
+            aten::tanh
+              urEnqueueKernelLaunchWithArgsExp
+                at::native::xpu::VectorizedElementwiseKernel<...>
+              [memory]
+            aten::sub
+              urEnqueueKernelLaunchWithArgsExp
+                at::native::xpu::VectorizedElementwiseKernel<...>
+              [memory]
+            aten::tanh
+              urEnqueueKernelLaunchWithArgsExp
+                at::native::xpu::VectorizedElementwiseKernel<...>
+              [memory]
+            aten::sub
+              urEnqueueKernelLaunchWithArgsExp
+                at::native::xpu::VectorizedElementwiseKernel<...>
+              [memory]""",
         )
 
 
