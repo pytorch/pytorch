@@ -563,11 +563,12 @@ class TestMaxAutotune(TestCase):
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
-    @parametrize("epilogue_subtile", (1, 2, 4))
+    @parametrize("tail_case", ((127, 1), (129, 2), (384, 4)))
     def test_blackwell_bmm_template_2cta_rank3_output(
-        self, epilogue_subtile: int
+        self, tail_case: tuple[int, int]
     ) -> None:
-        bsz, m, k, n = 3, 129, 4104, 136
+        m, epilogue_subtile = tail_case
+        bsz, k, n = 3, 4104, 136
         a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
 
