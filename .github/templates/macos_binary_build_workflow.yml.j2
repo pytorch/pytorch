@@ -90,6 +90,8 @@ jobs:
       - name: Install libomp
         run: |
           "${PYTORCH_ROOT}/.ci/macwheel/install_libomp.sh"
+      - name: Install Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
       - name: Install uv
         uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
