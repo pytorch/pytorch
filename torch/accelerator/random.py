@@ -1,7 +1,8 @@
 import torch
 from torch import Tensor
+from torch.types import Device as _device_t
 
-from ._utils import _device_t, _get_device_index
+from ._utils import _get_device_index
 
 
 def initial_seed(device: _device_t = None, /) -> int:
