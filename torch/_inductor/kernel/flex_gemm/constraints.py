@@ -12,6 +12,7 @@ from torch._inductor.kernel.gemm_epilogue import (
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known
 from torch._inductor.utils import _IntLike
 from torch.types import IntLikeType
+from torch.utils._ordered_set import OrderedSet
 
 
 INDEXED_OUTPUT_INDICES_ARG_NAME: Final = "indexed_output_indices"
@@ -25,6 +26,9 @@ LOCAL_REDUCE_STORE_ARG_NAME: Final = "local_reduce_store"
 # fit one logical TensorSSA fragment use QuACK's in-kernel accumulator prepass;
 # larger groups remain unsupported.
 LOCAL_REDUCE_FRAGMENT_WIDTH = GEMM_REDUCTION_FRAGMENT_WIDTH
+# Built-in local-reduce callback names; any other string is a generated callable.
+LOCAL_REDUCE_COMBINE_NAMES: Final = frozenset(OrderedSet(["add", "mul", "max", "min"]))
+LOCAL_REDUCE_FINALIZE_NAMES: Final = frozenset(OrderedSet(["mean"]))
 LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only same-warp axis-0 "
     f"groups <= {LOCAL_REDUCE_FRAGMENT_WIDTH}"
