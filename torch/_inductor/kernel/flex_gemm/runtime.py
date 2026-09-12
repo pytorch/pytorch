@@ -44,6 +44,7 @@ def flex_gemm_problem(
     concat_layout: Any,
     *,
     blockscaled: bool = False,
+    varlen_m: bool = False,
 ) -> Any:
     """Describe a FlexGEMM call (physical GEMM M and N) for QuACK config pruning."""
     from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn, ModProblem
@@ -53,6 +54,7 @@ def flex_gemm_problem(
         m=m,
         n=n,
         b_kn=mod_b_kn(device, concat_layout),
+        varlen_m=varlen_m,
         blockscaled=blockscaled,
         concat=bool(concat_layout),
     )
@@ -394,12 +396,17 @@ def gemm_epilogue(
     indexed_indices: torch.Tensor | None = None,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
     output_contraction: FlexGemmOutputContraction | None = None,
+    cu_seqlens_m: torch.Tensor | None = None,
     config: QuackConfigKey,
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense or block-scaled FlexGEMM call through the vendored QuACK EpiMod.
+    """Run a dense, block-scaled or varlen-M FlexGEMM call through the vendored QuACK EpiMod.
 
     ``config`` pins the exact GemmConfig Inductor selected at lowering time.
+    ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
+    ``a`` is ``[total_m, K]`` and ``b`` is per-group ``[E, K, N]``. Captured
+    row/col vectors are always passed rank-1; QuACK shares a row across groups
+    and offsets a ``[total_m]`` column per group.
     """
     from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -448,9 +455,9 @@ def gemm_epilogue(
     for index, (arg, kind) in enumerate(
         zip(quack_epilogue_args, epilogue_arg_kinds, strict=True)
     ):
-        operands[f"operand{index}"] = (
-            arg.squeeze(-1).unsqueeze(0) if kind == "col" else arg
-        )
+        if kind in ("row", "col"):
+            arg = arg.squeeze(0 if kind == "row" else -1)
+        operands[f"operand{index}"] = arg
     if indexed_out is not None:
         operands[INDEXED_OUTPUT_INDICES_ARG_NAME] = indexed_indices
         operands[INDEXED_OUTPUT_STORE_ARG_NAME] = indexed_out
@@ -535,6 +542,7 @@ def gemm_epilogue(
             config=quack_config,
             tuned=False,
             concat_layout=concat_layout,
+            cu_seqlens_m=cu_seqlens_m,
             compile_dispatch=False,
             **blockscaled_kwargs,
             **operands,
