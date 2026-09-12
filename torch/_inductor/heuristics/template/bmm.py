@@ -7,6 +7,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor.heuristics.registry import register_template_heuristic
 
+from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import (
     BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS,
     blackwell_ws_persistent_tma_bmm_template,
@@ -85,6 +86,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             "B_BROADCAST_BATCH": int(mat2.get_stride()[0]) == 0,
             "tma_store": False,
         }
+        use_meta_ws = meta_ws_enabled()
         for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
             yield {
                 "BLOCK_M": candidate.block_m,
@@ -94,8 +96,11 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "num_stages": candidate.num_stages,
                 "num_warps": candidate.num_warps,
                 "EPILOGUE_SUBTILE": candidate.epilogue_subtile,
+                "USE_META_WS": use_meta_ws,
                 "WARP_SPECIALIZE": True,
-                "FLATTEN": True,
+                "FLATTEN": not use_meta_ws,
+                "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
+                "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
                 **tma_options,
             }
 
