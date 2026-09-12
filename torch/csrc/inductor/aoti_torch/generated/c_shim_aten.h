@@ -14,6 +14,9 @@
 extern "C" {
 #endif
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_add_Tensor(AtenTensorHandle self, AtenTensorHandle other, double alpha, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_amax(AtenTensorHandle self, const int64_t* dim, int64_t dim_len_, int32_t keepdim, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_fill__Scalar(AtenTensorHandle self, double value);
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
