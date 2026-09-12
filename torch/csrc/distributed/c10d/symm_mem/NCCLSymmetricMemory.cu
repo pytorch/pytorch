@@ -27,7 +27,7 @@ namespace symmetric_memory {
 
 /* Start of NCCLAllocation implementation */
 
-static StoreExchange storeExchange = StoreExchange("NCCLAllocation");
+static StoreExchange storeExchange{"NCCLAllocation"};
 
 struct NCCLAllocation {
   // Combined ncclMemAlloc region. Layout (signal pad first):
