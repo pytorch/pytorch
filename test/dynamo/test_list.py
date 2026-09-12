@@ -4,10 +4,13 @@
 
 
 import collections
+import enum
 import sys
 
 import torch
+import torch._dynamo.exc
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
@@ -22,6 +25,21 @@ class AlwaysEqualForListRemove:
 class NeverEqualForListRemove:
     def __eq__(self, other):
         return False
+
+
+class IndexForListPop:
+    def __index__(self):
+        return 1
+
+
+class IntSubclassForListPop(int):
+    # _PyNumber_Index hands an int subclass back untouched, so this never runs.
+    def __index__(self):
+        raise AssertionError("__index__ consulted for an int subclass")
+
+
+class IntEnumForListPop(enum.IntEnum):
+    ONE = 1
 
 
 class CmpKeyForListSort:
@@ -287,6 +305,28 @@ class ListTests(TupleTests):
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.pop, 2, 3)
+
+    @make_dynamo_test
+    def test_pop_index_conversion(self):
+        p = self.thetype("abcd")
+        self.assertEqual(p.pop(-2), "c")
+        self.assertEqual(p.pop(IndexForListPop()), "b")
+        self.assertEqual(p, ["a", "d"])
+        # An int subclass converts without its __index__ being consulted.
+        p = self.thetype("abcd")
+        self.assertEqual(p.pop(IntSubclassForListPop(1)), "b")
+        self.assertEqual(p.pop(IntEnumForListPop.ONE), "c")
+        self.assertEqual(p.pop(True), "d")
+        self.assertRaises(IndexError, p.pop, -3)
+        self.assertRaises(TypeError, p.pop, 1.0)
+        with self.assertRaisesRegex(
+            OverflowError, "Python int too large to convert to C ssize_t"
+        ):
+            p.pop(2**80)
+
+        # The conversion precedes the empty-list check.
+        self.assertRaises(TypeError, self.thetype().pop, 1.0)
+        self.assertRaises(IndexError, self.thetype().pop, 0)
 
     @make_dynamo_test
     def test_remove(self):
@@ -600,6 +640,104 @@ class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
                 return str(e)
 
         self._check(fn)
+
+
+class DequeMaxlenTests(torch._dynamo.test_case.TestCase):
+    def _parity(self, fn):
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(3)), fn(torch.ones(3)))
+        return compiled(torch.ones(3))
+
+    def test_maxlen_conversion(self):
+        # maxlen is a Py_ssize_t, so a bool or an int subclass lands as a plain int.
+        def fn(x):
+            try:
+                collections.deque([1], maxlen=-1)
+                negative = None
+            except ValueError as e:
+                negative = str(e)
+            try:
+                collections.deque([1], maxlen=1.0)
+                wrong_type = None
+            except TypeError as e:
+                wrong_type = str(e)
+            return (
+                repr(collections.deque([1], maxlen=True)),
+                repr(collections.deque([1], maxlen=IntEnumForListPop.ONE)),
+                negative,
+                wrong_type,
+                collections.deque([1], maxlen=None).maxlen,
+            )
+
+        self.assertEqual(
+            self._parity(fn),
+            (
+                "deque([1], maxlen=1)",
+                "deque([1], maxlen=1)",
+                "maxlen must be non-negative",
+                "an integer is required",
+                None,
+            ),
+        )
+
+
+class SymIntIndexTests(torch._dynamo.test_case.TestCase):
+    # pop() specializes a shape-derived index under a guard, since which element
+    # leaves the list is structural. ref: https://github.com/pytorch/pytorch/issues/196285
+    def _check(self, fn, sizes):
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnts, fullgraph=True, dynamic=True)
+        for n in sizes:
+            x = torch.ones(n)
+            self.assertEqual(compiled(x), fn(x))
+        return cnts
+
+    def test_pop_sym_index(self):
+        def fn(x):
+            values = [x * 2, x * 3, x * 4]
+            first = values.pop(x.shape[0] - 2)
+            return first + values.pop(-x.shape[0] + 1)
+
+        self._check(fn, [3])
+
+    def test_pop_sym_index_recompiles(self):
+        def fn(x):
+            values = [x + 1, x + 2, x + 3]
+            return values.pop(x.shape[0] - 3) * 10 + values[0]
+
+        cnts = self._check(fn, [3, 4])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_pop_sym_index_out_of_range(self):
+        def fn(x):
+            seen = []
+            for idx in (x.shape[0] + 5, -x.shape[0] - 5):
+                try:
+                    [1, 2, 3].pop(idx)
+                except IndexError as e:
+                    seen.append(str(e))
+            return seen
+
+        self._check(fn, [3])
+
+    def test_deque_sym_maxlen(self):
+        # maxlen goes through the same PyLong_AsSsize_t conversion as pop's index.
+        def fn(x):
+            q = collections.deque([1, 2, 3], maxlen=x.shape[0] - 1)
+            return x + len(q)
+
+        cnts = self._check(fn, [3, 4])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_pop_unbacked_index_raises(self):
+        # No guard can make an unbacked choice sound, so pop refuses rather than
+        # specializing on the first sample.
+        def fn(x):
+            return [1, 2, 3].pop(x.sum().item() % 3)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            compiled(torch.ones(3, dtype=torch.int64))
 
 
 if __name__ == "__main__":

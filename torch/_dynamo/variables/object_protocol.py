@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import operator
 import sys
 import types
 import typing
@@ -36,6 +37,7 @@ from ..exc import (
     unimplemented,
 )
 from ..source import AttrSource, Source
+from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -824,14 +826,16 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
     if not issubclass(obj.python_type(), int):
         raise_type_error(tx, "an integer is required")
-    val = obj.as_python_constant()
+    # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
+    val = specialize_symnode(obj).as_python_constant()
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
             tx,
             args=["Python int too large to convert to C ssize_t"],
         )
-    return val
+    # A C ssize_t, so a bool or an int subclass comes back as a plain int.
+    return int(val)
 
 
 def pynumber_as_ssize_t(
@@ -876,6 +880,13 @@ def pynumber_index(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
     """Mirrors PyNumber_Index (index(x) dispatch)."""
+
+    # An int or subclass never sees its own __index__, then normalizes to an
+    # exact int. A SymInt is not constant: nb_index is where it specializes.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
+    if obj.is_python_constant() and issubclass(obj.python_type(), int):
+        return ConstantVariable.create(operator.index(obj.as_python_constant()))
 
     if obj.tp_as_number.nb_index is None:
         raise_type_error(
