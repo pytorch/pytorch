@@ -3173,11 +3173,6 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
-# defaultdict adds __init__/__repr__/__missing__/copy on top of dict's; a
-# defaultdict subclass inherits both, so UDOV slot delegation needs the union.
-defaultdict_methods = dict_methods | {
-    method for method in collections.defaultdict.__dict__.values() if callable(method)
-}
 set_methods = {method for method in set.__dict__.values() if callable(method)}
 frozenset_methods = {
     method for method in frozenset.__dict__.values() if callable(method)

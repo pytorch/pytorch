@@ -1039,11 +1039,13 @@ class OutputGraph(OutputGraphCommon):
                         var.value, _ExportModuleSpecTrackerDict
                     ):
                         if populate_export_metadata:
+                            if var._base_vt is None:
+                                raise AssertionError("var._base_vt must not be None")
                             for (
                                 k,
                                 v,
                             ) in (
-                                var.items.items()  # pyrefly: ignore[missing-attribute]
+                                var._base_vt.items.items()  # pyrefly: ignore[missing-attribute]
                             ):
                                 # pyrefly: ignore [implicit-any]
                                 specs = {}

@@ -207,7 +207,6 @@ from .user_defined import (
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
-    UserDefinedDefaultDictVariable,
     UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,

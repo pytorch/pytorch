@@ -394,10 +394,15 @@ class SuperVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         elif (
             isinstance(self.objvar, variables.UserDefinedObjectVariable)
+            and self.objvar._base_vt is not None
             and self.objvar._base_methods is not None
             and inner_fn in self.objvar._base_methods
         ):
-            return self.objvar.call_base_method(tx, name, args, kwargs)
+            if name == "__init__" and isinstance(
+                self.objvar, variables.lists.DequeVariable
+            ):
+                return self.objvar.call_method(tx, name, args, kwargs)
+            return self.objvar._base_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             attr_name = args[0].value  # type: ignore[attr-defined]
             # object.__getattribute__ IS PyObject_GenericGetAttr.  Delegate

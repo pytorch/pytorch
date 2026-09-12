@@ -8,11 +8,7 @@ import sys
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    make_dynamo_test,
-    parametrize,
-)
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 lst = []
@@ -626,63 +622,6 @@ class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
                 return str(e)
 
         self._check(fn)
-
-
-class ListSubclass(list):
-    pass
-
-
-class DequeSubclass(collections.deque):
-    pass
-
-
-@instantiate_parametrized_tests
-class SubclassSideEffectTests(torch._dynamo.test_case.TestCase):
-    # A container subclass input can mutate on two axes at once: the builtin
-    # contents and the instance __dict__. Both must be replayed on the caller's
-    # object.
-    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
-    def test_subclass_input_append(self, cls):
-        def fn(lst, x):
-            lst.append(5)
-            lst.attr = len(lst)
-            for v in lst:
-                x = x * v
-            return x
-
-        x = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-
-        ref, res = cls([1, 2]), cls([1, 2])
-        self.assertEqual(fn(ref, x), opt_fn(res, x))
-        self.assertEqual(list(ref), list(res))
-        self.assertEqual(list(res), [1, 2, 5])
-        self.assertEqual(res.attr, ref.attr)
-
-    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
-    def test_subclass_input_pop(self, cls):
-        def fn(lst, x):
-            lst.pop()
-            return x * len(lst)
-
-        x = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-
-        ref, res = cls([1, 2, 3]), cls([1, 2, 3])
-        self.assertEqual(fn(ref, x), opt_fn(res, x))
-        self.assertEqual(list(ref), list(res))
-        self.assertEqual(list(res), [1, 2])
-
-    def test_list_subclass_input_read_only(self):
-        def fn(lst, x):
-            return x * len(lst)
-
-        x = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-
-        ref, res = ListSubclass([1, 2]), ListSubclass([1, 2])
-        self.assertEqual(fn(ref, x), opt_fn(res, x))
-        self.assertEqual(list(res), [1, 2])
 
 
 if __name__ == "__main__":

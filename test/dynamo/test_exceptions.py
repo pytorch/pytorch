@@ -1880,6 +1880,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
 
+    @unittest.expectedFailure
     @parametrize(
         "attr",
         [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"],

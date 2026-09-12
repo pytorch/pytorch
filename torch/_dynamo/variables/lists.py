@@ -1165,12 +1165,7 @@ class ListVariable(BaseListVariable):
         return VariableTracker.build(tx, f"[{items}]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # Only a sourceless object needs the empty-then-fill placeholder. Once
-        # it has a source -- including the TempLocalSource that
-        # codegen_save_tempvars assigns after materializing it -- the
-        # self-reference loads from that source, and caching a throwaway here
-        # would rebind every later codegen of this VT to the throwaway.
-        if self._contains_self_reference() and self.source is None:
+        if self._contains_self_reference():
             # Self-referential list: create empty, cache, then extend
             codegen.extend_output(
                 [
@@ -1282,9 +1277,7 @@ class ListVariable(BaseListVariable):
             if i < 0:
                 i += len(self.items)
             # Explicit unbound dispatch
-            return ListVariable.sq_ass_item_impl(
-                self, tx, ConstantVariable.create(i), value
-            )
+            return ListVariable.sq_ass_item_impl(self, tx, ConstantVariable.create(i), value)
         elif pyslice_check(key):
             # CPython runs PySlice_Unpack first, which raises ValueError on
             # step==0 before the iterable check.
@@ -1659,12 +1652,13 @@ class DequeVariable(BaseListVariable):
         )
         codegen.append_output(create_instruction("BUILD_LIST", arg=0))
         codegen(self.maxlen)
-        codegen.extend_output([*codegen.create_call_function_kw(2, ("maxlen",), False)])
-        # See ConstDictVariable.reconstruct: only cache a sourceless object, so
-        # the store cannot rebind a later codegen of this VT to this throwaway.
-        if self.source is None:
-            codegen.append_output(create_dup_top())
-            codegen.add_cache(self)
+        codegen.extend_output(
+            [
+                *codegen.create_call_function_kw(2, ("maxlen",), False),
+                create_dup_top(),
+            ]
+        )
+        codegen.add_cache(self)
 
         codegen.append_output(create_dup_top())
         codegen.load_method("extend")
