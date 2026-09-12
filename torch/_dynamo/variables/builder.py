@@ -208,6 +208,7 @@ from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
     typestr,
+    ValueAndAttributeMutationExisting,
     ValueMutationNew,
     VariableTracker,
     VariableTrackerMeta,
@@ -335,6 +336,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDefaultDictVariable,
     UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
@@ -1258,14 +1260,15 @@ class VariableBuilder:
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
-                    value,
+                    result,  # type: ignore[arg-type]
                     default_factory=VariableBuilder(self.tx, factory_source)(
                         value.default_factory
                     ),
-                    items=result,  # type: ignore[arg-type]
                     source=self.source,
                 )
-                return self.tx.output.side_effects.track_object_existing(value, result)
+                return self.tx.output.side_effects.track_object_existing(
+                    value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+                )
             elif istype(value, collections.OrderedDict):
                 result = OrderedDictVariable(
                     result,  # type: ignore[arg-type]
@@ -2208,16 +2211,26 @@ class VariableBuilder:
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            udf_cls = (
-                UserDefinedOrderedDictVariable
-                if isinstance(value, collections.OrderedDict)
-                else UserDefinedDictVariable
+            if isinstance(value, collections.defaultdict):
+                factory_source = AttrSource(self.source, "default_factory")
+                result = UserDefinedDefaultDictVariable(
+                    value,
+                    default_factory=VariableBuilder(self.tx, factory_source)(
+                        value.default_factory
+                    ),
+                    items=kv_items,
+                    source=self.source,
+                )
+            else:
+                udf_cls = (
+                    UserDefinedOrderedDictVariable
+                    if isinstance(value, collections.OrderedDict)
+                    else UserDefinedDictVariable
+                )
+                result = udf_cls(value, items=kv_items, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(
+                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
             )
-            result = udf_cls(value, items=kv_items, source=self.source)
-            # Force this to reconstruct on mutation to keep the reconstruction
-            # bytecode simple
-            result.should_reconstruct_all = True
-            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2258,7 +2271,9 @@ class VariableBuilder:
                 items=output,  # type: ignore[arg-type]
                 source=self.source,
             )
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.tx.output.side_effects.track_object_existing(
+                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            )
         elif isinstance(value, collections.deque):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2283,7 +2298,9 @@ class VariableBuilder:
                 maxlen=ConstantVariable.create(value.maxlen),
                 source=self.source,
             )
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.tx.output.side_effects.track_object_existing(
+                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            )
         elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2305,7 +2322,9 @@ class VariableBuilder:
                 result = UserDefinedFrozensetVariable(
                     value, items=output, source=self.source
                 )
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.tx.output.side_effects.track_object_existing(
+                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            )
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = MutableMappingVariable(value, source=self.source)
