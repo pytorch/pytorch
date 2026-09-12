@@ -10,12 +10,14 @@ from torch._inductor.fx_passes.decompose_mem_bound_mm import check_device
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     is_navi3_arch,
     parametrize,
     patch_test_members,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu
@@ -495,6 +497,46 @@ class TestDecomposeMemMM(TestCase):
             1,
         )
         counters.clear()
+
+
+class TestDecomposeAddmmScalars(TestCase):
+    @parametrize(
+        "beta,alpha,should_decompose",
+        [
+            subtest((None, None, True), name="no_kwargs"),
+            (1, 1, True),
+            (0, 1, False),
+            (1, 2.0, False),
+            (0.5, 3.0, False),
+        ],
+    )
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={"decompose_mm_pass": {}},
+    )
+    def test_decompose_addmm_scalars(self, device, beta, alpha, should_decompose):
+        # The pass takes a single-row mat1 on CPU and a tall one on GPU. k, n > 16 keep
+        # Inductor's CPU addmm decomposition, which bumps the same counter, out of the way.
+        m, k, n = (1 if device == "cpu" else 10240), 24, 24
+        bias = torch.full((n,), float("nan") if beta == 0 else 10.0, device=device)
+        mat1 = torch.randn(m, k, device=device)
+        mat2 = torch.randn(k, n, device=device)
+        kwargs = {} if beta is None else {"beta": beta, "alpha": alpha}
+
+        def fn(x, a, b):
+            return torch.addmm(x, a, b, **kwargs)
+
+        args = (bias, mat1, mat2)
+        counters.clear()
+        self.assertEqual(torch.compile(fn)(*args), fn(*args), rtol=1e-3, atol=1e-3)
+        self.assertEqual(counters["inductor"]["decompose_addmm"], int(should_decompose))
+
+
+instantiate_device_type_tests(
+    TestDecomposeAddmmScalars,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
