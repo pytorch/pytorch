@@ -323,6 +323,8 @@ def grid_sample(
     mode: str = ...,
     padding_mode: str = ...,
     align_corners: Any | None = ...,
+    pixel_coords: bool = ...,
+    cubic_coeff_a: float | None = ...,
 ) -> Tensor: ...
 
 __all__ += ["grid_sample"]

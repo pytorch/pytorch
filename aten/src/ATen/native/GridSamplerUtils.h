@@ -58,6 +58,20 @@ inline void check_grid_sampler_common(
   }
 }
 
+// The _pixel ops read the grid in pixel units and accept it in the input's own
+// dtype or in double, so full precision coordinates can drive a low precision
+// payload. See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_pixel(
+  const TensorBase& input,
+  const TensorBase& grid
+) {
+  TORCH_CHECK(
+    grid.scalar_type() == input.scalar_type() ||
+      grid.scalar_type() == kDouble,
+    "grid_sampler(): expected grid dtype to match the input's (",
+    input.scalar_type(), ") or to be Double, but got ", grid.scalar_type());
+}
+
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_2d(
   const TensorBase& input,
@@ -73,19 +87,30 @@ inline void check_grid_sampler_2d(
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_3d(
   const TensorBase& input,
-  const TensorBase& grid,
-  int64_t interpolation_mode
+  const TensorBase& grid
 ) {
   TORCH_CHECK(
     input.dim() == 5 && input.dim() == grid.dim(),
     "grid_sampler(): expected 5D input and grid with same number of "
     "dimensions, but got input with sizes ", input.sizes(),
     " and grid with sizes ", grid.sizes());
-  TORCH_CHECK(
-    !(input.dim() == 5 &&
-      static_cast<GridSamplerInterpolation>(interpolation_mode) ==
-        GridSamplerInterpolation::Bicubic),
-    "grid_sampler(): bicubic interpolation only supports 4D input");
+}
+
+// TODO: drop this overload once torch-xpu-ops stops calling it. In-tree backends
+// call the one above and refuse bicubic themselves; torch-xpu-ops still passes
+// the mode here, at the commit third_party/xpu.txt pins.
+// See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_3d(
+  const TensorBase& input,
+  const TensorBase& grid,
+  int64_t interpolation_mode
+) {
+  check_grid_sampler_3d(input, grid);
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    static_cast<GridSamplerInterpolation>(interpolation_mode) !=
+      GridSamplerInterpolation::Bicubic,
+    "grid_sampler(): bicubic interpolation with 5D input is not "
+    "implemented for ", input.device().type());
 }
 
 // See NOTE [ grid_sampler Native Functions ].
@@ -122,11 +147,10 @@ inline void check_grid_sampler_2d_backward(
 inline void check_grid_sampler_3d_backward(
   const TensorBase& input,
   const TensorBase& grid,
-  const TensorBase& grad_output,
-  int64_t interpolation_mode
+  const TensorBase& grad_output
 ) {
   check_grid_sampler_common(input, grid);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d(input, grid);
   check_grid_sampler_backward(input, grid, grad_output);
 }
 
