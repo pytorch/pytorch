@@ -373,7 +373,7 @@ static void check_mps_shape(MPSShape* shape) {
   }
 }
 
-bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI) {
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool checkLinearOffset) {
   static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI && is_macOS_15_0_or_newer) {
     auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
@@ -381,10 +381,21 @@ bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI) {
       return true;
     }
   }
-  for (auto size : tensor.sizes()) {
+  // checkLinearOffset also requires the largest linear offset
+  // sum(stride[d] * (size[d] - 1)) to fit in int32, for kernels indexing in int32.
+  const bool check_offset = checkLinearOffset && tensor.numel() > 0;
+  int64_t max_linear_offset = 0;
+  for (const auto dim : c10::irange(tensor.dim())) {
+    const auto size = tensor.size(dim);
     if (size > std::numeric_limits<int32_t>::max()) {
       return true;
     }
+    if (check_offset) {
+      max_linear_offset += tensor.stride(dim) * (size - 1);
+    }
+  }
+  if (check_offset && max_linear_offset > std::numeric_limits<int32_t>::max()) {
+    return true;
   }
   return false;
 }
