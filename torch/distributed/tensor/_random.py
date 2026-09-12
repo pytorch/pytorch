@@ -20,15 +20,106 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
+    "register_rng_tracker",
+    "set_rng_tracker",
+    "get_or_create_rng_tracker",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
 
+# Registry of RNG tracker classes per device type, populated by third-party
+# backends (e.g. privateuse1 devices) via ``register_rng_tracker``. Devices
+# without an entry keep the default ``OffsetBasedRNGTracker`` behavior.
+_RNG_TRACKER_REGISTRY: dict[str, type["_RNGStateTracker"]] = {}
+
+
+def register_rng_tracker(device_type: str, tracker_cls: type["_RNGStateTracker"]) -> None:
+    """Register a custom RNG tracker class for a device type.
+
+    Third-party backends whose RNG does not follow the CUDA philox
+    counter/offset semantics assumed by the default
+    :class:`OffsetBasedRNGTracker` can register their own tracker here. A
+    registered tracker is instantiated by the DTensor random-op machinery
+    (``manual_seed`` and the creation points in ``_dispatch.py``/``_api.py``)
+    in place of the default one, without monkey-patching the private
+    ``_rng_tracker`` module global.
+
+    The tracker class must subclass ``_RNGStateTracker`` and accept the
+    constructor signature ``(device_mesh: DeviceMesh, run_state_sync: bool)``.
+
+    This follows the same registration pattern as
+    ``register_graphsafe_rng_dispatch`` in ``torch/_prims/rng_prims.py``.
+
+    Args:
+        device_type (str): The device type the tracker handles (e.g. ``"npu"``).
+        tracker_cls (type): The tracker class to register.
+
+    Returns:
+        None
+    """
+    if not (isinstance(tracker_cls, type) and issubclass(tracker_cls, _RNGStateTracker)):
+        raise TypeError(
+            f"tracker_cls must be a subclass of _RNGStateTracker, got {tracker_cls!r}"
+        )
+    _RNG_TRACKER_REGISTRY[device_type] = tracker_cls
+
+
+def set_rng_tracker(tracker: "_RNGStateTracker") -> None:
+    """Set the active RNG tracker instance directly.
+
+    This is the public form of assigning the private ``_rng_tracker`` module
+    global. It allows advanced users to install a custom tracker instance
+    (e.g. one that is pre-configured or shared across meshes) without
+    reaching into private module state.
+
+    Args:
+        tracker (:class:`_RNGStateTracker`): The tracker instance to install.
+
+    Returns:
+        None
+    """
+    global _rng_tracker
+    if not isinstance(tracker, _RNGStateTracker):
+        raise TypeError(
+            f"tracker must be an instance of _RNGStateTracker, got {tracker!r}"
+        )
+    _rng_tracker = tracker
+
+
+def get_or_create_rng_tracker(
+    device_mesh: DeviceMesh, run_state_sync: bool
+) -> "_RNGStateTracker":
+    """Return the active RNG tracker, creating it if it does not exist yet.
+
+    Centralizes the tracker creation logic used by the creation points in
+    ``manual_seed``, ``torch/distributed/tensor/_dispatch.py`` and
+    ``torch/distributed/tensor/_api.py``. The tracker class is looked up in
+    the registry populated by :func:`register_rng_tracker`; devices without
+    an entry fall back to the default :class:`OffsetBasedRNGTracker`.
+
+    Args:
+        device_mesh (:class:`DeviceMesh`): The device mesh the tracker manages.
+        run_state_sync (bool): Whether to synchronize RNG state across ranks
+            on creation (see :class:`OffsetBasedRNGTracker`).
+
+    Returns:
+        The active :class:`_RNGStateTracker` instance.
+    """
+    global _rng_tracker
+    if not _rng_tracker:
+        tracker_cls = _RNG_TRACKER_REGISTRY.get(
+            device_mesh.device_type, OffsetBasedRNGTracker
+        )
+        _rng_tracker = tracker_cls(device_mesh, run_state_sync)
+    return _rng_tracker
+
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     """Checks if the current device of ``device_mesh`` supports DTensor's random APIs.
-    Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest
-    users call this API to test the availability before using our random APIs.
+    A device type with a tracker registered via :func:`register_rng_tracker` is
+    considered supported. Otherwise we probe the device module for RNG state
+    APIs. We suggest users call this API to test the availability before using
+    our random APIs.
 
     Args:
         device_mesh (:class:`DeviceMesh`): The device mesh on which we check if the
@@ -38,8 +129,11 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
         A bool value. True if ``device_mesh`` supports DTensor Random APIs; False otherwise.
 
     .. warning::
-        Currently we only support correct RNG on cuda/cuda-like devices.
+        Without a registered tracker, correct RNG is only guaranteed on
+        cuda/cuda-like devices.
     """
+    if device_mesh.device_type in _RNG_TRACKER_REGISTRY:
+        return True
     device_handle = _get_device_handle(device_mesh.device_type)
     if device_handle and hasattr(device_handle, "set_rng_state"):
         return True
@@ -90,10 +184,9 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
-    # OffsetBasedRNGTracker to perform random operators.
-    global _rng_tracker
-    if not _rng_tracker:
-        _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
+    # OffsetBasedRNGTracker to perform random operators, unless the device
+    # type has a tracker registered via ``register_rng_tracker``.
+    get_or_create_rng_tracker(device_mesh, run_state_sync=False)
 
     if device_mesh.get_coordinate() is None:
         raise RuntimeError(
@@ -180,6 +273,24 @@ class _RNGStateTracker:
 
     def _manual_seed(self, parallel_seed: int) -> None:
         pass
+
+    def _compute_rng_offsets(self, spec: DTensorSpec) -> tuple[int, int]:
+        """Compute the RNG offset increments for a distributed random op.
+
+        Optional contract for counter-based (offset-based) RNG trackers:
+        returns ``(start_offset_incr, end_offset_incr)`` for the DTensor
+        described by ``spec``. Trackers that implement this contract enable
+        the traceable HOP path in ``torch/distributed/tensor/_dispatch.py``
+        (``run_dtensor_rng_op``). Trackers whose RNG is not counter-based
+        leave this unimplemented and run random ops under
+        ``_distribute_region`` instead.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement the counter-based "
+            f"RNG offset contract (_compute_rng_offsets); random ops on this "
+            f"tracker run under _distribute_region instead of the "
+            f"run_dtensor_rng_op HOP path."
+        )
 
 
 class OffsetBasedRNGTracker(_RNGStateTracker):
