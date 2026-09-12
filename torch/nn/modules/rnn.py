@@ -1615,10 +1615,15 @@ class RNNCell(RNNCellBase):
             raise ValueError(
                 f"RNNCell: Expected input to be 1D or 2D, got {input.dim()}D instead"
             )
-        if hx is not None and hx.dim() not in (1, 2):
-            raise ValueError(
-                f"RNNCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead"
-            )
+        if hx is not None:
+            if not isinstance(hx, Tensor):
+                raise TypeError(
+                    f"RNNCell: Expected hidden to be a Tensor, got {type(hx).__name__}"
+                )
+            if hx.dim() not in (1, 2):
+                raise ValueError(
+                    f"RNNCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead"
+                )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1737,7 +1742,15 @@ class LSTMCell(RNNCellBase):
                 f"LSTMCell: Expected input to be 1D or 2D, got {input.dim()}D instead"
             )
         if hx is not None:
+            if not isinstance(hx, (tuple, list)) or len(hx) != 2:
+                raise TypeError(
+                    f"LSTMCell: Expected hx to be a tuple or list of two Tensors (hx, cx), got {type(hx).__name__ if not isinstance(hx, (tuple, list)) else f'sequence of length {len(hx)}'}"
+                )
             for idx, value in enumerate(hx):
+                if not isinstance(value, Tensor):
+                    raise TypeError(
+                        f"LSTMCell: Expected hx[{idx}] to be a Tensor, got {type(value).__name__}"
+                    )
                 if value.dim() not in (1, 2):
                     raise ValueError(
                         f"LSTMCell: Expected hx[{idx}] to be 1D or 2D, got {value.dim()}D instead"
@@ -1846,10 +1859,15 @@ class GRUCell(RNNCellBase):
             raise ValueError(
                 f"GRUCell: Expected input to be 1D or 2D, got {input.dim()}D instead"
             )
-        if hx is not None and hx.dim() not in (1, 2):
-            raise ValueError(
-                f"GRUCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead"
-            )
+        if hx is not None:
+            if not isinstance(hx, Tensor):
+                raise TypeError(
+                    f"GRUCell: Expected hidden to be a Tensor, got {type(hx).__name__}"
+                )
+            if hx.dim() not in (1, 2):
+                raise ValueError(
+                    f"GRUCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead"
+                )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
