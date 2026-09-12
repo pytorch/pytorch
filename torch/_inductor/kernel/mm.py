@@ -708,12 +708,24 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         return box
 
+    # Some subgraph choices must be selected and inlined before scheduling so
+    # their inner templates can participate in fusion. MultiTemplateBuffer
+    # otherwise preserves the subgraph boundary until after fusion.
+    inline_selected_subgraph = mat2.get_name() not in V.graph.graph_inputs and any(
+        isinstance(choice, SubgraphChoiceCaller) and choice.inline_after_autotune
+        for choice in choices
+    )
+    if not inline_selected_subgraph:
+        for choice in choices:
+            if isinstance(choice, SubgraphChoiceCaller):
+                choice.inline_after_autotune = False
     node, _ = autotune_select_algorithm(
         name,
         choices,
         kernel_inputs.nodes(),
         layout,
         best_config_future=best_config_future,
+        return_multi_template=not inline_selected_subgraph,
     )
     return node
 

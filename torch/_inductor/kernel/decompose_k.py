@@ -32,6 +32,8 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 128, 3, 4, 2, 1, True, False),
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
+    # A single-CTA BK64 pipeline for the M=128, N=256 producer-fusion path.
+    BlackwellBMMConfig(128, 128, 64, 4, 8, 2, 1, True, False),
 )
 
 
@@ -92,12 +94,13 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
                 ),
                 decompositions,
             )
-            return super().generate(
+            return SubgraphChoiceCaller(
                 name=name,
                 input_nodes=input_nodes,
                 layout=layout,
                 make_fx_graph=fn,
                 description=description,
+                inline_after_autotune=bmm_backend == "triton",
             )
 
 
@@ -295,7 +298,18 @@ def lower_blackwell_decompose_k_partial(
     )
     if choice is None:
         raise NotImplementedError("Blackwell decompose-K partial choice is unavailable")
-    return choice.output_node()
+    result = choice.output_node()
+    # Opt this narrow source-fusion target into replacing a BF16 materialization
+    # with up to two contiguous FP32/BF16 inputs. Other templates retain the
+    # default scheduler limit on increased prologue traffic.
+    if (m, n) == (128, 256) and not partial_config.two_ctas:
+        result.data.data.annotations.update(
+            {
+                "prefer_template_prologue_fusion": True,
+                "prologue_fusion_max_input_bytes_to_output_ratio": 4.0,
+            }
+        )
+    return result
 
 
 def blackwell_decompose_k_partial(a, b, k_split, config_index):
