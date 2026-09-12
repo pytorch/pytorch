@@ -41,13 +41,13 @@ class PreservesZeros(SymPyOps, DefaultHandler):
 
     @staticmethod
     def to_dtype(
-        value: TypedExpr,
+        x: TypedExpr,
         dtype: torch.dtype,
         src_dtype: torch.dtype | None = None,
-        use_compute_types: bool = False,
+        use_compute_types: bool = True,
     ) -> TypedExpr:
         # Casts preserve zero, while unknown values remain unknown to this analysis.
-        return TypedExpr(value.expr, dtype)
+        return TypedExpr(x.expr, dtype)
 
     def store(
         self, name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
