@@ -288,6 +288,118 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
     def test_forced_triton_2cta(self):
         self._run_forced_triton_plan(True)
 
+    def test_1cta_fused_cat_cast_uses_descriptor_loads(self):
+        m, k, half_n = 128, 262_144, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            b = torch.cat((left, right), dim=1).to(torch.bfloat16)
+            return a @ b
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="TRITON",
+            benchmark_epilogue_fusion=True,
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.num_decompose_k_splits": 2,
+                "triton.decompose_k_bmm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": "_triton_",
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right), atol=16.0, rtol=1e-1)
+        source = codes[-1]
+        self.assertEqual(source.count("shape=[262144, 64], strides=[64, 1]"), 2)
+        self.assertIn("prologue_descriptor0.load([offs_k, 0])", source)
+        self.assertIn("prologue_descriptor1.load([offs_k, 0])", source)
+        self.assertIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertIn("BLOCK_K : tl.constexpr = 64", source)
+        self.assertIn("TWO_CTAS : tl.constexpr = False", source)
+        self.assertIn("num_stages=3", source)
+        self.assertNotIn("arg_B", source)
+        self.assertNotIn(f"empty_strided_cuda(({k}, 128)", source)
+
+    def test_1cta_cat_cast_materializes_shared_output(self):
+        m, k, half_n = 128, 262_144, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            b = torch.cat((left, right), dim=1).to(torch.bfloat16)
+            return a @ b, b
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="TRITON",
+            benchmark_epilogue_fusion=True,
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.num_decompose_k_splits": 2,
+                "triton.decompose_k_bmm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": "_triton_",
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        expected = fn(a, left, right)
+        torch.testing.assert_close(actual[0], expected[0], atol=16.0, rtol=1e-1)
+        torch.testing.assert_close(actual[1], expected[1])
+        source = codes[-1]
+        self.assertNotIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertEqual(source.count(f"empty_strided_cuda(({k}, 128)"), 1)
+        self.assertIn("arg_B", source)
+
+    def test_1cta_cat_cast_contract_rejects_intermediate_pointwise(self):
+        m, k, half_n = 128, 262_144, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            b = (torch.cat((left, right), dim=1) + 1).to(torch.bfloat16)
+            return a @ b
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="TRITON",
+            benchmark_epilogue_fusion=True,
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.num_decompose_k_splits": 2,
+                "triton.decompose_k_bmm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": "_triton_",
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right), atol=16.0, rtol=1e-1)
+        source = codes[-1]
+        self.assertNotIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertIn(f"empty_strided_cuda(({k}, 128)", source)
+
     def test_forced_triton_2cta_config_without_meta_ws(self):
         # One M tile distinguishes the effective 1CTA geometry (M_PAD=128)
         # from the 2CTA cluster geometry (M_PAD=256).

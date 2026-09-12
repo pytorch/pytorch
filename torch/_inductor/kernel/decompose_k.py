@@ -33,6 +33,8 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 128, 3, 4, 2, 1, True, False),
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
+    # Single-CTA schedule for the M=128, N=128 cat/cast producer path.
+    BlackwellBMMConfig(128, 128, 64, 3, 8, 2, 1, True, False),
 )
 
 
@@ -142,12 +144,16 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
                 ),
                 decompositions,
             )
-            return super().generate(
+            return SubgraphChoiceCaller(
                 name=name,
                 input_nodes=input_nodes,
                 layout=layout,
                 make_fx_graph=fn,
                 description=description,
+                inline_after_autotune=(
+                    bmm_backend == "triton"
+                    and get_cat2_fp32_prologue_sources(input_nodes[1]) is not None
+                ),
             )
 
 
@@ -239,6 +245,10 @@ def lower_blackwell_decompose_k_partial(
     m_pad: int,
     k_part: int,
 ):
+    if get_cat2_fp32_prologue_sources(mat2) is not None:
+        # Give the descriptor template a schedulable named boundary without
+        # forcing the single-use cat/cast producer to remain materialized.
+        mat2 = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(mat2))
     try:
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[int(config_index)]
     except IndexError as error:
@@ -295,7 +305,15 @@ def lower_blackwell_decompose_k_partial(
     )
     if choice is None:
         raise NotImplementedError("Blackwell decompose-K partial choice is unavailable")
-    return choice.output_node()
+    result = choice.output_node()
+    if int(config_index) == 6 and not partial_config.two_ctas:
+        result.data.data.annotations.update(
+            {
+                "prefer_template_prologue_fusion": True,
+                "prologue_fusion_max_input_bytes_to_output_ratio": 4.0,
+            }
+        )
+    return result
 
 
 def blackwell_decompose_k_partial(a, b, k_split, config_index):
