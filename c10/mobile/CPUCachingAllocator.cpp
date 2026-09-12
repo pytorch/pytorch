@@ -88,6 +88,7 @@ void CPUCachingAllocator::free_cached() {
 }
 
 CPUCachingAllocator::~CPUCachingAllocator() {
+  std::lock_guard<std::mutex> guard(mutex_);
   free_cached();
 }
 
