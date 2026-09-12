@@ -2111,6 +2111,46 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return None
 
+    def tp_descr_get_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_get slot.
+
+        Called when type_implements_tp_descr_get returns True for this type.
+        Subclasses override to provide the actual descriptor read.
+        """
+        unimplemented(
+            gb_type="tp_descr_get_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_get slot but no tp_descr_get_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_get C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def tp_descr_set_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_set slot (``value is None`` deletes).
+
+        Dispatched by the "__set__"/"__delete__" TPSLOT entries (via
+        _wrap_descr_set/_wrap_descr_delete) for any type whose
+        PyTypeSlots.TP_DESCR_SET bit is set. Subclasses override to provide
+        the actual descriptor write.
+        """
+        unimplemented(
+            gb_type="tp_descr_set_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_set slot but no tp_descr_set_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_set C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:

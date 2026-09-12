@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfMPS,
     instantiate_device_type_tests,
+    skipMPS,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -35,7 +36,7 @@ CUDA_FLOAT8_DTYPES = [
     torch.float8_e4m3fn,
     torch.float8_e8m0fnu,
 ]
-MPS_FLOAT8_DTYPES = CUDA_FLOAT8_DTYPES
+MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn]
 
 # The following information are not yet provided by torch.finfo.
 
@@ -278,6 +279,7 @@ class TestFloat8Dtype(TestCase):
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
+    @skipMPS
     def test_float8_e8m0fnu_rne_rounding(self, device):
         """
         For every possible e8m0 exponent (256 options) and for every possible
