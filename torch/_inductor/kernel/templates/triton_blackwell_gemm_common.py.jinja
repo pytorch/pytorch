@@ -1,0 +1,28 @@
+@triton.jit
+def _subtile_accumulator(
+    acc,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    SUBTILE_FACTOR: tl.constexpr,
+):
+    """Split an accumulator into equal-width N subtiles."""
+    tl.static_assert(SUBTILE_FACTOR > 0, "SUBTILE_FACTOR must be positive")
+    tl.static_assert(
+        (SUBTILE_FACTOR & (SUBTILE_FACTOR - 1)) == 0,
+        "SUBTILE_FACTOR must be a power of 2",
+    )
+
+    if SUBTILE_FACTOR == 1:
+        return (acc,)
+    else:
+        tl.static_assert(BLOCK_N % 2 == 0)
+        acc = tl.reshape(acc, (BLOCK_M, 2, BLOCK_N // 2))
+        acc = tl.permute(acc, (0, 2, 1))
+        left, right = tl.split(acc)
+        left_subtiles = _subtile_accumulator(
+            left, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2
+        )
+        right_subtiles = _subtile_accumulator(
+            right, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2
+        )
+        return left_subtiles + right_subtiles
