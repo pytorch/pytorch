@@ -5,12 +5,21 @@
 #include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+// RCCL symmetric memory requires the 2.30.4 API and an nccl_device.h that host
+// translation units can compile. Header presence and version macros alone do
+// not establish host compatibility, so CMake probes the installed header.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0) &&   \
+    (!defined(USE_ROCM) ||                           \
+     (NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 4) && \
+      defined(RCCL_DEVICE_HEADER_HOST_COMPATIBLE)))
 #define NCCL_HAS_SYMMEM_SUPPORT
 #endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
-#if !defined(USE_ROCM)
+// ROCm additionally requires NCCL_HAS_SYMMEM_SUPPORT above, which carries both
+// the RCCL 2.30.4 API floor and the CMake probe for a host-compilable
+// nccl_device.h.
+#if !defined(USE_ROCM) || defined(NCCL_HAS_SYMMEM_SUPPORT)
 #define NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 #include <nccl_device.h>
 #endif
@@ -24,13 +33,10 @@
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
 #define NCCL_HAS_DEVCOMM
-#endif
-
-#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
-    NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
 #define NCCL_HAS_ONE_SIDED_API
 #endif
 
+// Device-side reduce/copy APIs were completed in NCCL 2.29.7.
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
 #define NCCL_DEVICE_HAS_REDUCE_COPY
