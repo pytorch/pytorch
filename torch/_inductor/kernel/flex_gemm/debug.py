@@ -27,6 +27,7 @@ from torch._logging import LazyString, trace_structured
 
 if TYPE_CHECKING:
     from torch._inductor import ir
+    from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         FlexGemmEpilogueAnalysis,
     )
@@ -348,7 +349,9 @@ def format_flex_gemm_lowering_plan(
     return "\n".join(lines)
 
 
-def format_flex_gemm_config_candidates(configs: Any, *, tuned: bool) -> str:
+def format_flex_gemm_config_candidates(
+    configs: "Sequence[QuackConfigKey]", *, tuned: bool
+) -> str:
     """Render the QuACK configs Inductor will benchmark or pin."""
     lines = [
         f"mode: {'autotune' if tuned else 'default'}",
@@ -362,4 +365,14 @@ def format_flex_gemm_config_candidates(configs: Any, *, tuned: bool) -> str:
                 **fields
             )
         )
+    lines.extend(
+        (
+            "",
+            "more_detail_commands:",
+            '  analysis/codegen: TORCH_LOGS="+flex_gemm"',
+            '  autotune timings: TORCH_LOGS="flex_gemm,autotuning"',
+            '  generated kernel: TORCH_LOGS="flex_gemm,kernel_code"',
+            '  final wrapper: TORCH_LOGS="flex_gemm,output_code"',
+        )
+    )
     return "\n".join(lines)
