@@ -3870,6 +3870,31 @@ class TestMPS(TestCaseMPS):
         helper((100, 300), 1.0)
         helper((100, 300), 0.2)
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_lerp_scalar_weight_dtype(self, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196067
+        # A CPU scalar `weight` may have a dtype of its own, which the kernel must not
+        # reinterpret as the compute dtype
+        wdtype = torch.float16 if dtype == torch.float32 else torch.float32
+        cpu_x = torch.arange(6).reshape(2, 3).to(dtype)
+        cpu_w = torch.tensor(0.1, dtype=wdtype)
+        x = cpu_x.to("mps")
+        for w in (cpu_w, cpu_w.to("mps")):
+            self.assertEqual(torch.lerp(cpu_x, cpu_x + 2, cpu_w), torch.lerp(x, x + 2, w))
+            self.assertEqual(cpu_x.clone().lerp_(cpu_x + 2, cpu_w), x.clone().lerp_(x + 2, w))
+
+    def test_lerp_broadcast_scalar_weight(self):
+        # the scalar-weight fast path indexes self/end linearly, so neither may be broadcast
+        cpu_x, cpu_y, cpu_w = torch.randn(()), torch.randn(5), torch.randn(())
+        x, y, w = cpu_x.to("mps"), cpu_y.to("mps"), cpu_w.to("mps")
+        self.assertEqual(torch.lerp(cpu_x, cpu_y, cpu_w), torch.lerp(x, y, w))
+        self.assertEqual(torch.lerp(cpu_y, cpu_x, cpu_w), torch.lerp(y, x, w))
+
+    def test_lerp_lowp_scalar_weight(self):
+        # the weight is applied at opmath precision: 70000 is not representable in fp16
+        cpu_x = torch.zeros(4, dtype=torch.float16)
+        self.assertEqual(torch.lerp(cpu_x, cpu_x + 0.1, 70000), torch.lerp(cpu_x.to("mps"), cpu_x.to("mps") + 0.1, 70000))
+
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
         size = 16
