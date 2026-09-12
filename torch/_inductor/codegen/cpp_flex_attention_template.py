@@ -308,6 +308,25 @@ extern "C"
   const scalar_t* v_data = value;
   scalar_t* out_data = output;
 
+  // Auxiliary outputs. The kernel accumulates softmax stats in natural-log
+  // units; the flex_attention HOP expects them in log2 units, so scale by
+  // log2(e). Fully masked rows are written as -inf, matching eager.
+{%- if output_logsumexp or output_max %}
+  accum_t aux_log2e = accum_t(1) / std::log(accum_t(2));
+{%- endif %}
+{%- if output_logsumexp %}
+  int64_t lseStrideB = {{kernel.stride(logsumexp, 0)}};
+  int64_t lseStrideH = {{kernel.stride(logsumexp, 1)}};
+  int64_t lseStrideM = {{kernel.stride(logsumexp, 2)}};
+  accum_t* lse_data = const_cast<accum_t*>(logsumexp);
+{%- endif %}
+{%- if output_max %}
+  int64_t maxStrideB = {{kernel.stride(max_scores, 0)}};
+  int64_t maxStrideH = {{kernel.stride(max_scores, 1)}};
+  int64_t maxStrideM = {{kernel.stride(max_scores, 2)}};
+  accum_t* max_scores_data = const_cast<accum_t*>(max_scores);
+{%- endif %}
+
 """
 
 FLEX_ATTENTION_TEMPLATE = r"""
@@ -443,13 +462,14 @@ FLEX_ATTENTION_TEMPLATE = r"""
 {%- endif %}
       int64_t m = k * qSplitSize;
       int64_t cur_qSplitSize = std::min(qSplitSize, qSize - m);
+      // Initialize max and sum unconditionally so a fully masked query block
+      // (is_skip_kv, no valid kv) leaves qk_max at -inf and qk_sum at 0, which
+      // the aux outputs below turn into -inf lse/max, matching eager.
+      {{kernel.kernel_name}}_fill_stub(qk_max_data,
+          -std::numeric_limits<accum_t>::infinity(), cur_qSplitSize);
+      {{kernel.kernel_name}}_fill_stub(qk_sum_data,
+          static_cast<accum_t>(0), cur_qSplitSize);
       if (!is_skip_kv){
-        // Initialize max and sum
-        {{kernel.kernel_name}}_fill_stub(qk_max_data,
-            -std::numeric_limits<accum_t>::infinity(), cur_qSplitSize);
-        {{kernel.kernel_name}}_fill_stub(qk_sum_data,
-            static_cast<accum_t>(0), cur_qSplitSize);
-
         if (!headSize_even && need_pack) {
           // Pad query if headSize is not even
           {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
@@ -663,6 +683,18 @@ FLEX_ATTENTION_TEMPLATE = r"""
       // dst <- dst / sum[row]
       // reorder MHA output with strides
       for (int64_t row = 0; row < cur_qSplitSize; ++row) {
+{%- if output_logsumexp %}
+        lse_data[i * lseStrideB + j * lseStrideH + (m + row) * lseStrideM] =
+            qk_max_data[row] == -std::numeric_limits<accum_t>::infinity()
+                ? -std::numeric_limits<accum_t>::infinity()
+                : (qk_max_data[row] + std::log(qk_sum_data[row])) * aux_log2e;
+{%- endif %}
+{%- if output_max %}
+        max_scores_data[i * maxStrideB + j * maxStrideH + (m + row) * maxStrideM] =
+            qk_max_data[row] == -std::numeric_limits<accum_t>::infinity()
+                ? -std::numeric_limits<accum_t>::infinity()
+                : qk_max_data[row] * aux_log2e;
+{%- endif %}
         // Row sums for full masked out rows are 0, we set them to 1
         // in order to avoid NaNs in the output and instead set fully
         // masked out rows to 0
@@ -879,19 +911,20 @@ FLEX_DECODING_TEMPLATE = r"""
           token_num,
           logits,
           partition_max);
-      if (partition_max == -std::numeric_limits<float>::infinity()) {
-          partition_max = 0;
-      }
       max_logits_ptr[i * max_logits_strideN +
             j * max_logits_strideH + partition_id] =
           partition_max;
+      auto softmax_max =
+          partition_max == -std::numeric_limits<accum_t>::infinity()
+          ? accum_t(0)
+          : partition_max;
       {{kernel.kernel_name}}_exp_reduce_sum_fusion_kernel(
           logits,
           token_num,
           {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced),
-          partition_max);
+          softmax_max);
       exp_sum_ptr[i * exp_sum_strideN +
-            j * exp_sum_strideH + partition_id] = partition_max;
+            j * exp_sum_strideH + partition_id] = softmax_max;
 
 
       // 3) calculate the matmul(exp(logits-partition_max), value) for this
@@ -1005,10 +1038,11 @@ FLEX_DECODING_TEMPLATE = r"""
           tmp_out_ptr + i * tmp_out_strideN + j * tmp_out_strideH;
       auto max_logit0 = max_logits_ptr
           [i * max_logits_strideN + j * max_logits_strideH];
-      float exp_val = std::exp(max_logit0 - global_max);
-      global_exp_sum =
-          exp_sum_ptr[i * exp_sum_strideN + j * exp_sum_strideH] *
-          exp_val;
+      auto exp_sum0 =
+          exp_sum_ptr[i * exp_sum_strideN + j * exp_sum_strideH];
+      float exp_val =
+          exp_sum0 == 0 ? 0 : std::exp(max_logit0 - global_max);
+      global_exp_sum = exp_sum0 * exp_val;
       at::vec::map<accum_t>(
           [exp_val](Vec x) { return x * Vec(exp_val); },
           partition0_out_start,
@@ -1026,7 +1060,7 @@ FLEX_DECODING_TEMPLATE = r"""
           auto exp_sum = exp_sum_ptr
               [i * exp_sum_strideN + j * exp_sum_strideH +
                partition_id];
-          exp_val = std::exp(max_logit - global_max);
+          exp_val = exp_sum == 0 ? 0 : std::exp(max_logit - global_max);
           global_exp_sum += exp_sum * exp_val;
           at::vec::map2<accum_t>(
               [exp_val](Vec a, Vec b) { return a + Vec(exp_val) * b; },
@@ -1037,6 +1071,16 @@ FLEX_DECODING_TEMPLATE = r"""
         }
       }
 
+{%- if output_logsumexp %}
+      lse_data[i * lseStrideB + j * lseStrideH] =
+          global_exp_sum == 0
+              ? -std::numeric_limits<accum_t>::infinity()
+              : (global_max + std::log(global_exp_sum)) * aux_log2e;
+{%- endif %}
+{%- if output_max %}
+      max_scores_data[i * maxStrideB + j * maxStrideH] =
+          global_max * aux_log2e;
+{%- endif %}
       // Rescale the partition 0 result with global exp_sum
       // Sum for full masked out rows are 0, we set them to 1
       // in order to avoid NaNs in the output and instead set fully
@@ -1086,6 +1130,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         len_mask_other,
         kernel_input_name_to_buffer,
         block_vars,
+        logsumexp_buf: ir.IRNode | None,
+        max_scores_buf: ir.IRNode | None,
     ) -> None:
         if layout.dtype not in [torch.float, torch.bfloat16, torch.float16]:
             raise AssertionError(f"unsupported layout dtype: {layout.dtype}")
@@ -1141,16 +1187,24 @@ class CppFlexAttentionTemplate(CppTemplate):
             if self.has_other_buffer
             else None
         )
+        mask_other_start = (
+            self.other_buf_start_idx
+            + self.other_buffer_input_offset
+            + self.len_score_other
+        )
         self.mask_mod_other_buffers = (
-            self.input_nodes[
-                self.other_buf_start_idx
-                + self.other_buffer_input_offset
-                + self.len_score_other :
-            ]
+            self.input_nodes[mask_other_start : mask_other_start + self.len_mask_other]
             if self.has_other_buffer
             else None
         )
         self.other_ptr_data = {}  # type: ignore[var-annotated]
+
+        # Auxiliary outputs are mutated in place by the kernel.
+        self.logsumexp_buf = logsumexp_buf
+        self.max_scores_buf = max_scores_buf
+        self.mutated_inputs = [
+            buf for buf in (logsumexp_buf, max_scores_buf) if buf is not None
+        ] or None
 
     def update_kernel_args(self, kernel_args):
         kernel_args.update(
@@ -1160,6 +1214,13 @@ class CppFlexAttentionTemplate(CppTemplate):
                 if not isinstance(value, sympy.Symbol)
             }
         )
+        # Auxiliary outputs are mutated in place; pass them as trailing
+        # writable buffers so def_kernel emits pointer args for them. Order
+        # (logsumexp then max_scores) must match input_nodes.
+        if self.logsumexp_buf is not None:
+            kernel_args["logsumexp"] = self.logsumexp_buf
+        if self.max_scores_buf is not None:
+            kernel_args["max_scores"] = self.max_scores_buf
         return kernel_args
 
     def generate_other_buffer(self, buf_list, start_offset, len_attr, kernel_args):
@@ -1321,6 +1382,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         len_mask_other,
         kernel_input_name_to_buffer,
         block_vars,
+        logsumexp_buf,
+        max_scores_buf,
     ):
         def preprocessor(input_nodes, layout):
             return input_nodes, layout
@@ -1347,6 +1410,8 @@ class CppFlexAttentionTemplate(CppTemplate):
             len_mask_other=len_mask_other,
             kernel_input_name_to_buffer=kernel_input_name_to_buffer,
             block_vars=block_vars,
+            logsumexp_buf=logsumexp_buf,
+            max_scores_buf=max_scores_buf,
         )
         template.maybe_append_choice(choices)
         return template
@@ -1430,6 +1495,10 @@ class CppFlexAttentionTemplate(CppTemplate):
             qBlockSize=self.q_block_size,
             template=self,
             output=buf_out,
+            logsumexp=self.logsumexp_buf,
+            max_scores=self.max_scores_buf,
+            output_logsumexp=self.logsumexp_buf is not None,
+            output_max=self.max_scores_buf is not None,
             kernel=kernel,
             num_thread=num_threads,
             score_mod=self.score_mod,

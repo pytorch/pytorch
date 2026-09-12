@@ -16,6 +16,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 
 from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 from ...ir import Buffer, ExternKernel, FixedLayout, TensorBox
+from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
 from .common import (
     build_subgraph_buffer,
@@ -95,10 +96,8 @@ def lower_cpu(
             f"and value.dtype: {value.dtype}."
         )
 
-    if kernel_options["OUTPUT_LOGSUMEXP"]:
-        raise NotImplementedError(
-            "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
-        )
+    write_lse = bool(kernel_options.get("OUTPUT_LOGSUMEXP", False))
+    write_max = bool(kernel_options.get("OUTPUT_MAX", False))
     if not check_cpu_supported():
         raise NotImplementedError(
             "torch.compile on current platform is not supported for CPU."
@@ -328,6 +327,24 @@ def lower_cpu(
         raise AssertionError(
             "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
         )
+    # Auxiliary outputs (logsumexp, max_scores). The kernel writes them in
+    # log2 units, matching the flex_attention HOP contract; the public API
+    # converts back to natural log. They are mutated in place by the template,
+    # so realize them and append to input_nodes only when actually requested.
+    lse_shape = [B, Hq, seq_len_q]
+    logsumexp = empty_strided(
+        lse_shape, None, dtype=torch.float32, device=query.get_device()
+    )
+    max_scores = empty_strided(
+        lse_shape, None, dtype=torch.float32, device=query.get_device()
+    )
+    if write_lse:
+        logsumexp.realize()
+        input_nodes.append(logsumexp)
+    if write_max:
+        max_scores.realize()
+        input_nodes.append(max_scores)
+
     CppFlexAttentionTemplate.add_choices(
         choices=_choices,
         input_nodes=input_nodes,
@@ -345,6 +362,8 @@ def lower_cpu(
         len_mask_other=len(mask_mod_other_buffers),
         kernel_input_name_to_buffer=kernel_input_name_to_buffer,
         block_vars=(cur_qSplitSize, cur_kvSplitSize),
+        logsumexp_buf=logsumexp if write_lse else None,
+        max_scores_buf=max_scores if write_max else None,
     )
     inputs_for_autotuning = [
         query,
@@ -366,4 +385,4 @@ def lower_cpu(
         subgraph_buffer, mask_graph_buffer
     )
 
-    return (res,)
+    return (res, logsumexp, max_scores)
