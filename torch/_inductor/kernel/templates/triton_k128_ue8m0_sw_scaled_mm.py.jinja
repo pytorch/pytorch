@@ -1,0 +1,109 @@
+{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
+    M = {{size("A", 0)}}
+    N = {{size("B", 1)}}
+    K = {{size("A", 1)}}
+    if M * N == 0:
+        # early exit due to zero-size input(s)
+        return
+    tl.static_assert(128 % BLOCK_K == 0, "K128 UE8M0 software scaling requires BLOCK_K to divide 128")
+    stride_am = {{stride("A", 0)}}
+    stride_ak = {{stride("A", 1)}}
+    stride_bk = {{stride("B", 0)}}
+    stride_bn = {{stride("B", 1)}}
+    # One UE8M0 code per (SCALE_BLOCK_ROWS rows, K128 block), K block fastest:
+    # A is [ceil(M / rows), K blocks], B the transposed [K blocks, ceil(N / rows)].
+    stride_scale_am = {{stride("A_inverse_scale", 0)}}
+    stride_scale_ak = {{stride("A_inverse_scale", 1)}}
+    stride_scale_bk = {{stride("B_inverse_scale", 0)}}
+    stride_scale_bn = {{stride("B_inverse_scale", 1)}}
+
+    # based on triton.ops.matmul
+    pid = tl.program_id(0).to(INDEX_DTYPE)
+    grid_m = (M + BLOCK_M - 1) // BLOCK_M
+    grid_n = (N + BLOCK_N - 1) // BLOCK_N
+
+    # re-order program ID for better L2 performance
+    width = GROUP_M * grid_n
+    group_id = pid // width
+    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
+    pid_m = group_id * GROUP_M + (pid % group_size)
+    pid_n = (pid % width) // (group_size)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
+
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
+    if ((stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1)) and (M >= BLOCK_M and K > 1):
+        offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        offs_a_m = rm % M
+    if ((stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1)) and (N >= BLOCK_N and K > 1):
+        offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        offs_b_n = rn % N
+    offs_k = tl.arange(0, BLOCK_K).to(INDEX_DTYPE)
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+    # Keep contiguous hints for full tiles, but avoid wrapping scale loads at tails.
+    scale_a_rows = offs_a_m if M % BLOCK_M == 0 else rm
+    scale_b_rows = offs_b_n if N % BLOCK_N == 0 else rn
+    scale_a_mask = (M % BLOCK_M == 0) | (rm < M)
+    scale_b_mask = (N % BLOCK_N == 0) | (rn < N)
+
+    for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
+        {% if not EVEN_K %}
+        a_mask = offs_k[None, :] < (K - k_idx * BLOCK_K)
+        b_mask = offs_k[:, None] < (K - k_idx * BLOCK_K)
+        {% endif %}
+        a_k_idx_vals = offs_k[None, :] + (k_idx * BLOCK_K)
+        b_k_idx_vals = offs_k[:, None] + (k_idx * BLOCK_K)
+
+        idx_m = offs_a_m[:, None]
+        idx_n = a_k_idx_vals
+        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
+                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
+
+        idx_m = b_k_idx_vals
+        idx_n = offs_b_n[None, :]
+        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
+                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
+
+        # One UE8M0 scale per K128 block.
+        scale_block = (k_idx * BLOCK_K) // 128
+        scale_a = _e8m0_to_fp32(
+            tl.load(
+                A_inverse_scale
+                + (scale_a_rows // SCALE_BLOCK_ROWS_A) * stride_scale_am
+                + scale_block * stride_scale_ak,
+                mask=scale_a_mask,
+                other=127,
+            )
+        )
+        scale_b = _e8m0_to_fp32(
+            tl.load(
+                B_inverse_scale
+                + scale_block * stride_scale_bk
+                + (scale_b_rows // SCALE_BLOCK_ROWS_B) * stride_scale_bn,
+                mask=scale_b_mask,
+                other=127,
+            )
+        )
+        partial = tl.dot(a, b, out_dtype=ACC_TYPE)
+        acc += partial * scale_a[:, None] * scale_b[None, :]
+
+    # rematerialize rm and rn to save registers
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
+    idx_m = rm[:, None]
+    idx_n = rn[None, :]
+    mask = (idx_m < M) & (idx_n < N)
+
+    # inductor generates a suffix
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
+
+
+@triton.jit
+def _e8m0_to_fp32(code):
+    # UE8M0 code c is exactly 2 ** (c - 127); build the fp32 bit pattern directly.
+    code = code.to(tl.int32)
+    value = (code << 23).to(tl.float32, bitcast=True)
+    return tl.where(code == 0, 2.0 ** -127, value)

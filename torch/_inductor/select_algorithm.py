@@ -4025,6 +4025,8 @@ def _classify_kernel_operation(
                     "scaled_grouped_mm",
                     "mm_plus_mm",
                     "blackwell_ws_persistent_tma",
+                    "blackwell_ws_persistent_device_tma_k128_ue8m0_scaling",
+                    "k128_ue8m0_sw_scaled_mm",
                     "scaled_mm_device_tma_main_loop_scaling",
                 ):
                     return "mm"
