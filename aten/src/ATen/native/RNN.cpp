@@ -1696,6 +1696,31 @@ _thnn_differentiable_lstm_cell_backward( const std::optional<Tensor>& grad_hy_op
   if (!grad_hy.defined() && !grad_cy.defined()) {
     return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
   }
+
+  TORCH_CHECK(input_gates.dim() == 2, "_thnn_differentiable_lstm_cell_backward: input_gates must be 2D, got ", input_gates.dim(), "D");
+  TORCH_CHECK(hidden_gates.dim() == 2, "_thnn_differentiable_lstm_cell_backward: hidden_gates must be 2D, got ", hidden_gates.dim(), "D");
+  TORCH_CHECK(input_gates.size(1) % 4 == 0 && input_gates.size(1) > 0,
+              "_thnn_differentiable_lstm_cell_backward: input_gates dimension 1 must be divisible by 4 and positive, got ", input_gates.size(1));
+  TORCH_CHECK(hidden_gates.size(1) % 4 == 0 && hidden_gates.size(1) > 0,
+              "_thnn_differentiable_lstm_cell_backward: hidden_gates dimension 1 must be divisible by 4 and positive, got ", hidden_gates.size(1));
+  TORCH_CHECK(input_gates.sizes() == hidden_gates.sizes(),
+              "_thnn_differentiable_lstm_cell_backward: input_gates and hidden_gates must have the same sizes, got ", input_gates.sizes(), " and ", hidden_gates.sizes());
+
+  int64_t hidden_size = input_gates.size(1) / 4;
+  int64_t batch_size = input_gates.size(0);
+  TORCH_CHECK(cx.dim() == 2 && cx.size(0) == batch_size && cx.size(1) == hidden_size,
+              "_thnn_differentiable_lstm_cell_backward: cx must be 2D with shape (", batch_size, ", ", hidden_size, "), got ", cx.sizes());
+  TORCH_CHECK(cy.dim() == 2 && cy.size(0) == batch_size && cy.size(1) == hidden_size,
+              "_thnn_differentiable_lstm_cell_backward: cy must be 2D with shape (", batch_size, ", ", hidden_size, "), got ", cy.sizes());
+  if (grad_hy.defined()) {
+    TORCH_CHECK(grad_hy.dim() == 2 && grad_hy.size(0) == batch_size && grad_hy.size(1) == hidden_size,
+                "_thnn_differentiable_lstm_cell_backward: grad_hy must be 2D with shape (", batch_size, ", ", hidden_size, "), got ", grad_hy.sizes());
+  }
+  if (grad_cy.defined()) {
+    TORCH_CHECK(grad_cy.dim() == 2 && grad_cy.size(0) == batch_size && grad_cy.size(1) == hidden_size,
+                "_thnn_differentiable_lstm_cell_backward: grad_cy must be 2D with shape (", batch_size, ", ", hidden_size, "), got ", grad_cy.sizes());
+  }
+
   Tensor gates = input_gates + hidden_gates;
   if (input_bias.defined()) {
     gates = gates + input_bias;
@@ -1744,6 +1769,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
   c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
   const Tensor& input_bias = *input_bias_maybe_owned;
   const Tensor& hidden_bias = hidden_bias_opt.value_or(Tensor());
+
+  TORCH_CHECK(input_gates.dim() == 2, "_thnn_differentiable_gru_cell_backward: input_gates must be 2D, got ", input_gates.dim(), "D");
+  TORCH_CHECK(hidden_gates.dim() == 2, "_thnn_differentiable_gru_cell_backward: hidden_gates must be 2D, got ", hidden_gates.dim(), "D");
+  TORCH_CHECK(input_gates.size(1) % 3 == 0 && input_gates.size(1) > 0,
+              "_thnn_differentiable_gru_cell_backward: input_gates dimension 1 must be divisible by 3 and positive, got ", input_gates.size(1));
+  TORCH_CHECK(hidden_gates.size(1) % 3 == 0 && hidden_gates.size(1) > 0,
+              "_thnn_differentiable_gru_cell_backward: hidden_gates dimension 1 must be divisible by 3 and positive, got ", hidden_gates.size(1));
+  TORCH_CHECK(input_gates.sizes() == hidden_gates.sizes(),
+              "_thnn_differentiable_gru_cell_backward: input_gates and hidden_gates must have the same sizes, got ", input_gates.sizes(), " and ", hidden_gates.sizes());
+
+  int64_t hidden_size = input_gates.size(1) / 3;
+  int64_t batch_size = input_gates.size(0);
+  TORCH_CHECK(hx.dim() == 2 && hx.size(0) == batch_size && hx.size(1) == hidden_size,
+              "_thnn_differentiable_gru_cell_backward: hx must be 2D with shape (", batch_size, ", ", hidden_size, "), got ", hx.sizes());
+  TORCH_CHECK(grad_hy.dim() == 2 && grad_hy.size(0) == batch_size && grad_hy.size(1) == hidden_size,
+              "_thnn_differentiable_gru_cell_backward: grad_hy must be 2D with shape (", batch_size, ", ", hidden_size, "), got ", grad_hy.sizes());
 
   Tensor in_g = input_gates;
   Tensor h_g = hidden_gates;
