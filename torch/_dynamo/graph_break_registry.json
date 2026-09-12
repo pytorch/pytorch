@@ -6409,6 +6409,16 @@
       ]
     }
   ],
+  "GB1940": [
+    {
+      "Gb_type": "Attribute mutation on an untracked user-defined object",
+      "Context": "object={self}, name={name_str}, value={value}",
+      "Explanation": "Dynamo cannot safely apply this attribute mutation because the object is not tracked for mutation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0368": [
     {
       "Gb_type": "Frozen dataclass with __post_init__",

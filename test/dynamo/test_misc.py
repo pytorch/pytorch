@@ -16296,6 +16296,40 @@ fn
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
 
+    def test_sourceless_bound_clone_self_mutation_graph_breaks(self):
+        def make_method(bound):
+            def method(self, x):
+                bound.__self__.foo = 1
+                return x + 1
+
+            return method
+
+        ctx_manager = torch.no_grad()
+
+        class A:
+            method = make_method(ctx_manager.clone)
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        del ctx_manager.foo
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(ctx_manager.foo, 1)
+
+        del ctx_manager.foo
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Attribute mutation on an untracked user-defined object",
+        )
+
     def test_inspect_signature_parameters(self):
         import inspect
 
