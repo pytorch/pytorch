@@ -531,6 +531,9 @@
   self: cumsum_backward(grad.to(self.scalar_type()), dim)
   result: auto_linear
 
+- name: associative_scan(Tensor self, str combine_mode, int dim=0, bool reverse=False) -> Tensor
+  self: associative_scan_backward(grad, self, combine_mode, dim, result, reverse)
+
 - name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
   self: cummaxmin_backward(grad, self, indices, dim)
   values: self_t.gather(dim, indices)
