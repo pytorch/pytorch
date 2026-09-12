@@ -6079,6 +6079,56 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         run_and_get_code(compiled_f, a, b)
 
 
+class _TDMFakeSizeVars:
+    """Sizevars stand-in for the descriptor-checker host tests.
+
+    Whenever the gfx1250 probe is false the checker falls through to the shared
+    TMA stride and alignment validation, so a fake that answers only the TDM
+    questions leaves those calls unimplemented. ``hints`` resolves backed
+    symbols the way the force path does.
+    """
+
+    def __init__(self, hints=None):
+        self.hints = dict(hints or {})
+
+    def statically_known_true(self, expr):
+        # A relational over a live symbol is not decidable without a shape
+        # environment. Failing closed is what keeps the unforced descriptor
+        # path conservative, so model that rather than guessing.
+        expr = sympy.sympify(expr)
+        return bool(expr) if expr in (sympy.true, sympy.false) else False
+
+    def statically_known_equals(self, lhs, rhs):
+        return sympy.sympify(lhs) == sympy.sympify(rhs)
+
+    def replace_backed_symbols_with_hints(self, expr):
+        return sympy.sympify(expr).subs(self.hints)
+
+
+def _tdm_fake_kernel(**overrides):
+    """Kernel stand-in supplying the attributes the block analysis reads.
+
+    A bare Mock makes every attribute truthy, which silently routes the
+    analysis into its persistent-reduction and combo-kernel branches and then
+    fails on arithmetic against Mock objects.
+    """
+    kernel = mock.Mock(
+        no_x_dim=False,
+        persistent_reduction=False,
+        is_combo_kernel=False,
+        per_subkernel_blocks=False,
+        fixed_config=None,
+        tma_min_block_sizes={},
+    )
+    kernel.max_block.return_value = 1024
+    kernel.index_to_str.side_effect = str
+    kernel.features.strict_reduction_rblock.return_value = 0
+    kernel.features.has_strict_multirow_reduction.return_value = False
+    for name, value in overrides.items():
+        setattr(kernel, name, value)
+    return kernel
+
+
 # These host-side tests validate ROCm-specific TDM logic; TDM hardware is not required.
 @unittest.skipUnless(
     TEST_WITH_ROCM,
@@ -6733,6 +6783,246 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             issubclass(ROCmAddMMPersistentTDMTemplateConfigHeuristic, AddMMConfigMixin)
         )
 
+    def test_tdm_generic_descriptor_gate_composes_optins(self):
+        from torch._inductor.utils import use_gfx1250_descriptor_codegen
+
+        device = torch.device("cuda")
+        base = {"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True}
+        with mock.patch(self._PREREQS, return_value=True):
+            with config.patch(base):
+                self.assertTrue(use_gfx1250_descriptor_codegen(device))
+            for option in base:
+                with config.patch({**base, option: False}):
+                    self.assertFalse(use_gfx1250_descriptor_codegen(device))
+        # Same enabled config, capability false: the device probe contains it.
+        with mock.patch(self._PREREQS, return_value=False), config.patch(base):
+            self.assertFalse(use_gfx1250_descriptor_codegen(device))
+
+    def test_tdm_generic_descriptor_checker_preserves_backend_dtype_policy(self):
+        from torch._inductor.codegen.triton import TMACompatibilityChecker
+
+        kernel = _tdm_fake_kernel()
+
+        def can_use(device, dtype, *, gfx1250):
+            graph = mock.Mock(sizevars=_TDMFakeSizeVars())
+            graph.get_current_device_or_throw.return_value = device
+            with (
+                V.set_graph_handler(graph),
+                mock.patch(
+                    "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                    return_value=gfx1250,
+                ),
+                mock.patch(
+                    "torch._inductor.codegen.triton.has_triton_stable_tma_api",
+                    return_value=True,
+                ),
+                mock.patch("torch.cuda.get_device_capability", return_value=(9, 0)),
+            ):
+                return TMACompatibilityChecker(
+                    kernel, dtype, for_store=False, force=False
+                ).can_use_tma()
+
+        cuda, xpu = torch.device("cuda"), torch.device("xpu")
+
+        # gfx1250 selects the narrower TDM table, which has no FP8 entry. The
+        # config gates live inside the mocked capability helper, so these cases
+        # need no config patch.
+        self.assertTrue(can_use(cuda, torch.float16, gfx1250=True))
+        self.assertTrue(can_use(cuda, torch.bfloat16, gfx1250=True))
+        self.assertTrue(can_use(cuda, torch.float32, gfx1250=True))
+        self.assertFalse(can_use(cuda, torch.float8_e4m3fn, gfx1250=True))
+        self.assertFalse(can_use(cuda, torch.int32, gfx1250=True))
+
+        # With the AMD probe false, the shared CUDA and XPU paths must keep the
+        # wider TMA table. FP8 and int32 are the discriminating dtypes: they are
+        # accepted here and rejected above, which is what shows this change
+        # narrowed only the gfx1250 policy rather than the shared one.
+        with config.patch(
+            {"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True}
+        ):
+            for backend in (cuda, xpu):
+                self.assertTrue(can_use(backend, torch.float16, gfx1250=False))
+                self.assertTrue(can_use(backend, torch.float8_e4m3fn, gfx1250=False))
+                self.assertTrue(can_use(backend, torch.int32, gfx1250=False))
+
+    def test_tdm_generic_descriptor_checker_enforces_shape_bounds(self):
+        from torch._inductor.codegen.triton import (
+            BlockParameters,
+            TMACompatibilityChecker,
+            TritonSymbols,
+        )
+        from torch.utils._sympy.symbol import SymT
+
+        kernel = _tdm_fake_kernel()
+        graph = mock.Mock(sizevars=_TDMFakeSizeVars())
+        graph.get_current_device_or_throw.return_value = torch.device("cuda")
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=True,
+            ) as capable,
+        ):
+            checker = TMACompatibilityChecker(
+                kernel, torch.float16, for_store=False, force=False
+            )
+            self.assertTrue(checker.can_use_tma())
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(shape=[128] * 6)
+                )
+            )
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(shape=[torch.iinfo(torch.int32).max + 1])
+                )
+            )
+            # The probe reaches uncached device properties, so one checker must
+            # resolve capability once across both methods and all three calls.
+            capable.assert_called_once()
+
+        # A false result must cache too: an early return is not a cache miss.
+        # With the probe false the rank and int32 rules are skipped and the
+        # checker continues into the shared TMA stride validation, so this needs
+        # a complete descriptor rather than a bare shape. The final stride is
+        # deliberately non-unit: that is rejected before any tiling analysis, so
+        # the assertion stays about caching and needs no CUDA hardware.
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=False,
+            ) as incapable,
+            # Reached because the gfx1250 short-circuit no longer applies; the
+            # real call requires a device this host test does not have.
+            mock.patch("torch.cuda.get_device_capability", return_value=(9, 0)),
+        ):
+            checker = TMACompatibilityChecker(
+                kernel, torch.float16, for_store=False, force=False
+            )
+            # use_tensor_descriptor is off by default, so the CUDA/XPU branch
+            # cannot rescue the disabled gfx1250 path.
+            self.assertFalse(checker.can_use_tma())
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(
+                        shape=[128, 128],
+                        block_shape=[TritonSymbols.block_sizes[SymT.XBLOCK]] * 2,
+                        strides=[128, 2],
+                        offsets=[0, 0],
+                    )
+                )
+            )
+            incapable.assert_called_once()
+
+    def test_tdm_generic_descriptor_checker_force_path_enforces_shape_bounds(self):
+        from torch._inductor.codegen.triton import (
+            BlockParameters,
+            TMACompatibilityChecker,
+            TritonSymbols,
+        )
+        from torch.utils._sympy.symbol import SymT
+
+        xblock = TritonSymbols.block_sizes[SymT.XBLOCK]
+        extent = sympy.Symbol("s0", integer=True, positive=True)
+        int32_max = torch.iinfo(torch.int32).max
+        kernel = _tdm_fake_kernel()
+
+        def compatible(block_params, *, force, hints=None):
+            graph = mock.Mock(sizevars=_TDMFakeSizeVars(hints))
+            graph.get_current_device_or_throw.return_value = torch.device("cuda")
+            with (
+                V.set_graph_handler(graph),
+                mock.patch(
+                    "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                    return_value=True,
+                ),
+            ):
+                return TMACompatibilityChecker(
+                    kernel, torch.float16, for_store=False, force=force
+                ).are_block_parameters_compatible(block_params)
+
+        def descriptor(extent_expr):
+            # Rank 1 makes the outer-stride rule vacuous, so these assertions
+            # isolate the extent range check from the alignment rules.
+            return BlockParameters(
+                shape=[extent_expr],
+                block_shape=[xblock],
+                strides=[1],
+                offsets=[0],
+            )
+
+        # Constant extents behave the same with and without force.
+        for force in (True, False):
+            self.assertFalse(compatible(BlockParameters(shape=[128] * 6), force=force))
+            self.assertFalse(compatible(descriptor(int32_max + 1), force=force))
+
+        # A complete, valid descriptor must be accepted rather than merely "not
+        # rejected"; otherwise the negative cases could pass for the wrong
+        # reason, which is what left the earlier revision of this test vacuous.
+        self.assertTrue(compatible(descriptor(1024), force=True))
+        self.assertTrue(compatible(descriptor(1024), force=False))
+
+        # force decides on hints, so a backed symbol resolves in both
+        # directions instead of being rejected for being symbolic.
+        self.assertTrue(
+            compatible(descriptor(extent), force=True, hints={extent: 1024})
+        )
+        self.assertFalse(
+            compatible(descriptor(extent), force=True, hints={extent: int32_max + 1})
+        )
+
+        # Without force the same symbolic extent is not statically decidable,
+        # so the checker stays conservative even when a hint would be in range.
+        self.assertFalse(
+            compatible(descriptor(extent), force=False, hints={extent: 1024})
+        )
+
+
+@instantiate_parametrized_tests
+class TestTensorDescriptorCompatibility(TestCase):
+    @parametrize("device_type", ("cuda", "xpu"))
+    def test_tdm_generic_descriptor_checker_force_path_skips_unused_shape_hints(
+        self, device_type
+    ):
+        from torch._inductor.codegen.triton import (
+            BlockParameters,
+            TMACompatibilityChecker,
+            TritonSymbols,
+        )
+        from torch.utils._sympy.symbol import SymT
+
+        extent = sympy.Symbol("shape_extent", integer=True, positive=True)
+        sizevars = _TDMFakeSizeVars({extent: 1024})
+        graph = mock.Mock(sizevars=sizevars)
+        graph.get_current_device_or_throw.return_value = torch.device(device_type)
+        block_params = BlockParameters(
+            shape=[extent],
+            block_shape=[TritonSymbols.block_sizes[SymT.XBLOCK]],
+            strides=[1],
+            offsets=[0],
+        )
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=False,
+            ),
+            mock.patch.object(
+                sizevars,
+                "replace_backed_symbols_with_hints",
+                wraps=sizevars.replace_backed_symbols_with_hints,
+            ) as resolve_hint,
+        ):
+            checker = TMACompatibilityChecker(
+                _tdm_fake_kernel(), torch.float16, for_store=False, force=True
+            )
+            self.assertTrue(checker.are_block_parameters_compatible(block_params))
+            # Stride and offset still need hints; the unused shape does not.
+            resolve_hint.assert_any_call(1)
+            resolve_hint.assert_any_call(sympy.Integer(0))
+            self.assertNotIn(mock.call(extent), resolve_hint.call_args_list)
+
 
 def simple_fn():
     return 42
@@ -6966,6 +7256,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
     running_on_tdm_device(),
     "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
 )
+@instantiate_parametrized_tests
 class TestTDMEndToEnd(TestCase):
     def _compile_and_get_code(self, fn, *args):
         with config.patch(
@@ -6973,6 +7264,15 @@ class TestTDMEndToEnd(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tdm",
+            }
+        ):
+            return run_and_get_code(torch.compile(fn), *args)
+
+    def _compile_generic_and_get_code(self, fn, *args):
+        with config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
             }
         ):
             return run_and_get_code(torch.compile(fn), *args)
@@ -7021,6 +7321,88 @@ class TestTDMEndToEnd(TestCase):
         self.assertIn("make_tensor_descriptor", joined)
         self.assertIn("load_tensor_descriptor", joined)
         torch.testing.assert_close(result, fn(bias, a, b), atol=2e-2, rtol=2e-2)
+
+    def test_tdm_generic_pointwise_correctness_and_selection(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_generic_and_get_code(fn, x, y)
+        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(x, y), atol=1e-3, rtol=1e-3)
+
+    def test_tdm_generic_reduction_correctness_and_selection(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float32)
+        result, code = self._compile_generic_and_get_code(fn, x)
+        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(x), atol=1e-3, rtol=1e-3)
+
+    @parametrize(
+        "dtype,tol",
+        (
+            (torch.float16, 1e-3),
+            (torch.bfloat16, 1e-2),
+            (torch.float32, 1e-4),
+        ),
+    )
+    def test_tdm_generic_pointwise_supported_dtypes(self, dtype, tol):
+        # Every dtype in _TDM_SUPPORTED_DTYPES, on the same aligned shape the
+        # baseline pointwise case already selects descriptors for.
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=dtype)
+        y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=dtype)
+        result, code = self._compile_generic_and_get_code(fn, x, y)
+        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(x, y), atol=tol, rtol=tol)
+
+    @parametrize("rows,cols", ((1024, 1000), (1000, 1024), (1000, 1000)))
+    def test_tdm_generic_pointwise_tail_shapes(self, rows, cols):
+        # Extents that are not tile multiples exercise the descriptor's
+        # out-of-bounds handling. Whether TDM is selected for a given tail is a
+        # policy outcome rather than a contract, so this asserts numerics;
+        # qualification records the selection actually observed.
+        def fn(x, y):
+            return x * y + 1
+
+        x = torch.randn(rows, cols, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(rows, cols, device=GPU_TYPE, dtype=torch.float16)
+        result, _ = self._compile_generic_and_get_code(fn, x, y)
+        torch.testing.assert_close(result, fn(x, y), atol=1e-3, rtol=1e-3)
+
+    def test_tdm_generic_aligned_view_correctness_and_selection(self):
+        # A leading row slice keeps unit innermost stride and 16-byte alignment,
+        # so it stays descriptor-eligible.
+        def fn(x):
+            return x + 1
+
+        view = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)[:512]
+        result, code = self._compile_generic_and_get_code(fn, view)
+        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(view), atol=1e-3, rtol=1e-3)
+
+    def test_tdm_generic_unsuitable_layout_falls_back(self):
+        # Descriptor construction sorts dimensions by stride before validation,
+        # and transpose_discontiguous_tensor_descriptor is on by default, so a
+        # plain .t() normalizes back to a unit innermost stride and stays
+        # descriptor-eligible. A stepped column slice keeps its stride order
+        # through that sort, so this input genuinely fails the unit
+        # innermost-stride rule and must take the fallback.
+        def fn(x):
+            return x + 1
+
+        strided = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)[:, ::2]
+        self.assertEqual(strided.stride(), (1024, 2))
+        result, code = self._compile_generic_and_get_code(fn, strided)
+        # Check the input pointer specifically: a descriptor for the contiguous
+        # output stays legal, so requiring none anywhere would over-constrain.
+        self.assertNotIn("tl.make_tensor_descriptor(in_ptr", "\n".join(code))
+        torch.testing.assert_close(result, fn(strided), atol=1e-3, rtol=1e-3)
 
 
 if __name__ == "__main__":
