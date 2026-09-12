@@ -139,6 +139,17 @@
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
                 block_indexing=True
             )}}
+            {%- elif RANK3_TMA_OUTPUT %}
+            output_subtile = subtiles[i].reshape(
+                (1, BLOCK_M, BLOCK_N // EPILOGUE_SUBTILE)
+            )
+            {{store_output(
+                ("batch", "offs_cm", "offs_cn_i"),
+                "output_subtile",
+                indent_width=12,
+                val_shape=("1", "BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
+                block_indexing=True
+            )}}
             {%- else %}
             rm = offs_cm + tl.arange(0, BLOCK_M)[:, None]
             rn = offs_cn_i + tl.arange(0, BLOCK_N // EPILOGUE_SUBTILE)[None, :]
