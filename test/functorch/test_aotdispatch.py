@@ -95,6 +95,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     compare_equal_outs_and_grads,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_MACOS,
@@ -279,7 +280,9 @@ def _unwrap_exact_dict(c):
 
 
 class TestPythonKey(AOTTestCase):
-    def test_make_fx(self, device):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_make_fx(self):
         def f(x):
             return torch.sin(x)
 
@@ -289,7 +292,7 @@ class TestPythonKey(AOTTestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_make_fx_grad(self, device):
+    def test_make_fx_grad(self):
         def f(x):
             return torch.sin(x).sum()
 
@@ -300,15 +303,15 @@ class TestPythonKey(AOTTestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_scalar_device(self, device):
+    def test_scalar_device(self):
         def f(a, b):
             return a + b
 
-        inps = [torch.randn(3, device=device), torch.tensor(5)]
+        inps = [torch.randn(3, device="cpu"), torch.tensor(5)]
         fx_f = make_fx(f)(*inps)
         self.assertEqual(fx_f(*inps), f(*inps))
 
-    def test_make_fx_vmap(self, device):
+    def test_make_fx_vmap(self):
         def f(x):
             return torch.sin(x)
 
@@ -318,7 +321,7 @@ class TestPythonKey(AOTTestCase):
         new_inp = torch.randn(5, 3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_make_fx_jacrev(self, device):
+    def test_make_fx_jacrev(self):
         def f(x):
             return x.sin().sum()
 
@@ -328,7 +331,7 @@ class TestPythonKey(AOTTestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_make_fx_vjp(self, device):
+    def test_make_fx_vjp(self):
         def f(x):
             return torch.sin(x).sum()
 
@@ -339,7 +342,7 @@ class TestPythonKey(AOTTestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
-    def test_make_fx_functionalize(self, device):
+    def test_make_fx_functionalize(self):
         from functorch.experimental import functionalize
 
         def fn(a):
@@ -347,7 +350,7 @@ class TestPythonKey(AOTTestCase):
             a.relu_()
             return a
 
-        a = torch.randn(3, device=device)
+        a = torch.randn(3, device="cpu")
         symbolic_gm = torch.fx.symbolic_trace(fn)
         includes_method_relu_ = any(
             str(n.target) == "relu_" for n in symbolic_gm.graph.nodes
@@ -360,7 +363,7 @@ class TestPythonKey(AOTTestCase):
         )
         self.assertTrue(includes_aten_relu)
 
-    def test_make_fx_no_decompose(self, device):
+    def test_make_fx_no_decompose(self):
         # FIXME
         return self.skipTest("error: maximum recursion reached")
 
@@ -376,7 +379,7 @@ class TestPythonKey(AOTTestCase):
         ops = {i.target for i in fx_f.graph.nodes}
         self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
-    def test_nnc_jit(self, device):
+    def test_nnc_jit(self):
         def f(x):
             return torch.sin(x)
 
@@ -385,7 +388,7 @@ class TestPythonKey(AOTTestCase):
         inp = torch.randn(3)
         self.assertEqual(jit_f(inp), f(inp))
 
-    def test_nnc_scalar(self, device):
+    def test_nnc_scalar(self):
         def f(x):
             return torch.sin(x)
 
@@ -394,7 +397,7 @@ class TestPythonKey(AOTTestCase):
         inp = torch.randn(())
         self.assertEqual(jit_f(inp), f(inp))
 
-    def test_nnc_pytrees(self, device):
+    def test_nnc_pytrees(self):
         def f(x):
             return [torch.sin(x[0])]
 
@@ -403,7 +406,7 @@ class TestPythonKey(AOTTestCase):
         inp = [torch.randn(3)]
         self.assertEqual(jit_f(inp), f(inp))
 
-    def test_external_calls(self, device):
+    def test_external_calls(self):
         def f(a, b):
             return torch.mv(a, b)
 
@@ -411,7 +414,7 @@ class TestPythonKey(AOTTestCase):
         inp = [torch.randn(3, 3), torch.randn(3)]
         self.assertEqual(jit_f(*inp), f(*inp))
 
-    def test_nnc_passthrough(self, device):
+    def test_nnc_passthrough(self):
         def f(x, y):
             return x + y, y
 
@@ -428,7 +431,7 @@ class TestPythonKey(AOTTestCase):
         self.assertEqual(jit_f(*inp), f(*inp))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_resnet18_backward_trace(self, device):
+    def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
 
         def f(x):
@@ -5371,6 +5374,8 @@ class TestMod(torch.nn.Module):
 
 
 class TestAOTExport(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -6605,6 +6610,8 @@ def forward(self, primals, tangents):
 
 
 class TestPartitioning(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
@@ -10578,6 +10585,8 @@ class TestAOTDispatch(AOTTestCase):
     # - metadata mutation? (TBD)
     # - guard tests (fw guards *and* bw guards)
     # - subclass test involving _indices_of_inps_to_detach
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aminmax_out_dtype_mismatch_errors(self):
         def f(inp, out_min, out_max):
             return torch.aminmax(inp, dim=-1, out=(out_min, out_max))
@@ -11137,6 +11146,8 @@ class GradsNoForceContiguousContextManager(ContextDecorator):
 
 
 class TestAOTModuleSimplified(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -12693,6 +12704,8 @@ def _test_aot_autograd_module_helper(
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps(aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
@@ -12764,6 +12777,8 @@ symbolic_aot_autograd_module_failures = {
 
 
 class TestEagerFusionModuleInfo(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, aot_autograd_module_failures)
     def test_aot_autograd_module_exhaustive(self, device, dtype, training, module_info):
@@ -12775,23 +12790,17 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         aot_autograd_module_failures | symbolic_aot_autograd_module_failures,
     )
     def test_aot_autograd_symbolic_module_exhaustive(
-        self, device, dtype, training, module_info
+        self, dtype, training, module_info
     ):
         _test_aot_autograd_module_helper(
-            self, device, dtype, training, module_info, dynamic=True
+            self, "cpu", dtype, training, module_info, dynamic=True
         )
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_parametrized_tests(TestAOTModuleSimplified)
-only_for = "cpu"
-instantiate_device_type_tests(
-    TestPythonKey,
-    globals(),
-    only_for=only_for,
-)
-instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for=only_for)
-instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=only_for)
+instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
+instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
 
 
 @xfail_inherited_tests(
@@ -12803,6 +12812,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     """
     These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def assertExpectedInline(self, *args, **kwargs):
         # These will have different outputs because dynamo returns a different graph module
@@ -13076,6 +13087,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     """
     In memory version of FXGraphCache so we can isolate testing for FXGraphCache
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def make_compiler(self, fw_graph_cell):
         mock_inductor_cache = self.inductor_cache
