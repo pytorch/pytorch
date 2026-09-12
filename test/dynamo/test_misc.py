@@ -9293,6 +9293,76 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         torch._dynamo.reset()
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
+    def test_isinstance_value_reading_instancecheck_on_traced_list(self):
+        # This hook reads the instance, not its attributes, so answering it from
+        # a representative empty list would be wrong (here it raises IndexError).
+        # The traced list is reconstructible, so the real object answers.
+        class IndexMeta(type):
+            def __subclasscheck__(cls, subclass):
+                raise TypeError("nope")
+
+            def __instancecheck__(cls, instance):
+                return instance[0] == 1
+
+        class First1(metaclass=IndexMeta):
+            pass
+
+        def fn(x):
+            lst = [1, 2, 3]
+            return x + 1 if isinstance(lst, First1) else x - 1
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_isinstance_inherited_instancecheck_metaclass(self):
+        # __instancecheck__ resolves through the metaclass MRO, so a hook that is
+        # inherited rather than defined directly still takes the object path.
+        class Meta(abc.ABCMeta):
+            pass
+
+        class Base(metaclass=Meta):
+            pass
+
+        class Obj(Base):
+            pass
+
+        def subscripted_generic(x, o):
+            # typing._GenericAlias inherits __instancecheck__ from
+            # _BaseGenericAlias and rejects subscripted generics
+            try:
+                isinstance(o, typing.List[int])
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        def inherited_abcmeta(x, o):
+            return x + 1 if isinstance(o, Base) else x - 1
+
+        x = torch.ones(3)
+        o = Obj()
+        for fn in (subscripted_generic, inherited_abcmeta):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=fn.__name__)
+
+    def test_isinstance_protocol_on_nn_module(self):
+        @typing.runtime_checkable
+        class HasWeight(typing.Protocol):
+            weight: torch.Tensor
+
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def fn(x, mod):
+            return x + 1 if isinstance(mod, HasPorts | HasWeight) else x - 1
+
+        x = torch.ones(3)
+        mod = torch.nn.Linear(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, mod), fn(x, mod))
+
     def test_isinstance_non_runtime_checkable_protocol_raises(self):
         class NotRuntime(typing.Protocol):
             ports: tuple[int, ...]
