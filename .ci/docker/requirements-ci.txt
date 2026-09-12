@@ -343,8 +343,7 @@ pywavelets==1.7.0 ; python_version >= "3.12"
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==5.3.0 ; python_version < "3.14"
-lxml==6.1.0 ; python_version >= "3.14"
+lxml==6.1.0
 #Description: This is a requirement of unittest-xml-reporting
 
 PyGithub==2.3.0
@@ -354,7 +353,7 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.21.0
+onnx==1.22.0
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
@@ -384,10 +383,10 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
-pip==26.1.2
+pip==26.2
 pyyaml==6.0.3
 pyzstd
-setuptools==78.1.1
+setuptools==83.0.0
 packaging==24.2
 six
 
