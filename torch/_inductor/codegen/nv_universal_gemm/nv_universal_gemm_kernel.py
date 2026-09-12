@@ -25,6 +25,7 @@ from torch._inductor.codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
+from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
@@ -199,13 +200,13 @@ def _current_target_sm(dev_idx: int):
 def _make_disk_config_key(
     kernel_name: str,
     variant_name: str,
-    accumulator_type: Any,
-    scale_type_a: Any | None = None,
-    scale_type_b: Any | None = None,
-    swizzle_type_a: Any | None = None,
-    swizzle_type_b: Any | None = None,
+    accumulator_type: object,
+    scale_type_a: object = None,
+    scale_type_b: object = None,
+    swizzle_type_a: object = None,
+    swizzle_type_b: object = None,
     epilogue_source: str = "",
-) -> tuple:
+) -> tuple[str, ...]:
     return (
         kernel_name,
         variant_name,
@@ -236,9 +237,9 @@ def _compile_nvgemm(
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
-    Thread safety is handled at the dispatch layer: autotuning precompile
-    runs in subprocess workers (process-isolated), runtime is
-    single-threaded per graph execution.
+    Autotuning precompile runs in subprocess workers (process-isolated); the
+    in-process compile takes ``CUTEDSL_COMPILE_LOCK`` because other CuTeDSL
+    templates precompile on threads of this process.
 
     kernel_obj: pre-resolved kernel (skips _lookup_gemm_kernel).
     kernel_name: kernel name for _lookup_gemm_kernel.
@@ -277,7 +278,8 @@ def _compile_nvgemm(
     if fallback_fn is not None:
         artifact = fallback_fn(kernel)
     if artifact is None:
-        artifact = kernel.compile(args)
+        with CUTEDSL_COMPILE_LOCK:
+            artifact = kernel.compile(args)
         was_compiled = True
 
     return artifact, args, kernel, was_compiled

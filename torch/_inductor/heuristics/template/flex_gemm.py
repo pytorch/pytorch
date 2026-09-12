@@ -18,6 +18,10 @@ from torch._inductor import config as inductor_config
 
 QuackConfigKey = tuple[tuple[str, Any], ...]
 
+# Unranked legal sets (capabilities without a priority list, or constrained calls
+# whose legal set misses it) benchmark at most this many configs.
+_MAX_UNRANKED_CANDIDATES = 12
+
 
 def _sm100_priority_rank(
     order: tuple[tuple[int, int, int, int, bool], ...],
@@ -30,7 +34,8 @@ def _sm100_priority_rank(
     }
 
 
-# Measured dense FlexGEMM preference order on SM100.
+# Dense FlexGEMM preference order measured on B200 (SM100) with bf16 dense
+# mm epilogues, square M=N=K in 256..1024 (#187108, 2026-06); re-tune there.
 _PRIORITY_RANK = _sm100_priority_rank(
     (
         (128, 256, 2, 1, True),
@@ -61,20 +66,41 @@ _VARLEN_PRIORITY_RANK = _sm100_priority_rank(
 )
 
 
-def _priority_rank(config: QuackConfigKey, *, varlen: bool) -> int | None:
+def _rank_key(config: QuackConfigKey) -> tuple[Any, ...]:
     fields = dict(config)
-    return (_VARLEN_PRIORITY_RANK if varlen else _PRIORITY_RANK).get(
-        (
-            fields["tile_m"],
-            fields["tile_n"],
-            fields["cluster_m"],
-            fields["cluster_n"],
-            fields["pingpong"],
-            fields["swap_ab"],
-            fields["is_dynamic_persistent"],
-            fields["device_capacity"],
-        )
+    return (
+        fields["tile_m"],
+        fields["tile_n"],
+        fields["cluster_m"],
+        fields["cluster_n"],
+        fields["pingpong"],
+        fields["swap_ab"],
+        fields["is_dynamic_persistent"],
+        fields["device_capacity"],
     )
+
+
+def _priority_rank(config: QuackConfigKey, *, varlen: bool) -> int | None:
+    rank = _VARLEN_PRIORITY_RANK if varlen else _PRIORITY_RANK
+    return rank.get(_rank_key(config))
+
+
+# Untuned dense pick by shape hint (same measurement as _PRIORITY_RANK): ranks
+# into _PRIORITY_RANK, tried in order, falling back to QuACK's default.
+_DENSE_DEFAULT, _DENSE_SKINNY, _DENSE_LARGE_RECT, _DENSE_LARGE = range(4)
+
+
+def _dense_default_ranks(m: int, n: int) -> tuple[int, ...]:
+    min_dim, max_dim = min(m, n), max(m, n)
+    if min_dim < 512 or (m == 1024 and n == 1024):
+        return (_DENSE_SKINNY, _DENSE_DEFAULT)
+    if max_dim >= 4096 and 768 <= min_dim < 1024:
+        return (_DENSE_LARGE, _DENSE_DEFAULT)
+    if max_dim >= 4096 and min_dim == 1024:
+        return (_DENSE_LARGE_RECT, _DENSE_DEFAULT)
+    if min_dim >= 2048:
+        return (_DENSE_LARGE, _DENSE_DEFAULT)
+    return (_DENSE_DEFAULT,)
 
 
 def _prioritized(
@@ -95,9 +121,9 @@ def flex_gemm_search_space(
 
     ``legal_configs`` comes from QuACK with its untuned default first. The
     default search space keeps that default plus the measured priority configs;
-    EXHAUSTIVE keeps everything. Constrained calls whose legal set misses the
-    priority list entirely (for example pinned ``swap_ab``) benchmark every
-    legal config, since the constraints already narrowed the space. Varlen-M
+    EXHAUSTIVE keeps everything. Legal sets that miss the priority list
+    entirely (other capabilities, or constrained calls such as pinned ``swap_ab``)
+    benchmark QuACK's order, capped at ``_MAX_UNRANKED_CANDIDATES``. Varlen-M
     calls rank by the grouped_mm order and only add QuACK's dense default when
     it is measured (it is the slowest common choice for ragged groups).
     """
@@ -105,7 +131,7 @@ def flex_gemm_search_space(
         return legal_configs
     prioritized = _prioritized(legal_configs, varlen=varlen)
     if not prioritized:
-        return legal_configs
+        return legal_configs[:_MAX_UNRANKED_CANDIDATES]
     default = legal_configs[0]
     if default not in prioritized and not varlen:
         prioritized.insert(0, default)
@@ -113,13 +139,25 @@ def flex_gemm_search_space(
 
 
 def flex_gemm_default_config(
-    legal_configs: tuple[QuackConfigKey, ...], *, varlen: bool = False
+    legal_configs: tuple[QuackConfigKey, ...],
+    *,
+    varlen: bool = False,
+    dense_shape: tuple[int, int] | None = None,
 ) -> QuackConfigKey:
     """Return the config pinned when autotuning is off.
 
-    Dense calls keep QuACK's untuned default (``legal_configs[0]``); varlen-M
-    calls take the best-ranked legal grouped_mm config instead.
+    ``dense_shape`` is the ``(M, N)`` optimization hint of a dense call; it picks
+    from the measured dense table without guarding (a different runtime shape
+    still runs a legal config). Varlen-M calls take the best-ranked legal
+    grouped_mm config. Otherwise QuACK's untuned default (``legal_configs[0]``).
     """
-    if varlen and (prioritized := _prioritized(legal_configs, varlen=True)):
-        return prioritized[0]
+    if varlen:
+        if prioritized := _prioritized(legal_configs, varlen=True):
+            return prioritized[0]
+        return legal_configs[0]
+    if dense_shape is not None:
+        by_rank = {_PRIORITY_RANK.get(_rank_key(c)): c for c in legal_configs}
+        for rank in _dense_default_ranks(*dense_shape):
+            if (config := by_rank.get(rank)) is not None:
+                return config
     return legal_configs[0]

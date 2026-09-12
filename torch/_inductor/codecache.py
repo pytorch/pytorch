@@ -132,6 +132,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_guarding_hint,
     ShapeEnv,
 )
+from torch.utils._config_module import _ImplicationConfigModule
 from torch.utils._device import _device_constructors
 from torch.utils._ordered_set import OrderedSet
 
@@ -1733,6 +1734,14 @@ class FxGraphHashDetails:
             for device, custom_config in custom_backend_codegen_configs.items()
             if custom_config is not None
         }
+        implication_hashes = {
+            device: custom_config._implication_hash
+            for device, custom_config in custom_backend_codegen_configs.items()
+            if isinstance(custom_config, _ImplicationConfigModule)
+        }
+        if implication_hashes:
+            # FxGraphCachePickler includes these rule fingerprints through self.__dict__.
+            self.custom_backend_codegen_implications = implication_hashes
 
         # Register the custom partitioner function
         self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(
