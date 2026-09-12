@@ -16287,6 +16287,71 @@ fn
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
 
+    @parametrize("delete", [False, True])
+    def test_sourceless_bound_clone_self_mutation_graph_breaks(self, delete):
+        def make_method(bound):
+            def method(self, x):
+                if delete:
+                    del bound.__self__.foo
+                else:
+                    bound.__self__.foo = 1
+                return x + 1
+
+            return method
+
+        ctx_manager = torch.no_grad()
+        if delete:
+            ctx_manager.foo = 0
+
+        class A:
+            method = make_method(ctx_manager.clone)
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        if delete:
+            ctx_manager.foo = 0
+        else:
+            del ctx_manager.foo
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+        if delete:
+            self.assertFalse(hasattr(ctx_manager, "foo"))
+            ctx_manager.foo = 0
+        else:
+            self.assertEqual(ctx_manager.foo, 1)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Attribute mutation on an untracked user-defined object",
+        )
+
+    def test_sourced_untracked_mutation_reports_dynamo_bug(self):
+        @dataclasses.dataclass
+        class C:
+            foo: int
+
+        field = dataclasses.fields(C)[0]
+
+        def fn(obj, x):
+            dataclasses.fields(obj)[0].name = "bar"
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(C(1), torch.ones(1))
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Attribute mutation on a sourced but untracked user-defined object",
+        )
+        self.assertEqual(field.name, "foo")
+
     def test_inspect_signature_parameters(self):
         import inspect
 
