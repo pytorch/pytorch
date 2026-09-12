@@ -235,6 +235,10 @@ class FakeTensorTest(TestCase):
                 torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
                     *cuda_args, [2, 2], layout=torch.sparse_csr, device="cuda:1"
                 )
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
+                    *cuda_args, [2, 2], layout=torch.sparse_csr
+                )
 
     def test_nansum_nanmean_empty_dim(self):
         # nansum/nanmean reduce over all dimensions when dim=() or dim=[] is

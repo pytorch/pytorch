@@ -1536,8 +1536,10 @@ class TestFX(JitTestCase):
             node.meta["val"] = val
             graph.output(node)
             gm = torch.fx.GraphModule(torch.nn.Module(), graph)
-            gm.print_readable(print_output=False, include_stride=True, include_device=True)
-            node.format_node(include_tensor_metadata=True)
+            text = gm.print_readable(print_output=False, include_stride=True, include_device=True)
+            if val.layout is not torch.sparse_coo:
+                self.assertIn(f'"f32{list(val.shape)}cpu"', text)
+                self.assertIn(f'"f32{list(val.shape)}cpu"', node.format_node(include_tensor_metadata=True))
 
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
