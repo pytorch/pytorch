@@ -4,6 +4,7 @@ from hypothesis import given, strategies as st
 
 from torch._inductor.codegen.segmented_tree import SegmentedTree
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 # Helper functions for operations
@@ -42,6 +43,8 @@ update_values = st.integers(min_value=1, max_value=50)
 
 
 class TestSegmentedTree(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Basic construction and initialization tests
     def test_basic_construction(self):
         values = [1, 3, 5, 7, 9]
