@@ -1,9 +1,14 @@
 # Owner(s): ["module: fx"]
 
 import torch
-from torch._library.opaque_object import register_custom_class
+from torch._library.opaque_object import MemberType, register_custom_class
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 # Define a simple opaque type for testing
@@ -22,6 +27,59 @@ class OpaqueCounter(torch._custom_class_base.CustomClassBase):
 register_custom_class(OpaqueCounter, typ="symbolic")
 
 
+class OpaqueMemberBox(torch._custom_class_base.CustomClassBase):
+    def __init__(self, value: int):
+        self.value = value
+        self.inlined_state = {"value": value}
+        self.property_reads = 0
+        self.dynamic_reads = 0
+
+    @property
+    def bumping_property(self):
+        self.property_reads += 1
+        return self.value
+
+    def __getattr__(self, name):
+        if name == "dynamic":
+            self.dynamic_reads += 1
+            return self.value
+        raise AttributeError(name)
+
+    def mutates_and_returns_tensor(self, x):
+        self.value += 1
+        return x + self.value
+
+
+register_custom_class(
+    OpaqueMemberBox,
+    typ="symbolic",
+    members={
+        "value": MemberType.USE_REAL,
+        "inlined_state": MemberType.INLINED,
+        "bumping_property": MemberType.USE_REAL,
+        "dynamic": MemberType.USE_REAL,
+        "mutates_and_returns_tensor": MemberType.INLINED,
+    },
+)
+
+
+class OpaqueOptionalMemberBox(torch._custom_class_base.CustomClassBase):
+    optional: int
+
+    def optional_or_default(self):
+        return self.optional if hasattr(self, "optional") else 0
+
+
+register_custom_class(
+    OpaqueOptionalMemberBox,
+    typ="symbolic",
+    members={
+        "optional": MemberType.USE_REAL,
+        "optional_or_default": MemberType.INLINED,
+    },
+)
+
+
 # Define a wrapper class that holds an opaque object as an attribute
 class WrapperWithOpaque:
     """A wrapper class that contains an opaque object."""
@@ -31,6 +89,7 @@ class WrapperWithOpaque:
         self.data = torch.tensor([1.0, 2.0, 3.0])
 
 
+@instantiate_parametrized_tests
 class TestOpaqueInfrastructure(TestCase):
     """
     Test opaque object descriptor and tracking infrastructure.
@@ -68,6 +127,68 @@ class TestOpaqueInfrastructure(TestCase):
         # The second placeholder should be for the opaque object
         opaque_placeholder = placeholders[1]
         self.assertTrue(opaque_placeholder.name.startswith("opaque_obj"))
+
+    @parametrize("tracing_mode", ("fake", "symbolic"))
+    def test_registered_members_are_resolved_lazily(self, tracing_mode):
+        box = OpaqueMemberBox(2)
+        x = torch.ones(1)
+
+        make_fx(lambda x, box: x + 1, tracing_mode=tracing_mode)(x, box)
+
+        self.assertEqual(box.property_reads, 0)
+        self.assertEqual(box.dynamic_reads, 0)
+
+        make_fx(
+            lambda x, box: (
+                x
+                + box.bumping_property
+                + box.bumping_property
+                + box.dynamic
+                + box.dynamic
+            ),
+            tracing_mode=tracing_mode,
+        )(x, box)
+
+        self.assertEqual(box.property_reads, 1)
+        self.assertEqual(box.dynamic_reads, 1)
+
+    @parametrize("tracing_mode", ("fake", "symbolic"))
+    def test_inlined_method_uses_fake_receiver(self, tracing_mode):
+        box = OpaqueMemberBox(2)
+
+        # INLINED methods receive the fake object, so mutating self is user error
+        # and must not mutate the real input.
+        with self.assertRaisesRegex(AttributeError, "__setattr__"):
+            make_fx(
+                lambda x, box: box.mutates_and_returns_tensor(x),
+                tracing_mode=tracing_mode,
+            )(torch.ones(1), box)
+
+        self.assertEqual(box.value, 2)
+
+    @parametrize("tracing_mode", ("fake", "symbolic"))
+    def test_inlined_instance_attribute(self, tracing_mode):
+        box = OpaqueMemberBox(2)
+        x = torch.ones(1)
+
+        traced = make_fx(
+            lambda x, box: x + box.inlined_state["value"],
+            tracing_mode=tracing_mode,
+        )(x, box)
+
+        self.assertEqual(traced(x, box), x + 2)
+
+    @parametrize("tracing_mode", ("fake", "symbolic"))
+    def test_missing_optional_member_works_with_hasattr(self, tracing_mode):
+        box = OpaqueOptionalMemberBox()
+        x = torch.ones(1)
+
+        traced = make_fx(
+            lambda x, box: x + box.optional_or_default(),
+            tracing_mode=tracing_mode,
+        )(x, box)
+
+        self.assertEqual(traced(x, box), x)
 
 
 if __name__ == "__main__":
