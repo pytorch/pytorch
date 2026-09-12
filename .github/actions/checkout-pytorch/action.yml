@@ -94,6 +94,7 @@ runs:
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
       run: |
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
         cd "${GITHUB_WORKSPACE}"
         # Clean stale submodule dirs
         if [ -z "${NO_SUDO}" ]; then
