@@ -2,6 +2,7 @@
 
 import torch
 import torch._dynamo.test_case
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def fn_creator():
@@ -22,6 +23,8 @@ def fn_creator():
 
 
 class ResumeFunctionTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_freevars(self):
         fn = fn_creator()
         opt_fn = torch.compile(fn, backend="eager")
