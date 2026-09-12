@@ -328,7 +328,11 @@ def requires_world_size(n: int):
     """
     Decorator to request a specific world size for a test. The test harness can
     read this attribute to set the number of ranks to spawn. If there are fewer
-    than `n` CUDA devices available, the test should be skipped by the harness.
+    than ``n`` accelerators available, the test is skipped.
+
+    NOTE: The skip logic is hardware-agnostic and works for any accelerator
+    supported by ``torch.accelerator`` (e.g. CUDA, XPU, HPU, and
+    PrivateUse1-based backends).
 
     Usage:
         @require_world_size(3)
@@ -338,9 +342,12 @@ def requires_world_size(n: int):
 
     def decorator(func):
         func._required_world_size = n
-        available = torch.cuda.device_count()
+        acc = torch.accelerator.current_accelerator(check_available=True)
+        available = (
+            torch.get_device_module(acc.type).device_count() if acc is not None else 0
+        )
         return unittest.skipUnless(
-            available >= n, f"requires {n} GPUs, found {available}"
+            available >= n, f"requires {n} accelerators, found {available}"
         )(func)
 
     return decorator
