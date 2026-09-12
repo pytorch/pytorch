@@ -191,8 +191,10 @@ def is_blackwell_bmm_2cta_compatible(
     padded tile aliases the following batch. A rank-3 TMA output keeps the batch
     boundary explicit and safely suppresses the padded partner tile.
     """
-    return output_batch_rows > 1 and tma_store and (
-        not flatten_output or output_batch_rows % (2 * block_m) == 0
+    return (
+        output_batch_rows > 1
+        and tma_store
+        and (not flatten_output or output_batch_rows % (2 * block_m) == 0)
     )
 
 
