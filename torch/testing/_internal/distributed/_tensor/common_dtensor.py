@@ -86,6 +86,14 @@ if TEST_WITH_ROCM:
 else:
     NUM_DEVICES = 4
 
+
+def build_mesh_for_fake_pg(mesh: torch.Tensor) -> DeviceMesh:
+    if not dist.is_initialized() or dist.get_backend() != "fake":
+        raise RuntimeError("An initialized fake process group is required")
+    # DeviceMesh requires a logical device type, but FakePG performs no device work.
+    return DeviceMesh("cpu", mesh)
+
+
 # We use this as a proxy for "multiple GPUs exist"
 if (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
