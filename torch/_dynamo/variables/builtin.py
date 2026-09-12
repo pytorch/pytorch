@@ -180,6 +180,7 @@ IN_PLACE_DESUGARING_MAP = {
     operator.iand: operator.and_,
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
+    operator.iconcat: operator.concat,
 }
 
 _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
@@ -683,6 +684,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             operator.iand,
             operator.ixor,
             operator.ior,
+            operator.concat,
             operator.index,
         }
         from .tensor import supported_comparison_ops
@@ -737,6 +739,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             operator.iand,
             operator.ixor,
             operator.ior,
+            operator.concat,
         }
         return fns  # type: ignore[return-value]
 
