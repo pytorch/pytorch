@@ -4119,6 +4119,14 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def _guard_dict_keys(vt: VariableTracker) -> None:
+    """DICT_KEYS_MATCH is shallow; nested option dicts need it too."""
+    if isinstance(vt, ConstDictVariable):
+        vt.install_dict_keys_match_guard()
+        for value in vt.items.values():
+            _guard_dict_keys(value)
+
+
 class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_gemm"
     _ALLOW_FALLBACK_TO_EAGER = False
@@ -4157,6 +4165,10 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
+        # as_python_constant guards the present values only; an option added
+        # later (fast_math, backend, a config knob) must recompile.
+        _guard_dict_keys(args[3])
+        _guard_dict_keys(args[4])
         fn_kwargs = args[3].as_python_constant()
         kernel_options = args[4].as_python_constant()
         if self._HOP_NAME is None:

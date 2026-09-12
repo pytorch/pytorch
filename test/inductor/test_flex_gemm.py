@@ -2470,6 +2470,53 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "flex_gemm"):
             actual.sum().backward()
 
+    def test_compiled_autograd_raises_on_backward(self):
+        a = torch.randn(8, 16, requires_grad=True)
+        b = torch.randn(16, 12, requires_grad=True)
+
+        def fn(a, b):
+            return flex_gemm(torch.mm, (a, b), lambda acc: (acc.relu(), acc + 1))
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        actual, aux = compiled(a, b)
+        self.assertEqual(actual, fn(a, b)[0])
+        with self.assertRaisesRegex(
+            NotImplementedError, "Autograd not implemented for flex_gemm"
+        ):
+            (actual.sum() + aux.sum()).backward()
+        self.assertIsNone(a.grad)
+        self.assertIsNone(b.grad)
+
+        with torch.no_grad():
+            inference, _ = compiled(a, b)
+        self.assertFalse(inference.requires_grad)
+        self.assertEqual(inference, actual)
+
+    def test_kernel_options_key_set_is_guarded(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
+        counter = CompileCounterWithBackend("inductor")
+
+        def make(options):
+            def fn(a, b):
+                return flex_gemm(torch.mm, (a, b), torch.relu, kernel_options=options)
+
+            return torch.compile(fn, backend=counter, fullgraph=True)
+
+        base = {"backend": "TRITON"}
+        make(base)(a, b)
+        self.assertEqual(counter.frame_count, 1)
+        make({**base, "fast_math": True})(a, b)
+        self.assertEqual(counter.frame_count, 2)
+        make(dict(base))(a, b)
+        self.assertEqual(counter.frame_count, 2)
+        make({**base, "config": {"swap_ab": False}})(a, b)
+        self.assertEqual(counter.frame_count, 3)
+        make({**base, "config": {"swap_ab": False, "cluster": 2}})(a, b)
+        self.assertEqual(counter.frame_count, 4)
+
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_generated_captured_arg_rejects_unsupported_shape(self):
         def fn(a, b, scale):
