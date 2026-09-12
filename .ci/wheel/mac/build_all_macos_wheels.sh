@@ -6,8 +6,8 @@
 # tools/setup_helpers/cmake.py -- driven by SKIP_SETUP_CLEAN below.
 #
 # Per-Python orchestration (env setup, deps, build, delocate) lives in
-# .ci/macwheel/build.sh; this script only selects the interpreter, resolves the
-# package version, and loops. Mirrors .ci/manywheel/build_all.sh.
+# .ci/wheel/mac/build.sh; this script only selects the interpreter, resolves the
+# package version, and loops. Mirrors .ci/wheel/linux/build_all.sh.
 #
 # Inputs (env):
 #   PYTORCH_ROOT     Path to the PyTorch checkout.

@@ -4,7 +4,7 @@
 # it on PATH for the subsequent build_env_setup.py / build_install_deps.py /
 # build_wheel.py invocations.
 #
-# Windows analog of `.ci/manywheel/set_desired_python.sh`. The Linux variant
+# Windows analog of `.ci/wheel/linux/set_desired_python.sh`. The Linux variant
 # just prepends a manylinux-image-shipped /opt/python/cpXY/bin to PATH; the
 # Windows AMI doesn't bake Pythons in, so we run the installer.
 #
@@ -25,7 +25,10 @@ if [[ -z "$DESIRED_PYTHON" ]]; then
     exit 1
 fi
 
-WIN_CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# This script now lives in .ci/wheel/windows, but the Windows CD workspace
+# (Python install, downloads) stays under .ci/pytorch/windows.
+_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WIN_CI_DIR="$(cd "$_HERE/../../pytorch/windows" && pwd)"
 
 # DESIRED_PYTHON is e.g. "3.13" or, for free-threaded builds, "3.13t".
 # Strip the trailing "t" to get the base version and add the freethreaded
