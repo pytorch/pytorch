@@ -124,15 +124,24 @@ std::
 #endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// Only works for inputs in the range: [-2^51, 2^51]
-// From: https://stackoverflow.com/a/41148578
 template <>
 Vectorized<int64_t> inline convert_to_int_of_same_size<double>(
     const Vectorized<double>& src) {
-  auto x = _mm256_add_pd(src, _mm256_set1_pd(0x0018000000000000));
-  return _mm256_sub_epi64(
-      _mm256_castpd_si256(x),
-      _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000)));
+  // Split the truncated value into 32-bit halves so each half lands inside the
+  // magic-number trick's exact range. Every step below is exact: scaling by a
+  // power of two only adjusts the exponent, and |t - hi * 2^32| < 2^32.
+  const auto trunc = _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC;
+  auto magic = _mm256_set1_pd(0x0018000000000000);
+  auto t = _mm256_round_pd(src, trunc);
+  auto hi = _mm256_round_pd(_mm256_mul_pd(t, _mm256_set1_pd(0x1p-32)), trunc);
+  auto lo = _mm256_sub_pd(t, _mm256_mul_pd(hi, _mm256_set1_pd(0x1p32)));
+
+  auto to_i64 = [magic](__m256d v) {
+    return _mm256_sub_epi64(
+        _mm256_castpd_si256(_mm256_add_pd(v, magic)),
+        _mm256_castpd_si256(magic));
+  };
+  return _mm256_add_epi64(_mm256_slli_epi64(to_i64(hi), 32), to_i64(lo));
 }
 
 template <>
