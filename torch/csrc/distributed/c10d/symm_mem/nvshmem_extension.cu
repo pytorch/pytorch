@@ -1197,6 +1197,10 @@ void multi_root_tile_reduce(
   });
 }
 
+void release_nvshmem_team_pool(const std::string& group_name) {
+  TeamManager::release_group_if_initialized(group_name);
+}
+
 } // namespace c10d::nvshmem_extension
 
 namespace {
