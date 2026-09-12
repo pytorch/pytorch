@@ -5370,6 +5370,16 @@
       ]
     }
   ],
+  "GB3003": [
+    {
+      "Gb_type": "method comparison with undecidable receiver",
+      "Context": "{self} {op} {other}",
+      "Explanation": "Dynamo cannot tell at trace time whether the two bound methods share a receiver.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
   "GB0315": [
     {
       "Gb_type": "torch.associative_scan: improper xs",

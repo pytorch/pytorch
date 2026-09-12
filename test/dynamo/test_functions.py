@@ -31,6 +31,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    expectedFailureDynamic,
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, same
@@ -5459,6 +5460,10 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(hasattr(method, "source_fn"))
         self.assertIs(method.get_source(), im_func.get_source())
 
+    # generate_pycode cannot reconstruct a TensorPropertySource, which is what
+    # a symbolic size input is sourced by; the dynamic_shapes variant therefore
+    # cannot run this, with or without a method involved.
+    @expectedFailureDynamic
     def test_method_vt_reconstruct_pycode(self):
         """A bound method live across a graph break must be codegen-able."""
 

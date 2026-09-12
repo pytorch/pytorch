@@ -549,8 +549,9 @@ class NNModuleVariable(VariableTracker):
                     source = AttrSource(AttrSource(self.source, "__class__"), name)
                     # Get the getter function
                     source = AttrSource(source, "fget")
-                return variables.UserFunctionVariable(  # pyrefly: ignore[bad-argument-type]
-                    subobj.fget, source=source
+                return variables.UserFunctionVariable(
+                    subobj.fget,  # pyrefly: ignore[bad-argument-type]
+                    source=source,
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
