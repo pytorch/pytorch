@@ -679,13 +679,13 @@ namespace std {
 std::string to_string(const ExprPtr& expr) {
   std::ostringstream oss;
   oss << *expr;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 std::string to_string(const StmtPtr& stmt) {
   std::ostringstream oss;
   oss << *stmt;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 std::string to_string(const Tensor& t) {
@@ -699,6 +699,6 @@ std::string to_string(const Tensor& t) {
     oss << *t.buf()->dim(i);
   }
   oss << "]:\n" << *t.stmt() << '\n';
-  return oss.str();
+  return std::move(oss).str();
 }
 } // namespace std

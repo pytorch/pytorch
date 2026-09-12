@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/BlasBackend.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
@@ -216,5 +215,6 @@ sycl::event scaled_matmul(
     at::blas::ScalingType scaling_choice_b,
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
-    bool use_fast_accum);
+    bool use_fast_accum,
+    const std::optional<at::Tensor>& alpha = std::nullopt);
 } // namespace at::native::onednn

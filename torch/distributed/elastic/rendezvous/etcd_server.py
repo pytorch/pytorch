@@ -152,7 +152,7 @@ class EtcdServer:
         stderr: int | TextIO | None = None,
     ) -> None:
         """
-        Start the server, and waits for it to be ready. When this function returns the sever is ready to take requests.
+        Start the server, and waits for it to be ready. When this function returns the server is ready to take requests.
 
         Args:
             timeout: time (in seconds) to wait for the server to be ready

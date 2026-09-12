@@ -2332,6 +2332,28 @@ def forward(self):
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
+    def test_cond_dunder_dict_read_then_outer_mutation(self):
+        # The first __dict__ access on `inner` happens inside the cond body,
+        # whose side effects table is discarded after tracing. The later
+        # mutation outside the cond must still be recorded and replayed.
+        def fn(pred, x):
+            def inner():
+                return x + 1
+
+            def branch():
+                return x + len(inner.__dict__)
+
+            out = control_flow.cond(pred, branch, branch)
+            inner.tag = 42
+            return out, inner
+
+        x = torch.randn(4)
+        out, inner = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.tensor(True), x
+        )
+        self.assertEqual(out, x)
+        self.assertEqual(inner.tag, 42)
+
     def test_cond_with_constant_pred(self):
         def test(pred, x):
             def true_fn(x):
@@ -4619,6 +4641,21 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_grad_requires_grad_read(self):
+        counters.clear()
+
+        def fn(x):
+            # _create_differentiable has already made x differentiable
+            return (x * (10.0 if x.requires_grad else 1.0)).sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3)
+        expected = wrapper_fn(x)
+        actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
     def test_grad_freevar_tensor(self):
         counters.clear()
         y = torch.randn(3, 3)
@@ -6088,11 +6125,11 @@ class GraphModule(torch.nn.Module):
             return grad_res
 
         compile_options = dict(backend="eager", fullgraph=True, dynamic=False)
-        compiled_fn = torch.compile(fn, **compile_options)
+        compiled_fn = torch.compile(fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
         vmapped_fn = torch.vmap(compiled_fn)
         for attr in _DYNAMO_WRAPPER_ATTRS:
             self.assertFalse(hasattr(vmapped_fn, attr), attr)
-        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)
+        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
 
         x = torch.randn(8, dtype=torch.float64)
         expected = vmapped_fn(x)
@@ -6124,12 +6161,12 @@ class GraphModule(torch.nn.Module):
         )
         for transform, fn, x in cases:
             with self.subTest(transform=transform.__name__):
-                compiled_fn = torch.compile(fn, **compile_options)
+                compiled_fn = torch.compile(fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
                 transformed_fn = transform(compiled_fn)
                 for attr in _DYNAMO_WRAPPER_ATTRS:
                     self.assertFalse(hasattr(transformed_fn, attr), attr)
 
-                compiled_transformed_fn = torch.compile(
+                compiled_transformed_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
                     transformed_fn, **compile_options
                 )
 

@@ -60,16 +60,33 @@ def _required_align_bytes(t: torch.Tensor, N: int) -> int:
     return math.gcd(N, 128 // (itemsize * 8)) * itemsize
 
 
+def _const_data_ptr(t: torch.Tensor) -> int:
+    with torch._C.DisableTorchFunctionSubclass():
+        return t.const_data_ptr()  # type: ignore[attr-defined]
+
+
+def _read_only(t: torch.Tensor | None):  # type: ignore[no-untyped-def]
+    if t is None:
+        return None
+    from cutlass.cute.runtime import from_dlpack
+
+    from torch.utils.dlpack import ReadOnlyTensorWrapper
+
+    with torch._C.DisableTorchFunctionSubclass():
+        t = ReadOnlyTensorWrapper(t)
+    return from_dlpack(t, enable_tvm_ffi=True)
+
+
 def _reshape_2d(t: torch.Tensor, M: int, N: int) -> torch.Tensor:
     align = _required_align_bytes(t, N)
     if t.ndim == 2 and t.shape[0] == M and t.shape[1] == N and t.is_contiguous():
         # .contiguous() is a no-op on an already-contiguous tensor and would
         # preserve a misaligned base; clone to force a fresh (aligned) buffer.
-        return t if t.data_ptr() % align == 0 else t.clone()
+        return t if _const_data_ptr(t) % align == 0 else t.clone()
     out = t.reshape(M, N).contiguous()
     # reshape can return a view that keeps the original (misaligned) storage
     # offset, and .contiguous() then leaves it untouched.
-    return out if out.data_ptr() % align == 0 else out.clone()
+    return out if _const_data_ptr(out) % align == 0 else out.clone()
 
 
 def _aligned_weight(w: torch.Tensor, N: int) -> torch.Tensor:
@@ -77,7 +94,7 @@ def _aligned_weight(w: torch.Tensor, N: int) -> torch.Tensor:
     # contiguous-but-offset weight, leaving a misaligned base. Weight is only
     # N elements, so always clone rather than perf-gating like the input.
     w = w.reshape(N).contiguous()
-    if w.data_ptr() % _required_align_bytes(w, N) != 0:
+    if _const_data_ptr(w) % _required_align_bytes(w, N) != 0:
         w = w.clone()
     return w
 
@@ -127,7 +144,7 @@ def quack_rmsnorm_fwd(
         per_head=False,
     )
     # compile order: (x, weight, bias, res, out, res_out, rstd, mean, eps)
-    kernel(x, weight, None, None, out, None, rstd, None, eps)
+    kernel(_read_only(x), _read_only(weight), None, None, out, None, rstd, None, eps)
 
     out = out.reshape(input_shape)
     stat_shape = list(input_shape[: -len(normalized_shape)]) + [1] * len(
@@ -186,7 +203,18 @@ def quack_rmsnorm_bwd(
         per_head=False,
     )
     # compile order: (x, weight, dout, dres_out, rstd, dx, dw_partial, dres, db_partial, sm_count)
-    kernel(x, weight, dout, None, rstd_flat, dx, dw_partial, None, None, sm_count)
+    kernel(
+        _read_only(x),
+        _read_only(weight),
+        _read_only(dout),
+        None,
+        _read_only(rstd_flat),
+        dx,
+        dw_partial,
+        None,
+        None,
+        sm_count,
+    )
 
     dx = dx.reshape(input.shape)
     # `dw_partial is not None` implies `weight is not None` (invariant from

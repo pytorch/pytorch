@@ -90,6 +90,7 @@ jobs:
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
       runner: l-x86iavx512-48-384
+      flash-attention-large-memory-build: true
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks
@@ -146,6 +147,7 @@ jobs:
     name: cuda13.0-py3.12-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
+    if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Script used only in CD pipeline
+# Script used only in the CD pipeline, on an OSDC remote BuildKit builder (there
+# is no local Docker daemon). The caller sets up the buildx builder, passes the
+# target tag(s) as trailing `-t ...` args ("$@"), and gates publishing via
+# WITH_PUSH.
 
 set -exou pipefail
 
@@ -24,7 +27,12 @@ if [[ "${DOCKER_TAG_PREFIX}" == cuda* ]]; then
 elif [[ "${DOCKER_TAG_PREFIX}" == rocm* ]]; then
     # extract rocm version from image name and tag.  e.g. manylinux2_28-builder:rocm6.2.4 returns 6.2.4
     ROCM_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'rocm' '{print $2}')
-    EXTRA_BUILD_ARGS="--build-arg ROCM_IMAGE=rocm/dev-almalinux-8:${ROCM_VERSION}-complete"
+    if [[ "${ROCM_VERSION}" == "7.14" ]]; then
+        THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+    else
+        THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
+    fi
+    EXTRA_BUILD_ARGS="--build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
 fi
 
 case ${DOCKER_TAG_PREFIX} in
@@ -36,7 +44,7 @@ case ${DOCKER_TAG_PREFIX} in
     ;;
   rocm*)
     BASE_TARGET=rocm
-    PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950;gfx1150;gfx1151"
+    PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950;gfx1150;gfx1151"
     EXTRA_BUILD_ARGS="${EXTRA_BUILD_ARGS} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}"
     ;;
   *)
@@ -45,28 +53,31 @@ case ${DOCKER_TAG_PREFIX} in
     ;;
 esac
 
-# TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
-# is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
-sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-
 export DOCKER_BUILDKIT=1
 TOPDIR=$(git rev-parse --show-toplevel)
-tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
+DOCKERFILE="${TOPDIR}/.ci/docker/almalinux/Dockerfile"
+BUILD_CONTEXT="${TOPDIR}/.ci/docker/"
 
-docker build \
-  --target final \
-  --progress plain \
-  --build-arg "BASE_TARGET=${BASE_TARGET}" \
-  --build-arg "DEVTOOLSET_VERSION=13" \
-  ${EXTRA_BUILD_ARGS} \
-  -t ${tmp_tag} \
-  $@ \
-  -f "${TOPDIR}/.ci/docker/almalinux/Dockerfile" \
-  ${TOPDIR}/.ci/docker/
-
-if [ -n "${CUDA_VERSION}" ]; then
-  # Test that we're using the right CUDA compiler
-  docker run --rm "${tmp_tag}" nvcc --version | grep "cuda_${CUDA_VERSION}"
+# WITH_PUSH gates whether we publish: push events publish, PRs only validate the
+# build (remote driver with no output keeps the result in the build cache).
+output_flag=""
+if [[ "${WITH_PUSH:-false}" == "true" ]]; then
+  output_flag="--push"
 fi
+
+build_image() {
+  docker buildx build \
+    --target final \
+    --progress plain \
+    --build-arg "BASE_TARGET=${BASE_TARGET}" \
+    --build-arg "DEVTOOLSET_VERSION=13" \
+    ${EXTRA_BUILD_ARGS} \
+    ${output_flag} \
+    "$@" \
+    -f "${DOCKERFILE}" \
+    "${BUILD_CONTEXT}"
+}
+
+# The caller (binary-docker-build action) wraps this in a cold-pool
+# connect-retry loop, so just build once here.
+build_image "$@"

@@ -51,6 +51,7 @@ else:
         get_process_group_ranks,
         get_rank,
         get_world_size,
+        GroupMember,
         GroupName,
         init_process_group,
         is_initialized,
@@ -92,6 +93,40 @@ else:
             return pg
         else:
             return _resolve_process_group(name)  # pyrefly: ignore[bad-argument-type]
+
+    def _maybe_traced_group(mesh: "DeviceMesh", mesh_dim: int) -> ProcessGroup | None:
+        """Resolve the group via an in-graph op when tracing under CooR.
+
+        Under compile_on_one_rank and an active make_fx/proxy trace, return the
+        group as the output of _dtensor.mesh_get_process_group so the
+        ProcessGroup is extracted from the (graph-input) mesh at runtime instead
+        of being baked into the graph as an unserializable torchbind constant.
+        Returns None to take the eager path otherwise. Mirrors
+        _functional_collectives._resolve_group, but also covers eager collectives
+        (dist.all_reduce -> c10d.allreduce_) that bind the ProcessGroup directly.
+
+        This is a module-level helper rather than a DeviceMesh method so that
+        Dynamo does not reject it as an unregistered opaque-object member.
+        """
+        if not torch.compiler.config.compile_on_one_rank:
+            return None
+        # Under torch.compile, Dynamo lifts the ProcessGroup from the mesh's
+        # _pg_registry itself (see _get_pg_from_name); the op-emitting path here
+        # is only for make_fx tracing. is_compiling() folds to a constant under
+        # Dynamo, so this returns cleanly without tracing the op below.
+        if torch.compiler.is_compiling():
+            return None
+        from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+        # get_proxy_mode() is None in eager and inside the op's own fake/eager
+        # impl (the proxy mode is popped while dispatching), so this does not
+        # recurse.
+        if get_proxy_mode() is None:
+            return None
+        # Ensure the op is registered without a module-level circular import.
+        from torch.distributed.tensor import _collective_utils  # noqa: F401
+
+        return torch.ops._dtensor.mesh_get_process_group(mesh, mesh_dim)
 
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
@@ -175,6 +210,14 @@ else:
             device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
             mesh (ndarray): A multi-dimensional array or an integer tensor describing the layout
                 of devices, where the IDs are global IDs of the default process group.
+            preserve_rank_order (bool, optional):
+                If True, subgroup rank order is preserved instead of being sorted in
+                ascending order, and a mesh dim spanning the full world whose ranks are a
+                permutation of [0..N) gets a dedicated process group honoring that order
+                instead of silently reusing default_group. This provides flexibility for
+                custom or topology-aware rank ordering. Defaults to False for backward
+                compatibility with existing code that relies on sorted ranks and
+                default_group reuse.
             _rank (int): (experimental/internal)
                 The global rank of the current process. If not provided, it will
                 be inferred from the default process group.
@@ -204,6 +247,7 @@ else:
         _mesh_dim_names: tuple[str, ...] | None
         _layout: _MeshLayout
         _root_mesh: "DeviceMesh | None" = None
+        _preserve_rank_order: bool
         _thread_id: int | None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
@@ -217,6 +261,7 @@ else:
             *,
             mesh_dim_names: tuple[str, ...] | None = None,
             backend_override: tuple[BackendConfig, ...] | None = None,
+            preserve_rank_order: bool = False,
             _init_backend: bool = True,
             _rank: int | None = None,
             _layout: _MeshLayout | None = None,
@@ -268,6 +313,7 @@ else:
             self._rank_map = _rank_map
             self._mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             self._root_mesh = _root_mesh
+            self._preserve_rank_order = preserve_rank_order
 
             if backend_override is None:
                 backend_override = ((None, None),) * len(self._layout)
@@ -316,6 +362,7 @@ else:
                         self._rank_map,
                         self._mesh_dim_names,
                         backend_override,
+                        self._preserve_rank_order,
                     )
                     # Populate the process group registry
                     # If we have a root mesh, add to root's registry for lookups
@@ -502,6 +549,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
+            preserve_rank_order: bool,
         ) -> GroupName | None:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = _MeshLayout([sub_layout]).remap_to_tensor(rank_map)
@@ -525,20 +573,26 @@ else:
                 None,
                 None,
             ):
-                # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
-                # Otherwise, create new pg.
+                # Reuse default_group when ranks match standard [0..N-1] order, or
+                # when the caller hasn't opted in to honoring a permuted rank order
+                # (the fallthrough below preserves order unconditionally via
+                # split_group, so skipping the shortcut for an unsorted rank_map
+                # would silently change subgroup rank order for existing callers).
                 ranks = list(range(get_world_size()))
-                dim_group = (
-                    new_group(
-                        backend=backend,
-                        ranks=ranks,
-                        group_desc="mesh_default",
-                    )
-                    if torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                    else default_group
-                )
-                return dim_group.group_name  # type: ignore[union-attr]
+                ranks_match_default = ranks == pg_ranks_by_dim.flatten().tolist()
+                if not preserve_rank_order or ranks_match_default:
+                    if (
+                        torch.cuda.is_available()
+                        and get_backend(default_group) == "gloo"
+                    ):
+                        dim_group = new_group(
+                            backend=backend,
+                            ranks=ranks,
+                            group_desc="mesh_default",
+                        )
+                    else:
+                        dim_group = default_group
+                    return dim_group.group_name  # type: ignore[union-attr]
 
             # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
             # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
@@ -569,7 +623,7 @@ else:
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
                 )
-                if dim_group is None:
+                if dim_group == GroupMember.NON_GROUP_MEMBER:
                     return None
                 return dim_group.group_name
 
@@ -591,10 +645,15 @@ else:
                     pg_options=pg_options,
                     group_desc=group_desc,
                     use_local_synchronization=use_hashed,
+                    sort_ranks=not preserve_rank_order,
                 )
 
                 # only add to dim_groups if the current rank in the subgroup
                 if get_rank() in subgroup_ranks:
+                    if dim_group == GroupMember.NON_GROUP_MEMBER:
+                        raise AssertionError(
+                            f"Rank {get_rank()} was not included in process group {subgroup_ranks}"
+                        )
                     if pg_name is not None:
                         raise RuntimeError(
                             f"Each device mesh dimension should get only one process group, but got {get_rank()} "
@@ -609,6 +668,7 @@ else:
             rank_map: torch.Tensor,
             mesh_dim_names: tuple[str, ...] | None,
             backend_override: tuple[BackendConfig, ...],
+            preserve_rank_order: bool = False,
         ) -> list[GroupName]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
@@ -622,6 +682,7 @@ else:
                         rank_map,
                         dim_name,
                         backend_override[dim],
+                        preserve_rank_order,
                     )
                 )
             # Filter out None values. If any are None then they should all be None.
@@ -671,6 +732,7 @@ else:
                 self._device_type,
                 self._mesh_dim_names,
                 self._thread_id,
+                self._preserve_rank_order,
             )
 
         def __hash__(self):
@@ -691,6 +753,7 @@ else:
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
+                and self._preserve_rank_order == other._preserve_rank_order
             )
 
         def _stable_hash(self) -> str:
@@ -744,7 +807,7 @@ else:
                 >>>
                 >>> # Initialize a 3D mesh.
                 >>> mesh_3d = init_device_mesh(device_type="cuda", (2,2,2), mesh_dim_names=("dp", "pp", "cp"))
-                >>> # The order of the mesh_dim_names provided deteremines the order of dimensions in the submesh.
+                >>> # The order of the mesh_dim_names provided determines the order of dimensions in the submesh.
                 >>> dp_cp_mesh = mesh_3d["dp", "cp"]
                 >>> cp_dp_mesh = mesh_3d["cp", "dp"]
             """
@@ -763,7 +826,7 @@ else:
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` and `disable_proxy_modes_tracing()`
                 # will allow us to materialize the tensors within
-                # `_create_sub_mesh`, which should not affect modling.
+                # `_create_sub_mesh`, which should not affect modeling.
                 #
                 # Note that this should be orthogonal to torch.compile(). But whether
                 # we can compile device_mesh `slicing` (no graph break) is not verified
@@ -807,6 +870,9 @@ else:
 
             # Quick return if the current device_mesh is a 1D mesh.
             if len(self._layout) == 1 and mesh_dim is None:
+                traced = _maybe_traced_group(self, 0)
+                if traced is not None:
+                    return traced
                 return not_none(_get_pg_from_name(root_mesh, self._dim_group_names[0]))
 
             root_to_flatten_mapping = root_mesh._flatten_mapping
@@ -825,6 +891,9 @@ else:
                     raise AssertionError(
                         f"mesh_dim must be an int, got {type(mesh_dim)}"
                     )
+                traced = _maybe_traced_group(self, mesh_dim)
+                if traced is not None:
+                    return traced
                 return not_none(
                     _get_pg_from_name(root_mesh, self._dim_group_names[mesh_dim])
                 )
@@ -875,6 +944,7 @@ else:
                     mesh_dim_names=submesh_dim_names,
                     _root_mesh=root_mesh,
                     _init_backend=False,
+                    preserve_rank_order=root_mesh._preserve_rank_order,
                 )
                 res_submesh._dim_group_names = slice_dim_group_name
                 return res_submesh
@@ -922,6 +992,7 @@ else:
                 mesh_dim_names=(mesh_dim_name,),
                 _root_mesh=root_mesh,
                 backend_override=(backend_override,),
+                preserve_rank_order=root_mesh._preserve_rank_order,
             )
             root_mesh._flatten_mapping[mesh_dim_name] = res_flattened_mesh
 
@@ -1040,6 +1111,7 @@ else:
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
                     _init_backend=False,
+                    preserve_rank_order=self._preserve_rank_order,
                 )
                 submesh._dim_group_names = (  # type: ignore[has-type]
                     [self._dim_group_names[mesh_dim]]  # type: ignore[has-type]
@@ -1341,6 +1413,7 @@ else:
                 mesh_dim_names=tuple(unflattened_mesh_dim_names),
                 _root_mesh=root_mesh,
                 _init_backend=False,
+                preserve_rank_order=root_mesh._preserve_rank_order,
             )
 
             # If original mesh has initiated its backend, we need to initialize the backend
@@ -1354,6 +1427,7 @@ else:
                     root_mesh._rank_map,
                     mesh_dim_names,
                     backend_override,
+                    root_mesh._preserve_rank_order,
                 )
                 dim_group_names[dim : dim + 1] = new_group_names
                 res_mesh._dim_group_names = dim_group_names
@@ -1441,7 +1515,7 @@ else:
                 # because the concatenated indices should be indexed by the same root mesh tensor.
                 if dm._flatten_rank_map != flatten_rank_map:
                     raise RuntimeError(
-                        "Cannot concatenate DeviceMeshes derived from different device meshs"
+                        "Cannot concatenate DeviceMeshes derived from different device meshes"
                     )
             concat_mesh_layout = _MeshLayout(concat_axes)
             if not concat_mesh_layout.collapse().check_orthogonal():
@@ -1455,6 +1529,7 @@ else:
                 mesh_dim_names=tuple(concat_dim_names),
                 _root_mesh=device_mesh_list[0]._get_root_mesh(),
                 _init_backend=False,
+                preserve_rank_order=device_mesh_list[0]._preserve_rank_order,
             )
             res_mesh._dim_group_names = concat_dim_group_name
             return res_mesh
@@ -1689,6 +1764,7 @@ def _register_distributed_opaque_types():
             obj._device_type,
             obj._mesh_dim_names,
             obj._thread_id,
+            obj._preserve_rank_order,
         ],
         members={
             # USE_REAL: Evaluate these with the real object at compile time
@@ -1698,6 +1774,7 @@ def _register_distributed_opaque_types():
             "_device_type": MemberType.USE_REAL,
             "_mesh_dim_names": MemberType.USE_REAL,
             "_thread_id": MemberType.USE_REAL,
+            "_preserve_rank_order": MemberType.USE_REAL,
             "get_rank": MemberType.USE_REAL,
             "size": MemberType.USE_REAL,
             "get_coordinate": MemberType.USE_REAL,

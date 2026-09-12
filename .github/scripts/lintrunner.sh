@@ -2,6 +2,27 @@
 set -ex
 
 CACHE_DIRECTORY="/tmp/.lintbin"
+CLANG_LINTERS="CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT"
+PYREFLY_LINTERS="PYREFLY"
+
+case "${LINTER_GROUP:-}" in
+    clang)
+        ADDITIONAL_LINTRUNNER_ARGS="--take ${CLANG_LINTERS} ${CHANGED_FILES}"
+        ;;
+    pyrefly)
+        ADDITIONAL_LINTRUNNER_ARGS="--take ${PYREFLY_LINTERS} --all-files"
+        ;;
+    other)
+        ADDITIONAL_LINTRUNNER_ARGS="--skip ${CLANG_LINTERS},${PYREFLY_LINTERS} ${CHANGED_FILES}"
+        ;;
+    "")
+        ;;
+    *)
+        echo "Unknown linter group: ${LINTER_GROUP}" >&2
+        exit 1
+        ;;
+esac
+
 # Try to recover the cached binaries
 if [[ -d "${CACHE_DIRECTORY}" ]]; then
     # It's ok to fail this as lintrunner init would download these binaries

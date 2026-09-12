@@ -1,9 +1,14 @@
 # Owner(s): ["module: unknown"]
+import contextlib
+import importlib.util
 import os
 import pickle
 import queue
+import sys
+import tempfile
 import threading
 import warnings
+from types import ModuleType
 from unittest.mock import patch
 
 
@@ -16,9 +21,20 @@ from torch.testing._internal import (
     fake_config_module as config,
     fake_config_module2 as config2,
     fake_config_module3 as config3,
+    fake_config_module_with_implications as implied_config,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._config_module import _ConfigEntry, _UNSET_SENTINEL, Config
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+from torch.utils._config_module import (
+    _ConfigEntry,
+    _UNSET_SENTINEL,
+    Config,
+    install_config_module,
+)
 
 
 class TestConfigModule(TestCase):
@@ -86,6 +102,20 @@ class TestConfigModule(TestCase):
             AttributeError, msg="fake_config_module.does_not_exist does not exist"
         ):
             config.does_not_exist = 0
+
+    def test_hide_not_added_to_instance_dict_on_write(self):
+        # A normal config write must not materialize 'hide' in the _ConfigEntry instance
+        # __dict__; it should stay on the class default. An unconditional hide=False write
+        # on every setattr would add it (pure overhead), so __setattr__ clears hide only
+        # when it is actually set.
+        entry = config._config["e_bool"]
+        entry.__dict__.pop("hide", None)  # reset to the class default
+        config.e_bool = False
+        self.assertNotIn("hide", entry.__dict__)
+        # When hide *is* set (the __delattr__ / mock.patch path), a write still clears it.
+        entry.hide = True
+        config.e_bool = True
+        self.assertFalse(entry.hide)
 
     def test_none_override_semantics(self):
         config.e_bool = None
@@ -454,7 +484,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 break
 
         self.assertFalse(
-            error_messages, f"concurrent patch usage failed: {error_messages}"
+            error_messages,
+            lambda msg: f"{msg}\nconcurrent patch usage failed: {error_messages}",
         )
         self.assertTrue(config.e_bool)
 
@@ -837,6 +868,537 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         self.assertFalse(config._hash_dirty_var.get())
         config.load_config(saved)
         self.assertTrue(config._hash_dirty_var.get())
+
+
+@instantiate_parametrized_tests
+class TestConfigImplications(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.stack = contextlib.ExitStack()
+        self.addCleanup(self.stack.close)
+        self.stack.enter_context(
+            implied_config.patch(
+                {
+                    "mode": "default",
+                    "enabled": False,
+                    "nested.enabled": False,
+                    "downstream": 0,
+                    "conflict": False,
+                    "unrelated": 1,
+                }
+            )
+        )
+
+    def _make_config(self, definitions):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        path = os.path.join(tmpdir.name, "config_module.py")
+        with open(path, "w") as f:
+            f.write(
+                "from typing import Literal\n"
+                "from torch.utils._config_module import Config\n" + definitions
+            )
+        name = f"implied_config_{os.path.basename(tmpdir.name)}"
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise AssertionError("expected a config module loader")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(module)
+        install_config_module(module)
+        return module
+
+    def _make_lazy_module(self, owner, definitions):
+        name = owner.__name__ + "_lazy"
+        directory = os.path.dirname(owner.__file__)
+        with open(os.path.join(directory, name + ".py"), "w") as f:
+            f.write(
+                "import sys\n"
+                "from torch.utils._config_module import Config, install_config_module\n"
+                + definitions
+                + "\ninstall_config_module(sys.modules[__name__])\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        self.stack.enter_context(patch.object(sys, "path", [directory, *sys.path]))
+        return name
+
+    def test_nested_modes_restore_raw_values(self):
+        entry = implied_config._config["nested.enabled"]
+        entry.user_override.set(_UNSET_SENTINEL)
+        with implied_config.patch({"mode": "strict", "nested.enabled": False}):
+            self.assertTrue(implied_config.enabled)
+            self.assertTrue(implied_config.nested.enabled)
+            self.assertEqual(implied_config.downstream, 1)
+            with implied_config.patch(mode="default"):
+                self.assertFalse(implied_config.enabled)
+                self.assertFalse(implied_config.nested.enabled)
+                self.assertEqual(implied_config.downstream, 0)
+            self.assertTrue(implied_config.enabled)
+        self.assertIs(entry.user_override.get(), _UNSET_SENTINEL)
+
+        @implied_config.patch(mode="strict", unrelated=2)
+        def fail():
+            self.assertTrue(implied_config.enabled)
+            del implied_config.unrelated
+            del implied_config.mode
+            raise RuntimeError("test failure")
+
+        with self.assertRaisesRegex(RuntimeError, "test failure"):
+            fail()
+        self.assertEqual(implied_config.mode, "default")
+        self.assertEqual(implied_config.unrelated, 1)
+        self.assertFalse(implied_config.enabled)
+
+    @parametrize("nested", (False, True))
+    def test_active_targets_preserve_assignments(self, nested):
+        target = implied_config.nested if nested else implied_config
+        key = "nested.enabled" if nested else "enabled"
+        entry = implied_config._config[key]
+        target.enabled = True
+        with implied_config.patch(mode="strict"):
+            before_hash = implied_config.get_hash()
+            target.enabled = False
+            self.assertTrue(target.enabled)
+            self.assertIs(entry.user_override.get(), False)
+            self.assertFalse(implied_config.save_config_portable()[key])
+            self.assertNotEqual(implied_config.get_hash(), before_hash)
+            with implied_config.patch(mode="default"):
+                self.assertFalse(target.enabled)
+            with implied_config.patch({key: True}):
+                self.assertTrue(entry.user_override.get())
+            self.assertIs(entry.user_override.get(), False)
+        self.assertFalse(target.enabled)
+
+    def test_source_subclass_is_rejected(self):
+        class Mode(str):
+            __slots__ = ()
+
+        before = implied_config.save_config_portable(readonly_values=True)
+        before_hash = implied_config.get_hash()
+        with self.assertRaisesRegex(
+            TypeError, "implication source mode requires a plain"
+        ):
+            implied_config.mode = Mode("strict")
+        self.assertFalse(implied_config.enabled)
+        self.assertEqual(
+            implied_config.save_config_portable(readonly_values=True), before
+        )
+        self.assertEqual(implied_config.get_hash(), before_hash)
+
+    @parametrize(
+        "definitions, error, message",
+        (
+            (
+                "mode = Config(default=False, implies=[])",
+                TypeError,
+                "implies must be a dictionary",
+            ),
+            (
+                "mode = Config(default=False, implies={'strict': {'flag': True}})\nflag = False",
+                TypeError,
+                "invalid implication condition",
+            ),
+            (
+                "mode = Config(default=False, implies={True: []})",
+                TypeError,
+                "targets.*must be a dictionary",
+            ),
+            (
+                "mode = Config(default=False, implies={True: {1: True}})",
+                TypeError,
+                "targets must be dotted config names",
+            ),
+            (
+                "mode = Config(default=False, implies={True: {'flag': True}})\nflag = Config(alias='missing.flag')",
+                ValueError,
+                "target flag cannot be an alias",
+            ),
+            (
+                "mode = Config(alias='missing.flag', implies={True: {'flag': True}})\nflag = False",
+                AssertionError,
+                "if alias is set",
+            ),
+            (
+                "mode = Config(default=False, implies={True: {'missing': True}})",
+                ValueError,
+                "target.*does not exist",
+            ),
+            (
+                "mode = Config(default=False, implies={True: {'flag': 1}})\nflag = False",
+                TypeError,
+                "invalid implied value",
+            ),
+            (
+                "a = Config(default=False, implies={True: {'b': True}})\nb = Config(default=False, implies={True: {'a': True}})",
+                ValueError,
+                "implication cycle",
+            ),
+        ),
+    )
+    def test_invalid_declarations(self, definitions, error, message):
+        with self.assertRaisesRegex(error, message):
+            self._make_config(definitions)
+
+    def test_conflict_rollback(self):
+        before = implied_config.get_config_copy()
+        with self.assertRaisesRegex(ValueError, "conflicting.*enabled"):
+            with implied_config.patch(mode="strict", conflict=True):
+                pass
+        self.assertEqual(implied_config.get_config_copy(), before)
+        with implied_config.patch(mode="strict", conflict=False):
+            revert = implied_config._make_closure_patcher(mode="default")()
+            implied_config.conflict = True
+            cached_hash = implied_config.get_hash()
+            self.assertEqual(
+                implied_config.save_config_portable(readonly_values=True)["mode"],
+                "default",
+            )
+            with self.assertRaisesRegex(ValueError, "conflicting.*enabled"):
+                revert()
+            self.assertEqual(implied_config.mode, "strict")
+            self.assertEqual(
+                implied_config.save_config_portable(readonly_values=True)["mode"],
+                "strict",
+            )
+            self.assertNotEqual(implied_config.get_hash(), cached_hash)
+
+    def test_lazy_alias_changes_are_atomic(self):
+        cfg = self._make_config(
+            "a = Config(default=True, implies={True: {'flag': 1}})\n"
+            "b = Config(default=False, implies={True: {'flag': 2}})\nflag = 0"
+        )
+        lazy_name = self._make_lazy_module(
+            cfg,
+            f"import {cfg.__name__} as owner\nobserved = owner.flag\n"
+            "a = Config(alias=owner.__name__ + '.a')",
+        )
+        wrapper = self._make_config(
+            f"a = Config(alias='{lazy_name}.a')\n"
+            f"b = Config(alias='{cfg.__name__}.b')\nitems = []"
+        )
+        before_hash = cfg.get_hash()
+        patcher = wrapper.patch(items=[1], b=True, a=False)
+        self.assertNotIn(lazy_name, sys.modules)
+        with patcher:
+            self.assertEqual(sys.modules[lazy_name].observed, 1)
+            self.assertEqual(cfg.flag, 2)
+            self.assertEqual(cfg._get_dict_dirty_keys_var.get(), {"a", "b"})
+            self.assertNotEqual(cfg.get_hash(), before_hash)
+            with wrapper.patch(a=True, b=False):
+                self.assertEqual(cfg.flag, 1)
+            self.assertEqual(cfg.flag, 2)
+        self.assertEqual(cfg.flag, 1)
+        self.assertIs(wrapper._config["items"].user_override.get(), _UNSET_SENTINEL)
+        with self.assertRaisesRegex(TypeError, "implication source b requires a plain"):
+            with wrapper.patch(items=[1], b=object()):
+                pass
+        self.assertIs(wrapper._config["items"].user_override.get(), _UNSET_SENTINEL)
+        self.assertEqual(cfg.get_hash(), before_hash)
+        self.assertTrue(cfg.save_config_portable(readonly_values=True)["a"])
+        self.assertIs(cfg._config["a"].user_override.get(), _UNSET_SENTINEL)
+
+    def test_external_alias_snapshots_precede_reads_and_imports(self):
+        cfg = self._make_config(
+            "mode = Config(default=False, implies={True: {'flag': True}})\nflag = False"
+        )
+        ordinary = ModuleType(cfg.__name__ + "_ordinary")
+        ordinary.value = 1
+
+        def read_external(name):
+            if name == "mirror":
+                return cfg.mode or bool(wrapper.items)
+            raise AttributeError(name)
+
+        ordinary.__getattr__ = read_external
+        sys.modules[ordinary.__name__] = ordinary
+        self.addCleanup(sys.modules.pop, ordinary.__name__)
+        lazy_name = self._make_lazy_module(
+            cfg,
+            f"import {ordinary.__name__} as ordinary\nordinary.value = 7\n"
+            f"mode = Config(alias='{cfg.__name__}.mode')",
+        )
+        wrapper = self._make_config(
+            f"external = Config(alias='{ordinary.__name__}.value')\n"
+            f"mode = Config(alias='{lazy_name}.mode')\nitems = []\n"
+            f"mirror = Config(alias='{ordinary.__name__}.mirror')"
+        )
+        with wrapper.patch(external=2, mode=True, items=[1], mirror=True):
+            self.assertEqual(ordinary.value, 2)
+            self.assertTrue(ordinary.mirror)
+            self.assertTrue(cfg.flag)
+        self.assertEqual(ordinary.value, 1)
+        self.assertFalse(ordinary.mirror)
+        self.assertFalse(cfg.flag)
+        self.assertIs(wrapper._config["items"].user_override.get(), _UNSET_SENTINEL)
+
+    @parametrize("alias_offset", (False, True))
+    def test_external_alias_setters_observe_complete_config(self, alias_offset):
+        class External(ModuleType):
+            @property
+            def mirror(self):
+                return self.raw - cfg.offset
+
+            @mirror.setter
+            def mirror(self, value):
+                self.writes.append(value)
+                self.observed_flag = cfg.flag
+                self.raw = value + cfg.offset
+                self.observed_hash = cfg.get_hash()
+                self.observed_items = cfg.items
+
+        external = External("test_config_external_setter")
+        external.raw = 0
+        external.offset = 0
+        external.writes = []
+        with patch.dict(sys.modules, {external.__name__: external}):
+            offset = (
+                f"Config(alias='{external.__name__}.offset')" if alias_offset else "0"
+            )
+            cfg = self._make_config(
+                "a = Config(default=False, implies={True: {'flag': 1}})\n"
+                "b = Config(default=True, implies={True: {'flag': 2}})\n"
+                f"flag = 0\noffset = {offset}\nitems = []\n"
+                f"mirror = Config(alias='{external.__name__}.mirror')"
+            )
+            before_hash = cfg.get_hash()
+            with cfg.patch(a=True, offset=1, items=[1], mirror=4, b=False):
+                self.assertEqual(cfg.mirror, 4)
+                self.assertEqual(external.observed_flag, 1)
+                self.assertNotEqual(cfg.get_hash(), before_hash)
+                self.assertEqual(external.observed_hash, cfg.get_hash())
+            self.assertEqual(cfg.offset, 0)
+            self.assertEqual(cfg.mirror, 0)
+            self.assertEqual(external.observed_flag, 2)
+            self.assertEqual(external.observed_hash, before_hash)
+            self.assertEqual(external.observed_items, [])
+            self.assertIs(cfg._config["items"].user_override.get(), _UNSET_SENTINEL)
+            external.writes.clear()
+            with self.assertRaisesRegex(ValueError, "conflicting.*flag"):
+                with cfg.patch(a=True, mirror=4):
+                    pass
+            self.assertEqual(external.writes, [])
+            self.assertEqual(cfg.get_hash(), before_hash)
+
+    def test_alias_load_restores_raw_target_values(self):
+        cfg = self._make_config(
+            "a = Config(default=True, implies={True: {'flag': 1}})\n"
+            "b = Config(default=False, implies={True: {'flag': 2}})\nflag = 0"
+        )
+        wrapper = self._make_config(
+            f"a = Config(alias='{cfg.__name__}.a')\n"
+            f"b = Config(alias='{cfg.__name__}.b')\n"
+            f"flag = Config(alias='{cfg.__name__}.flag')"
+        )
+        with cfg.patch(flag=3):
+            wrapper.load_config({"b": True, "a": False, "flag": 0})
+            self.assertEqual(cfg.flag, 2)
+            wrapper.load_config(pickle.dumps({"a": False, "b": False}))
+            self.assertEqual(cfg.flag, 0)
+
+    def test_ordinary_alias_import_order(self):
+        cfg = self._make_config(
+            "value = 1\nother = Config(alias=__name__ + '_lazy.value')"
+        )
+        lazy_name = self._make_lazy_module(
+            cfg,
+            f"import {cfg.__name__} as owner\nobserved = owner.value\n"
+            "owner.value = 7\nvalue = 0",
+        )
+        with cfg.patch(value=2, other=3):
+            self.assertEqual(cfg.value, 2)
+            self.assertEqual(sys.modules[lazy_name].observed, 1)
+        self.assertEqual(cfg.value, 1)
+        sys.modules.pop(lazy_name)
+        cfg.load_config({"value": 2, "other": 3})
+        self.assertEqual(sys.modules[lazy_name].observed, 2)
+        self.assertEqual(cfg.other, 3)
+
+    @parametrize("overridden", (False, True))
+    def test_alias_import_restores_prior_raw_value(self, overridden):
+        cfg = self._make_config(
+            "mode = Config(default=False, implies={True: {'flag': True}})\n"
+            "flag = False\nvalue = 1\n"
+            "other = Config(alias=__name__ + '_lazy.value')"
+        )
+        self._make_lazy_module(
+            cfg, f"import {cfg.__name__} as owner\nowner.value = 7\nvalue = 0"
+        )
+        if overridden:
+            cfg.value = 3
+        before = cfg.value
+        before_raw = cfg._config["value"].user_override.get()
+        before_hash = cfg.get_hash()
+        with cfg.patch(value=2, other=3):
+            self.assertEqual(cfg.value, 2)
+            self.assertEqual(cfg.other, 3)
+        self.assertEqual(cfg.value, before)
+        self.assertIs(cfg._config["value"].user_override.get(), before_raw)
+        self.assertEqual(cfg.get_hash(), before_hash)
+
+    def test_failed_cleanup_invalidates_cache(self):
+        class RejectRestore(ModuleType):
+            def __setattr__(self, name, value):
+                if name == "flag" and value is False:
+                    raise RuntimeError("cannot restore external flag")
+                super().__setattr__(name, value)
+
+        target = RejectRestore("test_config_alias_restore")
+        target.__dict__["flag"] = False
+        with patch.dict(sys.modules, {target.__name__: target}):
+            cfg = self._make_config(
+                "mode = Config(default=False, implies={True: {'flag': True}})\n"
+                f"flag = False\nvalue = 0\nexternal = Config(alias='{target.__name__}.flag')"
+            )
+            before = cfg.get_hash()
+            with self.assertRaisesRegex(RuntimeError, "cannot restore external flag"):
+                with cfg.patch(value=1, external=True):
+                    self.assertNotEqual(cfg.get_hash(), before)
+                    self.assertEqual(
+                        cfg.save_config_portable(readonly_values=True)["value"], 1
+                    )
+            self.assertEqual(cfg.value, 0)
+            self.assertEqual(cfg.get_hash(), before)
+            self.assertEqual(cfg.save_config_portable(readonly_values=True)["value"], 0)
+
+    def test_serialization_preserves_raw_values(self):
+        before_hash = implied_config.get_hash()
+        with implied_config.patch(mode="strict", enabled=False):
+            saved = implied_config.save_config_portable()
+            self.assertFalse(saved["enabled"])
+            self.assertFalse(saved["nested.enabled"])
+            self.assertEqual(pickle.loads(implied_config.save_config()), saved)
+            code = implied_config.codegen_config()
+            active_hash = implied_config.get_hash()
+            self.assertNotEqual(active_hash, before_hash)
+        self.assertEqual(implied_config.get_hash(), before_hash)
+        implied_config.load_config(saved)
+        self.assertTrue(implied_config.enabled)
+        self.assertEqual(implied_config.get_hash(), active_hash)
+        implied_config.mode = "default"
+        exec(code, {"torch": sys.modules["torch"]})
+        self.assertEqual(implied_config.save_config_portable(), saved)
+        implied_config.mode = "default"
+        self.assertFalse(implied_config.enabled)
+
+    def test_rule_metadata_participates_in_hash(self):
+        import torch
+        from torch._inductor.codecache import FxGraphCachePickler, FxGraphHashDetails
+        from torch._inductor.codegen.common import custom_backend_codegen_configs
+
+        configs = [
+            self._make_config(
+                f"mode = Config(default=True, implies={{True: {{'flag': {value}}}}})\nflag = False"
+            )
+            for value in (True, False)
+        ]
+        self.assertEqual(
+            configs[0].save_config_portable(), configs[1].save_config_portable()
+        )
+        self.assertNotEqual(configs[0].flag, configs[1].flag)
+        self.assertNotEqual(configs[0].get_hash(), configs[1].get_hash())
+        cache_keys = []
+        pickler = FxGraphCachePickler(torch.fx.GraphModule({}, torch.fx.Graph()))
+        for cfg in configs:
+            with patch.dict(custom_backend_codegen_configs, {"test_implications": cfg}):
+                cache_keys.append(pickler.dumps(FxGraphHashDetails(None, [], {}, [])))
+        self.assertNotEqual(*cache_keys)
+
+    def test_justknob_resolution_is_lazy(self):
+        with patch(
+            "torch.utils._config_module.justknobs_check", side_effect=[True]
+        ) as jk:
+            cfg = self._make_config(
+                "root = Config(default=False, justknob='test/root', implies={True: {'left': True, 'right': True}})\n"
+                "left = Config(default=False, justknob='test/left', implies={True: {'flag': True}})\n"
+                "right = Config(default=False, justknob='test/right', implies={True: {'flag': True}})\n"
+                "flag = Config(default=False, justknob='test/flag')\nunrelated = 0"
+            )
+            jk.assert_not_called()
+            self.assertTrue(cfg.flag)
+            jk.assert_called_once_with(name="test/root", default=False)
+            jk.reset_mock()
+            jk.side_effect = [True]
+            cfg._validate_active_implications()
+            jk.assert_called_once_with(name="test/root", default=False)
+            jk.reset_mock()
+            jk.side_effect = None
+            jk.return_value = False
+            self.assertFalse(cfg.flag)
+            self.assertEqual(jk.call_count, 4)
+            jk.reset_mock()
+            jk.side_effect = RuntimeError("unexpected JK read")
+            with cfg.patch(), cfg.patch(unrelated=1):
+                self.assertEqual(cfg.unrelated, 1)
+            jk.assert_not_called()
+
+    def test_live_justknob_updates_cache(self):
+        import torch
+        from torch._guards import tracing, TracingContext
+        from torch._inductor.codecache import FxGraphCache
+        from torch._inductor.codegen.common import custom_backend_codegen_configs
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        cfg = self._make_config(
+            "mode = Config(default=False, justknob='test/mode', implies={True: {'flag': True}})\n"
+            "flag = False"
+        )
+        graph = torch.fx.Graph()
+        graph.output(None)
+        module = torch.fx.GraphModule({}, graph)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with (
+            patch(
+                "torch.utils._config_module.justknobs_check", return_value=False
+            ) as jk,
+            patch.dict(custom_backend_codegen_configs, {"test_implications": cfg}),
+            tracing(TracingContext(fake_mode)),
+        ):
+            before_hash = cfg.get_hash()
+            before, info = FxGraphCache.prepare_key(module, [], {}, [], remote=False)
+            self.assertIsNotNone(before, info)
+            jk.reset_mock()
+            jk.side_effect = [True]
+            self.assertTrue(cfg.save_config_portable(readonly_values=True)["mode"])
+            jk.assert_called_once()
+            jk.side_effect = None
+            jk.return_value = True
+            after, info = FxGraphCache.prepare_key(module, [], {}, [], remote=False)
+            self.assertIsNotNone(after, info)
+            self.assertNotEqual(before, after)
+            self.assertNotEqual(before_hash, cfg.get_hash())
+            code = cfg.codegen_config()
+            jk.return_value = False
+            exec(code, {cfg.__name__: cfg})
+            self.assertTrue(cfg.flag)
+
+    @parametrize("kind", ("drop", "change", "filter"))
+    def test_serialization_cannot_hide_sources(self, kind):
+        definitions = {
+            "drop": "def _cache_config_serializer(values):\n    values.pop('mode')\n",
+            "change": "def _cache_config_serializer(values):\n    values['mode'] = 0\n",
+            "filter": "_cache_config_ignore_prefix = ['mode']\n",
+        }[kind]
+        cfg = self._make_config(
+            definitions
+            + "mode = Config(default=False, implies={True: {'flag': True}})\nflag = False"
+        )
+        with self.assertRaisesRegex(
+            ValueError, "source mode must be serialized unchanged"
+        ):
+            cfg.save_config_portable()
+
+    def test_quoted_annotations(self):
+        cfg = self._make_config(
+            "mode: \"'str'\" = Config(default='default', implies={'strict': {'nested.flag': True}})\n"
+            "class nested:\n    flag: 'bool' = False\n"
+            "unrelated: 'UnresolvedType' = None"
+        )
+        with cfg.patch(mode="strict"):
+            self.assertTrue(cfg.nested.flag)
+        self.assertFalse(cfg.nested.flag)
+        self.assertEqual(cfg.get_type("unrelated"), "UnresolvedType")
 
 
 if __name__ == "__main__":

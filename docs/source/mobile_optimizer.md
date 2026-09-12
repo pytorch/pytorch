@@ -11,7 +11,7 @@ PyTorch Mobile is no longer actively supported. Redirecting to [ExecuTorch docum
 
 ```{warning}
 PyTorch Mobile is no longer actively supported. Please check out
-[ExecuTorch](https://pytorch.org/executorch-overview), PyTorch's
+[ExecuTorch](https://docs.pytorch.org/executorch/), PyTorch's
 all-new on-device inference library. You can also review
 documentation on [XNNPACK](https://pytorch.org/executorch/stable/backends-xnnpack.html)
 and [Vulkan](https://pytorch.org/executorch/stable/native-delegates-executorch-vulkan-delegate.html) delegates.

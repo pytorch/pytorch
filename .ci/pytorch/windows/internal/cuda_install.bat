@@ -28,6 +28,7 @@ if %CUDA_VER% EQU 128 goto cuda128
 if %CUDA_VER% EQU 129 goto cuda129
 if %CUDA_VER% EQU 130 goto cuda130
 if %CUDA_VER% EQU 132 goto cuda132
+if %CUDA_VER% EQU 134 goto cuda134
 
 echo CUDA %CUDA_VERSION_STR% is not supported
 exit /b 1
@@ -43,25 +44,31 @@ goto cuda_download
 :cuda128
 set CUDA_INSTALL_EXE=cuda_12.8.0_571.96_windows.exe
 set "ARGS=cuda_profiler_api_12.8 thrust_12.8 nvcc_12.8 cuobjdump_12.8 nvprune_12.8 nvprof_12.8 cupti_12.8 cublas_12.8 cublas_dev_12.8 cudart_12.8 cufft_12.8 cufft_dev_12.8 curand_12.8 curand_dev_12.8 cusolver_12.8 cusolver_dev_12.8 cusparse_12.8 cusparse_dev_12.8 npp_12.8 npp_dev_12.8 nvrtc_12.8 nvrtc_dev_12.8 nvml_dev_12.8 nvjitlink_12.8 nvtx_12.8"
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.23.1.3_cuda12-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda12-archive
 goto cuda_download
 
 :cuda129
 set CUDA_INSTALL_EXE=cuda_12.9.1_576.57_windows.exe
 set "ARGS=cuda_profiler_api_12.9 thrust_12.9 nvcc_12.9 cuobjdump_12.9 nvprune_12.9 nvprof_12.9 cupti_12.9 cublas_12.9 cublas_dev_12.9 cudart_12.9 cufft_12.9 cufft_dev_12.9 curand_12.9 curand_dev_12.9 cusolver_12.9 cusolver_dev_12.9 cusparse_12.9 cusparse_dev_12.9 npp_12.9 npp_dev_12.9 nvrtc_12.9 nvrtc_dev_12.9 nvml_dev_12.9 nvjitlink_12.9 nvtx_12.9"
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.23.1.3_cuda12-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda12-archive
 goto cuda_download
 
 :cuda130
 set CUDA_INSTALL_EXE=cuda_13.0.0_windows.exe
 set "ARGS="
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.23.1.3_cuda13-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda13-archive
 goto cuda_download
 
 :cuda132
 set CUDA_INSTALL_EXE=cuda_13.2.1_windows.exe
 set "ARGS="
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.23.1.3_cuda13-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda13-archive
+goto cuda_download
+
+:cuda134
+set CUDA_INSTALL_EXE=cuda_13.4.0_windows_x86_64.exe
+set "ARGS="
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda13-archive
 goto cuda_download
 
 :: Common download logic for CUDA toolkit, cuDNN, and ZLIB
@@ -76,7 +83,7 @@ if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
 )
 
 if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
-    curl -k -L "http://s3.amazonaws.com/ossci-windows/%CUDNN_INSTALL_ZIP%" --output "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" & REM @lint-ignore
+    curl -k -L "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/%CUDNN_INSTALL_ZIP%" --output "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" & REM @lint-ignore
     if errorlevel 1 exit /b 1
     set "CUDNN_SETUP_FILE=%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%"
 )
@@ -168,20 +175,24 @@ if %CUDA_VER% EQU 126 (
     set EXPECTED_CUDNN_VERSION=9.10.2
 )
 if %CUDA_VER% EQU 128 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.23.1.3_cuda12-archive
-    set EXPECTED_CUDNN_VERSION=9.23.1
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda12-archive
+    set EXPECTED_CUDNN_VERSION=9.25.1
 )
 if %CUDA_VER% EQU 129 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.23.1.3_cuda12-archive
-    set EXPECTED_CUDNN_VERSION=9.23.1
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda12-archive
+    set EXPECTED_CUDNN_VERSION=9.25.1
 )
 if %CUDA_VER% EQU 130 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.23.1.3_cuda13-archive
-    set EXPECTED_CUDNN_VERSION=9.23.1
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.25.1
 )
 if %CUDA_VER% EQU 132 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.23.1.3_cuda13-archive
-    set EXPECTED_CUDNN_VERSION=9.23.1
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.25.1
+)
+if %CUDA_VER% EQU 134 (
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.25.1.1_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.25.1
 )
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 
@@ -213,7 +224,7 @@ del /Q "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin
 
 if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
 
-curl -k -L "http://s3.amazonaws.com/ossci-windows/%CUDNN_INSTALL_ZIP%" --output "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" & REM @lint-ignore
+curl -k -L "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/%CUDNN_INSTALL_ZIP%" --output "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" & REM @lint-ignore
 if errorlevel 1 exit /b 1
 
 7z x "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" -o"%SRC_DIR%\temp_build\cudnn"

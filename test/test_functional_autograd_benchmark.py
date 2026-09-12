@@ -1,11 +1,12 @@
 # Owner(s): ["module: autograd"]
 
 import os
-
+import pathlib
 import subprocess
 import unittest
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     slowTest,
@@ -18,16 +19,21 @@ PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
 # This is a very simple smoke test for the functional autograd benchmarking script.
 class TestFunctionalAutogradBenchmark(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_runner(self, model, disable_gpu=False):
         # Note about windows:
         # The temporary file is exclusively open by this process and the child process
         # is not allowed to open it again. As this is a simple smoke test, we choose for now
         # not to run this on windows and keep the code here simple.
+        benchmark_script = str(
+            pathlib.Path(__file__).resolve().parent.parent
+            / "benchmarks"
+            / "functional_autograd_benchmark"
+            / "functional_autograd_benchmark.py"
+        )
         with TemporaryFileName() as out_file:
-            cmd = [
-                "python3",
-                "../benchmarks/functional_autograd_benchmark/functional_autograd_benchmark.py",
-            ]
+            cmd = ["python3", benchmark_script]
             if IS_WINDOWS:
                 cmd[0] = "python"
             # Only run the warmup

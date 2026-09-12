@@ -547,6 +547,8 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
         0 <= lambd <= torch.finfo(a.dtype).max,
         lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
     )
+    if a.dtype in (torch.bfloat16, torch.float16):
+        lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
     # We implement this in one torch.where to generate better code in the backward
     # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
     # We multiply by 0 for dealing with nans
@@ -754,14 +756,14 @@ def _nll_loss_nd(
     # TODO: This check does not work with FakeTensor inputs; See Issue #85834
     # Explicit cast for class_check to bool; See Issue #78071
     """
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
     num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
     valid_classes_mask = torch.logical_and(
         (flat_target >= 0), (flat_target < num_classes)
     )
     class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
     torch._check(
-        isinstance(target, FakeTensor) or bool(class_check.item()),
+        is_fake_tensor(target) or bool(class_check.item()),
         lambda: "A target class is out-of-bounds and not the ignore index.",
     )
     """
@@ -1048,16 +1050,12 @@ def _hardtanh(
     if inplace:
         raise NotImplementedError
     if utils.is_boolean_dtype(a.dtype):
-        raise RuntimeError("Bool inputs not supported for hardtanh")
+        raise NotImplementedError("Bool inputs not supported for hardtanh")
 
     # preserve legacy behavior of boundaries not causing type promotion
     if utils.is_integer_dtype(a.dtype):
         min_val = int(min_val)  # type: ignore[arg-type]
         max_val = int(max_val)  # type: ignore[arg-type]
-        if not (a.dtype != torch.uint8 or (min_val >= 0 and max_val >= 0)):
-            raise RuntimeError(
-                "Cannot do hardtanh on an unsigned type with negative limits"
-            )
 
     if check_bounds and min_val > max_val:  # type: ignore[operator]
         raise ValueError("min_val cannot be greater than max_val")

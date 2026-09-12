@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.utils.dlpack import (
     DLDeviceType,
@@ -414,6 +415,29 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(z.shape, (1,))
         # Stride normalization has been removed, strides should be preserved
         self.assertEqual(z.stride(), (3,))
+
+    @xfailIfTorchDynamo
+    @skipMeta
+    @onlyCPU
+    def test_from_dlpack_negative_strides(self, device):
+        # torch.from_dlpack() on a NumPy array with negative strides used to
+        # abort the process instead of raising a catchable Python exception.
+        # See https://github.com/pytorch/pytorch/issues/188023.
+        import numpy as np
+
+        # 1-D negative stride
+        a1 = np.arange(8.0)[::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a1)
+
+        # 2-D, one negative axis
+        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a2)
 
     @skipMeta
     @onlyNativeDeviceTypes

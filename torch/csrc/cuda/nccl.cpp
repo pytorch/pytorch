@@ -194,7 +194,7 @@ static void NCCL_CHECK_TIMEOUT(
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
   if (result == ncclInProgress) {
-    for (const auto i : c10::irange(comms.size())) {
+    for (const auto& comm : comms) {
       do {
         auto currentTimepoint = std::chrono::steady_clock::now();
         auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -204,7 +204,7 @@ static void NCCL_CHECK_TIMEOUT(
             timeElapsed <= nccl_nonblocking_timeout(),
             "NCCL timeout when waiting for nonblocking call to become successful.");
         sched_yield(); // yield to other threads
-        ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
+        ncclCommGetAsyncError(to_nccl_comm(comm), &result);
       } while (result == ncclInProgress);
       if (result != ncclSuccess) {
         break; /* fall through to failed case */
@@ -226,7 +226,7 @@ void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
   err << "NCCL Error " << static_cast<int>(status) << ": "
       << ncclGetErrorString(to_nccl_result(status));
-  TORCH_CHECK(false, err.str());
+  TORCH_CHECK(false, std::move(err).str());
 }
 
 struct NcclCommList {
@@ -271,10 +271,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
     return t.get_device();
   };
   device_list devices = fmap(inputs, get_device);
-  auto it = _communicators.find(devices);
-  if (it == _communicators.end()) {
-    it = _communicators.emplace(devices, devices).first;
-  }
+  auto [it, _] = _communicators.try_emplace(devices, devices);
   return it->second.ref();
 }
 
@@ -767,12 +764,14 @@ void all2all_single_equal_split(
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.mutable_data_ptr());
   auto comm = to_nccl_comm(_comm);
-#if defined(USE_ROCM) || defined(NCCL_ALLTOALL_SUPPORTED)
-  // NCCL_ALLTOALL_SUPPORTED is used so NCCL can differentiate send/recv
-  // operations issued as a part of the collective (e.g. alltoall) vs those
-  // inside traditional p2p operations.
+#if defined(USE_ROCM)
+  // RCCL spells the collective with a capital T.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
-#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+#elif defined(NCCL_ALLTOALL_SUPPORTED) || \
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  // Using the collective rather than a send/recv loop lets NCCL differentiate
+  // send/recv operations issued as part of the collective (e.g. alltoall) vs
+  // those inside traditional p2p operations.
   NCCL_CHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   int numranks = 0;

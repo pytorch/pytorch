@@ -114,6 +114,7 @@ jobs:
     uses: ./.github/workflows/_vllm-build.yml
     with:
       runner: mt-l-x86iavx512-94-768
+      flash_attention_large_memory_build: true
       docker_image: ${{ needs.set-parameters.outputs.docker_image }}
       build_environment: ${{ needs.set-parameters.outputs.build_environment }}
       pytorch_branch: ${{ inputs.pytorch_branch }}

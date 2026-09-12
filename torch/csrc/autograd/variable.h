@@ -163,7 +163,13 @@ TORCH_API void set_gradient_edge(const Variable& /*self*/, Edge edge);
 /// For View Variables:
 /// Called after in-place modifications. Modifies the grad_fn of the base
 /// Variable.
-TORCH_API void rebase_history(const Variable& /*self*/, Edge gradient_edge);
+///
+/// Returns the node that was actually attached as the new history: the
+/// CopySlices node for views, otherwise the passed-in function. Callers use
+/// it to fire node creation hooks on the composed node.
+TORCH_API c10::intrusive_ptr<Node> rebase_history(
+    const Variable& /*self*/,
+    Edge gradient_edge);
 
 /// Gets the raw gradient function pointer, whatever it currently is.
 TORCH_API Node* grad_fn_unsafe(const Variable& /*self*/);

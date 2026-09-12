@@ -10,11 +10,8 @@ runs:
       shell: bash
       run: |
         # Prune all stopped containers.
-        # If other runner is pruning on this node, will skip.
-        nprune=$(ps -ef | grep -c "docker container prune")
-        if [[ $nprune -eq 1 ]]; then
-          docker container prune -f
-        fi
+        # Ignore errors if another runner is already pruning on this node.
+        docker container prune -f || true
     - name: Runner diskspace health check
       uses: pytorch/pytorch/.github/actions/diskspace-cleanup@main
       if: always()

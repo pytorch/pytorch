@@ -1,5 +1,7 @@
 #include <ATen/Functions.h>
 #include <ATen/core/CachingHostAllocator.h>
+#include <ATen/xpu/MemPool.h>
+#include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGraph.h>
 #include <c10/xpu/XPUFunctions.h>
 
@@ -8,11 +10,16 @@
 namespace at::xpu {
 
 using namespace sycl::ext::oneapi::experimental;
+
+#define XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture) \
+  ((device_architecture) == architecture::intel_gpu_pvc || \
+   (device_architecture) == architecture::intel_gpu_pvc_vg)
+
 static bool _xpu_graphs_debug = false;
 
 MempoolId_t graph_pool_handle() {
   // set the second value by default
-  return c10::xpu::MemPool::graph_pool_handle();
+  return at::xpu::MemPool::graph_pool_handle();
 }
 
 XPUGraphImpl::XPUGraphImpl(const GraphImplArgs& args)
@@ -82,7 +89,7 @@ void XPUGraphImpl::capture_begin(
     // User did not ask us to share a mempool. Create graph pool handle using
     // is_user_created=false. Sets just the first value, to distinguish it from
     // MempoolId_ts created by graph_pool_handle().
-    mempool_id_ = c10::xpu::MemPool::graph_pool_handle(false);
+    mempool_id_ = at::xpu::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
@@ -101,12 +108,31 @@ void XPUGraphImpl::capture_begin(
         return filter(XPUStream(XPUStream::UNCHECKED, stream));
       });
 
-  auto graph_impl = xpuGraph_t(capture_stream_.queue());
+  // Enable sycl graph native recording mode for sycl compiler version >=
+  // 2026.1.0, except on PVC.
+  auto sycl_property = sycl::property_list{};
+  const auto device_architecture =
+      at::xpu::getCurrentDeviceProperties()->architecture;
+#if SYCL_COMPILER_VERSION >= 20260100
+  if (!XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture)) {
+    sycl_property =
+        sycl::property_list{property::graph::enable_native_recording{}};
+  }
+#else
+  if (!XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture)) {
+    TORCH_WARN_ONCE(
+        "XPUGraph: Please use a PyTorch build compiled with oneAPI 2026.1.0 or newer for latest runtime support.");
+  }
+#endif
+
+  auto graph_impl = xpuGraph_t(capture_stream_.queue(), sycl_property);
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
   graph_->begin_recording(capture_stream_.queue());
 
   TORCH_INTERNAL_ASSERT(
       capture_stream_.queue().ext_oneapi_get_state() == queue_state::recording);
+
+  c10::xpu::XPUCachingAllocator::markCaptureBegin(capture_dev_);
 }
 
 void XPUGraphImpl::capture_end() {
@@ -118,6 +144,8 @@ void XPUGraphImpl::capture_end() {
 
   graph_->end_recording();
 
+  c10::xpu::XPUCachingAllocator::markCaptureEnd(capture_dev_);
+
   c10::xpu::XPUCachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kXPU)->end_allocate_to_pool(mempool_id_);
 
@@ -126,10 +154,7 @@ void XPUGraphImpl::capture_end() {
     wholegraph_increments = generator_state->capture_epilogue();
   }
 
-  // When SYCL_COMPILER_VERSION meets the threshold, use empty(); If empty()
-  // method is available, graphs must not use get_nodes(). Otherwise use "the
-  // old method", via get_nodes().
-#if SYCL_COMPILER_VERSION >= 20260101
+#if SYCL_COMPILER_VERSION >= 20260100
   const bool graph_is_empty = graph_->empty();
 #else
   const bool graph_is_empty = (graph_->get_nodes().size() == 0);

@@ -84,7 +84,8 @@ class BitwiseBinaryOperatorBase(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         spec = TensorSpec(
             size=output_spec.size,
             stride=output_spec.stride,
@@ -141,7 +142,8 @@ class BitwiseShiftOperatorBase(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         spec = TensorSpec(
             size=output_spec.size,
             stride=output_spec.stride,
@@ -170,7 +172,8 @@ class BitwiseShiftOperatorBase(Operator):
         input_names: list[str],
         output_spec: Spec,
     ) -> str:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         if _CLAMP_SHIFT_COUNTS:
             bw = _BIT_WIDTHS[output_spec.dtype]
             shift_expr = f"torch.clamp({input_names[1]}, 0, {bw - 1})"
@@ -235,7 +238,8 @@ class BitwiseNotOperator(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         return [
             TensorSpec(
                 size=output_spec.size,

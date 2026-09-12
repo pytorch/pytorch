@@ -8,11 +8,13 @@ on:
       - trunk
       - trunk-rocm-sandbox
       - periodic
+      - periodic-strict
       - periodic-rocm-mi200
       - periodic-rocm-mi300
       - periodic-rocm-mi350
       - inductor
       - unstable
+      - td-holdout-unstable
       - slow
       - slow-rocm-mi200
       - unstable-periodic
@@ -21,7 +23,7 @@ on:
       - rocm-mi300
       - rocm-mi350
       - rocm-navi31
-      - rocm-nightly
+      - rocm-preview
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124

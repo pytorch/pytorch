@@ -9,7 +9,7 @@
 
 namespace torch::inductor {
 
-// Regarding a aten operation implemented by AOTI, the metadata of the input
+// Regarding an aten operation implemented by AOTI, the metadata of the input
 // tensors will be cached on the disk to accelerate next run. TensorMetadata
 // structure is to represent the metadata of each input tensor. It includes
 // whether the tensor is symbolic, the dtype, the device, the sizes and the
@@ -75,7 +75,7 @@ struct TensorMetadata {
   bool dynamic_check(const TensorMetadata& other) const;
 };
 
-// ParameterTag is to represent the type of the input parameters of a aten
+// ParameterTag is to represent the type of the input parameters of an aten
 // operation. Currently, we support the following types:
 //   1. TENSOR: a single tensor
 //   2. TENSOR_OPTIONAL: a single optional tensor

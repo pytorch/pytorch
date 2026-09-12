@@ -176,6 +176,7 @@ def _build_test(
             # performance issue.
             new_op = copy.deepcopy(op)
             new_op.init(**init_dict)
+            new_op.extract_inputs_tuple()
             # Input name index will start from input1
             input_name = i + 1
             yield _create_test(
@@ -387,7 +388,7 @@ class BenchmarkRunner:
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)
-        return result.median * iters
+        return result.median
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """This function runs forward path of an op to get an output. Then the backward path is executed
@@ -408,7 +409,7 @@ class BenchmarkRunner:
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)
-        return result.median * iters
+        return result.median
 
     def _measure_metrics(self, launch_test, test_case, iters, print_per_iter):
         """

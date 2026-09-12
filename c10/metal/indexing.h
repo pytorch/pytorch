@@ -68,8 +68,11 @@ inline T val_at_offs(constant void* ptr, long offs) {
 }
 
 template <typename T>
-inline T val_at_offs(device void* ptr, long offs) {
-  return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
+inline T val_at_offs(device const void* ptr, long offs) {
+  // A non-const `device` pointer coerces to this overload; the separate
+  // `constant` overload above is required because address spaces don't convert.
+  return *reinterpret_cast<device const T*>(
+      static_cast<device const char*>(ptr) + offs);
 }
 
 template <typename T>
@@ -338,6 +341,40 @@ kernel void unary_alpha_dense(
   output[index] = f(input[index], alpha);
 }
 
+// ILP variant of unary_alpha_dense; mirrors unary_dense. Selected by the host
+// only when the caller opts in via ilp_threshold (see
+// exec_unary_kernel_with_params).
+template <typename T, typename T2, typename F>
+kernel void unary_alpha_dense_ilp(
+    device result_of<F, T, T2>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T2& alpha [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  uint base = index * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<T, ILP_PER_THREAD> tmp_in;
+    array<result_of<F, T, T2>, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = input[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j], alpha);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      output[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      output[i] = f(input[i], alpha);
+    }
+  }
+}
+
 template <typename T, typename T2, typename F>
 kernel void unary_alpha_strided(
     device void* output [[buffer(0)]],
@@ -371,6 +408,15 @@ kernel void unary_alpha_strided(
               output,                                                      \
           constant DTYPEI * input,                                         \
           constant DTYPEA & alpha,                                         \
+          uint index);                                                     \
+  template [[host_name(#NAME "_dense_ilp_" #DTYPEO "_" #DTYPEI             \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::     \
+      unary_alpha_dense_ilp<DTYPEI, DTYPEA, NAME##_functor>(               \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEA> * \
+              output,                                                      \
+          constant DTYPEI * input,                                         \
+          constant DTYPEA & alpha,                                         \
+          constant uint & numel,                                           \
           uint index);                                                     \
   template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI               \
                              "_" #DTYPEA)]] kernel void ::c10::metal::     \
@@ -984,7 +1030,7 @@ template <typename T, typename F, typename om_t = opmath_t<T>>
 kernel void binary_dense_scalar(
     device result_of<F, T, T>* out [[buffer(0)]],
     constant T* input [[buffer(1)]],
-    device T* scalar [[buffer(2)]],
+    device const T* scalar [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
@@ -994,7 +1040,7 @@ kernel void binary_dense_scalar(
 template <typename T, typename F, typename om_t = opmath_t<T>>
 kernel void binary_dense_scalar_lhs(
     device result_of<F, T, T>* out [[buffer(0)]],
-    device T* scalar [[buffer(1)]],
+    device const T* scalar [[buffer(1)]],
     constant T* input [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
@@ -1006,7 +1052,7 @@ template <typename T, typename F, typename om_t = T>
 kernel void binary_dense_scalar_cast(
     device result_of<F, T, T>* out [[buffer(0)]],
     constant void* input [[buffer(1)]],
-    device void* scalar [[buffer(2)]],
+    device const void* scalar [[buffer(2)]],
     constant uint4& sizes_types [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
@@ -1021,7 +1067,7 @@ kernel void binary_dense_scalar_cast(
 template <typename T, typename F, typename om_t = T>
 kernel void binary_dense_scalar_lhs_cast(
     device result_of<F, T, T>* out [[buffer(0)]],
-    device void* scalar [[buffer(1)]],
+    device const void* scalar [[buffer(1)]],
     constant void* input [[buffer(2)]],
     constant uint4& sizes_types [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
@@ -1038,7 +1084,7 @@ template <typename T, typename T2, typename F>
 kernel void binary_alpha_dense_scalar(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
     constant T* input [[buffer(1)]],
-    device T* scalar [[buffer(2)]],
+    device const T* scalar [[buffer(2)]],
     constant T2& alpha [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
@@ -1048,7 +1094,7 @@ kernel void binary_alpha_dense_scalar(
 template <typename T, typename T2, typename F>
 kernel void binary_alpha_dense_scalar_lhs(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
-    device T* scalar [[buffer(1)]],
+    device const T* scalar [[buffer(1)]],
     constant T* input [[buffer(2)]],
     constant T2& alpha [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
@@ -1060,7 +1106,7 @@ template <typename T, typename T2, typename F>
 kernel void binary_alpha_dense_scalar_cast(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
     constant void* input [[buffer(1)]],
-    device void* scalar [[buffer(2)]],
+    device const void* scalar [[buffer(2)]],
     constant T2& alpha [[buffer(3)]],
     constant uint4& sizes_types [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
@@ -1075,7 +1121,7 @@ kernel void binary_alpha_dense_scalar_cast(
 template <typename T, typename T2, typename F>
 kernel void binary_alpha_dense_scalar_lhs_cast(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
-    device void* scalar [[buffer(1)]],
+    device const void* scalar [[buffer(1)]],
     constant void* input [[buffer(2)]],
     constant T2& alpha [[buffer(3)]],
     constant uint4& sizes_types [[buffer(4)]],
@@ -1196,15 +1242,15 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
   kernel void ::c10::metal::binary_dense_scalar<DTYPEI, NAME##_functor, OMT>(  \
       device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> * out_,   \
       constant DTYPEI * input_,                                                \
-      device DTYPEI * scalar_,                                                 \
+      device const DTYPEI* scalar_,                                            \
       uint tid);                                                               \
   template [[host_name(#NAME "_dense_scalar_lhs_" #DTYPEO "_" #DTYPEI)]]       \
   kernel void ::c10::metal::                                                   \
       binary_dense_scalar_lhs<DTYPEI, NAME##_functor, OMT>(                    \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
               out_,                                                            \
-          device DTYPEI * scalar_,                                             \
-          constant DTYPEI * input_,                                            \
+          device const DTYPEI* scalar_,                                        \
+          constant DTYPEI* input_,                                             \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_scalar_cast_" #DTYPEO "_" #DTYPEI)]]      \
   kernel void ::c10::metal::                                                   \
@@ -1212,7 +1258,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
               out_,                                                            \
           constant void* input_,                                               \
-          device void* scalar_,                                                \
+          device const void* scalar_,                                          \
           constant uint4& sizes_types,                                         \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_scalar_lhs_cast_" #DTYPEO                 \
@@ -1220,7 +1266,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
       binary_dense_scalar_lhs_cast<DTYPEI, NAME##_functor, OMT>(               \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
               out_,                                                            \
-          device void* scalar_,                                                \
+          device const void* scalar_,                                          \
           constant void* input_,                                               \
           constant uint4& sizes_types,                                         \
           uint tid)
@@ -1357,8 +1403,8 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
                   result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
               out_,                                                           \
           constant DTYPEI * input_,                                           \
-          device DTYPEI * scalar_,                                            \
-          constant DTYPEA & alpha,                                            \
+          device const DTYPEI* scalar_,                                       \
+          constant DTYPEA& alpha,                                             \
           uint tid);                                                          \
   template [[host_name(#NAME "_dense_scalar_lhs_" #DTYPEO "_" #DTYPEI         \
                              "_" #DTYPEA)]] kernel void ::c10::metal::        \
@@ -1366,9 +1412,9 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           device ::c10::metal::                                               \
                   result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
               out_,                                                           \
-          device DTYPEI * scalar_,                                            \
-          constant DTYPEI * input_,                                           \
-          constant DTYPEA & alpha,                                            \
+          device const DTYPEI* scalar_,                                       \
+          constant DTYPEI* input_,                                            \
+          constant DTYPEA& alpha,                                             \
           uint tid);                                                          \
   template [[host_name(#NAME "_dense_scalar_cast_" #DTYPEO "_" #DTYPEI        \
                              "_" #DTYPEA)]] kernel void ::c10::metal::        \
@@ -1377,7 +1423,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
                   result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
               out_,                                                           \
           constant void* input_,                                              \
-          device void* scalar_,                                               \
+          device const void* scalar_,                                         \
           constant DTYPEA& alpha,                                             \
           constant uint4& sizes_types,                                        \
           uint tid);                                                          \
@@ -1387,7 +1433,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           device ::c10::metal::                                               \
                   result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
               out_,                                                           \
-          device void* scalar_,                                               \
+          device const void* scalar_,                                         \
           constant void* input_,                                              \
           constant DTYPEA& alpha,                                             \
           constant uint4& sizes_types,                                        \

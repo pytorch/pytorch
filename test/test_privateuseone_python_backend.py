@@ -1,4 +1,6 @@
 # Owner(s): ["module: PrivateUse1"]
+import unittest
+
 import numpy as np
 
 import torch
@@ -138,6 +140,10 @@ class PrivateUse1BackendTest(TestCase):
         # Assert this don't throw:
         _ = a_cpu.is_pinned()
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190232"
+    )
     def test_backend_simple(self):
         a_cpu = torch.randn((2, 2))
         b_cpu = torch.randn((2, 2))

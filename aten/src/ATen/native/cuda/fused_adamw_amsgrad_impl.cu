@@ -24,12 +24,12 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf) {
-  std::vector<std::vector<at::Tensor>> tensor_lists{
+  auto tensor_lists = c10::make_nested<Tensor>(
       params.vec(),
       grads.vec(),
       exp_avgs.vec(),
       exp_avg_sqs.vec(),
-      max_exp_avg_sqs.vec()};
+      max_exp_avg_sqs.vec());
 
   const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
@@ -113,12 +113,12 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf) {
-  std::vector<std::vector<at::Tensor>> tensor_lists{
+  auto tensor_lists = c10::make_nested<Tensor>(
       params.vec(),
       grads.vec(),
       exp_avgs.vec(),
       exp_avg_sqs.vec(),
-      max_exp_avg_sqs.vec()};
+      max_exp_avg_sqs.vec());
 
   const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;

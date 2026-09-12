@@ -66,7 +66,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         # Check for the main dynamo event (follows pattern from test_dynamo_timed_profiling_backend_compile)
         self.assertTrue(
             any("(dynamo_timed)" in name for name in event_names),
-            f"Expected dynamo_timed events in profiler: {event_names}",
+            lambda msg: f"{msg}\nExpected dynamo_timed events in profiler: {event_names}",
         )
 
     def test_record_functions_thread_local(self):

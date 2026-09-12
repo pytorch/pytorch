@@ -43,6 +43,58 @@ return (%x)
       torch::equal(frame.getTensor(graph->getValue("x")->id()), expected));
 }
 
+at::Tensor throwing_tensor_list_kernel(
+    const at::TensorList& tensors,
+    const at::Tensor& other) {
+  TORCH_CHECK(tensors.empty(), "intentional failure");
+  return other;
+}
+
+TEST(C10KernelTest, errorMessageRebuildsConsumedListArgs) {
+  // Unboxing moves a Tensor[] argument out of the stack, so the error path must
+  // re-derive the arguments from the frame instead of formatting the stack it
+  // just handed to callBoxed -- otherwise every list argument reads as "None".
+  auto registrar = c10::RegisterOperators().op(
+      "test::throwing_list(Tensor[] tensors, Tensor other) -> Tensor",
+      &throwing_tensor_list_kernel);
+
+  static constexpr std::string_view source =
+      R"(graph(%a, %b, %other):
+%tensors[] = prim.ListPack(l0=%a, l1=%b)
+%x = test.throwing_list.default(tensors=%tensors, other=%other)
+return (%x)
+)";
+
+  auto graph = stringToGraph(source);
+  const auto& nodes = graph->nodes();
+  auto it = nodes.begin();
+  std::advance(it, 2);
+  const Node& node = *it;
+
+  // Seed the packed list directly; only the throwing node is executed here.
+  auto frame = ExecutionFrame(*graph);
+  frame.setIValue(
+      graph->getValue("tensors")->id(),
+      c10::List<at::Tensor>({at::tensor({1, 2}), at::tensor({3, 4})}));
+  frame.setIValue(graph->getValue("other")->id(), at::tensor({5, 6}));
+
+  auto kernel = C10Kernel(&node);
+
+  try {
+    kernel.computeInternal(frame);
+    FAIL() << "expected test::throwing_list to throw";
+  } catch (const c10::Error& e) {
+    const std::string message = e.what();
+    EXPECT_EQ(message.find("arg0 tensors: None"), std::string::npos) << message;
+    EXPECT_NE(message.find("[int[2]cpu, int[2]cpu, ]"), std::string::npos)
+        << message;
+    // A Tensor bound to `const Tensor&` is borrowed, not moved, so it survives
+    // unboxing and was already printed correctly before this change.
+    EXPECT_NE(message.find("arg1 other: Tensor int[2]cpu"), std::string::npos)
+        << message;
+  }
+}
+
 TEST(ScalarBinaryOpKernelTest, computeInternal) {
   static constexpr std::string_view source =
       R"(graph(%a, %b):

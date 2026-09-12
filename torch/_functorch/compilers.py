@@ -111,7 +111,7 @@ def ts_compile(fx_g: fx.GraphModule, inps: Sequence[Any]) -> torch.jit.ScriptMod
 
         f = torch.jit.freeze(f.eval())
         f = torch.jit.optimize_for_inference(f)
-        if not any(isinstance(t, torch._subclasses.FakeTensor) for t in inps):
+        if not any(torch._subclasses.fake_tensor.is_fake_tensor(t) for t in inps):
             f(*inps)
     return f
 

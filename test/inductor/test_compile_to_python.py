@@ -13,8 +13,8 @@ from torch._inductor.utils import fresh_cache
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.inductor_utils import IS_BIG_GPU
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 def _capture(m, x, tracing_mode="fake"):
@@ -197,9 +197,9 @@ def call(args):
             compile_to_python(gm, _flat_inputs(m, x))
 
 
-@requires_cuda_and_triton
-class TestInductorCompileToPythonCudaCodegen(TestCase):
-    # On CUDA, compile_to_python emits actual @triton.jit kernels rather than the CPU
+@requires_gpu_and_triton
+class TestInductorCompileToPythonGPUCodegen(TestCase):
+    # On GPU, compile_to_python emits actual @triton.jit kernels rather than the CPU
     # extern_kernels / cpp_fused path the sibling class goldens. The expect goldens lock
     # the ``call()`` body only: it carries NO autotuning artifacts -- XBLOCK / num_warps
     # are chosen inside ``.run`` at launch time and the arch-specific DeviceProperties
@@ -216,20 +216,20 @@ class TestInductorCompileToPythonCudaCodegen(TestCase):
         return src, _extract_call(src)
 
     def test_pointwise_triton_kernel_codegen(self):
-        m = _Pointwise().eval().cuda()
-        x = torch.randn(128, 64, device="cuda")
+        m = _Pointwise().eval().to(GPU_TYPE)
+        x = torch.randn(128, 64, device=GPU_TYPE)
         src, call_src = self._inner_call(m, x)
         self.assertExpectedInline(
             call_src,
-            """\
+            f"""\
 def call(args):
     flat_1, = args
     args.clear()
     assert_size_stride(flat_1, (128, 64), (64, 1), 'input')
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
+    with torch.{GPU_TYPE}._DeviceGuard(0):
+        torch.{GPU_TYPE}.set_device(0)
         flat_1 = copy_if_misaligned(flat_1)
-        buf0 = empty_strided_cuda((128, 64), (64, 1), torch.float32)
+        buf0 = empty_strided_{GPU_TYPE}((128, 64), (64, 1), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: []
         raw_stream0 = get_raw_stream(0)
         triton_poi_fused_0.run(flat_1, buf0, 8192, stream=raw_stream0)
@@ -252,20 +252,20 @@ def call(args):
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_reduction_triton_kernel_codegen(self):
-        m = _SumDim1().eval().cuda()
-        x = torch.randn(64, 256, device="cuda")
+        m = _SumDim1().eval().to(GPU_TYPE)
+        x = torch.randn(64, 256, device=GPU_TYPE)
         src, call_src = self._inner_call(m, x)
         self.assertExpectedInline(
             call_src,
-            """\
+            f"""\
 def call(args):
     flat_1, = args
     args.clear()
     assert_size_stride(flat_1, (64, 256), (256, 1), 'input')
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
+    with torch.{GPU_TYPE}._DeviceGuard(0):
+        torch.{GPU_TYPE}.set_device(0)
         flat_1 = copy_if_misaligned(flat_1)
-        buf0 = empty_strided_cuda((64, ), (1, ), torch.float32)
+        buf0 = empty_strided_{GPU_TYPE}((64, ), (1, ), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: []
         raw_stream0 = get_raw_stream(0)
         triton_per_fused_0.run(flat_1, buf0, 64, 256, stream=raw_stream0)
@@ -284,26 +284,30 @@ def call(args):
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_addmm_relu_fused_triton_epilogue_codegen(self):
-        # CUDA counterpart of test_addmm_relu_fused_pointwise_codegen: the matmul is an
+        # GPU counterpart of test_addmm_relu_fused_pointwise_codegen: the matmul is an
         # extern BLAS call but the relu epilogue fuses into a @triton.jit kernel
         # (triton_poi_fused_add_0 here; a real AOTAutograd graph, with source-node
         # provenance, would name it triton_poi_fused_addmm_relu_0) rather than the CPU
         # cpp_fused_relu_0.
-        m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval().cuda()
-        x = torch.randn(5, 4, device="cuda")
+        m = (
+            torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU())
+            .eval()
+            .to(GPU_TYPE)
+        )
+        x = torch.randn(5, 4, device=GPU_TYPE)
         src, call_src = self._inner_call(m, x)
         self.assertExpectedInline(
             call_src,
-            """\
+            f"""\
 def call(args):
     flat_1, flat_2, flat_3 = args
     args.clear()
     assert_size_stride_grouped((flat_3, flat_1), ((5, 4), (3, 4)), ((4, 1), (4, 1)), 'input')
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
+    with torch.{GPU_TYPE}._DeviceGuard(0):
+        torch.{GPU_TYPE}.set_device(0)
         flat_3 = copy_if_misaligned(flat_3)
         flat_1 = copy_if_misaligned(flat_1)
-        buf0 = empty_strided_cuda((5, 3), (3, 1), torch.float32)
+        buf0 = empty_strided_{GPU_TYPE}((5, 3), (3, 1), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: [aten.mm]
         extern_kernels.mm(flat_3, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), out=buf0)
         del flat_1
@@ -329,8 +333,8 @@ def call(args):
         # all collapse into ONE persistent-reduction Triton kernel. Its exact name
         # (the decomposition route) varies, so this checks structure + numerics rather
         # than goldening the call body.
-        m = _Softmax().eval().cuda()
-        x = torch.randn(32, 128, device="cuda")
+        m = _Softmax().eval().to(GPU_TYPE)
+        x = torch.randn(32, 128, device=GPU_TYPE)
         src, call_src = self._inner_call(m, x)
         self.assertIn("@triton.jit", src)
         self.assertIn("@triton_heuristics.persistent_reduction", src)
@@ -359,9 +363,9 @@ def call(args):
         m = (
             torch.nn.Sequential(torch.nn.Linear(8192, 64, bias=False), torch.nn.ReLU())
             .eval()
-            .cuda()
+            .to(GPU_TYPE)
         )
-        x = torch.randn(64, 8192, device="cuda")
+        x = torch.randn(64, 8192, device=GPU_TYPE)
         gm = _capture(m, x)
         orig = SubgraphChoiceCaller._compile_for_benchmarking
         bench_calls = []
@@ -393,19 +397,14 @@ def call(args):
             )
 
     @config.patch({"compile_threads": 1})
-    def test_warm_load_rehydrates_static_launcher(self):
-        # The cache must let a COLD (fresh-dir) load reuse the compiled kernels AND the
-        # static CUDA launcher, not fall back to the slower dynamic launch. This works only
-        # because compile_to_python defaults keep_static_cubin_raw=True, travelling the raw
-        # cubin in the bundle; with the default False, reload_cubin_path can't find the cubin
-        # file in a fresh dir and the static launcher is silently dropped. Assert the static
-        # autotuner is rehydrated on the warm load (counter > 0) and the result matches eager.
+    def test_warm_load_without_eager_static_launcher_rehydration(self):
+        # A cold load should use JIT instead of eagerly rehydrating the static launcher.
         if config.force_disable_caches or not config.fx_graph_cache:
             self.skipTest("requires inductor FxGraphCache enabled")
         if not config.use_static_cuda_launcher:
             self.skipTest("requires the static CUDA launcher")
-        m = _Pointwise().eval().cuda()
-        x = torch.randn(1024, 1024, device="cuda")
+        m = _Pointwise().eval().to(GPU_TYPE)
+        x = torch.randn(1024, 1024, device=GPU_TYPE)
         src, cache = compile_to_python(_capture(m, x), _flat_inputs(m, x))
         self.assertIsInstance(cache, bytes)
         with fresh_cache():
@@ -413,7 +412,7 @@ def call(args):
             with torch.no_grad():
                 out = load_from_python(src, cache)(_flat_inputs(m, x))
             rehydrated = counters["inductor"]["triton_bundler_load_static_autotuner"]
-        self.assertGreater(rehydrated, 0)
+        self.assertEqual(rehydrated, 0)
         self.assertEqual(out[0], m(x))
 
 

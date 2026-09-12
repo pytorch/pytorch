@@ -263,12 +263,20 @@ class PySpyHandler(DebugHandler):
 
 
 class FlightRecorderHandler(DebugHandler):
+    # Each hooked backend records into its own FlightRecorder instance, so the
+    # generic fr_trace_json / fr_dump_file control plane handlers take the
+    # backend to read. "gloo" is the instance ProcessGroupGloo records into and
+    # what those handlers default to, so /fr_trace keeps showing what it always
+    # did; ?backend=<name> selects another one.
+    default_backend: str = "gloo"
+
     def routes(self) -> list[Route]:
         return [
             Route("/fr_trace", self._handle_fr_trace),
             Route("/fr_trace_json", self._handle_fr_trace_json),
             Route("/fr_trace_nccl", self._handle_fr_trace_nccl),
             Route("/fr_trace_nccl_json", self._handle_fr_trace_nccl_json),
+            Route("/fr_dump_file", self._handle_fr_dump_file),
         ]
 
     def nav_links(self) -> list[NavLink]:
@@ -277,7 +285,12 @@ class FlightRecorderHandler(DebugHandler):
             NavLink("/fr_trace_json", "(JSON)"),
             NavLink("/fr_trace_nccl", "FlightRecorder NCCL"),
             NavLink("/fr_trace_nccl_json", "(JSON)"),
+            NavLink("/fr_dump_file", "FlightRecorder Dump"),
         ]
+
+    def _backend(self, req: HTTPRequestHandler) -> str:
+        backend = req.get_query_arg("backend", self.default_backend)
+        return str(backend)
 
     def templates(self) -> dict[str, str]:
         return {"fr_trace.html": FR_TRACE_TEMPLATE}
@@ -328,14 +341,32 @@ class FlightRecorderHandler(DebugHandler):
         )
 
     def _handle_fr_trace(self, req: HTTPRequestHandler) -> bytes:
-        addrs, resps = fetch_all("fr_trace_json", timeout=self.fetch_timeout)
+        backend = self._backend(req)
+        addrs, resps = fetch_all(
+            "fr_trace_json", f"backend={backend}", timeout=self.fetch_timeout
+        )
         return self._render_tables(req.frontend, addrs, list(resps))
 
     def _handle_fr_trace_json(self, req: HTTPRequestHandler) -> bytes:
-        addrs, resps = fetch_all("fr_trace_json", timeout=self.fetch_timeout)
+        backend = self._backend(req)
+        addrs, resps = fetch_all(
+            "fr_trace_json", f"backend={backend}", timeout=self.fetch_timeout
+        )
         return req.frontend.render_template(
             "json_resp.html",
-            title="FlightRecorder",
+            title=f"FlightRecorder {backend}",
+            addrs=addrs,
+            resps=resps,
+        )
+
+    def _handle_fr_dump_file(self, req: HTTPRequestHandler) -> bytes:
+        backend = self._backend(req)
+        addrs, resps = fetch_all(
+            "fr_dump_file", f"backend={backend}", timeout=self.fetch_timeout
+        )
+        return req.frontend.render_template(
+            "raw_resp.html",
+            title=f"FlightRecorder Dump {backend}",
             addrs=addrs,
             resps=resps,
         )

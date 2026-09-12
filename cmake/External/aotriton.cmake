@@ -9,13 +9,15 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.12.1b")
+  set(__AOTRITON_VER "0.13b")
+  set(__AOTRITON_BUILD_VARIANTS "")
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
       "manylinux_2_28"  # rocm7.1
       "manylinux_2_28"  # rocm7.2
       "manylinux_2_28"  # rocm7.14
+      "manylinux_2_28"  # rocm7.15
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.4"
@@ -23,18 +25,20 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm7.1"
       "rocm7.2"
       "rocm7.14"
+      "rocm7.15"
       )
   if(DEFINED ENV{PYTORCH_AOTRITON_COMMIT})
     set(__AOTRITON_CI_COMMIT "$ENV{PYTORCH_AOTRITON_COMMIT}")
   else()
-    set(__AOTRITON_CI_COMMIT "8fdb4a4353f95b88c9542f5e5637efc1e1e0e530")
+    set(__AOTRITON_CI_COMMIT "6e00ef3e335b45dfb49065259533b59c68995bfe")
   endif()
   set(__AOTRITON_SHA256_LIST
-      "981981cfa065eaad2b32cd6e5a7a1ed21227a66b0d17b9199f354aff7d03d8fd"  # rocm6.4
-      "44f6699e669e620428d65ac12c7e4f5e6b5dcbd1e25e65b5dbb6d887c5e8ced0"  # rocm7.0
-      "4298bd4cec76d1d090d7f0b8c43220c49291d4cc6e705f6896a459c020eec48b"  # rocm7.1
-      "fb3ad4b75816366686ff3dcf41a8ba5f095ac471c22bd8f08bd1e6f103d90286"  # rocm7.2
-      "285a37fc663934ae2b51a9ae84d15e6c5cd567316fa02921d0281fd9f62c55e5"  # rocm7.14
+      "2fafa80953d9a49bd20e794bb8c0e1646e8aa815be2fb161deaa849a47547b17"  # rocm6.4
+      "7409f7c974cc79be731a419818bdb2ed6b8a3640fd40665baa76ec3c2a537204"  # rocm7.0
+      "f061a997679d8529a7b196b0ffb39912145ede217e515e1ee9ef5673b56d9e41"  # rocm7.1
+      "1cdeebb7ef61ab691fba1d81da919b9db5d8bef28269c892a30bd13a0495b7a0"  # rocm7.2
+      "7a139797c16b002fd5d9bcd706d36dc9819bb108877150f8186da21d0590eaa6"  # rocm7.14
+      "f024225d8b6063f7d95974e5957cb20893a1579a9a73b22b60426441331bc021"  # rocm7.15
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -46,14 +50,39 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx1250"
      )
   set(__AOTRITON_IMAGE_SHA256_LIST
-     "bb8bf2237b77fc503bc2967ea0d99d6ca419126c479e951ea42b712737128086" # amd-gfx90a
-     "f08edacf83c9ccf1c4bdcb51f1cab052d1680abea31c9e035f3f9fadb2f13ba4" # amd-gfx942
-     "307a37d729cda3a2120449909e5192cd71c2badccbd37f0222786098e69c7a91" # amd-gfx950
-     "c9cac7cf6f277168e1659ac2f04706f8823580b7c7e3e895f5a5503ed6bdd55f" # amd-gfx110x
-     "3177387a15c678b30057f4584d1fc1b8f8db56163890cb5c98f27450209f5a7b" # amd-gfx115x
-     "68572511ce6487a83f9014bd255bd69c8943f87d0c93bd57b2daac5fbc6c79c1" # amd-gfx120x
-     "f15547af1cf95292701dffb9f1f593e8a83b34f4ae7cfc40c821e913c12c961a" # amd-gfx1250
+     "a3d1a6868ce290ba8118618207093e785252eff4e18a64f495752cb5a03ffed6" # amd-gfx90a
+     "ccdbc7e3d96839be4895ee004f21531cc55d590c9018937b9e314bba363b3927" # amd-gfx942
+     "518fd072eb05948fc0a6c25a20832591c6406df865e3b691a2aeff3fd4c5ce1d" # amd-gfx950
+     "efe773e7a2c8adc995d90ecd0daca2db801285445ee10432df2b29c67d5b11d2" # amd-gfx110x
+     "1bc50e8aa8b6bda3410e92886ccca8fd45df3e60a6cbda9ffc58b2c541efd5c2" # amd-gfx115x
+     "6a465dbc03148bba8a2d78c4c2a3cb83155eca00f4f7f749e676402d7660968c" # amd-gfx120x
+     "4aaf71d6e510549d593757e5f88598df1e4a29cbcd91f70750ee8a76f65c027f" # amd-gfx1250
      )
+  if(USE_ASAN)
+    set(__AOTRITON_BUILD_VARIANTS "+asan")
+    set(__AOTRITON_MANYLINUX_LIST
+        "manylinux_2_28"  # rocm7.14
+        "manylinux_2_28"  # rocm7.15
+        )
+    # ASAN only supports rocm7.14
+    set(__AOTRITON_ROCM_LIST
+        "rocm7.14"
+        "rocm7.15"
+        )
+    set(__AOTRITON_SHA256_LIST
+        "3f5cfba6c42261a3e3b44022c66083ec859fcc98296faa4646b65373fead3448"  # rocm7.14+asan
+        "7a7928d881d6341fc0b8ffb3ad7077f62438a8412ec57f97fb4b4dfbc73b3e64"  # rocm7.15+asan
+        )
+    # ASAN only supports gfx942+gfx950
+    set(__AOTRITON_IMAGE_LIST
+        "amd-gfx942"
+        "amd-gfx950"
+       )
+    set(__AOTRITON_IMAGE_SHA256_LIST
+       "563d2e4c41b367725c7b8e12fdfd04df4d1b1ff15947e011e2452818f3a43d26" # amd-gfx942+asan
+       "b428dfe6eef7a1dcfac54ac2408dd136dbd622016331dc863e87ce9ea84c8054" # amd-gfx950+asan
+       )
+  endif()
   set(__AOTRITON_BASE_URL "$ENV{PYTORCH_AOTRITON_BASE_URL}")
   if(NOT __AOTRITON_BASE_URL)
     set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")  # @lint-ignore
@@ -176,7 +205,9 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_SHA256_LIST ${index} __AOTRITON_SHA256)
 
     string(CONCAT __AOTRITON_FILE "aotriton-"
-                                  "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
+                                  "${__AOTRITON_VER}"
+                                  "${__AOTRITON_BUILD_VARIANTS}-"
+                                  "${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL
@@ -202,7 +233,7 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_IMAGE_SHA256_LIST ${index} __AOTRITON_SHA256)
 
     string(CONCAT __AOTRITON_FILE
-           "aotriton-${__AOTRITON_VER}-images-"
+           "aotriton-${__AOTRITON_VER}${__AOTRITON_BUILD_VARIANTS}-images-"
            "${image}.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL
            "${__AOTRITON_BASE_URL}"

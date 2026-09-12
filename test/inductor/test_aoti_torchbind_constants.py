@@ -62,7 +62,7 @@ class TestTorchbindAOTI(TestCase):
         self.assertTrue(
             isinstance(any_torchbind, torch.ScriptObject)
             or hasattr(any_torchbind, "_type"),
-            msg=f"Expected a torchbind ScriptObject, got {type(any_torchbind)}",
+            msg=lambda msg: f"{msg}\nExpected a torchbind ScriptObject, got {type(any_torchbind)}",
         )
 
     @unittest.skipIf(HAS_CUDA and not HAS_TRITON, "requires triton on CUDA builds")

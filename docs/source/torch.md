@@ -915,7 +915,6 @@ False
     pinverse
     saddmm
     spmm
-    qr
     svd
     svd_lowrank
     pca_lowrank
@@ -929,73 +928,9 @@ False
 
 ### Foreach Operations
 
-:::{warning}
-This API is in beta and subject to future changes.
-Forward-mode AD is not supported.
-:::
-
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    _foreach_abs
-    _foreach_abs_
-    _foreach_acos
-    _foreach_acos_
-    _foreach_asin
-    _foreach_asin_
-    _foreach_atan
-    _foreach_atan_
-    _foreach_ceil
-    _foreach_ceil_
-    _foreach_clone
-    _foreach_cos
-    _foreach_cos_
-    _foreach_cosh
-    _foreach_cosh_
-    _foreach_erf
-    _foreach_erf_
-    _foreach_erfc
-    _foreach_erfc_
-    _foreach_exp
-    _foreach_exp_
-    _foreach_expm1
-    _foreach_expm1_
-    _foreach_floor
-    _foreach_floor_
-    _foreach_log
-    _foreach_log_
-    _foreach_log10
-    _foreach_log10_
-    _foreach_log1p
-    _foreach_log1p_
-    _foreach_log2
-    _foreach_log2_
-    _foreach_neg
-    _foreach_neg_
-    _foreach_tan
-    _foreach_tan_
-    _foreach_sin
-    _foreach_sin_
-    _foreach_sinh
-    _foreach_sinh_
-    _foreach_round
-    _foreach_round_
-    _foreach_sqrt
-    _foreach_sqrt_
-    _foreach_lgamma
-    _foreach_lgamma_
-    _foreach_frac
-    _foreach_frac_
-    _foreach_reciprocal
-    _foreach_reciprocal_
-    _foreach_sigmoid
-    _foreach_sigmoid_
-    _foreach_trunc
-    _foreach_trunc_
-    _foreach_zero_
-```
+You can find our foreach APIs at {mod}`torch.foreach`. While the private
+`torch._foreach_*` APIs remain available to support backwards compatibility
+during migration, we recommend using the public APIs.
 
 ## Utilities
 

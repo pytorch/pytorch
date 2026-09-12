@@ -1,20 +1,27 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import contextlib
+import dataclasses
+import inspect
 import os
-from typing import Any, TypeAlias
+from typing import Any, TYPE_CHECKING
 
 import torch
-import torch._vendor.quack.gemm_config as quack_gemm_config
+from torch._inductor.kernel.flex_gemm.constraints import (
+    FlexGemmLocalReduceGeometry,
+    FlexGemmOutputContraction,
+    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+    LOCAL_REDUCE_RUNTIME_OUT_ERROR,
+    LOCAL_REDUCE_STORE_ARG_NAME,
+)
+from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
 
 
-GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
-
-# swap_ab transposes the dispatched GEMM, so a row broadcast becomes a col
-# broadcast (and vice versa) while tile broadcasts only transpose their data.
-_SWAPPED_ARG_KIND = {"row": "col", "col": "row", "tile": "tile"}
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def inductor_quack_cache_dir() -> str:
@@ -22,135 +29,15 @@ def inductor_quack_cache_dir() -> str:
     return os.path.join(cache_dir(), "quack")
 
 
-def check_matrix(
-    name: str, tensor: torch.Tensor, expected_ndim: int | None = None
-) -> None:
-    """Require a CUDA matrix operand with optional generated-op rank checking."""
-    if expected_ndim is not None and tensor.ndim != expected_ndim:
-        raise RuntimeError(
-            f"FlexGEMM expected {expected_ndim}-D {name}, got {tensor.ndim}-D"
-        )
-    if tensor.ndim not in (2, 3):
-        raise NotImplementedError(f"FlexGEMM currently supports only 2-D or 3-D {name}")
-    if not tensor.is_cuda:
-        raise RuntimeError(f"FlexGEMM requires CUDA {name}")
-
-
-def check_same_device(a: torch.Tensor, b: torch.Tensor, *rest: torch.Tensor) -> None:
-    """Require all runtime tensors to live on the same CUDA device."""
-    device = a.device
-    if b.device != device or any(tensor.device != device for tensor in rest):
-        raise RuntimeError("FlexGEMM inputs must be on the same device")
-
-
-def check_broadcast_shape(
-    name: str, shape: torch.Size, expected_shape: tuple[int, ...]
-) -> None:
-    """Require a tensor shape to broadcast exactly to the GEMM output shape."""
-    if not is_expandable_to(tuple(shape), expected_shape):
-        raise RuntimeError(
-            f"{name} shape must broadcast to {expected_shape}, got {tuple(shape)}"
-        )
-
-
-def check_matrix_major_layout(name: str, tensor: torch.Tensor) -> None:
-    """Require row-major or column-major dense matrix strides."""
-    if tensor.stride(-1) != 1 and tensor.stride(-2) != 1:
-        raise NotImplementedError(
-            f"FlexGEMM requires {name} to be row- or column-major"
-        )
-
-
-def check_epilogue_arg_kinds(epilogue_arg_kinds: tuple[str, ...]) -> None:
-    """Require each epilogue arg kind to be row, col, or tile."""
-    for kind in epilogue_arg_kinds:
-        if kind not in ("tile", "row", "col"):
-            raise NotImplementedError(
-                f"FlexGEMM supports only tile/row/col args, got {epilogue_arg_kinds}"
-            )
-
-
-def infer_epilogue_arg_kind(a: torch.Tensor, b: torch.Tensor, arg: torch.Tensor) -> str:
-    """Infer a captured epilogue tensor's broadcast kind from its shape."""
-    m, n = a.shape[-2], b.shape[-1]
-    if tuple(arg.shape) == (m, n):
-        return "tile"
-    if tuple(arg.shape) == (1, n):
-        return "row"
-    if tuple(arg.shape) == (m, 1):
-        return "col"
-    raise NotImplementedError(
-        "FlexGEMM captured tensor args must match the GEMM output "
-        "shape or broadcast as [1, N] / [M, 1]"
-    )
-
-
-def validate_epilogue_arg_shape(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    arg: torch.Tensor,
-    kind: str,
-) -> None:
-    """Require a captured epilogue tensor shape to match its declared kind."""
-    m, n = a.shape[-2], b.shape[-1]
-    expected_shapes = {
-        "tile": (m, n),
-        "row": (1, n),
-        "col": (m, 1),
-    }
-    if tuple(arg.shape) != expected_shapes[kind]:
-        raise RuntimeError(
-            f"{kind} epilogue arg shape must be {expected_shapes[kind]}, "
-            f"got {tuple(arg.shape)}"
-        )
-
-
-def resolve_epilogue_arg_kinds(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    epilogue_args: tuple[torch.Tensor, ...],
-    epilogue_arg_kinds: tuple[str, ...],
-) -> tuple[str, ...]:
-    """Validate declared epilogue arg kinds or infer them from tensor shapes."""
-    if epilogue_arg_kinds and len(epilogue_arg_kinds) != len(epilogue_args):
-        raise RuntimeError("epilogue_arg_kinds must match epilogue_args length")
-    check_epilogue_arg_kinds(epilogue_arg_kinds)
-    if not epilogue_arg_kinds:
-        return tuple(infer_epilogue_arg_kind(a, b, arg) for arg in epilogue_args)
-    for arg, kind in zip(epilogue_args, epilogue_arg_kinds):
-        validate_epilogue_arg_shape(a, b, arg, kind)
-    return epilogue_arg_kinds
-
-
-# NOTE [Boolean epilogue tensor storage]
-# PyTorch bool tensors are byte-addressed, but CuTeDSL models cutlass.Boolean as
-# a 1-bit logical type. Keep the manual uint8 storage view
-# see https://github.com/NVIDIA/cutlass/issues/3348 for details
+# NOTE [Byte-backed epilogue tensor storage]
+# PyTorch bool tensors are byte-addressed while CuTeDSL models cutlass.Boolean as
+# a 1-bit logical type; Float4E2M1FN similarly exposes two values per byte. Pass
+# both through QuACK as their physical uint8 carrier.
 def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
     """Adapt logical epilogue tensors to QuACK's physical tensor ABI."""
-    return arg.view(torch.uint8) if arg.dtype is torch.bool else arg
-
-
-def split_epilogue_args(
-    epilogue_args: tuple[torch.Tensor, ...],
-    epilogue_arg_kinds: tuple[str, ...],
-) -> tuple[
-    tuple[torch.Tensor, ...], tuple[torch.Tensor, ...], tuple[torch.Tensor, ...]
-]:
-    """Group epilogue tensors into QuACK row, col, and tile argument lists."""
-    row_args = []
-    col_args = []
-    tile_args = []
-    for arg, kind in zip(epilogue_args, epilogue_arg_kinds):
-        arg = quack_epilogue_arg(arg)
-        match kind:
-            case "row":
-                row_args.append(arg)
-            case "col":
-                col_args.append(arg.squeeze(-1).unsqueeze(0))
-            case "tile":
-                tile_args.append(arg.unsqueeze(0))
-    return tuple(row_args), tuple(col_args), tuple(tile_args)
+    if arg.dtype in (torch.bool, torch.float4_e2m1fn_x2):
+        return arg.view(torch.uint8)
+    return arg
 
 
 def normalize_c(
@@ -159,234 +46,349 @@ def normalize_c(
     """Return the effective C tensor that QuACK should read for alpha/beta GEMMs."""
     if C is None:
         return None
-    check_broadcast_shape("C", C.shape, expected_shape)
+    if not is_expandable_to(tuple(C.shape), expected_shape):
+        raise RuntimeError(
+            f"C shape must broadcast to {expected_shape}, got {tuple(C.shape)}"
+        )
     if beta == 0:
         return None
     broadcast_C = torch.broadcast_to(C, expected_shape)
-    check_matrix("C", broadcast_C)
-    check_matrix_major_layout("C", broadcast_C)
+    if broadcast_C.ndim not in (2, 3):
+        raise NotImplementedError("FlexGEMM currently supports only 2-D or 3-D C")
+    if not broadcast_C.is_cuda:
+        raise RuntimeError("FlexGEMM requires CUDA C")
+    if broadcast_C.stride(-1) != 1 and broadcast_C.stride(-2) != 1:
+        raise NotImplementedError("FlexGEMM requires C to be row- or column-major")
     return broadcast_C
 
 
-def dispatch_gemm_act(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    C: torch.Tensor | None,
-    out: torch.Tensor,
-    aux_out: torch.Tensor | None,
-    epilogue_key: str,
-    epilogue_arg_kinds: tuple[str, ...],
-    row_args: tuple[torch.Tensor, ...],
-    col_args: tuple[torch.Tensor, ...],
-    tile_args: tuple[torch.Tensor, ...],
-    alpha: float,
-    beta: float,
-    config,
-    device_capacity_override: tuple[int, int] | None = None,
-) -> None:
-    """Dispatch one dense FlexGEMM call to the vendored QuACK GEMM kernel.
+@dataclasses.dataclass(frozen=True)
+class FlexGemmRuntimeLocalReducePlan:
+    """QuACK EpiOp configuration for one analyzed grouped local reduction."""
 
-    ``config.swap_ab`` dispatches the transposed problem (only the tile schedule
-    changes, not numerics): it swaps the A/B operands, writes through transposed
-    ``out``/``C``/``aux_out`` views, and swaps the row/col broadcast roles of
-    captured aux tensors so each still aligns with the transposed accumulator.
-    Tuple epilogues route the main result through QuACK ``D`` and aux through
-    ``PostAct``/``mAuxOut``.
-    """
-    from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
+    geometry: FlexGemmLocalReduceGeometry
+    out: torch.Tensor | None = None
+    feeds_main: bool = False
+    combine: str | None = None
+    finalize: Callable[..., Any] | str | None = None
+    finalize_operands: tuple[str, ...] = ()
+    store_finalize: Callable[..., Any] | str | None = None
+    prepass: Callable[..., Any] | None = None
+    prepass_combine: str | None = None
+    prepass_finalize: Callable[..., Any] | str | None = None
+    output_layout: FlexGemmOutputStorageLayout | None = None
 
-    # QuACK consumes A as (l, m, k) and B as (l, n, k); b is (k, n) so b.mT is (n, k).
-    quack_a, quack_b = a, b.mT
-    quack_out, quack_aux_out, quack_c = out, aux_out, C
-    if config.swap_ab:
-        quack_a, quack_b = quack_b, quack_a
-        quack_out = out.mT
-        quack_aux_out = None if aux_out is None else aux_out.mT
-        quack_c = None if C is None else C.mT
-        row_args, col_args = col_args, row_args
-        tile_args = tuple(tile.mT for tile in tile_args)
-        epilogue_arg_kinds = tuple(
-            _SWAPPED_ARG_KIND[kind] for kind in epilogue_arg_kinds
+    def __post_init__(self) -> None:
+        if self.out is None and not self.feeds_main:
+            raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if self.combine is None:
+            raise RuntimeError("FlexGEMM EpiMod local reductions require a combine")
+        if self.output_layout is not None and not isinstance(
+            self.output_layout, FlexGemmOutputStorageLayout
+        ):
+            raise TypeError(
+                "local-reduce output_layout must be a FlexGemmOutputStorageLayout"
+            )
+        if (self.prepass is None) != (self.prepass_combine is None):
+            raise RuntimeError(
+                "FlexGEMM EpiMod prepasses require both a callable and combine"
+            )
+        if self.prepass_finalize is not None and self.prepass is None:
+            raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
+        if self.finalize_operands and not callable(
+            self.store_finalize or self.finalize
+        ):
+            raise RuntimeError(
+                "FlexGEMM EpiMod finalize operands require a generated finalizer"
+            )
+
+    @property
+    def group(self) -> int:
+        return self.geometry.group
+
+    @property
+    def axis(self) -> int:
+        return self.geometry.axis
+
+    @property
+    def cache_key(self) -> tuple[Any, ...]:
+        return (
+            self.geometry,
+            self.feeds_main,
+            self.combine,
+            self.finalize,
+            self.finalize_operands,
+            self.store_finalize,
+            self.prepass,
+            self.prepass_combine,
+            self.prepass_finalize,
+            self.output_layout,
+            self.out is not None,
         )
 
-    # QuACK expects a leading batch dim; 2-D (non-batched) operands get one here.
-    quack_a = quack_a.unsqueeze(0) if quack_a.ndim == 2 else quack_a
-    quack_b = quack_b.unsqueeze(0) if quack_b.ndim == 2 else quack_b
-    quack_out = quack_out.unsqueeze(0) if quack_out.ndim == 2 else quack_out
-    if quack_aux_out is not None and quack_aux_out.dtype is torch.bool:
-        quack_aux_out = quack_aux_out.view(torch.uint8)
-    if quack_aux_out is not None and quack_aux_out.ndim == 2:
-        quack_aux_out = quack_aux_out.unsqueeze(0)
-    if quack_c is not None and quack_c.ndim == 2:
-        quack_c = quack_c.unsqueeze(0)
 
-    returns_aux = quack_aux_out is not None
-    quack_d = quack_out if returns_aux else None
-    quack_postact = quack_aux_out if returns_aux else quack_out
+_EPIMOD_CACHE: dict[tuple[Any, ...], Any] = {}
 
-    gemm_act_dispatch(
-        quack_a,
-        quack_b,
-        quack_d,
-        quack_c,
-        quack_postact,
-        None,  # tile_count_semaphore
-        None,  # activation
-        config.tile_m,
-        config.tile_n,
-        config.cluster_m,
-        config.cluster_n,
-        tile_K=config.tile_k,
-        pingpong=config.pingpong,
-        persistent=True,
-        is_dynamic_persistent=config.is_dynamic_persistent,
-        tensor_epilogue_key=epilogue_key,
-        tensor_epilogue_returns_aux=returns_aux,
-        tensor_epilogue_arg_kinds=epilogue_arg_kinds,
-        tensor_epilogue_rowvec_biases=row_args,
-        tensor_epilogue_colvec_biases=col_args,
-        tensor_epilogue_tile_biases=tile_args,
-        alpha=alpha,
-        beta=beta,
-        use_tma_gather=config.use_tma_gather,
-        device_capacity_override=device_capacity_override,
+
+def flex_gemm_epimod(
+    epilogue_fn: Any,
+    epilogue_args: tuple[torch.Tensor, ...],
+    epilogue_arg_kinds: tuple[str, ...],
+    aux_output_count: int,
+    local_reduce: FlexGemmRuntimeLocalReducePlan | None,
+    output_contraction: FlexGemmOutputContraction | None,
+):
+    """Build and cache a QuACK TensorSSA EpiMod from generated FlexGEMM metadata."""
+    epilogue_arg_dtypes = tuple(arg.dtype for arg in epilogue_args)
+    key = (
+        epilogue_fn,
+        epilogue_arg_kinds,
+        epilogue_arg_dtypes,
+        aux_output_count,
+        None if local_reduce is None else local_reduce.cache_key,
+        output_contraction,
     )
+    epimod = _EPIMOD_CACHE.get(key)
+    if epimod is not None:
+        return epimod
+
+    from torch._vendor.quack import cute_dsl_utils
+    from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
+
+    op_types = {
+        "row": epi_ops.RowVecLoad,
+        "col": epi_ops.ColVecLoad,
+        "tile": epi_ops.TileLoad,
+    }
+    ops: dict[str, Any] = {}
+    for index, (arg, kind) in enumerate(
+        zip(epilogue_args, epilogue_arg_kinds, strict=True)
+    ):
+        name = f"operand{index}"
+        dtype = cute_dsl_utils.torch2cute_dtype_map[arg.dtype]
+        ops[name] = (
+            epi_ops.Scalar(name, dtype=dtype)
+            if kind == "scalar"
+            else op_types[kind](name, dtype=dtype)
+        )
+    if output_contraction is not None:
+        from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
+            GroupedMainStore,
+        )
+
+        outputs = (GroupedMainStore("main", output_contraction.group),)
+    else:
+        outputs = tuple(f"output{index}" for index in range(aux_output_count))
+    sinks: dict[str, Any] = {}
+    prepass = None
+    prepass_outs = ()
+    if local_reduce is not None:
+        from torch._inductor.kernel.flex_gemm.quack_ops import grouped_reduce
+
+        finalize = local_reduce.finalize
+        store_finalize = local_reduce.store_finalize or finalize
+        prepass_finalize = local_reduce.prepass_finalize
+        output_layout = (
+            None
+            if local_reduce.output_layout is None
+            else local_reduce.output_layout.quack_layout(grouped_reduce)
+        )
+        if local_reduce.prepass is not None:
+            prepass = local_reduce.prepass
+            ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = (
+                grouped_reduce.GroupedLocalReducePrepass(
+                    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+                    axis=local_reduce.axis,
+                    group=local_reduce.group,
+                    combine=local_reduce.prepass_combine,
+                    finalize=prepass_finalize,
+                )
+            )
+            prepass_outs = (LOCAL_REDUCE_FEED_MAIN_ARG_NAME,)
+            if local_reduce.out is not None:
+                finalize_arity = (
+                    len(inspect.signature(store_finalize).parameters)
+                    - len(local_reduce.finalize_operands)
+                    if callable(store_finalize)
+                    else 1
+                )
+                if finalize_arity == 2:
+                    if output_layout is not None:
+                        raise RuntimeError(
+                            "local-reduce output layouts do not support binary finalizers"
+                        )
+                    sink = grouped_reduce.GroupedLocalReduceWithFinalizeArg(
+                        LOCAL_REDUCE_STORE_ARG_NAME,
+                        axis=local_reduce.axis,
+                        group=local_reduce.group,
+                        combine=local_reduce.combine,
+                        finalize=store_finalize,
+                        finalize_operands=local_reduce.finalize_operands,
+                    )
+                else:
+                    sink = grouped_reduce.GroupedLocalReduce(
+                        LOCAL_REDUCE_STORE_ARG_NAME,
+                        axis=local_reduce.axis,
+                        group=local_reduce.group,
+                        combine=local_reduce.combine,
+                        finalize=store_finalize,
+                        finalize_operands=local_reduce.finalize_operands,
+                        output_layout=output_layout,
+                    )
+                sinks[LOCAL_REDUCE_STORE_ARG_NAME] = sink
+        else:
+            if local_reduce.feeds_main:
+                if output_layout is not None:
+                    raise RuntimeError(
+                        "feed-main local reductions do not support output layouts"
+                    )
+                reduce_op = grouped_reduce.GroupedLocalReduceFeed(
+                    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+                    axis=local_reduce.axis,
+                    group=local_reduce.group,
+                    combine=local_reduce.combine,
+                    finalize=finalize,
+                )
+            else:
+                reduce_op = grouped_reduce.GroupedLocalReduce(
+                    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+                    axis=local_reduce.axis,
+                    group=local_reduce.group,
+                    combine=local_reduce.combine,
+                    finalize=finalize,
+                    finalize_operands=local_reduce.finalize_operands,
+                    output_layout=output_layout,
+                )
+            if local_reduce.feeds_main:
+                ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
+            else:
+                sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
+    epimod = epilogue_module.fragment_epilogue(
+        outputs=outputs,
+        ops=ops,
+        outs=sinks,
+        prepass=prepass,
+        prepass_outs=prepass_outs,
+    )(epilogue_fn)
+    _EPIMOD_CACHE[key] = epimod
+    return epimod
 
 
 def gemm_epilogue(
     a: torch.Tensor,
     b: torch.Tensor,
     epilogue_fn,
-    epilogue_key: str,
     *,
     C: torch.Tensor | None = None,
     alpha: float = 1.0,
-    beta: float = 1.0,
-    out_dtype: torch.dtype | None = None,
-    out: torch.Tensor | None = None,
-    aux_out: torch.Tensor | None = None,
+    beta: float = 0.0,
+    out: torch.Tensor,
+    aux_outs: tuple[torch.Tensor, ...] = (),
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
-    config_key: GemmConfigKey | None = None,
-    expected_ndim: int | None = None,
-    device_capacity_override: tuple[int, int] | None = None,
-    quack_cache_dir: str | None = None,
+    local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
+    output_contraction: FlexGemmOutputContraction | None = None,
+    tuned: bool = False,
+    config_constraints: tuple[tuple[str, Any], ...] = (),
+    stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense GEMM through QuACK with a CuTeDSL epilogue.
-
-    Args:
-        a: Left operand with shape ``[M, K]`` or ``[B, M, K]``.
-        b: Right operand with shape ``[K, N]`` or ``[B, K, N]``.
-        epilogue_fn: CuTeDSL epilogue callable applied to the accumulator tile.
-        epilogue_key: Stable cache key component for the epilogue.
-        C: Optional bias/addend broadcastable to the output shape.
-        alpha: Scale applied to the GEMM accumulator.
-        beta: Scale applied to ``C`` when ``C`` is present.
-        out_dtype: Optional output dtype. Defaults to ``a.dtype``.
-        out: Optional preallocated output tensor with shape ``[M, N]`` or ``[B, M, N]``.
-        aux_out: Optional preallocated same-shape aux tensor for tuple epilogues.
-        epilogue_args: Optional tensor args captured by the epilogue.
-        epilogue_arg_kinds: Explicit ``tile``, ``row``, or ``col`` kind per arg.
-        config_key: Optional explicit QuACK config key selected by Inductor autotune.
-        expected_ndim: Optional generated-op rank contract for A and B operands.
-        device_capacity_override: Parent-computed capability for compile-only workers.
-        quack_cache_dir: Optional scoped cache root for Inductor-generated QuACK work.
-
-    Returns:
-        Tensor with shape ``[M, N]`` or ``[B, M, N]``.
-    """
-    check_matrix("a", a, expected_ndim)
-    check_matrix("b", b, expected_ndim)
-    check_matrix_major_layout("a", a)
-    check_matrix_major_layout("b", b)
-    if a.ndim != b.ndim:
-        raise RuntimeError("FlexGEMM inputs must both be 2-D or both be 3-D")
-    if a.ndim == 3 and a.shape[0] != b.shape[0]:
-        raise RuntimeError("FlexGEMM batched inputs must have the same batch size")
-    if a.shape[-1] != b.shape[-2]:
-        raise RuntimeError(
-            f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
-        )
-    expected_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
-    expected_dtype = a.dtype if out_dtype is None else out_dtype
-    effective_C = normalize_c(C, expected_shape, beta)
-    if out is not None:
-        check_matrix("out", out)
-        check_matrix_major_layout("out", out)
-        if tuple(out.shape) != expected_shape:
-            raise RuntimeError(
-                f"out shape must be {expected_shape}, got {tuple(out.shape)}"
-            )
-        if out.dtype != expected_dtype:
-            raise RuntimeError(f"out dtype must be {expected_dtype}, got {out.dtype}")
-    if aux_out is not None:
-        if a.ndim != 2:
-            raise NotImplementedError(
-                "FlexGEMM generic aux tuple epilogues currently support only 2-D aten.mm"
-            )
-        if effective_C is not None or alpha != 1.0 or beta != 1.0:
-            raise NotImplementedError(
-                "FlexGEMM generic aux tuple epilogues cannot be combined with C/alpha/beta yet"
-            )
-        check_matrix("aux_out", aux_out)
-        check_matrix_major_layout("aux_out", aux_out)
-        if tuple(aux_out.shape) != expected_shape:
-            raise RuntimeError(
-                f"aux_out shape must be {expected_shape}, got {tuple(aux_out.shape)}"
-            )
-    if a.ndim == 3 and epilogue_args:
-        raise NotImplementedError("FlexGEMM batched args are not supported yet")
-    if epilogue_args and effective_C is not None:
-        # TODO: Route this through the flex frontend so validated A/B/C metadata
-        # can be reused here.
-        raise NotImplementedError("FlexGEMM args cannot be combined with C yet")
-    if epilogue_args and (alpha != 1.0 or beta != 1.0):
+    """Run a dense FlexGEMM call through the vendored QuACK EpiMod."""
+    if (
+        output_contraction is not None
+        and output_contraction.chunked
+        and b.stride(-1) == 1
+    ):
         raise NotImplementedError(
-            "FlexGEMM args cannot be combined with non-default alpha/beta yet"
+            "chunked grouped main output requires column-major B storage"
         )
-    tensors = (C, out, aux_out, *epilogue_args)
-    check_same_device(a, b, *(tensor for tensor in tensors if tensor is not None))
-    inferred_arg_kinds = resolve_epilogue_arg_kinds(
-        a, b, epilogue_args, epilogue_arg_kinds
+    quack_epilogue_args = tuple(quack_epilogue_arg(arg) for arg in epilogue_args)
+    epimod = flex_gemm_epimod(
+        epilogue_fn,
+        quack_epilogue_args,
+        epilogue_arg_kinds,
+        len(aux_outs),
+        local_reduce,
+        output_contraction,
     )
-    for index, arg in enumerate(epilogue_args):
-        check_matrix_major_layout(f"epilogue_args[{index}]", arg)
-    row_args, col_args, tile_args = split_epilogue_args(
-        epilogue_args, inferred_arg_kinds
-    )
+    effective_C = normalize_c(C, tuple(out.shape), beta)
+    operands: dict[str, Any] = {}
+    if "alpha" in epimod.operand_names:
+        operands["alpha"] = alpha
+    if "beta" in epimod.operand_names:
+        operands["beta"] = beta
+    for index, (arg, kind) in enumerate(
+        zip(quack_epilogue_args, epilogue_arg_kinds, strict=True)
+    ):
+        operands[f"operand{index}"] = (
+            arg.squeeze(-1).unsqueeze(0) if kind == "col" else arg
+        )
+    initialize_local_reduce_out = None
+    if local_reduce is not None:
+        # QuACK's host_validate checks the compressed buffer against the GEMM
+        # problem; only the caller-owned carrier view is built here.
+        local_reduce_out = local_reduce.out
+        if local_reduce_out is not None and local_reduce.output_layout is not None:
+            grouped_dim = a.shape[-2] if local_reduce.axis == 0 else b.shape[-1]
+            if grouped_dim % local_reduce.group:
+                raise ValueError(
+                    f"group {local_reduce.group} must divide the grouped dim "
+                    f"{grouped_dim} (axis={local_reduce.axis})"
+                )
+            rows, cols = (
+                (a.shape[-2], b.shape[-1] // local_reduce.group)
+                if local_reduce.axis == 1
+                else (a.shape[-2] // local_reduce.group, b.shape[-1])
+            )
+            if local_reduce_out.numel() != rows * cols:
+                initialize_local_reduce_out = local_reduce_out
+            local_reduce_out = local_reduce.output_layout.runtime_view(
+                local_reduce_out, 1, rows, cols
+            )
+        if local_reduce.prepass is not None:
+            operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = None
+            if local_reduce.out is not None:
+                operands[LOCAL_REDUCE_STORE_ARG_NAME] = local_reduce_out
+        else:
+            operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = local_reduce_out
 
-    from torch._vendor.quack.gemm_act import register_tensor_epilogue_fn
-
-    register_tensor_epilogue_fn(epilogue_key, epilogue_fn)
-    out = (
-        torch.empty(expected_shape, device=a.device, dtype=expected_dtype)
-        if out is None
-        else out
-    )
-    from torch._inductor.heuristics.template.flex_gemm import (
-        candidate_gemm_configs_for_device,
-    )
     from torch._vendor.quack.cache import cache_dir_override
 
-    with cache_dir_override(quack_cache_dir):
-        dispatch_gemm_act(
+    output_buffers = (
+        {"main": quack_epilogue_arg(out)}
+        if output_contraction is not None
+        else {
+            "D": quack_epilogue_arg(out),
+            **dict(
+                zip(
+                    epimod.outputs,
+                    (quack_epilogue_arg(aux_out) for aux_out in aux_outs),
+                    strict=True,
+                )
+            ),
+        }
+    )
+    stream_context = (
+        torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
+        if stream is not None
+        else contextlib.nullcontext()
+    )
+    with cache_dir_override(inductor_quack_cache_dir()), stream_context:
+        # Layout callbacks predicate logical stores but do not own padded bytes.
+        if initialize_local_reduce_out is not None:
+            initialize_local_reduce_out.zero_()
+        result = epimod(
             a,
             b,
-            effective_C,
-            out,
-            aux_out,
-            epilogue_key,
-            inferred_arg_kinds,
-            row_args,
-            col_args,
-            tile_args,
-            alpha,
-            beta,
-            config=(
-                quack_gemm_config.GemmConfig(**dict(config_key))
-                if config_key is not None
-                else candidate_gemm_configs_for_device(a.device)[0]
+            C=effective_C,
+            out=output_buffers,
+            out_dtype=out.dtype,
+            store_d=output_contraction is None,
+            config=None,
+            config_constraints=config_constraints,
+            tuned=tuned,
+            concat_layout=(
+                None if output_contraction is None else output_contraction.concat_layout
             ),
-            device_capacity_override=device_capacity_override,
+            **operands,
         )
-    return out
+    return result["main" if output_contraction is not None else "D"]

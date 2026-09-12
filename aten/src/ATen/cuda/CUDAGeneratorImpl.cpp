@@ -1,10 +1,8 @@
 #include <ATen/Functions.h>
 #include <ATen/Tensor.h>
-#include <ATen/Utils.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
-#include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/CallOnce.h>
@@ -107,6 +105,11 @@ void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
 
   rng_state_seed_extragraph_ = at::empty({1}, options);
   rng_state_offset_extragraph_ = at::empty({1}, options);
+  // Captured graphs bake in these buffers' addresses, and philox_state hands
+  // out aliases of them; make the storage non-resizable so nothing can
+  // reallocate it.
+  rng_state_seed_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
+  rng_state_offset_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
 
   // Synchronize the default stream so that any prior work completes before
   // a different stream writes to this memory.
@@ -492,6 +495,48 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     state_->increase(increment);
     return PhiloxCudaState(state_->seed_, offset);
   }
+}
+
+/**
+ * Tensor-based variant of philox_cuda_state for consumers that cannot
+ * take a PhiloxCudaState (e.g. Python). Writes 1-element int64 tensors
+ * (seed, offset, intragraph_offset); the kernel-visible values are
+ * (seed, offset + intragraph_offset), with the uint64 seed and offset
+ * reinterpreted as int64. Mirrors PhiloxCudaState: outside capture, seed
+ * and offset are CPU tensors holding the current values (HostState);
+ * during capture, they are CUDA aliases of the per-capture extragraph
+ * device state that replay_prologue refills on every replay (DevState) -
+ * their contents are undefined until the first replay and they are only
+ * valid for that capture's lifetime.
+ *
+ * See Note [Acquire lock when using random generators]
+ */
+void CUDAGeneratorImpl::philox_state(
+    uint64_t increment,
+    at::Tensor& seed,
+    at::Tensor& offset,
+    at::Tensor& intragraph_offset) {
+  const auto cpu_opts = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  auto capture_id = at::cuda::currentStreamCaptureId();
+  if (capture_id.has_value()) {
+    auto* capture_state = state_->get_capture_state(capture_id.value(), true);
+    uint64_t intragraph = capture_state->offset_intragraph_;
+    state_->increase(increment);
+    // Aliases (not the tensors themselves) so callers cannot mutate the
+    // capture state's metadata; the storage itself is non-resizable (see
+    // CUDAGeneratorCaptureState::initialize). The Tensor(TensorBase) ctor
+    // bridges the at::TensorBase members to at::Tensor, which has alias().
+    seed = at::Tensor(capture_state->rng_state_seed_extragraph_).alias();
+    offset = at::Tensor(capture_state->rng_state_offset_extragraph_).alias();
+    intragraph_offset =
+        at::full({1}, static_cast<int64_t>(intragraph), cpu_opts);
+    return;
+  }
+  uint64_t current_offset = state_->philox_offset_per_thread_;
+  state_->increase(increment);
+  seed = at::full({1}, static_cast<int64_t>(state_->seed_), cpu_opts);
+  offset = at::full({1}, static_cast<int64_t>(current_offset), cpu_opts);
+  intragraph_offset = at::zeros({1}, cpu_opts);
 }
 
 /**

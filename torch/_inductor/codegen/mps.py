@@ -46,6 +46,9 @@ DTYPE_TO_METAL = {
     torch.int32: "int",
     torch.int64: "long",
     torch.uint8: "uchar",
+    torch.uint16: "ushort",
+    torch.uint32: "uint",
+    torch.uint64: "ulong",
     torch.float: "float",
     torch.half: "half",
     torch.bfloat16: "bfloat",
@@ -481,6 +484,7 @@ class MetalOverrides(OpOverrides):
         # Unary special ops
         for name in [
             "erf",
+            "erfc",
             "erfinv",
             "i0",
             "i0e",
@@ -529,6 +533,7 @@ class MetalOverrides(OpOverrides):
             "chebyshev_polynomial_w",
             "hermite_polynomial_h",
             "hermite_polynomial_he",
+            "laguerre_polynomial_l",
             "shifted_chebyshev_polynomial_t",
             "shifted_chebyshev_polynomial_u",
             "shifted_chebyshev_polynomial_v",
@@ -671,7 +676,7 @@ class MetalKernel(SIMDKernel):
             raise AssertionError("expected no load mask during reduction")
 
         def _unwrap_helper(res3: CSEVariable) -> tuple[CSEVariable, ...]:
-            # Uwraps vec3 dtype into individual components
+            # Unwraps vec3 dtype into individual components
             return OpsWrapper._unwrap(
                 [CSEVariable(f"{res3}.{t}", res3.bounds, res3.dtype) for t in "xyz"]
             )

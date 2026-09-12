@@ -16,6 +16,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_distributed import run_subtests
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -101,19 +102,19 @@ class DistConvolutionOpsTest(DTensorTestBase):
         bias_mse_rel = torch.mean(bias_diff_rel * bias_diff_rel).item()
         self.assertTrue(
             weight_mse_abs <= 1e-6,
-            f"Too large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
+            lambda msg: f"{msg}\nToo large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
         )
         self.assertTrue(
             bias_mse_abs <= 1e-6,
-            f"Too large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
+            lambda msg: f"{msg}\nToo large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
         )
         self.assertTrue(
             weight_mse_rel <= 1e-6,
-            f"Too large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
+            lambda msg: f"{msg}\nToo large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
         )
         self.assertTrue(
             bias_mse_rel <= 1e-6,
-            f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
+            lambda msg: f"{msg}\nToo large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
         )
 
     # TODO: test_depthwise_convolution is broken in CI with gloo backend.
@@ -171,19 +172,19 @@ class DistConvolutionOpsTest(DTensorTestBase):
         bias_mse_rel = torch.mean(bias_diff_rel * bias_diff_rel).item()
         self.assertTrue(
             weight_mse_abs <= 1e-6,
-            f"Too large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
+            lambda msg: f"{msg}\nToo large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
         )
         self.assertTrue(
             bias_mse_abs <= 1e-6,
-            f"Too large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
+            lambda msg: f"{msg}\nToo large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
         )
         self.assertTrue(
             weight_mse_rel <= 1e-6,
-            f"Too large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
+            lambda msg: f"{msg}\nToo large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
         )
         self.assertTrue(
             bias_mse_rel <= 1e-6,
-            f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
+            lambda msg: f"{msg}\nToo large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
         )
 
     @with_comms
@@ -325,6 +326,51 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
         out_ref.backward(grad)
+        self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
+
+    @with_tf32_off
+    @with_comms
+    def test_convolution_last_dim_shard(self):
+        run_subtests(
+            self,
+            {"conv_dim": [1, 2, 3]},
+            self._test_convolution_last_dim_shard,
+        )
+
+    def _test_convolution_last_dim_shard(self, conv_dim):
+        device_mesh = self.build_device_mesh()
+        conv_cls = (nn.Conv1d, nn.Conv2d, nn.Conv3d)[conv_dim - 1]
+        spatial_shape = (8,) * (conv_dim - 1) + (16,)
+        kernel_size = (3,) * (conv_dim - 1) + (4,)
+        stride = (1,) * (conv_dim - 1) + (4,)
+        padding = (1,) * (conv_dim - 1) + (0,)
+
+        model = conv_cls(
+            3, 8, kernel_size=kernel_size, stride=stride, padding=padding
+        ).to(self.device_type)
+        model_ref = copy.deepcopy(model).to(self.device_type)
+        model = distribute_module(model, device_mesh, _conv_fn)
+
+        x = torch.randn(
+            4, 3, *spatial_shape, device=self.device_type, requires_grad=True
+        )
+        placements = (Shard(x.ndim - 1),)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_dt = distribute_tensor(x, device_mesh, placements)
+
+        out_dt = model(x_dt)
+        out_ref = model_ref(x_ref)
+        self.assertEqual(out_dt.placements, placements)
+        self.assertEqual(out_dt.shape, out_ref.shape)
+        self.assertEqual(out_dt.full_tensor(), out_ref)
+
+        grad = torch.randn_like(out_ref)
+        grad_dt = distribute_tensor(grad, device_mesh, placements)
+        out_dt.backward(grad_dt)
+        out_ref.backward(grad)
+
+        self.assertEqual(x_dt.grad.placements, placements)
+        self.assertEqual(x_dt.grad.shape, x_ref.grad.shape)
         self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
 
     @with_comms

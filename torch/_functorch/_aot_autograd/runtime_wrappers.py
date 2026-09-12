@@ -28,7 +28,12 @@ from torch._custom_class_base import CustomClassBase
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.graph_bytecode_inputs import index_to_external_object_weakref
-from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    deferred_full_gc,
+    dynamo_timed,
+    get_metrics_context,
+)
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -42,10 +47,10 @@ from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.types import IntLikeType
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
@@ -102,6 +107,10 @@ from .utils import (
     strict_zip,
     without_output_descs,
 )
+
+
+if typing.TYPE_CHECKING:
+    from .codegen import PySourceBuilder
 
 
 def _snapshot_external_objects(ctx: Any) -> None:
@@ -467,7 +476,15 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             underlying_tensor = tensor
             if isinstance(tensor, torch.nn.Parameter):
                 underlying_tensor = tensor.data
-            if type(underlying_tensor) not in HANDLED_TYPES:
+            # A subclass with no __torch_dispatch__ has no handler to defer to, so
+            # returning NotImplemented for it makes the dispatch fail outright.
+            # `types` cannot replace the check because HigherOrderOperator.dispatch
+            # passes it empty and this mode accepts HOPs.
+            if (
+                not is_fake_tensor(underlying_tensor)
+                and type(underlying_tensor).__torch_dispatch__
+                is not torch._C._disabled_torch_dispatch_impl
+            ):
                 return NotImplemented
 
         res = func(*args, **kwargs)
@@ -806,19 +823,18 @@ class _RuntimeForwardEpilogue:
 
 
 def _codegen_capture_orig_inputs(
-    rw_lines: list[str],
+    buf: "PySourceBuilder",
     epilogue_args_idx: tuple[int, ...],
 ) -> None:
     if epilogue_args_idx:
         idx_str = ", ".join(f"{i}: args[{i}]" for i in epilogue_args_idx)
-        rw_lines.append(f"    orig_inputs = {{{idx_str}}}")
+        buf.emit(f"orig_inputs = {{{idx_str}}}", indent=1)
     else:
-        rw_lines.append("    orig_inputs = {}")
+        buf.emit("orig_inputs = {}", indent=1)
 
 
 def _codegen_increment_mutation_versions(
-    rw_lines: list[str],
-    rw_globals: dict[str, object],
+    buf: "PySourceBuilder",
     keep_input_mutations: bool,
     runtime_metadata: ViewAndMutationMeta,
 ) -> None:
@@ -826,80 +842,78 @@ def _codegen_increment_mutation_versions(
         keep_input_mutations
         and runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
     ):
-        rw_globals["_increment_version_"] = torch.autograd.graph.increment_version
+        buf.add_global("_increment_version_", torch.autograd.graph.increment_version)
         mut_idx = tuple(runtime_metadata.mutated_graph_handled_indices_seen_by_autograd)
         gen_expr = ", ".join(f"args[{i}]" for i in mut_idx)
-        rw_lines.append(f"    _increment_version_(({gen_expr},))")
+        buf.emit(f"_increment_version_(({gen_expr},))", indent=1)
 
 
 def _codegen_normalize_as_list(
-    lines: list[str], var_name: str, *, indent_level: int
+    buf: "PySourceBuilder", var_name: str, *, indent_level: int
 ) -> None:
-    indent = "    " * indent_level
-    lines.append(f"{indent}if isinstance({var_name}, tuple):")
-    lines.append(f"{indent}    {var_name} = list({var_name})")
-    lines.append(f"{indent}elif not isinstance({var_name}, list):")
-    lines.append(f"{indent}    {var_name} = [{var_name}]")
+    buf.emit(f"if isinstance({var_name}, tuple):", indent=indent_level)
+    buf.emit(f"{var_name} = list({var_name})", indent=indent_level + 1)
+    buf.emit(f"elif not isinstance({var_name}, list):", indent=indent_level)
+    buf.emit(f"{var_name} = [{var_name}]", indent=indent_level + 1)
 
 
 def _codegen_compiled_fn_invocation(
-    rw_lines: list[str],
-    rw_globals: dict[str, object],
+    buf: "PySourceBuilder",
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
 ) -> None:
-    rw_lines.append("    with _first_ctx_():")
+    buf.emit("with _first_ctx_():", indent=1)
     # trace_joint is known at codegen time. Only the joint/training path needs
     # forced view replay; inference wrappers should not touch this TLS state.
     if trace_joint:
-        rw_lines.append("        args_ = list(args)")
+        buf.emit("args_ = list(args)", indent=2)
         for idx in indices_of_inps_to_detach:
-            rw_lines.append(
-                f"        if isinstance(args_[{idx}], torch.Tensor): "
-                f"args_[{idx}] = args_[{idx}].detach()"
+            buf.emit(
+                f"if isinstance(args_[{idx}], torch.Tensor): "
+                f"args_[{idx}] = args_[{idx}].detach()",
+                indent=2,
             )
-        rw_lines.append(
-            "        prev_view_replay_enabled = torch._C._is_view_replay_enabled()"
+        buf.emit(
+            "prev_view_replay_enabled = torch._C._is_view_replay_enabled()", indent=2
         )
-        rw_lines.append("        try:")
-        rw_lines.append("            if not prev_view_replay_enabled:")
-        rw_lines.append("                torch._C._set_view_replay_enabled(True)")
-        rw_lines.append("            with torch.enable_grad():")
-        rw_lines.append("                _on_before_call_()")
+        buf.emit("try:", indent=2)
+        buf.emit("if not prev_view_replay_enabled:", indent=3)
+        buf.emit("torch._C._set_view_replay_enabled(True)", indent=4)
+        buf.emit("with torch.enable_grad():", indent=3)
+        buf.emit("_on_before_call_()", indent=4)
         if disable_amp:
-            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("                with _DisableAutocast_():")
-            rw_lines.append("                    all_outs = _compiled_fn_(args_)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=5)
+            buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
+            buf.emit("with _DisableAutocast_():", indent=4)
+            buf.emit("all_outs = _compiled_fn_(args_)", indent=5)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=5)
         else:
-            rw_lines.append("                all_outs = _compiled_fn_(args_)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
-        rw_lines.append("        finally:")
-        rw_lines.append(
-            "            if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:"
+            buf.emit("all_outs = _compiled_fn_(args_)", indent=4)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
+        buf.emit("finally:", indent=2)
+        buf.emit(
+            "if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:",
+            indent=3,
         )
-        rw_lines.append(
-            "                torch._C._set_view_replay_enabled(prev_view_replay_enabled)"
+        buf.emit(
+            "torch._C._set_view_replay_enabled(prev_view_replay_enabled)", indent=4
         )
     else:
-        rw_lines.append("        grad_enabled = torch.is_grad_enabled()")
-        rw_lines.append("        try:")
-        rw_lines.append(
-            "            if grad_enabled: torch._C._set_grad_enabled(False)"
-        )
-        rw_lines.append("            _on_before_call_()")
+        buf.emit("grad_enabled = torch.is_grad_enabled()", indent=2)
+        buf.emit("try:", indent=2)
+        buf.emit("if grad_enabled: torch._C._set_grad_enabled(False)", indent=3)
+        buf.emit("_on_before_call_()", indent=3)
         if disable_amp:
-            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append("                all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
+            buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
+            buf.emit("with _DisableAutocast_():", indent=3)
+            buf.emit("all_outs = _compiled_fn_(args)", indent=4)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
         else:
-            rw_lines.append("            all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=3)
-        rw_lines.append("        finally:")
-        rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
-    rw_lines.append("    del args")
+            buf.emit("all_outs = _compiled_fn_(args)", indent=3)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
+        buf.emit("finally:", indent=2)
+        buf.emit("if grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
+    buf.emit("del args", indent=1)
 
 
 # signatures mirror the _RuntimeForwardEpilogue reference methods
@@ -911,48 +925,49 @@ _EpilogueReplayAliasesFn = Callable[[dict[int, Tensor], list[Any]], list[Any]]
 
 
 def _codegen_epilogue(
-    rw_lines: list[str],
-    rw_globals: dict[str, object],
+    buf: "PySourceBuilder",
     runtime_metadata: ViewAndMutationMeta,
     apply_mutations_fn: _EpilogueApplyMutationsFn | None,
     replay_aliases_fn: _EpilogueReplayAliasesFn | None,
     num_mutated_runtime_inps: int,
     expected_outs: int,
 ) -> None:
-    rw_lines.append(f"    if len(all_outs) != {expected_outs}:")
-    rw_lines.append(
-        f'        raise AssertionError(f"expected {expected_outs} outputs, '
-        f'got {{len(all_outs)}}")'
+    buf.emit(f"if len(all_outs) != {expected_outs}:", indent=1)
+    buf.emit(
+        f'raise AssertionError(f"expected {expected_outs} outputs, '
+        f'got {{len(all_outs)}}")',
+        indent=2,
     )
 
     if num_mutated_runtime_inps > 0:
-        rw_lines.append(f"    updated_inputs = all_outs[:{num_mutated_runtime_inps}]")
-        rw_lines.append(f"    fw_outs = all_outs[{num_mutated_runtime_inps}:]")
-        rw_lines.append("    _apply_mutations_(orig_inputs, updated_inputs)")
-        rw_globals["_apply_mutations_"] = apply_mutations_fn
+        buf.emit(f"updated_inputs = all_outs[:{num_mutated_runtime_inps}]", indent=1)
+        buf.emit(f"fw_outs = all_outs[{num_mutated_runtime_inps}:]", indent=1)
+        buf.emit("_apply_mutations_(orig_inputs, updated_inputs)", indent=1)
+        buf.add_global("_apply_mutations_", apply_mutations_fn)
     else:
-        rw_lines.append("    fw_outs = all_outs")
+        buf.emit("fw_outs = all_outs", indent=1)
 
     if runtime_metadata.num_outputs_aliased > 0:
-        rw_globals["_replay_aliases_"] = replay_aliases_fn
-        rw_lines.append("    ret_outs = _replay_aliases_(orig_inputs, fw_outs)")
+        buf.add_global("_replay_aliases_", replay_aliases_fn)
+        buf.emit("ret_outs = _replay_aliases_(orig_inputs, fw_outs)", indent=1)
     else:
-        rw_lines.append("    ret_outs = fw_outs")
+        buf.emit("ret_outs = fw_outs", indent=1)
 
     if runtime_metadata.dynamic_outputs:
-        rw_globals["_mark_dynamic_"] = mark_dynamo_propagated_dynamic_indices
+        buf.add_global("_mark_dynamic_", mark_dynamo_propagated_dynamic_indices)
         for i, o in enumerate(runtime_metadata.output_info):
             if o.dynamic_dims is not None:
                 dims_name = f"_dyn_dims_{i}"
-                rw_globals[dims_name] = o.dynamic_dims
-                rw_lines.append(f"    _mark_dynamic_(ret_outs[{i}], {dims_name})")
+                buf.add_global(dims_name, o.dynamic_dims)
+                buf.emit(f"_mark_dynamic_(ret_outs[{i}], {dims_name})", indent=1)
 
     if runtime_metadata.grad_enabled_mutation is not None:
-        rw_lines.append(
-            f"    torch._C._set_grad_enabled({runtime_metadata.grad_enabled_mutation!r})"
+        buf.emit(
+            f"torch._C._set_grad_enabled({runtime_metadata.grad_enabled_mutation!r})",
+            indent=1,
         )
 
-    rw_lines.append("    return ret_outs")
+    buf.emit("return ret_outs", indent=1)
 
 
 def _create_runtime_wrapper(
@@ -1075,11 +1090,13 @@ def _create_runtime_wrapper(
             artifact_name="mutation_epilogue",
         )
         buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
                 meta = runtime_metadata.input_info[inpt_idx]
                 if not meta.mutates_data and not meta.mutates_metadata:
                     continue
+                wrote_body = True
                 oi = f"orig_inputs[{inpt_idx}]"
                 ui = f"updated_inputs[{i}]"
                 if meta.mutates_storage_metadata:
@@ -1104,9 +1121,10 @@ def _create_runtime_wrapper(
                             f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
                         )
                     else:
-                        assert meta.mutates_data, (  # noqa: S101
-                            f"expected mutates_data for input {inpt_idx}"
-                        )
+                        if not meta.mutates_data:
+                            raise AssertionError(
+                                f"expected mutates_data for input {inpt_idx}"
+                            )
                     if meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
@@ -1128,7 +1146,7 @@ def _create_runtime_wrapper(
                             buf.writeline(f"raise RuntimeError({msg_name})")
                         else:
                             buf.writeline(f"{oi}.copy_({ui})")
-            if len(buf.lines) == 1:
+            if not wrote_body:
                 buf.writeline("pass")
 
         codegen_apply_mutations = typing.cast(_EpilogueApplyMutationsFn, buf.build())
@@ -1149,19 +1167,14 @@ def _create_runtime_wrapper(
         artifact_name="runtime_wrapper_orchestration",
     )
     buf.bind(torch=torch)
-    rw_lines = buf.lines
-    rw_globals = buf.globals
 
-    _codegen_capture_orig_inputs(rw_lines, epilogue_args_idx)
-    _codegen_increment_mutation_versions(
-        rw_lines, rw_globals, keep_input_mutations, runtime_metadata
-    )
+    _codegen_capture_orig_inputs(buf, epilogue_args_idx)
+    _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)
     _codegen_compiled_fn_invocation(
-        rw_lines, rw_globals, trace_joint, indices_of_inps_to_detach, disable_amp
+        buf, trace_joint, indices_of_inps_to_detach, disable_amp
     )
     _codegen_epilogue(
-        rw_lines,
-        rw_globals,
+        buf,
         runtime_metadata,
         codegen_apply_mutations,
         codegen_alias_fn,
@@ -1316,7 +1329,8 @@ class FakifiedOutWrapper(InductorWrapper):
     # TracingContext.fwd_output_strides
     # Generated from actually doing compile
     # NB: an entry is None if it's not a Tensor
-    fwd_output_strides: list[list[int] | None] | None = None
+    # NB: an inner element may be a SymInt under dynamic shapes
+    fwd_output_strides: list[list[IntLikeType] | None] | None = None
     needs_post_compile: bool = True
 
     def pre_compile(
@@ -1367,7 +1381,7 @@ class FakifiedOutWrapper(InductorWrapper):
 
     # To be called post compile
     def set_fwd_output_strides(
-        self, fwd_output_strides: list[list[int] | None]
+        self, fwd_output_strides: list[list[IntLikeType] | None]
     ) -> None:
         self.fwd_output_strides = fwd_output_strides
 
@@ -2636,11 +2650,14 @@ class _AutogradSavedState:
 
         # See Note [Detaching saved tensors in AOTAutograd]
         num_vc_check = len(tensors_saved_with_vc_check)
+        is_graph_input = self.metadata.saved_tensor_is_graph_input
         tensors_to_save = [
-            x.detach() if x._is_view() else x for x in tensors_saved_with_vc_check
+            x if is_graph_input[i] or not x._is_view() else x.detach()
+            for i, x in enumerate(tensors_saved_with_vc_check)
         ]
         tensors_no_vc_check = [
-            x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+            x if is_graph_input[num_vc_check + i] or not x._is_view() else x.detach()
+            for i, x in enumerate(tensors_saved_no_vc_check)
         ]
 
         # dynamic_saved_tensors_idxs has indices relative to all saved tensors
@@ -2876,6 +2893,10 @@ class _AutogradBackwardCompiler:
         context = torch._C._DisableAutocast if self.disable_amp else nullcontext
         metrics_context = get_metrics_context()
         with (
+            # Lazily compiling the backward builds as much graph as the forward
+            # did, and it runs outside Dynamo's compile, so it needs its own
+            # deferral of full collections.
+            deferred_full_gc(),
             tracing(saved_context),
             compile_context(saved_compile_context),
             context(),
@@ -3245,10 +3266,10 @@ def _codegen_compiled_forward(
             buf.writeline("with _DisableAutocast_():")
             with buf.indent():
                 buf.writeline("fw_outs = _compiled_fw_(list(args))")
-                _codegen_normalize_as_list(buf.lines, "fw_outs", indent_level=2)
+                _codegen_normalize_as_list(buf, "fw_outs", indent_level=2)
         else:
             buf.writeline("fw_outs = _compiled_fw_(list(args))")
-            _codegen_normalize_as_list(buf.lines, "fw_outs", indent_level=1)
+            _codegen_normalize_as_list(buf, "fw_outs", indent_level=1)
 
         buf.writeline("_save_(ctx, fw_outs)")
         buf.writeline("return _finalize_(ctx, fw_outs)")
@@ -3623,12 +3644,12 @@ class AOTDispatchAutograd:
     @staticmethod
     def _raise_tangent_metadata_error(
         expected_type: type | None,
-        expected_meta: Any,
+        expected_meta: object,
         runtime_type: type,
-        runtime_meta: Any,
+        runtime_meta: object,
         orig_x: torch.Tensor,
         tangent_idx: int | None,
-        tangent_desc: Any | None,
+        tangent_desc: AOTInput | None,
         compile_id_str: str | None,
         tangent_stack_trace: str | None,
     ) -> RuntimeError:
@@ -3700,14 +3721,14 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         x: Any,
         meta: PlainTensorMeta | SubclassCreationMeta,
         tangent_idx: int | None = None,
-        tangent_desc: Any | None = None,
+        tangent_desc: AOTInput | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
             return x, [x]
 
-        if isinstance(x, FakeTensor):
+        if is_fake_tensor(x):
             if not meta.memory_format:
                 raise AssertionError(
                     "meta.memory_format must not be None for FakeTensor"

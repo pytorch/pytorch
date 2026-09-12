@@ -165,7 +165,7 @@ class TorchTensor(ir.Tensor):
             # Disable any fake mode so calling detach() etc. will return a real tensor
             tensor = self.raw.detach().cpu().contiguous()
 
-        if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(tensor):
             raise TypeError(
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
@@ -1015,7 +1015,7 @@ def exported_program_to_ir(
     """Convert an exported program to an ONNX IR model.
 
     Reference:
-        - ExportedProgram spec: https://pytorch.org/docs/stable/export.ir_spec.html
+        - ExportedProgram spec: https://pytorch.org/docs/stable/export.html
 
     Args:
         exported_program: The exported program to convert.
@@ -1045,6 +1045,12 @@ def _prepare_exported_program_for_export(
     with (
         # Support the dynamism with 0/1 input dim
         torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+        # RNN ops are preserved for ONNX, but decomposition retraces the graph and
+        # recomputes their meta values. Keep the while_loop based decompositions so
+        # that dynamic sequence lengths are not specialized to the example length.
+        _capture_strategies.patch_dynamic_shape_rnn_decompositions(
+            exported_program.range_constraints
+        ),
     ):
         # Decompose the graph given the implemented torch ops in ONNX
         exported_program = _fx_passes.decompose_with_registry(
@@ -1098,7 +1104,7 @@ def _exported_program_to_onnx_program(
     decompositions have been applied.
 
     Reference:
-        - ExportedProgram spec: https://pytorch.org/docs/stable/export.ir_spec.html
+        - ExportedProgram spec: https://pytorch.org/docs/stable/export.html
 
     Args:
         exported_program: The exported program to convert. The exported program

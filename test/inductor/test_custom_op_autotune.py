@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -35,7 +34,20 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.set_float32_matmul_precision("high")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 @unittest.skipIf(IS_MACOS, "TODO: mac")
@@ -100,7 +112,7 @@ class TestCustomOpAutoTune(TestCase):
             # Basic sanity checks
             self.assertTrue(
                 torch.isfinite(result).all(),
-                f"{op_name} {name} produced non-finite values",
+                lambda msg: f"{msg}\n{op_name} {name} produced non-finite values",
             )
 
         # Verify numerical equivalence
@@ -262,7 +274,6 @@ class TestCustomOpAutoTune(TestCase):
         )
         return a, b, bias
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/171519")
     def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
         """Test decompose_k autotuning with epilogue fusion(matmul+bias+relu+scale) and
         dynamic config generation based on matmul input shapes.
@@ -531,7 +542,7 @@ class TestCustomOpAutoTune(TestCase):
         test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
 
         def find_shape_dispatch(code_list):
-            pattern = re.compile(r"if\s+s\d+\s*[<>=]")
+            pattern = re.compile(r"if\s+s\d+\s*[<>=]|_selector\s*=\s*int\(.*\bs\d+")
             return [
                 line.strip()
                 for code in code_list
@@ -584,7 +595,6 @@ class TestCustomOpAutoTune(TestCase):
             print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
         self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179943")
     @skipIfXpu
     def test_benchmark_with_cudagraphs_uses_cuda_graph_benchmarking(self):
         """Test that benchmark_with_cudagraphs flag causes CUDA graph benchmarking to be used."""
@@ -895,7 +905,9 @@ class TestCustomOpAutoTune(TestCase):
         # Verify we got concrete integers during benchmarking (not symbolic)
         unique_shapes = sorted(set(shapes_seen))
         for shape in unique_shapes:
-            self.assertIsInstance(shape, int, f"Expected int, got {type(shape)}")
+            self.assertIsInstance(
+                shape, int, lambda msg: f"{msg}\nExpected int, got {type(shape)}"
+            )
 
         # Verify we hit all 3 ranges during autotuning
         ranges_hit = set()

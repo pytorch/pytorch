@@ -756,10 +756,14 @@ class LOBPCG:
     def update(self):
         """Set and update iteration variables."""
         if self.ivars["istep"] == 0:
-            X_norm = float(torch.norm(self.X))
+            X_norm = float(torch.linalg.vector_norm(self.X))
             iX_norm = X_norm**-1
-            A_norm = float(torch.norm(_utils.matmul(self.A, self.X))) * iX_norm
-            B_norm = float(torch.norm(_utils.matmul(self.B, self.X))) * iX_norm
+            A_norm = (
+                float(torch.linalg.vector_norm(_utils.matmul(self.A, self.X))) * iX_norm
+            )
+            B_norm = (
+                float(torch.linalg.vector_norm(_utils.matmul(self.B, self.X))) * iX_norm
+            )
             self.fvars["X_norm"] = X_norm
             self.fvars["A_norm"] = A_norm
             self.fvars["B_norm"] = B_norm
@@ -792,8 +796,9 @@ class LOBPCG:
         A_norm = self.fvars["A_norm"]
         B_norm = self.fvars["B_norm"]
         E, X, R = self.E, self.X, self.R
-        rerr = torch.norm(R, 2, (0,)) / (
-            torch.norm(X, 2, (0,)) * (A_norm + torch.abs(E[: X.shape[-1]]) * B_norm)
+        rerr = torch.linalg.vector_norm(R, ord=2, dim=(0,)) / (
+            torch.linalg.vector_norm(X, ord=2, dim=(0,))
+            * (A_norm + torch.abs(E[: X.shape[-1]]) * B_norm)
         )
         converged = rerr < tol
         count = 0
@@ -1109,7 +1114,7 @@ class LOBPCG:
         self.ivars.pop("ortho_i", 0)
         self.ivars.pop("ortho_j", 0)
 
-        BV_norm = torch.norm(mm_B(self.B, V))
+        BV_norm = torch.linalg.vector_norm(mm_B(self.B, V))
         BU = mm_B(self.B, U)
         VBU = mm(V.mT, BU)
         i = j = 0
@@ -1131,10 +1136,10 @@ class LOBPCG:
                     return U
                 BU = mm_B(self.B, U)
                 UBU = mm(U.mT, BU)
-                U_norm = torch.norm(U)
-                BU_norm = torch.norm(BU)
+                U_norm = torch.linalg.vector_norm(U)
+                BU_norm = torch.linalg.vector_norm(BU)
                 R = UBU - torch.eye(UBU.shape[-1], device=UBU.device, dtype=UBU.dtype)
-                R_norm = torch.norm(R)
+                R_norm = torch.linalg.vector_norm(R)
                 # https://github.com/pytorch/pytorch/issues/33810 workaround:
                 rerr = float(R_norm) * float(BU_norm * U_norm) ** -1
                 vkey = f"ortho_UBUmI_rerr[{i}, {j}]"
@@ -1142,8 +1147,8 @@ class LOBPCG:
                 if rerr < tau_ortho:
                     break
             VBU = mm(V.mT, BU)
-            VBU_norm = torch.norm(VBU)
-            U_norm = torch.norm(U)
+            VBU_norm = torch.linalg.vector_norm(VBU)
+            U_norm = torch.linalg.vector_norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1
             vkey = f"ortho_VBU_rerr[{i}]"
             self.fvars[vkey] = rerr

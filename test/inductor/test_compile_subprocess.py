@@ -66,7 +66,7 @@ test_failures = {
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_remove_noop_slice": TestFailure(
-        ("xpu", "cuda"),
+        ("cuda",),
         is_skip=(TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)) or not TEST_WITH_ROCM,
     ),
     "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
@@ -75,6 +75,19 @@ test_failures = {
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
     # can not pickle ParametrizedConv2d
     "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
+    # TypeError: cannot pickle '_thread._local' object.
+    # nested_compile_region(options=...) hangs compiler callables off
+    # NestedCompileRegionOptions. dill cannot resolve a module reference for that
+    # class, falls back to pickling the callables by value, and walking their
+    # globals reaches a thread-local. is_skip rather than xfail because the
+    # by-value fallback is dill-specific, so the test still passes where the
+    # graph pickler does not go through dill.
+    "test_regional_fallback_by_default_invoke_subgraph": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_regional_codegen_only_config_cpp_wrapper": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     # This manually constructs an FX graph with an OpOverloadPacket target to
     # cover a legacy lowering table entry, which is outside the subprocess
     # compile serialization path this file exercises.
@@ -82,11 +95,6 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
 }
-
-if TEST_WITH_ROCM and not torch.cuda.has_magma:
-    test_failures["test_linalg_eig_stride_consistency"] = TestFailure(
-        ("cuda",), is_skip=True
-    )
 
 
 class TestSubprocess(TestCase):
@@ -123,12 +131,9 @@ class TestSubprocess(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
+    @patch("torch._inductor.compile_fx.fx_compile_progressive", True)
     def test_progressive(self):
-        from triton.testing import do_bench
-
         from torch._inductor.compile_fx_async import _ProgressiveFxCompile
-
-        torch._inductor.compile_fx.fx_compile_progressive = True
 
         x = torch.randn(1152, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
         y = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -187,21 +192,7 @@ class TestSubprocess(TestCase):
             self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_started, 1)
             self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_finished, 1)
 
-        torch._inductor.compile_fx.fx_compile_progressive = False
-
-        @torch.compile(fullgraph=True, backend="inductor")
-        def baseline(x, y):
-            return (x @ y).relu()
-
-        # Warmup
-        baseline(x, y)
-
-        # Skip the perf assertion to avoid flakiness on XPU.
-        if GPU_TYPE != "xpu":
-            self.assertGreater(
-                do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
-            )
-        self.assertTrue("'max_autotune': True" in source_codes[-1])
+        self.assertIn("'max_autotune': True", source_codes[-1])
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):

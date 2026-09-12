@@ -124,13 +124,13 @@ namespace std {
 std::string to_string(const Dtype& dtype) {
   std::ostringstream oss;
   oss << dtype;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 std::string to_string(const ScalarType& type) {
   std::ostringstream oss;
   oss << type;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 } // namespace std

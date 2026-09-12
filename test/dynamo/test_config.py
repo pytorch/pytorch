@@ -1,15 +1,48 @@
 # Owner(s): ["module: dynamo"]
 
+import importlib.util
+import sys
+import tempfile
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.utils import disable_cache_limit
+from torch.testing._internal import (
+    fake_config_module_with_implications as implied_config,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 # NB: do NOT include this test class in test_dynamic_shapes.py
 
 
+@instantiate_parametrized_tests
 class ConfigTests(torch._dynamo.test_case.TestCase):
+    def _make_config_module(self, name: str):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        module_path = f"{tmpdir.name}/config_module.py"
+        with open(module_path, "w") as f:
+            f.write(
+                "import sys\n"
+                "from torch.utils._config_module import install_config_module\n"
+                "flag = False\n"
+                "install_config_module(sys.modules[__name__])\n"
+            )
+
+        spec = importlib.util.spec_from_file_location(name, module_path)
+        if spec is None or spec.loader is None:
+            raise AssertionError(f"Failed to create spec for {name}")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        self.addCleanup(lambda: sys.modules.pop(name, None))
+        spec.loader.exec_module(mod)
+        return mod
+
     @disable_cache_limit()
     def test_no_automatic_dynamic(self):
         def fn(a, b):
@@ -136,6 +169,70 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             raise AssertionError(
                 f"Expected newest_hash {newest_hash} to equal starting_hash {starting_hash}"
             )
+
+    def test_custom_config_module_patch_recompiles(self):
+        config = self._make_config_module(f"{__name__}.test_patch_config")
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            if config.flag:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), x + 2)
+        self.assertEqual(cnt.frame_count, 1)
+
+        with config.patch(flag=True):
+            self.assertEqual(fn(x), x + 1)
+            self.assertEqual(cnt.frame_count, 2)
+
+        self.assertEqual(fn(x), x + 2)
+        self.assertGreaterEqual(cnt.frame_count, 2)
+
+    def test_custom_config_module_setattr_updates_value(self):
+        config = self._make_config_module(f"{__name__}.test_setattr_config")
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            if config.flag:
+                x = x + 1
+            setattr(config, "flag", True)  # noqa: B010
+            if config.flag:
+                x = x + 2
+            return x
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), x + 2)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertTrue(config.flag)
+
+    @parametrize("nested", (False, True))
+    def test_config_implications_recompile(self, nested):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            flag = implied_config.nested.enabled if nested else implied_config.enabled
+            return (
+                x + 1 if flag else x + 2,
+                x + implied_config.unrelated + implied_config.downstream,
+            )
+
+        x = torch.randn(4)
+        with implied_config.patch(mode="default", enabled=False, unrelated=2):
+            self.assertEqual(fn(x), (x + 2, x + 2))
+            self.assertEqual(counter.frame_count, 1)
+            with implied_config.patch(mode="strict"):
+                self.assertEqual(fn(x), (x + 1, x + 3))
+                self.assertEqual(counter.frame_count, 2)
+                with implied_config.patch(mode="default"):
+                    self.assertEqual(fn(x), (x + 2, x + 2))
+                self.assertEqual(fn(x), (x + 1, x + 3))
+            self.assertEqual(fn(x), (x + 2, x + 2))
+            self.assertEqual(counter.frame_count, 2)
 
 
 if __name__ == "__main__":
