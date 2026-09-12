@@ -26,7 +26,6 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.while_loop import while_loop
-from torch._inductor import config as inductor_config
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
     FunctionalTensor,
@@ -13175,9 +13174,9 @@ class <lambda>(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("mutate_in", ["cond", "body"])
-    @parametrize("cpp_wrapper", [False, True])
+    @parametrize("dynamic", [True, False])
     def test_while_loop_carried_input_and_captured_input_mutation_raises(
-        self, device, mutate_in, cpp_wrapper
+        self, device, mutate_in, dynamic
     ):
         class M(torch.nn.Module):
             def forward(self, y):
@@ -13206,13 +13205,184 @@ class <lambda>(torch.nn.Module):
         y = torch.ones(4, requires_grad=False)
         with (
             torch.no_grad(),
-            inductor_config.patch(cpp_wrapper=cpp_wrapper),
             self.assertRaisesRegex(
                 torch._dynamo.exc.TorchRuntimeError,
                 f"{mutate_in}_fn might be modifying a carried input",
             ),
         ):
-            torch.compile(M(), backend="inductor", fullgraph=True)(y.to(device))
+            torch.compile(M(), backend="inductor", fullgraph=True, dynamic=dynamic)(
+                y.to(device)
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("mutate_in", ["cond", "body"])
+    def test_while_loop_functionalize_carried_input_mutation_raises(
+        self, device, mutate_in
+    ):
+        def f(x):
+            def cond_fn(i, acc):
+                if mutate_in == "cond":
+                    acc.add_(1)
+                return i < 2
+
+            def body_fn(i, acc):
+                if mutate_in == "body":
+                    acc.add_(1)
+                return i + 1, acc + 1
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), x.clone()),
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, f"{mutate_in}_fn might be modifying the input!"
+        ):
+            make_fx(torch.func.functionalize(f))(torch.ones(4, device=device))
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    @parametrize("mutate_in", ["cond", "body"])
+    @parametrize(
+        "view_kind", ["slice", "strided", "empty_capture", "empty_carry", "dtype"]
+    )
+    def test_while_loop_disjoint_captured_mutation(
+        self, device, dynamic, mutate_in, view_kind
+    ):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                mid = x.numel() // 2
+                carried, captured = x[:mid], x[mid:]
+                if view_kind == "strided":
+                    captured = captured[::2]
+                elif view_kind == "empty_capture":
+                    captured = x[1:1]
+                elif view_kind == "empty_carry":
+                    carried = x[mid + 1 : mid + 1]
+                elif view_kind == "dtype":
+                    captured = captured.view(torch.uint8)
+
+                def cond_fn(i, acc):
+                    if mutate_in == "cond":
+                        captured.add_(1)
+                    return i < 2
+
+                def body_fn(i, acc):
+                    if mutate_in == "body":
+                        captured.add_(1)
+                    return i + 1, acc + captured.sum()
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (torch.zeros((), dtype=torch.int64, device=x.device), carried),
+                )
+                return i, acc, x.clone()
+
+        self.check(M, (torch.ones(8),), device, dynamic)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("dynamic", [True, False])
+    @parametrize("mutate_in", ["cond", "body"])
+    @parametrize("view_kind", ["full", "partial", "dtype"])
+    def test_while_loop_overlapping_captured_mutation_raises(
+        self, device, dynamic, mutate_in, view_kind
+    ):
+        def f(x):
+            mid = x.numel() // 2
+            carried = x[:mid]
+            captured = carried.view_as(carried) if view_kind == "full" else x[mid - 1 :]
+            if view_kind == "dtype":
+                captured = captured.view(torch.uint8)
+
+            def cond_fn(i, acc):
+                if mutate_in == "cond":
+                    captured.add_(1)
+                return i < 2
+
+            def body_fn(i, acc):
+                if mutate_in == "body":
+                    captured.add_(1)
+                return i + 1, acc + 1
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), carried),
+            )
+
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.TorchRuntimeError,
+                f"{mutate_in}_fn mutates a tensor that aliases carried input 1; "
+                "clone it before mutating, or update the carry through the return value",
+            ),
+        ):
+            torch.compile(f, backend="eager", fullgraph=True, dynamic=dynamic)(
+                torch.ones(8, device=device)
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("mutate_in", ["cond", "body"])
+    @parametrize("empty_capture", [False, True])
+    @parametrize("nested", [False, True])
+    def test_while_loop_captured_view_escapes_span_raises(
+        self, device, mutate_in, empty_capture, nested
+    ):
+        def f(x):
+            carried = x[:4]
+            captured = x[4:4] if empty_capture else x[4:]
+
+            def mutate():
+                captured.as_strided((4,), (1,), 0).add_(1)
+
+            def mutate_captured():
+                if nested:
+
+                    def cond_fn(i):
+                        return i < 1
+
+                    def body_fn(i):
+                        mutate()
+                        return (i + 1,)
+
+                    while_loop(
+                        cond_fn,
+                        body_fn,
+                        (torch.zeros((), dtype=torch.int64, device=x.device),),
+                    )
+                else:
+                    mutate()
+
+            def cond_fn(i, acc):
+                if mutate_in == "cond":
+                    mutate_captured()
+                return i < 2
+
+            def body_fn(i, acc):
+                if mutate_in == "body":
+                    mutate_captured()
+                return i + 1, acc + 1
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), carried),
+            )
+
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.TorchRuntimeError,
+                f"{mutate_in}_fn mutates a tensor that aliases carried input 1",
+            ),
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(
+                torch.ones(8, device=device)
+            )
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipCUDAIf(not SM70OrLater, "triton")
@@ -13237,7 +13407,7 @@ class <lambda>(torch.nn.Module):
             torch.no_grad(),
             self.assertRaisesRegex(
                 torch._dynamo.exc.TorchRuntimeError,
-                "cond_fn might be modifying a carried input",
+                "cond_fn mutates a tensor that aliases carried input 1",
             ),
         ):
             torch.compile(f, backend="inductor", fullgraph=True)(

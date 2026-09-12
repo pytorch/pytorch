@@ -810,12 +810,64 @@ def _call_while_loop(
     def check_carried_input_mutation(
         fn_name: str, graph: torch.fx.Graph
     ) -> set[StorageWeakRef]:
+        from torch._prims_common import compute_required_storage_length
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
         mutated_inputs = set(getattr(graph, "_dynamo_mutated_input_indices", ()))
         mutated_storages = subgraph_mutated_input_storages(graph, mutated_inputs)
-        if any(
-            idx < num_carried_inputs for idx in mutated_inputs
-        ) or parent_mutated_input_indices(operands_seq, mutated_storages):
+        if any(idx < num_carried_inputs for idx in mutated_inputs):
             raise TorchRuntimeError(f"{fn_name} might be modifying a carried input!")
+        aliased_carries = parent_mutated_input_indices(operands_seq, mutated_storages)
+        if not aliased_carries:
+            return mutated_storages
+
+        def byte_range(tensor):
+            start = tensor.storage_offset() * tensor.element_size()
+            end = compute_required_storage_length(
+                tensor.shape, tensor.stride(), tensor.storage_offset()
+            )
+            return start, end * tensor.element_size()
+
+        graphs = [graph]
+        for node in graph.find_nodes(op="get_attr"):
+            subgraph = tx.output.nn_modules.get(node.target)
+            if isinstance(subgraph, GraphModule):
+                graphs.extend(
+                    module.graph
+                    for module in subgraph.modules()
+                    if isinstance(module, GraphModule)
+                )
+        # Views can escape a placeholder's span, including inside nested HOPs.
+        # Conservatively include read-only aliases of mutated storage as well.
+        aliases = [
+            tensor
+            for subgraph in graphs
+            for node in subgraph.nodes
+            for tensor in pytree.tree_leaves(
+                node.meta.get("example_value", node.meta.get("val"))
+            )
+            if isinstance(tensor, torch.Tensor)
+        ]
+        for carry_idx in aliased_carries:
+            carried = operands_seq[carry_idx].as_proxy().node.meta["example_value"]
+            if guard_or_false(carried.numel() == 0):
+                continue
+            carry_start, carry_end = byte_range(carried)
+            for mutated in aliases:
+                if not get_tensor_storages(carried) & get_tensor_storages(mutated):
+                    continue
+                if guard_or_false(mutated.numel() == 0):
+                    continue
+                start, end = byte_range(mutated)
+                # Bounding spans conservatively include gaps in strided views.
+                if guard_or_false(end <= carry_start) or guard_or_false(
+                    carry_end <= start
+                ):
+                    continue
+                raise TorchRuntimeError(
+                    f"{fn_name} mutates a tensor that aliases carried input {carry_idx}; "
+                    "clone it before mutating, or update the carry through the return value."
+                )
         return mutated_storages
 
     with discard_graph_changes(tx):
