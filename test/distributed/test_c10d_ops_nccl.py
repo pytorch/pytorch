@@ -555,7 +555,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         for idx in range(num_gpus):
             gpu_idx = local_device_ids[idx]
             output_ts.append([])
-            for rank in range(self.world_size):
+            for _ in range(self.world_size):
                 output_ts[idx].append(torch.tensor([-1]).cuda(gpu_idx))
 
         expected = [[torch.tensor([rank]) for rank in range(self.world_size)]]

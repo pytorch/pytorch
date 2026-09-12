@@ -2641,7 +2641,7 @@ class TestOptimRenewed(TestCase):
             # Simulate bf16 storage: after each ref step, quantize states to
             # bf16 and back so the reference matches the mixed-precision kernel.
             tracker = TensorTracker()
-            for i in range(7):
+            for _ in range(7):
                 ref_optim.step()
                 bf16_optim.step()
                 for p in params:
@@ -2659,7 +2659,7 @@ class TestOptimRenewed(TestCase):
                         tracker.add(max_exp_avg_sq_bf16)
                         d["max_exp_avg_sq"] = max_exp_avg_sq_bf16.to(torch.float32)
 
-                for e, pc in enumerate(params_c):
+                for _e, pc in enumerate(params_c):
                     tracker.pop_check_set(pc, self)
                     tracker.pop_check_set(pc.grad, self)
 
