@@ -1,6 +1,5 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>

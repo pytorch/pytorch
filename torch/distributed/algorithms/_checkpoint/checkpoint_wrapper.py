@@ -94,7 +94,7 @@ class ActivationWrapper(torch.nn.Module, ABC):
         *args: Any,
     ) -> None:
         """
-        ``_pre_state_dict_hook` is called before ``self._load_from_state_dict()`` is called.
+        ``_pre_state_dict_hook`` is called before ``self._load_from_state_dict()`` is called.
 
         For ``checkpoint_wrapper``, it will add back the module
         prefix so that non-checkpointed modules can be loaded into
@@ -217,7 +217,7 @@ def checkpoint_wrapper(
             implementation, and is ignored if a custom ``checkpoint_fn`` is
             specified. Note that for implementations using reentrant checkpoint
             from ``torch.utils.checkpoint``, keyword arguments will only be
-            supported if ``checkpoint_impl`` is passed as ``CheckpointImpl.REENTRANT`.
+            supported if ``checkpoint_impl`` is passed as ``CheckpointImpl.REENTRANT``.
         checkpoint_fn (Optional[Callable]):
             Functional checkpoint implementation to use. If this is specified,
             it will be used over the default ``torch.utils.checkpoint.checkpoint``

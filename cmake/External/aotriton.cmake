@@ -10,6 +10,7 @@ if(NOT __AOTRITON_INCLUDED)
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
   set(__AOTRITON_VER "0.13b")
+  set(__AOTRITON_BUILD_VARIANTS "")
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
@@ -57,6 +58,31 @@ if(NOT __AOTRITON_INCLUDED)
      "6a465dbc03148bba8a2d78c4c2a3cb83155eca00f4f7f749e676402d7660968c" # amd-gfx120x
      "4aaf71d6e510549d593757e5f88598df1e4a29cbcd91f70750ee8a76f65c027f" # amd-gfx1250
      )
+  if(USE_ASAN)
+    set(__AOTRITON_BUILD_VARIANTS "+asan")
+    set(__AOTRITON_MANYLINUX_LIST
+        "manylinux_2_28"  # rocm7.14
+        "manylinux_2_28"  # rocm7.15
+        )
+    # ASAN only supports rocm7.14
+    set(__AOTRITON_ROCM_LIST
+        "rocm7.14"
+        "rocm7.15"
+        )
+    set(__AOTRITON_SHA256_LIST
+        "3f5cfba6c42261a3e3b44022c66083ec859fcc98296faa4646b65373fead3448"  # rocm7.14+asan
+        "7a7928d881d6341fc0b8ffb3ad7077f62438a8412ec57f97fb4b4dfbc73b3e64"  # rocm7.15+asan
+        )
+    # ASAN only supports gfx942+gfx950
+    set(__AOTRITON_IMAGE_LIST
+        "amd-gfx942"
+        "amd-gfx950"
+       )
+    set(__AOTRITON_IMAGE_SHA256_LIST
+       "563d2e4c41b367725c7b8e12fdfd04df4d1b1ff15947e011e2452818f3a43d26" # amd-gfx942+asan
+       "b428dfe6eef7a1dcfac54ac2408dd136dbd622016331dc863e87ce9ea84c8054" # amd-gfx950+asan
+       )
+  endif()
   set(__AOTRITON_BASE_URL "$ENV{PYTORCH_AOTRITON_BASE_URL}")
   if(NOT __AOTRITON_BASE_URL)
     set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")  # @lint-ignore
@@ -179,7 +205,9 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_SHA256_LIST ${index} __AOTRITON_SHA256)
 
     string(CONCAT __AOTRITON_FILE "aotriton-"
-                                  "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
+                                  "${__AOTRITON_VER}"
+                                  "${__AOTRITON_BUILD_VARIANTS}-"
+                                  "${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL
@@ -205,7 +233,7 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_IMAGE_SHA256_LIST ${index} __AOTRITON_SHA256)
 
     string(CONCAT __AOTRITON_FILE
-           "aotriton-${__AOTRITON_VER}-images-"
+           "aotriton-${__AOTRITON_VER}${__AOTRITON_BUILD_VARIANTS}-images-"
            "${image}.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL
            "${__AOTRITON_BASE_URL}"

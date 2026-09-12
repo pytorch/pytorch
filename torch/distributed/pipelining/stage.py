@@ -13,6 +13,7 @@ import torch.distributed as dist
 import torch.distributed.config as dist_config
 import torch.fx as fx
 import torch.nn as nn
+from torch._logging import warning_once
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
@@ -140,6 +141,18 @@ class _RecvInfo:
 _PP_DIRECTION_GROUP_CACHE: "weakref.WeakKeyDictionary[dist.ProcessGroup, tuple[dist.ProcessGroup, dist.ProcessGroup]]" = weakref.WeakKeyDictionary()
 
 
+def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
+    if dist.get_backend(group) not in {"nccl", "nccl2"}:
+        return
+    warning_once(
+        logger,
+        "Pipeline parallelism is using an eager NCCL communicator. Consider "
+        'creating its process group with backend="nccl-lazy" so peer '
+        "communicators are initialized lazily and traffic to different peers "
+        "can overlap.",
+    )
+
+
 def _build_p2p_direction_groups(
     group: dist.ProcessGroup | None,
 ) -> tuple[dist.ProcessGroup, dist.ProcessGroup]:
@@ -176,8 +189,11 @@ def _build_p2p_direction_groups(
     upstream = dist.split_group(
         parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_upstream"
     )
-    # All parent ranks are members of the single split, so neither is None.
-    assert downstream is not None and upstream is not None  # noqa: S101
+    # All parent ranks are members of the single split.
+    if not isinstance(downstream, dist.ProcessGroup):
+        raise AssertionError(f"expected dist.ProcessGroup, got {type(downstream)}")
+    if not isinstance(upstream, dist.ProcessGroup):
+        raise AssertionError(f"expected dist.ProcessGroup, got {type(upstream)}")
     logger.info("Pipeline P2P: using per-direction (downstream/upstream) communicators")
     _PP_DIRECTION_GROUP_CACHE[parent] = (downstream, upstream)
     return downstream, upstream
@@ -223,6 +239,8 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
+
+        _warn_if_eager_nccl(group)
 
         # Downstream (data flowing r -> r+1: forward activations) and upstream
         # (r -> r-1: backward gradients) P2P communicators. Auto-enabled when
@@ -443,10 +461,12 @@ class _PipelineStageBase(ABC):
                 continue
             # Skip entries with None buffer (None gradients)
             if info.buffer is None:
-                assert info.tensor_meta is None  # noqa: S101
+                if info.tensor_meta is not None:
+                    raise AssertionError("expected info.tensor_meta to be None")
                 continue
             # At this point, source and buffer are guaranteed non-None
-            assert info.source is not None  # noqa: S101
+            if info.source is None:
+                raise AssertionError("expected info.source to be not None")
             peer_global_rank = self._resolve_peer_global_rank(info.source)
             ops.append(dist.P2POp(dist.irecv, info.buffer, peer_global_rank, group))
 
@@ -1126,7 +1146,8 @@ class _PipelineStageBase(ABC):
         # Note: grads_input may contain gradients for both args and kwargs (from fwd_cache),
         # Kwargs are local to each stage and don't need gradient transmission.
         # Validate backward output (input gradients) for DTensor metadata
-        assert self._stage_meta.inputs is not None  # noqa: S101
+        if self._stage_meta.inputs is None:
+            raise AssertionError("expected self._stage_meta.inputs to be not None")
         num_fwd_args = len(self._stage_meta.inputs)
         if self._runtime_validate and not self.is_first:
             self._validate_stage_tensors(
@@ -1869,7 +1890,8 @@ class PipelineStage(_PipelineStageBase):
         if self.is_first:
             acc = my_vote_t
         elif self._is_same_rank(self.stage_index - 1):
-            assert received_acc is not None  # noqa: S101
+            if received_acc is None:
+                raise AssertionError("expected received_acc to be not None")
             acc = received_acc * my_vote_t
         else:
             peer_global = self._resolve_peer_global_rank(self.stage_index - 1)
@@ -1900,7 +1922,8 @@ class PipelineStage(_PipelineStageBase):
             The global vote result tensor for this stage.
         """
         if self.is_last or self._is_same_rank(self.stage_index + 1):
-            assert received_result is not None  # noqa: S101
+            if received_result is None:
+                raise AssertionError("expected received_result to be not None")
             result = received_result
         else:
             peer_global = self._resolve_peer_global_rank(self.stage_index + 1)
@@ -2023,7 +2046,8 @@ class PipelineStage(_PipelineStageBase):
                     f"got {type(args).__name__}."
                 )
             tensor_args = validate_and_normalize_to_tuple(args)
-            assert tensor_args is not None  # noqa: S101
+            if tensor_args is None:
+                raise AssertionError("expected tensor_args to be not None")
             self._stage_meta.inputs = extract_tensor_metas(tensor_args)
             inference_args = tuple(self._to_tensor(a) for a in tensor_args)
         elif self._is_same_rank(self.stage_index - 1):

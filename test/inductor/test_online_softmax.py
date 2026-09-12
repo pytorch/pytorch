@@ -179,6 +179,23 @@ class TestOnlineSoftmax(TestCase):
                 expected_num_loop = 1
             self.assertEqual(code.count("for r0_offset in"), expected_num_loop)
 
+    @inductor_config.patch(strict_signed_zero=True)
+    def test_prepare_softmax_signed_zero(self):
+        def reduce_max(x):
+            return x.amax(dim=-1, keepdim=True)
+
+        x = torch.zeros(2, 2048, device=GPU_TYPE)
+        x[0, 1::2] = -0.0
+        x[1, ::2] = -0.0
+
+        ref = _prepare_softmax(x, -1)
+        ref_max = torch.compile(reduce_max, fullgraph=True)(x)
+        act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
+
+        self.assertIn("online_softmax_reduce", code)
+        self.assertEqual(ref_max.view(torch.int32), act[0].view(torch.int32))
+        self.assertEqual(ref[1], act[1])
+
     def test_prepare_softmax_after_partitioning(self):
         from torch._dynamo.backends.common import aot_autograd
         from torch._functorch.aot_autograd import make_boxed_func
@@ -284,7 +301,8 @@ class TestOnlineSoftmax(TestCase):
             current["saved_activation_bytes"],
         )
 
-    def test_split_reduction(self):
+    @parametrize("strict_signed_zero", [False, True])
+    def test_split_reduction(self, strict_signed_zero):
         """
         Split online_softmax_reduce into partial max/sum tuples and combine
         the partials with another online_softmax_reduce.
@@ -292,7 +310,8 @@ class TestOnlineSoftmax(TestCase):
         # tensor shape to trigger split reduction
         x = torch.randn(1, 2**20 + 13, dtype=torch.bfloat16, device=GPU_TYPE)
         ref = torch.softmax(x, dim=-1)
-        act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
+        with inductor_config.patch(strict_signed_zero=strict_signed_zero):
+            act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
         self.assertTrue(torch.allclose(ref, act, atol=1e-3, rtol=1e-3))
         self.assertTrue(code.count("def triton") >= 2)
         self.assertTrue("online_softmax_reduce" in code)
@@ -462,6 +481,48 @@ class TestOnlineSoftmax(TestCase):
 
         opt_f = torch.compile(f)
         torch.testing.assert_close(f(x, y), opt_f(x, y), atol=1e-3, rtol=1e-3)
+
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    def test_nan_propagation(self, dtype):
+        """
+        The softmax-internal max uses fmax (non-NaN-propagating) for
+        performance, but NaN must still propagate to the final output
+        because the original input flows through exp(x - xmax).
+        Place NaN at the beginning, middle, and end of separate rows.
+
+        This is Triton-only because fmax is only implemented in the
+        Triton persistent reduction path.
+        """
+        if not HAS_TRITON:
+            self.skipTest("requires triton")
+
+        M, N = 4, 1024
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=dtype)
+
+        x[0, 0] = float("nan")
+        x[1, N // 2] = float("nan")
+        x[2, N - 1] = float("nan")
+        # row 3 has no NaN
+
+        ref = torch.softmax(x, dim=-1)
+        act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
+
+        self.assertIn("fmax2", code)
+
+        # Rows with NaN input must produce all-NaN output
+        for row in range(3):
+            self.assertTrue(
+                ref[row].isnan().all(),
+                f"eager row {row} should be all NaN",
+            )
+            self.assertTrue(
+                act[row].isnan().all(),
+                f"compiled row {row} should be all NaN",
+            )
+
+        # Row without NaN must match exactly
+        self.assertFalse(act[3].isnan().any())
+        torch.testing.assert_close(ref[3], act[3])
 
 
 instantiate_parametrized_tests(TestOnlineSoftmax)

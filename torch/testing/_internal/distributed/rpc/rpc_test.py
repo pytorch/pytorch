@@ -2640,7 +2640,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             with self.assertRaisesRegex(ValueError, expected_err):
                 fut.wait()
             # This barrier prevents a race condition where the main thread exits
-            # context manager before the remote function has ran.
+            # context manager before the remote function has run.
             dist.barrier()
 
         # Validate that trainers log errors when running functions.

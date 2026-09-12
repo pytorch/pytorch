@@ -3,6 +3,10 @@ name: distributed-triage
 description: Sub-triages issues in the oncall:distributed queue by assigning distributed module labels, routing to sub-oncalls, and marking triaged. Use when an issue has been routed to oncall:distributed and needs second-level triage.
 hooks:
   PreToolUse:
+    - matcher: "mcp__github__issue_write|mcp__github__update_issue|mcp__github__add_issue_comment|mcp__github__transfer_issue"
+      hooks:
+        - type: command
+          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/triaging-issues/scripts/validate_issue_target.py"
     - matcher: "mcp__github__issue_write|mcp__github__update_issue"
       hooks:
         - type: command
@@ -41,8 +45,9 @@ Use these GitHub MCP tools for triage:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__github__issue_read` | Get issue details, comments, and existing labels |
-| `mcp__github__issue_write` | Apply labels or close issues |
+| `mcp__github__get_issue` | Get issue details and existing labels |
+| `mcp__github__get_issue_comments` | Get existing issue comments |
+| `mcp__github__update_issue` | Apply labels or close issues |
 | `mcp__github__add_issue_comment` | Add comment (only for reproduction requests or mislabel flags) |
 | `mcp__github__search_issues` | Find similar issues for context |
 
@@ -51,7 +56,7 @@ Use these GitHub MCP tools for triage:
 ## Comment Deduplication
 
 Before adding any issue comment:
-1. Read the existing comments with `mcp__github__issue_read`.
+1. Read the existing comments with `mcp__github__get_issue_comments`.
 2. Check whether the triage bot has already posted the same template or a substantially equivalent request/explanation.
 3. If a duplicate exists, do not add another comment. Continue with any non-comment actions that are still needed, such as labels.
 

@@ -140,6 +140,10 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
+from ._aot_autograd.to_standalone_python import (  # noqa: F401
+    compile_to_python,
+    load_from_python,
+)
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
     call_func_at_runtime_with_args,
@@ -450,7 +454,7 @@ AOT_COUNTER = itertools.count()
 # However, Inductor does not want the concept of tokens in the final generated
 # code's input and output. Since changing the graph signature inside of inductor
 # is difficult, after generating the forward graph, we will run a pass to
-# remove the tokens from the inputgenerate the following graph for Inductor, where
+# remove the tokens from the input and generate the following graph for Inductor, where
 # the tokens are created and sunk within the graph, rather than as inputs and
 # outputs:
 #
@@ -584,7 +588,11 @@ def create_aot_state(
                     "aot_collect_metadata", log_pt2_compile_event=True
                 )
 
-            with dynamo_timed_ctx, ctx:
+            with (
+                dynamo_timed_ctx,
+                ctx,
+                torch._dynamo.eval_frame._use_eager_on_nested_compile(),
+            ):
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     flat_args_descs=flat_args_descs,

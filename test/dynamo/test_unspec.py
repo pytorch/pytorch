@@ -2,19 +2,33 @@
 import contextlib
 import math
 import random
+import subprocess
+import sys
+import time
 import unittest
+import warnings
+from unittest import mock
 
 import numpy as np
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch._functorch.config as functorch_config
+import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
+from torch._dynamo.variables.functions import _TIME_FUNCTION_NAMES
+from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
+    skipIfWindows,
+)
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -24,9 +38,37 @@ from torch.testing._internal.logging_utils import logs_to_string
 # you assume static by default, put it in a regular test file and
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
+_EXPECTED_TIME_FUNCTION_NAMES = (
+    "clock_gettime",
+    "clock_gettime_ns",
+    "monotonic",
+    "monotonic_ns",
+    "perf_counter",
+    "perf_counter_ns",
+    "process_time",
+    "process_time_ns",
+    "thread_time",
+    "thread_time_ns",
+    "time",
+    "time_ns",
+)
+
+_TIME_FUNCTION_TEST_CASES = tuple(
+    (
+        name,
+        (time.CLOCK_MONOTONIC,) if name.startswith("clock_gettime") else (),
+    )
+    for name in _EXPECTED_TIME_FUNCTION_NAMES
+    if hasattr(time, name)
+)
+
 
 @torch._dynamo.config.patch(assume_static_by_default=False)
+@instantiate_parametrized_tests
 class UnspecTests(torch._dynamo.test_case.TestCase):
+    def test_time_function_names(self):
+        self.assertEqual(_TIME_FUNCTION_NAMES, _EXPECTED_TIME_FUNCTION_NAMES)
+
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
@@ -175,6 +217,127 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res.append(fn(torch.ones(2)))
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
+
+    @parametrize("clock_name,clock_args", _TIME_FUNCTION_TEST_CASES)
+    def test_time_function_unused_no_warning(self, clock_name, clock_args):
+        torch._dynamo.reset()
+        clock_fn = getattr(time, clock_name)
+
+        def fn():
+            clock_fn(*clock_args)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            self.assertIsNone(opt_fn())
+
+        self.assertFalse(
+            any(
+                f"time.{clock_name}" in str(warning.message)
+                for warning in caught_warnings
+            )
+        )
+
+    def test_time_functions_preserve_call_order(self):
+        # Guard against hoisting clock reads into pregraph runtime inputs.
+        graph_times = []
+
+        def backend(gm, _):
+            def run(*args):
+                graph_times.append(time.perf_counter())
+                return gm(*args)
+
+            return run
+
+        def fn(x):
+            before = time.perf_counter()
+            y = x + 1
+            after = time.perf_counter()
+            return y, before, after
+
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.zeros(())
+
+        opt_fn(x)
+        graph_times.clear()
+        result, before, after = opt_fn(x)
+
+        self.assertEqual(result, x + 1)
+        self.assertEqual(len(graph_times), 1)
+        self.assertLessEqual(before, graph_times[0])
+        self.assertLessEqual(graph_times[0], after)
+
+    def test_time_time_does_not_bypass_disable(self):
+        # A disabled monkey patch should retain the usual disable graph break.
+        @torch.compiler.disable
+        def disabled_time():
+            return 0.0
+
+        with mock.patch.object(time, "time", disabled_time):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Skip calling `torch.compiler.disable\\(\\)`d function",
+            ):
+                torch.compile(lambda: time.time(), backend="eager", fullgraph=True)()
+
+    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode")
+    def test_time_function_patch_before_dynamo_import(self):
+        script = r"""
+import importlib
+import os
+import sys
+import time
+
+import numpy
+import torch
+
+if "torch._dynamo.variables.functions" in sys.modules:
+    raise AssertionError("Dynamo functions imported before the time patch")
+
+original_process_time = time.process_time
+original_perf_counter = time.perf_counter
+
+
+class UnhashableClock:
+    __hash__ = None
+
+    def __call__(self):
+        return original_perf_counter()
+
+
+time.process_time = os.getpid
+time.perf_counter = UnhashableClock()
+try:
+    importlib.import_module("torch._dynamo.variables.functions")
+finally:
+    time.perf_counter = original_perf_counter
+
+try:
+    torch.compile(lambda: time.process_time(), backend="eager", fullgraph=True)()
+except torch._dynamo.exc.Unsupported as exc:
+    if "Attempted to call function marked as skipped" not in str(exc):
+        raise
+else:
+    raise AssertionError("The monkey-patched time.process_time was treated as a clock")
+
+time.process_time = original_process_time
+torch._dynamo.reset()
+try:
+    torch.compile(lambda: time.process_time(), backend="eager", fullgraph=True)()
+except torch._dynamo.exc.Unsupported as exc:
+    if "Call to a time function" not in str(exc):
+        raise
+else:
+    raise AssertionError("The restored time.process_time was not treated as a clock")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
 
     def test_random_call_with_while_loop(self):
         def fn(x):
@@ -867,6 +1030,53 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn_opt(x, y2), fn(x, y2))
             self.assertEqual(fn_opt(x, y3), fn(x, y3))
             self.assertEqual(cnt.frame_count, 1)
+
+    # assume_static_by_default=False is needed for frame_count == 1 even when
+    # this test is rerun without the class-level patch (see
+    # test_nested_graph_breaks_wrapped.py); otherwise the first call compiles a
+    # static graph and the second recompiles dynamically.
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
+    def test_unspecialized_float_clamp_tensorify(self):
+        # https://github.com/pytorch/pytorch/issues/194976
+        def fn(x, limit):
+            gate, up = torch.chunk(x, 2, dim=-1)
+            gate = F.silu(gate).clamp(max=limit)
+            up = up.clamp(min=-limit, max=limit)
+            return gate * up
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, backend=cnt)
+        for limit in [0.5, 1.0, 0.25]:
+            x = torch.full((1, 4), 0.75, requires_grad=True)
+            x_ref = x.detach().clone().requires_grad_(True)
+            actual = fn_opt(x, limit)
+            expected = fn(x_ref, limit)
+            self.assertEqual(actual, expected)
+            actual.sum().backward()
+            expected.sum().backward()
+            self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("force_disable_caches", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_unspecialized_float_untensorifiable_use_specializes(self):
+        # https://github.com/pytorch/pytorch/issues/194976
+        # torch.full's fill value cannot be tensorified while x * scale can.
+        # The surviving use must force Dynamo to specialize and guard on the
+        # float; specializing only in the joint graph poisons the
+        # AOTAutogradCache with a baked-in value that is silently reused for
+        # other values of scale.
+        def fn(x, scale):
+            return torch.full((3,), scale, device=x.device) + x * scale
+
+        fn_opt = torch.compile(fn, backend="inductor")
+        with fresh_cache():
+            x = torch.randn(3)
+            for scale in [0.5, 0.75, 1.0]:
+                self.assertEqual(fn_opt(x, scale), fn(x, scale))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tensorfiy_python_scalars_1(self):

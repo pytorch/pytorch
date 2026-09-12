@@ -57,11 +57,10 @@ def isvar(v: Var) -> Literal[True]:
     return True
 
 
-isvar
-
-
 @dispatch(object)  # type: ignore[no-redef]
-def isvar(o: object) -> bool:
+# The noqa suppresses F811 for this multipledispatch overload redefinition
+# (it replaces the bare-name-statement hack that previously silenced it).
+def isvar(o: object) -> bool:  # noqa: F811
     return bool(_glv and hashable(o) and o in _glv)
 
 

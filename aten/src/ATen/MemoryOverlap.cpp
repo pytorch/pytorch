@@ -59,6 +59,9 @@ MemOverlapStatus get_overlap_status(const TensorBase& a, const TensorBase& b) {
 
 MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   if (a == b) return MemOverlapStatus::Full;
+  if (a->has_symbolic_sizes_strides() || b->has_symbolic_sizes_strides()) {
+    return MemOverlapStatus::TooHard;
+  }
   if (a->numel() == 0 || b->numel() == 0) {
     return MemOverlapStatus::No;
   }

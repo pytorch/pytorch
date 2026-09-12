@@ -359,12 +359,12 @@ def script_method(fn):
         warnings.warn(
             "`torch.jit.script_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return fn
@@ -791,7 +791,7 @@ if _enabled:
             warnings.warn(
                 "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
                 https://docs.pytorch.org/executorch/stable/getting-started.html",
-                DeprecationWarning,
+                FutureWarning,
                 stacklevel=2,
             )
             return self._c._save_for_mobile(*args, **kwargs)
@@ -804,7 +804,7 @@ if _enabled:
             warnings.warn(
                 "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
                 https://docs.pytorch.org/executorch/stable/getting-started.html",
-                DeprecationWarning,
+                FutureWarning,
                 stacklevel=2,
             )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
@@ -1485,12 +1485,12 @@ def script(
         warnings.warn(
             "`torch.jit.script` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return obj
@@ -1642,7 +1642,7 @@ def interface(obj: _T) -> _T:
     """
     warnings.warn(
         "`torch.jit.interface` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+        FutureWarning,
     )
     if not inspect.isclass(obj):
         raise RuntimeError("interface must be applied to a class")

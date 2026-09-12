@@ -7,7 +7,7 @@ from torch.jit._builtins import _find_builtin
 
 
 # this file is for generating documentation using sphinx autodoc
-# > help(torch.jit.supported_ops) will also give a nice listed of the
+# > help(torch.jit.supported_ops) will also give a nice list of the
 # supported ops programmatically
 
 

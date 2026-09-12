@@ -2,6 +2,7 @@
 # Owner(s): ["module: typing"]
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     load_tests,
     run_tests,
     set_default_dtype,
@@ -25,6 +26,8 @@ if TEST_NUMPY:
 
 
 class TestDTypeInfo(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_invalid_input(self):
         for dtype in [
             torch.float16,

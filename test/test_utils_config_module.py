@@ -87,6 +87,20 @@ class TestConfigModule(TestCase):
         ):
             config.does_not_exist = 0
 
+    def test_hide_not_added_to_instance_dict_on_write(self):
+        # A normal config write must not materialize 'hide' in the _ConfigEntry instance
+        # __dict__; it should stay on the class default. An unconditional hide=False write
+        # on every setattr would add it (pure overhead), so __setattr__ clears hide only
+        # when it is actually set.
+        entry = config._config["e_bool"]
+        entry.__dict__.pop("hide", None)  # reset to the class default
+        config.e_bool = False
+        self.assertNotIn("hide", entry.__dict__)
+        # When hide *is* set (the __delattr__ / mock.patch path), a write still clears it.
+        entry.hide = True
+        config.e_bool = True
+        self.assertFalse(entry.hide)
+
     def test_none_override_semantics(self):
         config.e_bool = None
         self.assertIsNone(config.e_bool)

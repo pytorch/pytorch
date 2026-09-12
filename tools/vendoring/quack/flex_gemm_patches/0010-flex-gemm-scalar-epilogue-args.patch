@@ -1,0 +1,202 @@
+diff --git a/epi_ops.py b/epi_ops.py
+index 895aeec9d7b..de134691751 100644
+--- a/epi_ops.py
++++ b/epi_ops.py
+@@ -557,6 +557,39 @@ class ColVecTupleLoad(VecTupleLoad):
+     vec_op_cls = CapturedColVecLoad
+
+
++class CapturedScalarLoad(EpiOp):
++    """Loads a captured (1,)-shaped tensor's element once per tile. No smem."""
++
++    def param_fields(self):
++        return [(self.name, object, None)]
++
++    def to_params(self, gemm, args):
++        return {self.name: getattr(args, self.name)}
++
++    @cute.jit
++    def begin(self, gemm, param, smem_tensor, ctx):
++        return param.load()
++
++
++class ScalarTupleLoad(EpiOp):
++    """Loads a tuple of captured scalar tensors once per tile. No smem."""
++
++    def param_fields(self):
++        return [(self.name, object, None)]
++
++    def to_params(self, gemm, args):
++        return {self.name: getattr(args, self.name)}
++
++    @cute.jit
++    def begin(self, gemm, param, smem_tensor, ctx):
++        values = []
++        for i, tensor in enumerate(param):
++            values.append(
++                CapturedScalarLoad(f"{self.name}{i}").begin(gemm, tensor, None, ctx)
++            )
++        return tuple(values)
++
++
+ class TileStore(EpiOp):
+     """Tile-sized output tensor stored via TMA (e.g. postact).
+
+diff --git a/gemm_act.py b/gemm_act.py
+index 5030cf895fa..bf143521b42 100644
+--- a/gemm_act.py
++++ b/gemm_act.py
+@@ -26,6 +26,7 @@ from .epi_ops import (
+     RowVecLoad,
+     RowVecTupleLoad,
+     ColVecTupleLoad,
++    ScalarTupleLoad,
+     EpiSmemBytes,
+     GroupedLocalReduce,
+     Scalar,
+@@ -126,6 +127,7 @@ class GemmActMixin(ComposableEpiMixin):
+         RowVecTupleLoad("mTensorEpilogueRowVecBroadcasts"),
+         ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
+         TileTupleLoad("mTensorEpilogueTiles"),
++        ScalarTupleLoad("mTensorEpilogueScalars"),
+         GroupedLocalReduce("mLocalReduce"),
+         TileStore("mAuxOut"),
+     )
+@@ -160,6 +162,7 @@ class GemmActMixin(ComposableEpiMixin):
+         mTensorEpilogueRowVecBroadcasts: Optional[tuple[cute.Tensor, ...]] = None
+         mTensorEpilogueColVecBroadcasts: Optional[tuple[cute.Tensor, ...]] = None
+         mTensorEpilogueTiles: Optional[tuple[cute.Tensor, ...]] = None
++        mTensorEpilogueScalars: Optional[tuple[cute.Tensor, ...]] = None
+         mLocalReduce: Optional[cute.Tensor] = None
+         rounding_mode: cutlass.Constexpr[int] = RoundingMode.RN
+         sr_seed: Optional[Int32 | cute.Tensor] = None
+@@ -391,24 +394,33 @@ class GemmActMixin(ComposableEpiMixin):
+                 tDrRowVecs = epi_loop_tensors.get("mTensorEpilogueRowVecBroadcasts")
+                 tDrColVecs = epi_loop_tensors.get("mTensorEpilogueColVecBroadcasts")
+                 tRsTileAuxes = epi_loop_tensors.get("mTensorEpilogueTiles")
++                scalars = epi_loop_tensors.get("mTensorEpilogueScalars")
+                 row_arg_index = 0
+                 col_arg_index = 0
+                 tile_arg_index = 0
++                scalar_arg_index = 0
+                 for arg_kind in params.tensor_epilogue_arg_kinds:
+-                    if const_expr(arg_kind == 1):
+-                        epilogue_aux = tRsTileAuxes[tile_arg_index]
+-                        tile_arg_index += 1
+-                    elif const_expr(arg_kind == 2):
+-                        epilogue_aux = tDrRowVecs[row_arg_index]
+-                        row_arg_index += 1
++                    if const_expr(arg_kind == 4):
++                        scalar = scalars[scalar_arg_index]
++                        scalar_arg_index += 1
++                        tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
++                        tRS_rScalar.fill(scalar[0])
++                        epilogue_aux_values.append(tRS_rScalar.load())
+                     else:
+-                        epilogue_aux = tDrColVecs[col_arg_index]
+-                        col_arg_index += 1
+-                    tRS_rEpilogueAux = cute.make_rmem_tensor_like(
+-                        tRS_rD, epilogue_aux.element_type
+-                    )
+-                    tRS_rEpilogueAux.store(epilogue_aux.load())
+-                    epilogue_aux_values.append(tRS_rEpilogueAux.load())
++                        if const_expr(arg_kind == 1):
++                            epilogue_aux = tRsTileAuxes[tile_arg_index]
++                            tile_arg_index += 1
++                        elif const_expr(arg_kind == 2):
++                            epilogue_aux = tDrRowVecs[row_arg_index]
++                            row_arg_index += 1
++                        else:
++                            epilogue_aux = tDrColVecs[col_arg_index]
++                            col_arg_index += 1
++                        tRS_rEpilogueAux = cute.make_rmem_tensor_like(
++                            tRS_rD, epilogue_aux.element_type
++                        )
++                        tRS_rEpilogueAux.store(epilogue_aux.load())
++                        epilogue_aux_values.append(tRS_rEpilogueAux.load())
+             if const_expr(tDrLocalReduceValue is not None):
+                 epilogue_aux_values.append(tDrLocalReduceValue.load())
+             epilogue_result = params.tensor_epilogue_fn(
+@@ -637,6 +647,7 @@ def _compile_gemm_act(
+     tensor_epilogue_colvec_ndims,
+     tensor_epilogue_tile_dtypes,
+     tensor_epilogue_tile_majors,
++    tensor_epilogue_scalar_dtypes,
+     local_reduce_dtype,
+     local_reduce_ndim,
+     local_reduce_group,
+@@ -738,6 +749,10 @@ def _compile_gemm_act(
+         )
+         for dtype, ndim in zip(tensor_epilogue_colvec_dtypes, tensor_epilogue_colvec_ndims)
+     ) or None
++    mTensorEpilogueScalars = tuple(
++        fake_tensor(dtype, (1,), leading_dim=0, divisibility=1)
++        for dtype in tensor_epilogue_scalar_dtypes
++    ) or None
+     if local_reduce_dtype is not None and local_reduce_axis == 0:
+         local_reduce_shape = (
+             (l, cute.sym_int(), n) if local_reduce_ndim == 3 else (cute.sym_int(), n)
+@@ -808,6 +823,7 @@ def _compile_gemm_act(
+         mTensorEpilogueRowVecBroadcasts=mTensorEpilogueRowVecs,
+         mTensorEpilogueColVecBroadcasts=mTensorEpilogueColVecs,
+         mTensorEpilogueTiles=mTensorEpilogueTiles,
++        mTensorEpilogueScalars=mTensorEpilogueScalars,
+         mLocalReduce=mLocalReduce,
+         rounding_mode=rounding_mode,
+         sr_seed=fake_scalar(sr_seed_mode),
+@@ -874,6 +890,7 @@ def gemm_act(
+     tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
+     tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
+     tensor_epilogue_tile_biases: tuple[Tensor, ...] = (),
++    tensor_epilogue_scalar_biases: tuple[Tensor, ...] = (),
+     local_reduce_out: Optional[Tensor] = None,
+     local_reduce_group: int = 0,
+     local_reduce_axis: int = 1,
+@@ -949,14 +966,15 @@ def gemm_act(
+         if isinstance(PostAct, tuple)
+         else (torch2cute_dtype_map[PostAct.dtype],)
+     )
+-    if not set(tensor_epilogue_arg_kinds) <= {"tile", "row", "col"}:
++    if not set(tensor_epilogue_arg_kinds) <= {"tile", "row", "col", "scalar"}:
+         raise NotImplementedError(
+-            f"QUACK tensor epilogues support only tile/row/col aux tensors, got {tensor_epilogue_arg_kinds}"
++            f"QUACK tensor epilogues support only tile/row/col/scalar aux tensors, got {tensor_epilogue_arg_kinds}"
+         )
+     expected_tensor_epilogue_arg_counts = {
+         "row": len(tensor_epilogue_rowvec_biases),
+         "col": len(tensor_epilogue_colvec_biases),
+         "tile": len(tensor_epilogue_tile_biases),
++        "scalar": len(tensor_epilogue_scalar_biases),
+     }
+     actual_tensor_epilogue_arg_counts = {
+         kind: tensor_epilogue_arg_kinds.count(kind)
+@@ -964,10 +982,11 @@ def gemm_act(
+     }
+     if actual_tensor_epilogue_arg_counts != expected_tensor_epilogue_arg_counts:
+         raise RuntimeError(
+-            "tensor_epilogue_arg_kinds must match row/col/tile tensor epilogue args"
++            "tensor_epilogue_arg_kinds must match row/col/tile/scalar tensor epilogue args"
+         )
+     tensor_epilogue_arg_kind_codes = tuple(
+-        {"tile": 1, "row": 2, "col": 3}[kind] for kind in tensor_epilogue_arg_kinds
++        {"tile": 1, "row": 2, "col": 3, "scalar": 4}[kind]
++        for kind in tensor_epilogue_arg_kinds
+     )
+     colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
+
+@@ -1079,6 +1098,7 @@ def gemm_act(
+         tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
+         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_tile_biases_p),
+         tuple(get_major(tensor, "m", "n") for tensor in tensor_epilogue_tile_biases_p),
++        tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_scalar_biases),
+         local_reduce_dtype,
+         local_reduce_out.ndim if local_reduce_out is not None else 0,
+         local_reduce_group,
+@@ -1135,6 +1155,7 @@ def gemm_act(
+         mTensorEpilogueRowVecBroadcasts=tensor_epilogue_rowvec_biases or None,
+         mTensorEpilogueColVecBroadcasts=tensor_epilogue_colvec_biases or None,
+         mTensorEpilogueTiles=tensor_epilogue_tile_biases_p or None,
++        mTensorEpilogueScalars=tensor_epilogue_scalar_biases or None,
+         mLocalReduce=local_reduce_out,
+         rounding_mode=None,  # Constexpr, pass None at call time
+         sr_seed=scalar_arg(sr_seed, sr_seed_mode),

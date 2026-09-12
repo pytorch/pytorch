@@ -89,7 +89,7 @@ endif()
 
 # --- NCCL checkout ---
 # Clone NCCL from the pinned tag if building with NCCL and not using
-# system NCCL.  Conditions match build_pytorch_libs.py::build_pytorch().
+# system NCCL.
 if(NOT USE_SYSTEM_NCCL)
   # Only attempt if USE_DISTRIBUTED, USE_CUDA, USE_NCCL are not explicitly OFF.
   set(_skip_nccl FALSE)

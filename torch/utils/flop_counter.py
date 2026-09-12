@@ -169,7 +169,7 @@ def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     return m * n * 2 * k
 
 @register_flop_formula(aten.addmm)
-def _addmm_flop_impl(self_shape, a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
+def addmm_flop(self_shape, a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for addmm."""
     return mm_flop(a_shape, b_shape)
 
@@ -179,7 +179,7 @@ def addmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     )
 
 @register_flop_formula(aten.bmm)
-def _bmm_flop_impl(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
+def bmm_flop(a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for the bmm operation."""
     # Inputs should be a list of length 2.
     # Inputs contains the shapes of two tensor.
@@ -197,9 +197,7 @@ def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     return _bmm_flop_impl(a_shape, b_shape, out_shape=out_shape, **kwargs)
 
 @register_flop_formula(aten.baddbmm)
-def _baddbmm_flop_impl(
-    self_shape, a_shape, b_shape, *args, out_shape=None, **kwargs
-) -> int:
+def baddbmm_flop(self_shape, a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for the baddbmm operation."""
     # Inputs should be a list of length 3.
     # Inputs contains the shapes of three tensors.
@@ -494,7 +492,7 @@ def _unpack_efficient_attention_nested_shapes(
     max_seqlen_k,
 ) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
-    Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
+    Given inputs to an efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
     each batch element.
 

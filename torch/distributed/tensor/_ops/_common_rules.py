@@ -82,7 +82,7 @@ def einop_rule(
 
     def merge_sharding(dim: str, a: int, b: int) -> int:
         # merge the sharding of inputs if it's able to merge, i.e. we can merge
-        # replicate and shard to shard, but this will trigger an reshard operation
+        # replicate and shard to shard, but this will trigger a reshard operation
         if a != b:
             if a == -1 or b == -1:
                 # reshard the replicate to match the sharded one

@@ -83,7 +83,7 @@ runs:
       run: |
         # Add render group for container creation.
         render_gid=`cat /etc/group | grep render | cut -d: -f3`
-        echo "GPU_FLAG=--device=/dev/mem --device=/dev/dri --group-add video --group-add $render_gid" >> "${GITHUB_ENV}"
+        echo "GPU_FLAG=--device=/dev/mem --device=/dev/dri --group-add video --group-add $render_gid -e ZE_AFFINITY_MASK" >> "${GITHUB_ENV}"
 
     - name: Login to ECR
       uses: pytorch/pytorch/.github/actions/ecr-login@main

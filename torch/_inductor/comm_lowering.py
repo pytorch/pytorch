@@ -199,7 +199,7 @@ def register_comm_lowerings():
     Register lowerings for the comm subsystem.
     """
     try:
-        torch.ops._c10d_functional.all_reduce
+        _ = torch.ops._c10d_functional.all_reduce
     except AttributeError:
         log.info(
             "Inductor support for distributed collectives depends on building "
@@ -408,6 +408,11 @@ def register_comm_lowerings():
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
 
+    @register_comm_lowering(c10d.wait_tensors)
+    def _wait_tensors(inputs):
+        ir._WaitKernel.create_wait(c10d.wait_tensors.default, inputs)
+        return inputs
+
     @register_comm_lowering(c10d.isend)  # type: ignore[misc]
     def _isend(inp, dst, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
@@ -483,7 +488,7 @@ def register_symm_mem_lowerings():
         # torch.ops.symm_mem is a lazy namespace that always exists,
         # but the operations may not exist on non-CUDA platforms or
         # when USE_DISTRIBUTED is disabled.
-        symm_mem.one_shot_all_reduce
+        _ = symm_mem.one_shot_all_reduce
     except AttributeError:
         log.info("symm_mem ops not available, skipping symm_mem lowerings")
         return

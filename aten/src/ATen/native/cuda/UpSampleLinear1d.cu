@@ -129,8 +129,6 @@ static void upsample_linear1d_out_cuda_template(
 
   int input_width = input.size(2);
 
-  output.zero_();
-
   AT_ASSERT(input_width > 0 && output_width > 0);
 
   const int num_kernels = output_width;

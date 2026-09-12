@@ -551,7 +551,7 @@ def _codegen_subclass_wrapper_source(
     else:
         state.emit(f"return {result_tuple}")
 
-    source = "\n".join(state.lines)
+    source = state.getvalue()
     return source, state.globals
 
 
@@ -570,7 +570,7 @@ def _codegen_subclass_wrap_source(
     )
     result_tuple = f"({', '.join(result_exprs)},)" if result_exprs else "()"
     state.emit(f"return {result_tuple}")
-    source = "\n".join(state.lines)
+    source = state.getvalue()
     return source, state.globals
 
 

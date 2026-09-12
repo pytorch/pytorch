@@ -53,7 +53,12 @@ if [[ "$PACKAGE_TYPE" != libtorch ]]; then
 
     # numpy tests:
     # We test 1 version no numpy. 1 version with numpy 1.x and rest with numpy 2.x
-    if [[ "\$python_nodot" = *311* ]]; then
+    if [[ "${DESIRED_CUDA}" == *rocm* && "\$python_nodot" = *315* ]]; then
+      # cp315 has no numpy wheel on any index, and the ROCm image can't build
+      # numpy from source (pkg-config resolves python3 to the image's system
+      # 3.6), so skip the numpy smoke test for ROCm cp315 / cp315t.
+      retry pip install -q protobuf typing-extensions
+    elif [[ "\$python_nodot" = *311* ]]; then
       retry pip install -q numpy==1.23.5 protobuf typing-extensions
     elif [[ "\$python_nodot" = *312* ]]; then
       retry pip install -q protobuf typing-extensions

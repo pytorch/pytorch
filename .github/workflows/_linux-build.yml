@@ -46,6 +46,13 @@ on:
         default: "linux.c7i.2xlarge"
         description: |
           Label of the runner this job should run on.
+      flash-attention-large-memory-build:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          Allow a larger FlashAttention compile pool. Only enable this for a
+          reviewed high-memory build runner.
       test-matrix:
         required: false
         type: string
@@ -229,11 +236,11 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
+          FLASH_ATTENTION_LARGE_MEMORY_BUILD: ${{ inputs.flash-attention-large-memory-build }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
-          RUNNER: ${{ inputs.runner }}
           SKIP_SCCACHE_INITIALIZATION: 1
         shell: bash
         run: |

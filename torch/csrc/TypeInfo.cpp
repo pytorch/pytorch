@@ -16,8 +16,7 @@
 static PyObject* THPFInfo_New(const at::ScalarType& type) {
   auto finfo = &THPFInfoType;
   auto self = THPObjectPtr{finfo->tp_alloc(finfo, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = c10::toRealValueType(type);
   return self.release();
@@ -26,8 +25,7 @@ static PyObject* THPFInfo_New(const at::ScalarType& type) {
 static PyObject* THPIInfo_New(const at::ScalarType& type) {
   auto iinfo = &THPIInfoType;
   auto self = THPObjectPtr{iinfo->tp_alloc(iinfo, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = type;
   return self.release();
@@ -403,10 +401,6 @@ PyTypeObject THPIInfoType = {
 };
 
 void THPDTypeInfo_init(PyObject* module) {
-  if (PyModule_AddType(module, &THPFInfoType) < 0) {
-    throw python_error();
-  }
-  if (PyModule_AddType(module, &THPIInfoType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPFInfoType) >= 0);
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPIInfoType) >= 0);
 }

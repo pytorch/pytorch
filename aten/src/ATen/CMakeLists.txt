@@ -55,6 +55,31 @@ set_bool(AT_CUDNN_ENABLED CAFFE2_USE_CUDNN)
 set_bool(AT_CUSPARSELT_ENABLED CAFFE2_USE_CUSPARSELT)
 set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
 
+# The architectures CK SDPA kernels are built for: the candidates that
+# PYTORCH_ROCM_ARCH also asks for. The CK codegen target families, the ck_sdpa
+# target's HIP_ARCHITECTURES and the runtime check in Context.cpp are all
+# derived from this one list.
+#
+# gfx1200/gfx1201 (RDNA4, WMMA) is opt-in through USE_ROCM_CK_SDPA_GFX12 (OFF by
+# default): those arches are already in the ROCm wheel arch list, so building CK
+# SDPA for them would add code generation and compile cost to existing builds.
+set(AT_ROCM_CK_SDPA_ARCHS "")
+if(USE_ROCM AND USE_ROCM_CK_SDPA AND USE_FLASH_ATTENTION)
+  set(_ck_sdpa_candidate_archs gfx942 gfx950)
+  if(USE_ROCM_CK_SDPA_GFX12)
+    list(APPEND _ck_sdpa_candidate_archs gfx1200 gfx1201)
+  endif()
+  foreach(ARCH IN LISTS _ck_sdpa_candidate_archs)
+    if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+      list(APPEND AT_ROCM_CK_SDPA_ARCHS ${ARCH})
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES AT_ROCM_CK_SDPA_ARCHS)
+endif()
+string(REPLACE ";" "," AT_ROCM_CK_SDPA_ARCHS_STR "${AT_ROCM_CK_SDPA_ARCHS}")
+# Alongside the other generated ATen headers (see cmake/Codegen.cmake).
+configure_file(ROCmCKSDPAConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKSDPAConfig.h" @ONLY)
+
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
 # At the moment, `jit_macros.h` include CUDAConfig.h for both CUDA and HIP builds
@@ -84,12 +109,6 @@ file(GLOB cuda_cu CONFIGURE_DEPENDS "cuda/*.cu" "cuda/detail/*.cu" "cuda/tunable
 file(GLOB cudnn_h CONFIGURE_DEPENDS "cudnn/*.h" "cudnn/*.cuh")
 file(GLOB cudnn_cpp CONFIGURE_DEPENDS "cudnn/*.cpp")
 file(GLOB ops_h CONFIGURE_DEPENDS "ops/*.h")
-
-# MTIA
-file(GLOB mtia_h CONFIGURE_DEPENDS "mtia/*.h" "mtia/detail/*.h")
-file(GLOB mtia_cpp CONFIGURE_DEPENDS "mtia/*.cpp" "mtia/detail/*.cpp")
-file(GLOB_RECURSE native_mtia_cpp CONFIGURE_DEPENDS "native/mtia/*.cpp")
-file(GLOB_RECURSE native_mtia_h CONFIGURE_DEPENDS "native/mtia/*.h")
 
 file(GLOB xpu_h CONFIGURE_DEPENDS "xpu/*.h" "xpu/detail/*.h")
 file(GLOB xpu_cpp CONFIGURE_DEPENDS "xpu/*.cpp" "xpu/detail/*.cpp")
@@ -204,28 +223,12 @@ file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/fla
 if(USE_FLASH_ATTENTION)
   # Now building CK by default
   if(USE_ROCM)
-    if(DEFINED ENV{USE_ROCM_CK_SDPA})
-        if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
-          caffe2_update_option(USE_ROCM_CK_SDPA ON)
-        endif()
-    elseif(NOT WIN32)
-      caffe2_update_option(USE_ROCM_CK_SDPA ON)
-    endif()
-    # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
-    # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
-    # empty HIP_ARCHITECTURES and CMake errors out.
-    if(USE_ROCM_CK_SDPA)
-      set(_have_ck_sdpa_arch FALSE)
-      foreach(ARCH gfx942 gfx950)
-        if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
-          set(_have_ck_sdpa_arch TRUE)
-          break()
-        endif()
-      endforeach()
-      if(NOT _have_ck_sdpa_arch)
-        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
-        caffe2_update_option(USE_ROCM_CK_SDPA OFF)
-      endif()
+    # AT_ROCM_CK_SDPA_ARCHS, resolved at the top of this file, is what CK SDPA
+    # is built for. Auto-disable when it is empty; otherwise the ck_sdpa target
+    # ends up with an empty HIP_ARCHITECTURES and CMake errors out.
+    if(USE_ROCM_CK_SDPA AND NOT AT_ROCM_CK_SDPA_ARCHS)
+      message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch CK SDPA is built for (gfx942/gfx950; gfx1200/gfx1201 with USE_ROCM_CK_SDPA_GFX12)")
+      caffe2_update_option(USE_ROCM_CK_SDPA OFF)
     endif()
   endif()
   if(USE_ROCM AND USE_ROCM_CK_SDPA)
@@ -308,23 +311,22 @@ if(USE_FLASH_ATTENTION)
     file(GLOB ck_sdpa_sources_hip CONFIGURE_DEPENDS
          "native/transformers/hip/flash_attn/ck/*.hip"
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
+    # Take the generated FMHA instances from the blob lists this configure
+    # wrote instead of from the glob: they are generated into the source tree,
+    # which can also hold instances from an earlier configure that asked for
+    # different target families.
+    list(FILTER ck_sdpa_sources_hip EXCLUDE REGEX "/fmha_[^/]*\\.hip$")
+    list(APPEND ck_sdpa_sources_hip ${CK_FMHA_GENERATED_SOURCES})
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
-
-    # Only build for MI3xx series architectures as building for all targets takes too long
-    # We will selectively add supported architectures when/if needed
-    set(_ck_sdpa_hip_arches "")
-    foreach(ARCH gfx942 gfx950)
-      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
-        list(APPEND _ck_sdpa_hip_arches ${ARCH})
-      endif()
-    endforeach()
 
     add_library(ck_sdpa STATIC ${ck_sdpa_sources_hip})
     target_compile_options(ck_sdpa PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${CK_SDPA_EXTRA_HIPCC_FLAGS}> ${HIP_CXX_FLAGS})
     set_target_properties(ck_sdpa PROPERTIES
       POSITION_INDEPENDENT_CODE ON
-      HIP_ARCHITECTURES "${_ck_sdpa_hip_arches}")
+      # Only the architectures CK SDPA instances were generated for, to limit
+      # build cost.
+      HIP_ARCHITECTURES "${AT_ROCM_CK_SDPA_ARCHS}")
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
     target_include_directories(ck_sdpa PUBLIC
@@ -366,11 +368,17 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   )
 
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+  if(FLASH_ATTENTION_MAX_JOBS)
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS
+      flash_attention_compile=${FLASH_ATTENTION_MAX_JOBS})
+    set_property(TARGET flash_attention PROPERTY JOB_POOL_COMPILE
+      flash_attention_compile)
+  endif()
 endif()
 
 if(USE_FLASH_ATTENTION)
   list(APPEND native_transformers_cuda_cpp ${native_flash_attn_api_cpp})
-  list(APPEND FLASH_ATTENTION_CUDA_SOURCES ${flash_attention_cuda_cu} ${flash_attention_cuda_kernels_cu})
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})
 
   list(APPEND native_transformers_hip_hip ${flash_attention_hip_hip})
@@ -552,10 +560,6 @@ if(USE_EIGEN_SPARSE)
   set(all_cpu_cpp ${all_cpu_cpp} ${native_eigen_cpp})
 endif()
 
-if(USE_MTIA)
-    set(ATen_MTIA_SRCS ${ATen_MTIA_SRCS} ${mtia_cpp} ${mtia_h} ${native_mtia_cpp} ${native_mtia_h})
-endif()
-
 if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${mkldnn_xpu_cpp})
   list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
@@ -578,10 +582,6 @@ elseif(APPLE AND USE_PYTORCH_METAL)
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
-endif()
-
-if(USE_CUDA AND USE_ROCM)
-  message(FATAL_ERROR "ATen doesn't not currently support simultaneously building with CUDA and ROCM")
 endif()
 
 if(USE_CUDA)
@@ -642,7 +642,7 @@ if(USE_ROCM)
     # a ck/config.h. We just do that part here. Without this, the ck.h from the
     # ROCM SDK may get accidentally used instead.
     rocm_generate_ck_conf(
-      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+      "${CMAKE_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
       "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
     )
   endif()
@@ -932,6 +932,10 @@ if(USE_CUDA)
   list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
 endif()
 
+if(USE_XPU)
+  list(APPEND ATen_XPU_DEPENDENCY_LIBS ATEN_XPU_FILES_GEN_LIB)
+endif()
+
 if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
@@ -952,7 +956,10 @@ if(USE_MPS)
                 cmake_path(GET SHADER STEM TGT_STEM)
                 string(CONCAT TGT_40 ${TGT_STEM} "_40.air")
                 list(APPEND AIR_40 ${TGT_40})
-                metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0")
+                # MetalPerformancePrimitives switches the cooperative-tensor ABI on the
+                # deployment target (__TENSOR_OPS_SUPPORT_DEPLOYMENT_TARGET_26_2); the
+                # MPP kernels assume the 26.2+ layout, so pin the target explicitly.
+                metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0;-mmacos-version-min=26.2")
             endforeach()
             air_to_metallib(kernels_40.metallib ${AIR_40})
             list(APPEND METALLIB_DEPS kernels_40.metallib)
@@ -990,7 +997,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_mtia_h} ${cudnn_h} ${hip_h} ${mtia_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)
@@ -1012,7 +1019,7 @@ endif()
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 foreach(HEADER  ${INSTALL_HEADERS})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "ATen/" HEADER_SUB ${HEADER})
-  string(REPLACE "${Torch_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
+  string(REPLACE "${CMAKE_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
   get_filename_component(DIR ${HEADER_SUB} DIRECTORY)
   install(FILES ${HEADER} DESTINATION "${AT_INSTALL_INCLUDE_DIR}/${DIR}")
 endforeach()
@@ -1067,7 +1074,6 @@ set(ATen_CUDA_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY} PARENT_SC
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
 set(ATen_MPS_SRCS ${ATen_MPS_SRCS} PARENT_SCOPE)
-set(ATen_MTIA_SRCS ${ATen_MTIA_SRCS} PARENT_SCOPE)
 set(ATen_XPU_SRCS ${ATen_XPU_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_SRCS ${ATen_QUANTIZED_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
@@ -1091,6 +1097,5 @@ set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_XPU_DEPENDENCY_LIBS ${ATen_XPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)
-set(FLASH_ATTENTION_CUDA_SOURCES ${FLASH_ATTENTION_CUDA_SOURCES} PARENT_SCOPE)
 set(MEM_EFF_ATTENTION_CUDA_SOURCES ${MEM_EFF_ATTENTION_CUDA_SOURCES} PARENT_SCOPE)
 set(ATen_ATTENTION_KERNEL_SRCS ${ATen_ATTENTION_KERNEL_SRCS} PARENT_SCOPE)

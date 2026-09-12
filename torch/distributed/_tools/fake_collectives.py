@@ -50,6 +50,7 @@ functional_collectives: set[torch._ops.OpOverload] = {
     _c10d_functional.all_to_all_single.default,
     _c10d_functional_autograd.all_to_all_single.default,
     _c10d_functional.wait_tensor.default,
+    _c10d_functional.wait_tensors.default,
     _c10d_functional.all_reduce_.default,
     _c10d_functional.all_reduce_coalesced.default,
     _c10d_functional.all_reduce_coalesced_.default,
@@ -69,6 +70,7 @@ sync_ops: set[torch._ops.OpOverload] = {
     c10d.barrier.default,
     c10d.monitored_barrier_.default,
     _c10d_functional.wait_tensor.default,
+    _c10d_functional.wait_tensors.default,
 }
 
 collective_ops = set.union(functional_collectives, non_functional_collectives)

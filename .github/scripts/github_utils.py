@@ -183,6 +183,34 @@ def gh_close_pr(org: str, repo: str, pr_num: int, dry_run: bool = False) -> None
         gh_fetch_url(url, method="PATCH", data={"state": "closed"})
 
 
+def gh_merge_pr(
+    org: str,
+    repo: str,
+    pr_num: int,
+    *,
+    merge_method: str = "squash",
+    commit_title: str | None = None,
+    commit_message: str | None = None,
+    sha: str | None = None,
+    dry_run: bool = False,
+) -> str:
+    """Merge a PR via GitHub's merge API and return the resulting merge commit sha."""
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}/merge"
+    data: dict[str, Any] = {"merge_method": merge_method}
+    if commit_title is not None:
+        data["commit_title"] = commit_title
+    if commit_message is not None:
+        data["commit_message"] = commit_message
+    if sha is not None:
+        data["sha"] = sha
+    if dry_run:
+        print(f"[dry_run] Merging PR {pr_num} via GitHub API with {data}")
+        return ""
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    resp = gh_fetch_url(url, headers=headers, data=data, method="PUT", reader=json.load)
+    return cast(str, resp["sha"])
+
+
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/issues/comments/{comment_id}"
     gh_fetch_url(url, method="DELETE", reader=lambda x: x.read())

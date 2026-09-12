@@ -11,6 +11,7 @@ from .metadata import (
 )
 from .optimizer import load_sharded_optimizer_state_dict
 from .planner import LoadPlan, LoadPlanner, ReadItem, SavePlan, SavePlanner, WriteItem
+from .protocol import CheckpointableTensor
 from .quantized_hf_storage import QuantizedHuggingFaceStorageReader
 
 # pyrefly: ignore [deprecated]

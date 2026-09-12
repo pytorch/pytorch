@@ -2,7 +2,6 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <csignal>
 #include <optional>
 
@@ -32,12 +31,11 @@
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <c10/util/thread_name.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <iostream>
@@ -95,18 +93,17 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
 
@@ -118,7 +115,6 @@
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #ifdef __HIP_PLATFORM_AMD__
@@ -243,8 +239,7 @@ static PyObject* THPModule_initExtension(
   libshm_init(path.c_str());
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!module)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(module);
 
   THPStorage_postInit(module);
   THPAutograd_initFunctions();
@@ -701,9 +696,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
   auto dl_device = at::torchDeviceToDLDevice(device);
 
   auto tuple = PyTuple_New(2);
-  if (!tuple) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(tuple);
 
   PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
   PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
@@ -713,7 +706,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
 }
 
 struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
-  TorchDLPackExchangeAPI() {
+  TorchDLPackExchangeAPI() : DLPackExchangeAPI{} {
     header.version.major = DLPACK_MAJOR_VERSION;
     header.version.minor = DLPACK_MINOR_VERSION;
     header.prev_api = nullptr;
@@ -724,7 +717,7 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     current_work_stream = CurrentWorkStream;
   }
 
-  static const DLPackExchangeAPI* Global() {
+  static DLPackExchangeAPI* Global() {
     static TorchDLPackExchangeAPI inst;
     return &inst;
   }
@@ -787,7 +780,8 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
           at::TensorOptions()
               .dtype(at::toScalarType(prototype->dtype))
               .device(at::dlDeviceToTorchDevice(
-                  prototype->device.device_type, prototype->device.device_id));
+                  prototype->device.device_type,
+                  static_cast<c10::DeviceIndex>(prototype->device.device_id)));
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
@@ -809,8 +803,9 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
         return 0;
       }
       if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
-        *out_stream =
-            at::accelerator::getCurrentStream(device_id).native_handle();
+        *out_stream = at::accelerator::getCurrentStream(
+                          static_cast<c10::DeviceIndex>(device_id))
+                          .native_handle();
       }
       return 0;
     } catch (const std::exception& e) {
@@ -825,9 +820,7 @@ static PyObject* THPModule_DLPackExchangeAPI(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyCapsule_New(
-      const_cast<DLPackExchangeAPI*>(TorchDLPackExchangeAPI::Global()),
-      "dlpack_exchange_api",
-      nullptr);
+      TorchDLPackExchangeAPI::Global(), "dlpack_exchange_api", nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -842,7 +835,7 @@ struct TorchConstDLPackExchangeAPI : public TorchDLPackExchangeAPI {
     dltensor_from_py_object_no_sync = DLTensorFromPyObjectNoSync;
   }
 
-  static const DLPackExchangeAPI* Global() {
+  static DLPackExchangeAPI* Global() {
     static TorchConstDLPackExchangeAPI inst;
     return &inst;
   }
@@ -880,9 +873,7 @@ static PyObject* THPModule_ConstDLPackExchangeAPI(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyCapsule_New(
-      const_cast<DLPackExchangeAPI*>(TorchConstDLPackExchangeAPI::Global()),
-      "dlpack_exchange_api",
-      nullptr);
+      TorchConstDLPackExchangeAPI::Global(), "dlpack_exchange_api", nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -896,6 +887,22 @@ static PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   }
   return THPUtils_packString(
       c10::get_backtrace(frames_to_skip, maximum_number_of_frames, true));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THModule_getSymbolizeMode(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  switch (torch::get_symbolize_mode()) {
+    case torch::unwind::Mode::addr2line:
+      return THPUtils_packString("addr2line");
+    case torch::unwind::Mode::fast:
+      return THPUtils_packString("fast");
+    case torch::unwind::Mode::dladdr:
+      return THPUtils_packString("dladdr");
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unknown symbolize mode");
   END_HANDLE_TH_ERRORS
 }
 
@@ -1032,6 +1039,25 @@ static PyObject* THPModule_userEnabledFA3SDP(
   else
     Py_RETURN_FALSE;
 }
+static PyObject* THPModule_setSDPUseFA4(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_fa4 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFA4(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject* THPModule_userEnabledFA4SDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledFA4SDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 static PyObject* THPModule_setSDPUseMemEfficient(
     PyObject* _unused,
     PyObject* arg) {
@@ -1118,8 +1144,7 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_sdp_use_cudnn expects a bool, "
-      "but got %s",
+      "set_sdp_use_cudnn expects a bool, but got ",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseCuDNN(Py_IsTrue(arg));
   Py_RETURN_NONE;
@@ -1673,16 +1698,13 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
   };
 
   THPObjectPtr result(PyList_New(0));
-  if (!result)
-    throw python_error();
+  TORCH_CHECK_PYTHON(result);
   for (auto scalar_type : all_scalar_types) {
     if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
       continue;
     }
     auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
-    if (PyList_Append(result.get(), dtype) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(PyList_Append(result.get(), dtype) >= 0);
   }
   return result.release();
   END_HANDLE_TH_ERRORS
@@ -1794,7 +1816,7 @@ static PyObject* THPModule_willEngineExecuteNode(
   }
   const auto nodes_in_graph =
       torch::autograd::get_current_graph_task_nodes_in_graph();
-  bool ret = nodes_in_graph->find(node) != nodes_in_graph->end();
+  bool ret = nodes_in_graph->contains(node);
   if (ret && !exec_info->empty()) {
     auto it = exec_info->find(node);
     if (it == exec_info->end() || !it->second.should_execute()) {
@@ -2093,6 +2115,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
     {"_get_fa3_sdp_enabled", THPModule_userEnabledFA3SDP, METH_NOARGS, nullptr},
     {"_set_sdp_use_fa3", THPModule_setSDPUseFA3, METH_O, nullptr},
+    {"_get_fa4_sdp_enabled", THPModule_userEnabledFA4SDP, METH_NOARGS, nullptr},
+    {"_set_sdp_use_fa4", THPModule_setSDPUseFA4, METH_O, nullptr},
     {"_get_mem_efficient_sdp_enabled",
      userEnabledMemEfficientSDP,
      METH_NOARGS,
@@ -2290,6 +2314,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
+    {"_get_symbolize_mode", THModule_getSymbolizeMode, METH_NOARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
      METH_O,
@@ -2409,6 +2434,11 @@ void initModule(PyObject* module);
 } // namespace torch::xpu
 #endif
 
+#ifdef USE_MPS
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+void THPMPSStream_init(PyObject* module);
+#endif
+
 static std::vector<PyMethodDef> methods;
 
 static void LogAPIUsageMetadataFromPython(
@@ -2422,7 +2452,8 @@ class WeakTensorRef {
   c10::weak_intrusive_ptr<c10::TensorImpl> weakref_;
 
  public:
-  WeakTensorRef(const at::Tensor& t) : weakref_(t.getIntrusivePtr()) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  explicit WeakTensorRef(const at::Tensor& t) : weakref_{t.getIntrusivePtr()} {}
 
   bool expired() {
     return weakref_.expired();
@@ -2605,6 +2636,7 @@ PyObject* initModule() {
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
+  THPMPSStream_init(module);
 #endif
 #ifdef USE_XPU
   torch::xpu::initModule(module);
@@ -2662,12 +2694,19 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
-#if defined(USE_CUSPARSELT) || defined(USE_ROCM)
+#if defined(USE_CUSPARSELT) || defined(USE_HIPSPARSELT)
   PyObject* has_cusparselt = Py_True;
 #else
   PyObject* has_cusparselt = Py_False;
 #endif
   ASSERT_TRUE(set_module_attr("_has_cusparselt", has_cusparselt));
+
+#if defined(USE_CUFILE)
+  PyObject* has_gds = Py_True;
+#else
+  PyObject* has_gds = Py_False;
+#endif
+  ASSERT_TRUE(set_module_attr("_has_gds", has_gds));
 
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
@@ -2694,6 +2733,26 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+  py_module.def("_is_pybind11_type", [](py::handle cls) {
+    if (!PyType_Check(cls.ptr())) {
+      return false;
+    }
+    auto* type = reinterpret_cast<PyTypeObject*>(cls.ptr());
+    return !py::detail::all_type_info(type).empty();
+  });
+
+  // Serialized access to the process environment. Prefer these over Python's
+  // os.environ/os.getenv when torch is loaded: they share c10's env mutex, so
+  // reads and writes are consistent with C++ code that also goes through
+  // c10::utils::{get,set}_env.
+  py_module.def("_getenv", &c10::utils::get_env);
+  py_module.def(
+      "_setenv",
+      &c10::utils::set_env,
+      py::arg("name"),
+      py::arg("value"),
+      py::arg("overwrite") = true);
+  py_module.def("_unsetenv", &c10::utils::unset_env);
 
   {
     using at::impl::FakeDispatchCategory;
@@ -2739,6 +2798,25 @@ Call this whenever a new thread is created in order to propagate values from
     at::caching::set_cached_tensors_enabled(enabled);
   });
 
+  py_module.def("_set_native_aot_enabled", [](bool enabled) {
+    at::globalContext().setAllowNativeAot(enabled);
+  });
+
+  py_module.def("_get_native_aot_enabled", []() {
+    return at::globalContext().allowNativeAot();
+  });
+
+  // Not a user-facing switch, unlike _set_native_aot_enabled: it masks ops
+  // whose AOT kernels ARE the implementation, changing what the op computes.
+  // Called only by torch._native._unconditional_masked().
+  py_module.def("_set_native_aot_unconditional_masked", [](bool masked) {
+    at::globalContext().setMaskUnconditionalNativeAot(masked);
+  });
+
+  py_module.def("_get_native_aot_unconditional_masked", []() {
+    return at::globalContext().maskUnconditionalNativeAot();
+  });
+
   py_module.def("_add_cached_tensor", [](const at::Tensor& t) {
     at::caching::add_cached_tensor(t);
   });
@@ -2760,6 +2838,35 @@ Call this whenever a new thread is created in order to propagate values from
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     return c10::raw::intrusive_ptr::use_count(storage_impl);
   });
+
+  py_module.def(
+      "_storage_throw_on_immutable_data_ptr", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        return storage_impl->throw_on_immutable_data_ptr();
+      });
+
+  py_module.def(
+      "_storage_throw_on_mutable_data_ptr", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        return storage_impl->throw_on_mutable_data_ptr();
+      });
+
+  py_module.def(
+      "_set_storage_data_ptr_access_error_msg",
+      [](size_t storage_impl_ptr, std::string s) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
+      "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->clear_data_ptr_access_error_msg_();
+      });
 
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
@@ -2800,7 +2907,7 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py::class_<WeakTensorRef>(py_module, "_WeakTensorRef")
-      .def(py::init([](py::object tensor) {
+      .def(py::init([](const py::object& tensor) {
         return WeakTensorRef(THPVariable_Unpack(tensor.ptr()));
       }))
       .def("expired", &WeakTensorRef::expired);
@@ -2840,7 +2947,7 @@ Call this whenever a new thread is created in order to propagate values from
          at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         c10::SymInt groups_) {
+         const c10::SymInt& groups_) {
         return at::native::select_conv_backend(
             input,
             weight,
@@ -2850,7 +2957,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            std::move(groups_),
+            groups_,
             std::nullopt);
       },
       py::arg("input"),
@@ -2874,7 +2981,7 @@ Call this whenever a new thread is created in order to propagate values from
          at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         c10::SymInt groups_,
+         const c10::SymInt& groups_,
          std::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
         c10::OptionalArrayRef<c10::SymInt> ref = std::nullopt;
         if (bias_sizes_opt) {
@@ -2889,7 +2996,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            std::move(groups_),
+            groups_,
             ref);
       },
       py::arg("input"),
@@ -3297,6 +3404,9 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_is_cow_tensor",
       [](const at::Tensor& tensor) {
+        TORCH_CHECK(
+            !tensor.key_set().has(c10::DispatchKey::Python),
+            "_is_cow_tensor is not defined for Python tensor subclasses");
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");

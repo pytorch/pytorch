@@ -33,7 +33,7 @@ static std::string getPythonName(const PyObject* obj_) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   PyObject* obj = const_cast<PyObject*>(obj_);
   auto v = py::getattr(obj, "__name__", py::str("<python_value>"));
-  // if this was a autograd.Function recover the name of the class
+  // if this was an autograd.Function recover the name of the class
   return py::str(v);
 }
 
@@ -514,7 +514,7 @@ void initPythonIRBindings(PyObject* module_) {
           "inferTypeFrom",
           py::overload_cast<const c10::intrusive_ptr<c10::ivalue::Object>&>(
               &Value::inferTypeFrom))
-      // skip owningGraph because it returns a raw pointer to a otherwise
+      // skip owningGraph because it returns a raw pointer to an otherwise
       // std::shared_ptr stored graph object, and would cause a double free
       .VS(unique)
       .VS(debugName)

@@ -679,6 +679,14 @@ class TestCuteDSLSmoketest(TestCase):
     Run before bumping cuteDSL version pins in torch/_native/cutedsl_utils.py.
     """
 
+    def test_runtime_version_is_supported(self):
+        from torch._native import cutedsl_utils
+
+        self.assertIn(
+            cutedsl_utils.runtime_version(),
+            cutedsl_utils._CUTEDSL_REQUIRED_VERSIONS,
+        )
+
     @unittest.skipIf(not SM80OrLater, "SM80+ required")
     def test_elementwise_add(self):
         _host, from_dlpack = _build_elementwise_add()

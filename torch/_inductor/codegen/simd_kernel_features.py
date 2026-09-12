@@ -14,8 +14,10 @@ import torch
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
+from .. import ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
+from ..runtime.runtime_utils import next_power_of_2
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
@@ -25,6 +27,34 @@ if typing.TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from torch._inductor.tiling_utils import CoalesceVarAnalysis
+
+
+_INNER_REDUCTION_RATIO = 32
+_SMALL_INNER_REDUCTION_RATIO = 16
+_SMALL_INNER_REDUCTION_MAX_RBLOCK = 512
+
+
+def tiling_scores_suggest_inner_reduction(
+    tiling_scores: dict[str, sympy.Expr], reduction_numel: sympy.Expr
+) -> bool:
+    """Return whether tiling scores justify treating a reduction as inner."""
+    sizevars = V.graph.sizevars
+    non_reduction_score = sum(
+        sizevars.optimization_hint(tiling_scores.get(dim, 0), fallback=0)
+        for dim in ("x", "y", "z")
+    )
+    non_reduction_score = max(non_reduction_score, 1)
+    r_score = sizevars.optimization_hint(tiling_scores["r0_"], fallback=0)
+    if r_score >= _INNER_REDUCTION_RATIO * non_reduction_score:
+        return True
+    if r_score < _SMALL_INNER_REDUCTION_RATIO * non_reduction_score:
+        return False
+
+    # Moderate score ratios are useful while persistent configs can keep XBLOCK=8.
+    rblock_hint = next_power_of_2(
+        max(sizevars.optimization_hint(reduction_numel, fallback=1), 1)
+    )
+    return rblock_hint <= _SMALL_INNER_REDUCTION_MAX_RBLOCK
 
 
 class NodeScheduleMarker:
@@ -74,7 +104,8 @@ class EnableReduction(NodeScheduleMarker):
 
 class SIMDKernelFeatures:
     """
-    An ordered schedule of nodes that will become a single kernel.
+    An ordered schedule of nodes that will become a single kernel. A separately
+    emitted stage may contribute only to ``indexing_node_schedule``.
     """
 
     def __init__(
@@ -83,13 +114,32 @@ class SIMDKernelFeatures:
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
         coalesce_analysis: CoalesceVarAnalysis | None = None,
+        tiling_scores: dict[str, sympy.Expr] | None = None,
+        *,
+        indexing_node_schedule: list[NodeScheduleEntry] | None = None,
     ):
         self.node_schedule = node_schedule
+        self.indexing_node_schedule = (
+            node_schedule if indexing_node_schedule is None else indexing_node_schedule
+        )
         # numel excludes reduction_numel
         self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
         self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
         self._stats_cache: dict[tuple[sympy.Expr, ...], MemoryStats] = {}
         self.coalesce_analysis = coalesce_analysis
+        self.tiling_scores = tiling_scores
+
+    def with_tiling_scores(
+        self, tiling_scores: dict[str, sympy.Expr] | None
+    ) -> SIMDKernelFeatures:
+        return SIMDKernelFeatures(
+            self.node_schedule,
+            self.numel,
+            self.reduction_numel,
+            self.coalesce_analysis,
+            tiling_scores,
+            indexing_node_schedule=self.indexing_node_schedule,
+        )
 
     @cache_on_self
     def is_reduction(self) -> bool:
@@ -99,14 +149,44 @@ class SIMDKernelFeatures:
     def scheduler_nodes(self) -> Iterable[SchedulerNode]:
         return tuple(NodeScheduleMarker.only_nodes(self.node_schedule))
 
+    @cache_on_self
+    def indexing_scheduler_nodes(self) -> Iterable[SchedulerNode]:
+        return tuple(NodeScheduleMarker.only_nodes(self.indexing_node_schedule))
+
     def reduction_nodes(self) -> list[SchedulerNode]:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
+
+    @cache_on_self
+    def strict_reductions(self) -> tuple[ir.Reduction, ...]:
+        return tuple(
+            node.node.data
+            for node in self.reduction_nodes()
+            if isinstance(node.node, ir.ComputedBuffer)
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_reduction_rblock is not None
+        )
+
+    def has_strict_multirow_reduction(self) -> bool:
+        return any(r.strict_reduction_multirow for r in self.strict_reductions())
+
+    @cache_on_self
+    def strict_reduction_rblock(self) -> int | None:
+        rblocks = OrderedSet(
+            reduction.strict_reduction_rblock for reduction in self.strict_reductions()
+        )
+        if not rblocks:
+            return None
+        if len(rblocks) != 1:
+            raise AssertionError(
+                f"strict reductions require one reduction block size, got {rblocks}"
+            )
+        return next(iter(rblocks))
 
     @cache_on_self
     def buf_accesses(self) -> dict[str, list[Dep]]:
         """only needed for config.benchmark_kernel"""
         buf_accesses = collections.defaultdict(list)
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for access in node.read_writes.reads | node.read_writes.writes:
                 buf_accesses[access.name].append(access)
         return buf_accesses
@@ -133,7 +213,7 @@ class SIMDKernelFeatures:
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
         buffer_names: OrderedSet[str] = OrderedSet()
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
         buffers = [V.graph.get_buffer(name) for name in buffer_names]
@@ -178,7 +258,7 @@ class SIMDKernelFeatures:
 
         int32_max = sympy.Integer(2**31 - 1)
         int32_min = sympy.Integer(-(2**31))
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes):
                 if not isinstance(dep, MemoryDep):
                     continue
@@ -221,8 +301,10 @@ class SIMDKernelFeatures:
         return False
 
     def get_reduction_hint(
-        self, tiling_scores: dict[str, int] | None = None
+        self, tiling_scores: dict[str, sympy.Expr] | None = None
     ) -> ReductionHint:
+        if tiling_scores is None:
+            tiling_scores = self.tiling_scores
         reductions = self.reduction_nodes()
         if len(reductions) > 0:
             hints = [self.reduction_hint(n) for n in reductions]
@@ -244,13 +326,9 @@ class SIMDKernelFeatures:
                 and "x" in tiling_scores
                 and "r0_" in tiling_scores
             ):
-                # If reduction dimension has much better coalescing than non-reduction dimensions,
-                # this is an inner reduction
-                from ..codegen.triton import INNER_REDUCTION_RATIO_THRESHOLD
-
-                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
-                if contiguous_red:
+                if tiling_scores_suggest_inner_reduction(
+                    tiling_scores, self.reduction_numel
+                ):
                     reduction_hint_val = ReductionHint.INNER
         else:
             reduction_hint_val = ReductionHint.DEFAULT
@@ -340,7 +418,7 @@ class MemoryEstimator:
         self.groups = groups
         self.symbols = [make_symbol(SymT.INDEX, i) for i in range(len(groups))]
         # We are doing two estimates simultaneously:
-        # 1) the first is a for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
+        # 1) the first is for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
         # we add an item to loops each corresponding to each reduction loop in the kernel
         # outside_loop is only used for broadcasting or point-wise ops that don't use the reduction dimension
         # 2) the second is for a persistent kernel, using self.persistent

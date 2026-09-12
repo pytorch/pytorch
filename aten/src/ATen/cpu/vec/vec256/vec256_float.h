@@ -5,6 +5,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
+
+#include <limits>
 #if defined(CPU_CAPABILITY_AVX2)
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
@@ -163,7 +165,8 @@ class Vectorized<float> {
   }
   Vectorized<float> angle() const {
     const auto zero_vec = _mm256_set1_ps(0.f);
-    const auto nan_vec = _mm256_set1_ps(NAN);
+    const auto nan_vec =
+        _mm256_set1_ps(std::numeric_limits<float>::quiet_NaN());
     const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
     const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_ps(c10::pi<float>);

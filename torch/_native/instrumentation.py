@@ -3,18 +3,20 @@
 Native DSL ops compile device kernels lazily on first call. Those compiles
 are the dominant first-call latency, and a silent cache miss is a common
 "why is this slow again?" question. This module surfaces both, with no
-runtime cost when neither ``TORCH_LOGS`` nor structured tracing is enabled.
+runtime cost unless ``TORCH_LOGS=+native_dsl_compile`` is set. That artifact
+is off by default to avoid log spew: these wrappers sit on the compile
+*cache*, so they run on every op call, cache hits included.
 
-Two sinks, both fed by a single :class:`CompileEvent`:
+Two sinks, both gated on that artifact and fed by a single
+:class:`CompileEvent`:
 
-* The ``native_dsl`` logger (``TORCH_LOGS=+native_dsl``): a one-line
-  human-readable summary per compile -- outcome, wall time, and running
-  hit/miss totals.
+* The ``native_dsl_compile`` artifact logger: a one-line human-readable
+  summary per compile -- outcome, wall time, and running hit/miss totals.
 * ``trace_structured`` artifacts (tlparse): a JSON record per compile, for
   production jobs where only the structured trace is retrievable.
 
-Two DSLs compile through different machinery, so there are two entry points.
-Both reduce to the same shared core (:func:`_make_wrapper`): snapshot the
+The DSLs compile through different machinery, so each has an entry point.
+All reduce to the same shared core (:func:`_make_wrapper`): snapshot the
 cache, time the call, snapshot again, and flag ``compiled`` when the miss
 counter advanced. They differ only in how a snapshot is sampled:
 
@@ -30,6 +32,11 @@ counter advanced. They differ only in how a snapshot is sampled:
   ``cute.compile``, so the measured wall time *is* the compile time;
   otherwise the key was served from the in-memory or on-disk ``.o`` cache.
 
+* :func:`instrument_flydsl_compile` -- for FlyDSL, stacked *above* the
+  ``@flydsl_jit_cache`` decorator, exactly like the CuTeDSL entry point.
+  Both cache wrappers expose ``cache_info().hits`` and ``.misses``, so they
+  share a sampler and differ only in the reported DSL name.
+
 * :func:`instrument_triton_kernel` -- for Triton ``@triton.jit`` kernels,
   which compile *and* launch in one ``kernel[grid](...)`` call and keep
   their own per-kernel cache (``JITFunction.device_caches``). Stacked above
@@ -40,7 +47,11 @@ counter advanced. They differ only in how a snapshot is sampled:
   fused, ``wall_ms`` on a miss is compile + host-launch latency (compile
   dominates); on a hit it is just host-launch latency.
 
-Both DSLs only expose miss-side signal directly (CuTeDSL's vendored cache
+* :func:`instrument_helion_kernel` -- for regular and AOT Helion kernels. It
+  tracks compiled configurations across the kernel's bound specialization
+  cache; a growing count means the call compiled a new configuration.
+
+The DSLs only expose miss-side signal directly (CuTeDSL's vendored cache
 reports aggregate counters; Triton's cache only grows), so finer reasons
 (disk-hit vs lock-timeout, Triton's on-disk cache) are not distinguished
 here -- the boolean ``compiled`` flag plus wall time covers the common case.
@@ -53,10 +64,12 @@ capture Inductor's unrelated Triton compiles).
 from __future__ import annotations
 
 import functools
-import logging
 import time
 from dataclasses import asdict, dataclass
 from typing import Any, TYPE_CHECKING, TypeVar
+
+import torch._logging
+from torch._native.flydsl.cache import flydsl_jit_cache
 
 
 if TYPE_CHECKING:
@@ -65,18 +78,24 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CompileEvent",
+    "InstrumentedHelionKernel",
     "InstrumentedTritonKernel",
     "instrument_cutedsl_compile",
+    "instrument_flydsl_compile",
+    "instrument_helion_kernel",
     "instrument_triton_kernel",
     "instrumented_cutedsl_cache",
+    "instrumented_flydsl_cache",
+    "instrumented_helion_kernel",
     "instrumented_triton_cache",
 ]
 
-log = logging.getLogger(__name__)
-
-# tlparse artifact name. The "artifact" envelope (see trace_structured_artifact)
-# is the well-supported transport; the name lets tlparse group these events.
+# tlparse artifact name, and the TORCH_LOGS switch gating both sinks. The
+# "artifact" envelope (see trace_structured_artifact) is the well-supported
+# transport; the name lets tlparse group these events.
 _ARTIFACT_NAME = "native_dsl_compile"
+
+log = torch._logging.getArtifactLogger(__name__, _ARTIFACT_NAME)
 
 R = TypeVar("R")
 
@@ -106,28 +125,27 @@ class CompileEvent:
 
 
 def _listening() -> bool:
-    """True if either sink would record an event.
+    """True if the ``native_dsl_compile`` artifact is enabled.
 
     Lets the wrapper skip all instrumentation work (cache sampling, timing,
     key formatting, event construction) on the hot path when nothing is
     listening -- important because the CuTeDSL wrapper sits on the compile
     *cache* and so runs on every op call, cache hits included.
 
-    Mirrors the gates the sinks apply internally: the logger on its effective
-    level, and structured tracing on ``trace_log.handlers`` (the documented
-    "is tracing enabled" idiom, also used by ``trace_structured`` itself).
-    """
-    from torch._logging._internal import trace_log
+    Both sinks share this one gate; tlparse emission cannot be left to
+    ``trace_structured``'s internal ``trace_log.handlers`` check, which is
+    true in any job collecting a structured trace.
 
-    return log.isEnabledFor(logging.INFO) or bool(trace_log.handlers)
+    ``log_state`` is read off the module because ``TORCH_LOGS`` parsing
+    rebinds it.
+    """
+    from torch._logging import _internal
+
+    return _internal.log_state.is_artifact_enabled(_ARTIFACT_NAME)
 
 
 def _emit(event: CompileEvent) -> None:
-    """Fan the event out to the native_dsl logger and tlparse.
-
-    Both sinks self-gate (logging on level, trace_structured on
-    ``trace_log.handlers``), so this is cheap when nothing is listening.
-    """
+    """Fan the event out to the artifact logger and tlparse."""
     log.info(
         "%s [%s] %s in %.1fms (key=%s, cache hits=%d misses=%d)",
         event.op,
@@ -176,7 +194,7 @@ def _format_key(args: tuple, kwargs: dict, key_fn: Callable | None) -> str:
 
 def _make_wrapper(
     fn: Callable[..., R],
-    op: str,
+    op: str | Callable[..., str],
     dsl: str,
     key_fn: Callable[..., str] | None,
     sample: Callable[[], tuple[int | None, int | None]],
@@ -218,9 +236,19 @@ def _make_wrapper(
                 outcome = "error"
             else:
                 outcome = "compiled" if compiled else "cache_hit"
+            if callable(op):
+                # A label callback must never change the wrapped fn's outcome:
+                # this runs in the finally block, so a raised exception would
+                # mask the real result/error. Fall back to a safe label.
+                try:
+                    op_label = op(*args, **kwargs)
+                except Exception:
+                    op_label = "<op-label-error>"
+            else:
+                op_label = op
             _emit(
                 CompileEvent(
-                    op=op,
+                    op=op_label,
                     dsl=dsl,
                     outcome=outcome,
                     compiled=compiled,
@@ -256,15 +284,21 @@ def _cache_info_sampler(fn: Any) -> Callable[[], tuple[int | None, int | None]]:
     return sample
 
 
-def instrument_cutedsl_compile(
-    op: str,
+def _instrument_cached_compile(
+    op: str | Callable[..., str],
+    dsl: str,
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
-    """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
+    """Shared implementation behind the per-DSL compile instrumentation.
 
     Args:
-        op: Operator symbol being compiled for, e.g. ``"aten::topk"``.
+        op: Operator symbol being compiled for, e.g. ``"aten::topk"``. May
+            instead be a callable receiving the wrapped function's arguments
+            and returning the label per call; if that callable raises, the
+            label falls back to ``"<op-label-error>"`` without changing the
+            wrapped function's result or exception.
+        dsl: DSL name reported in the event, e.g. ``"cutedsl"``.
         key_fn: Optional callable with the wrapped function's signature
             returning a short string describing the compile key for logs.
             Defaults to a repr of the args/kwargs.
@@ -276,7 +310,7 @@ def instrument_cutedsl_compile(
     """
 
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
-        wrapper = _make_wrapper(fn, op, "cutedsl", key_fn, _cache_info_sampler(fn))
+        wrapper = _make_wrapper(fn, op, dsl, key_fn, _cache_info_sampler(fn))
         # Forward jit_cache's bespoke attributes (functools.wraps doesn't copy
         # them) so the instrumented function stays a drop-in for callers that
         # introspect the cache.
@@ -286,6 +320,34 @@ def instrument_cutedsl_compile(
         return wrapper
 
     return decorator
+
+
+def instrument_cutedsl_compile(
+    op: str | Callable[..., str],
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
+
+    See :func:`_instrument_cached_compile` for the arguments and for what the
+    returned decorator guarantees.
+    """
+
+    return _instrument_cached_compile(op, "cutedsl", key_fn=key_fn)
+
+
+def instrument_flydsl_compile(
+    op: str | Callable[..., str],
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    """Instrument a FlyDSL (``@flydsl_jit_cache``-decorated) compile function.
+
+    Same contract as :func:`_instrument_cached_compile`; only the DSL name
+    reported in the event differs.
+    """
+
+    return _instrument_cached_compile(op, "flydsl", key_fn=key_fn)
 
 
 def _triton_cache_size(kernel: Any) -> int | None:
@@ -389,6 +451,66 @@ def instrument_triton_kernel(
     return decorator
 
 
+def _helion_cache_size(kernel: Any) -> int | None:
+    """Compiled-config count across a Helion Kernel's bound specializations.
+
+    Helion stores compiled configs in ``Kernel._bound_kernels[*]._compile_cache``;
+    the total grows by one each time a new configuration compiles, so a delta
+    across a call tells us whether *this* kernel compiled. Returns None if the
+    object doesn't expose these private attributes (a future Helion that renames
+    them, or a non-kernel in tests).
+    """
+    bound_kernels = getattr(kernel, "_bound_kernels", None)
+    if bound_kernels is None:
+        return None
+    try:
+        return sum(
+            len(getattr(bound, "_compile_cache", ()))
+            for bound in bound_kernels.values()
+        )
+    except Exception:
+        return None
+
+
+class InstrumentedHelionKernel:
+    """Transparent proxy over a Helion ``Kernel`` compile cache."""
+
+    def __init__(
+        self,
+        kernel: Any,
+        op: str,
+        key_fn: Callable[..., str] | None,
+    ) -> None:
+        self._kernel = kernel
+        self._wrapped = _make_wrapper(kernel, op, "helion", key_fn, self._sample)
+
+    @property
+    def helion_kernel(self) -> Any:
+        return self._kernel
+
+    def _sample(self) -> tuple[int | None, int | None]:
+        return None, _helion_cache_size(self._kernel)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._wrapped(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._kernel, name)
+
+
+def instrument_helion_kernel(
+    op: str,
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Any], InstrumentedHelionKernel]:
+    """Instrument a Helion ``Kernel`` without importing Helion eagerly."""
+
+    def decorator(kernel: Any) -> InstrumentedHelionKernel:
+        return InstrumentedHelionKernel(kernel, op, key_fn)
+
+    return decorator
+
+
 # ---------------------------------------------------------------------------
 # Combined decorators: the recommended one-decorator surface for native ops.
 # They apply the DSL's own cache/jit *and* the instrumentation, so the op
@@ -399,7 +521,7 @@ def instrument_triton_kernel(
 
 
 def instrumented_cutedsl_cache(
-    op: str,
+    op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
@@ -418,6 +540,27 @@ def instrumented_cutedsl_cache(
 
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
         return instrument_cutedsl_compile(op, key_fn=key_fn)(jit_cache(fn))
+
+    return decorator
+
+
+def instrumented_flydsl_cache(
+    op: str | Callable[..., str],
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    """Cache + instrument a FlyDSL compile function in one decorator::
+
+        @instrumented_flydsl_cache("aten::_fused_rms_norm")
+        def _compile_rmsnorm_fwd(n, dtype, arch, ...):
+            return flyc.compile(...)
+
+    Equivalent to ``instrument_flydsl_compile(op)`` stacked above
+    ``@flydsl_jit_cache``.
+    """
+
+    def decorator(fn: Callable[..., R]) -> Callable[..., R]:
+        return instrument_flydsl_compile(op, key_fn=key_fn)(flydsl_jit_cache(fn))
 
     return decorator
 
@@ -442,5 +585,26 @@ def instrumented_triton_cache(
 
     def decorator(fn: Callable[..., R]) -> InstrumentedTritonKernel:
         return instrument_triton_kernel(op, key_fn=key_fn)(triton.jit(fn))
+
+    return decorator
+
+
+def instrumented_helion_kernel(
+    op: str,
+    *,
+    aot: bool = False,
+    key_fn: Callable[..., str] | None = None,
+    **settings: object,
+) -> Callable[[Callable[..., R]], InstrumentedHelionKernel]:
+    """Create and instrument a regular or AOT Helion kernel."""
+    import helion  # pyrefly: ignore[missing-import]
+    import helion.experimental  # pyrefly: ignore[missing-import]
+
+    kernel_decorator = helion.experimental.aot_kernel if aot else helion.kernel
+
+    def decorator(fn: Callable[..., R]) -> InstrumentedHelionKernel:
+        return instrument_helion_kernel(op, key_fn=key_fn)(
+            kernel_decorator(**settings)(fn)
+        )
 
     return decorator

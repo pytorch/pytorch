@@ -38,7 +38,7 @@ else
     exit 1
 fi
 
-# Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
+# Version: uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
 # PYTORCH_BUILD_NUMBER > 1
 build_version="$PYTORCH_BUILD_VERSION"
 build_number="$PYTORCH_BUILD_NUMBER"
@@ -87,7 +87,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
 fi
 pushd "$PYTORCH_ROOT"
 retry pip install -qUr requirements-build.txt
-python setup.py clean
+python -m spin clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
 
@@ -100,17 +100,12 @@ fi
 
 echo "Calling -m pip install . -v --no-build-isolation at $(date)"
 
-if [[ $LIBTORCH_VARIANT = *"static"* ]]; then
-    STATIC_CMAKE_FLAG="-DTORCH_STATIC=1"
-fi
-
 (
     set -x
 
     mkdir -p build
 
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
-        EXTRA_CAFFE2_CMAKE_FLAGS="${EXTRA_CAFFE2_CMAKE_FLAGS[@]} $STATIC_CMAKE_FLAG" \
         # TODO: Remove this flag once https://github.com/pytorch/pytorch/issues/55952 is closed
         CFLAGS='-Wno-deprecated-declarations' \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=1 \

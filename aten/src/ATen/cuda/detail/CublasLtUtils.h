@@ -81,7 +81,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
   }
 };
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
                                         cublasLtMatrixLayoutOpaque_t,
                                         &cublasLtMatrixLayoutDestroy> {
@@ -120,7 +120,7 @@ class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
         descriptor(), attr, &value, sizeof(T)));
   }
 };
-#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 
 class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
                                      cublasLtMatmulPreferenceOpaque_t,
@@ -140,11 +140,17 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 
 struct CublasLtWorkspace {
-  CublasLtWorkspace() {
-    size = at::cuda::getCUDABlasLtWorkspaceSize();
-    ptr = at::cuda::getCUDABlasLtWorkspace();
+  CublasLtWorkspace()
+      : ptr(nullptr), size(at::cuda::getCUDABlasLtWorkspaceSize()) {
+    if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
+      ptr = at::cuda::getCUDABlasLtWorkspace(size);
+    } else {
+      workspace = at::cuda::allocateCUDABlasWorkspace(size);
+      ptr = workspace.get();
+    }
   }
 
+  at::DataPtr workspace;
   void* ptr;
   size_t size;
 };
@@ -308,11 +314,17 @@ CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo() {
     info.compute_type = CUBLAS_COMPUTE_64F;
     info.scale_type = CUDA_R_64F;
   } else if constexpr (std::is_same_v<T, float>) {
-    if (at::globalContext().float32Precision(
-            at::Float32Backend::CUDA,
-            at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
+    const auto fp32_precision = at::globalContext().float32Precision(
+        at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+    if (fp32_precision == at::Float32Precision::TF32) {
       info.compute_type = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
+    if (fp32_precision == at::Float32Precision::BF16X9 &&
+        !at::NoTF32Guard::should_disable_fp32_reduced_precision()) {
+      info.compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
+    }
+#endif
   } else if constexpr (std::is_same_v<T, c10::complex<double>>) {
     info.ab_type = CUDA_C_64F;
     info.c_type = CUDA_C_64F;

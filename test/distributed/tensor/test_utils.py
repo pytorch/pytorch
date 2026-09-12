@@ -1792,7 +1792,8 @@ class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTes
         target_tensor_dim: int,
     ) -> torch.Tensor:
         """Perform alltoall redistribution to a new shard dimension."""
-        assert isinstance(shard_spec, _StridedShard)  # noqa: S101
+        if not isinstance(shard_spec, _StridedShard):
+            raise AssertionError(f"expected _StridedShard, got {type(shard_spec)}")
         return shard_spec._to_new_shard_dim(
             local_tensor, mesh, mesh_dim, logical_shape, target_tensor_dim
         )

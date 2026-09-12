@@ -17,7 +17,7 @@ struct MaybeOwnedTraitsGenericImpl {
   using owned_type = T;
   using borrow_type = const T*;
 
-  static borrow_type createBorrow(const owned_type& from) {
+  static borrow_type createBorrow(const owned_type& from C10_LIFETIMEBOUND) {
     return &from;
   }
 
@@ -73,7 +73,7 @@ class MaybeOwned final {
   };
 
   /// Don't use this; use borrowed() instead.
-  explicit MaybeOwned(const owned_type& t)
+  explicit MaybeOwned(const owned_type& t C10_LIFETIMEBOUND)
       : isBorrowed_(true), borrow_(MaybeOwnedTraits<T>::createBorrow(t)) {}
 
   /// Don't use this; use owned() instead.
@@ -167,7 +167,7 @@ class MaybeOwned final {
     return *this;
   }
 
-  static MaybeOwned borrowed(const T& t) {
+  static MaybeOwned borrowed(const T& t C10_LIFETIMEBOUND) {
     return MaybeOwned(t);
   }
 

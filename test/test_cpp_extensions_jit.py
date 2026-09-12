@@ -141,6 +141,39 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
 
+    def test_jit_stale_lock_file_does_not_deadlock(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189245:
+        # a leftover 'lock' file (e.g. from a builder killed by SIGKILL/OOM)
+        # must not deadlock later loads. Run in a subprocess so a regression
+        # (an infinite wait) surfaces as a timeout instead of hanging the job.
+        build_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, build_dir, ignore_errors=True)
+        # Simulate the stale lock left behind by a forcefully killed builder.
+        open(os.path.join(build_dir, "lock"), "w").close()
+        script = "\n".join(
+            [
+                "import torch.utils.cpp_extension as ext",
+                "m = ext.load_inline(",
+                "    name='stale_lock_ext',",
+                "    cpp_sources='int forty_two() { return 42; }',",
+                "    functions=['forty_two'],",
+                f"    build_directory={build_dir!r},",
+                "    verbose=True)",
+                "assert m.forty_two() == 42",
+                "print('STALE_LOCK_OK')",
+            ]
+        )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("cpp_extension.load() deadlocked on a stale lock file (#189245)")
+        self.assertIn("STALE_LOCK_OK", proc.stdout, msg=proc.stderr)
+
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
         # NOTE: The name of the extension must equal the name of the module.

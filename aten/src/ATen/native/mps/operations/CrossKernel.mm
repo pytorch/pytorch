@@ -49,7 +49,7 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto crossPSO = lib.getPipelineStateForFunc(fmt::format("cross_{}_{}", suffix, scalarToMetalTypeString(out)));
-      getMPSProfiler().beginProfileKernel(crossPSO, "cross", {input, other});
+      getMPSProfiler().beginProfileKernel(crossPSO, "cross", {input, other}, mpsStream);
       [computeEncoder setComputePipelineState:crossPSO];
       mtl_setArgs(computeEncoder, out, input, other);
       if (is_dense) {
@@ -64,7 +64,7 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
                        static_cast<uint32_t>(dim));
       }
       mtl_dispatch1DJob(computeEncoder, crossPSO, numThreads);
-      getMPSProfiler().endProfileKernel(crossPSO);
+      getMPSProfiler().endProfileKernel(crossPSO, mpsStream);
     }
   });
 }

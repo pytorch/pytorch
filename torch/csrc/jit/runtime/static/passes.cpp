@@ -727,7 +727,7 @@ static void ReplaceWithCopyImpl(
   DepthFirstGraphNodeIterator graph_it(graph);
   for (auto n = graph_it.next(); n != nullptr; n = graph_it.next()) {
     c10::Symbol new_symbol;
-    if (supported.count(n->kind()) && opIsRegistered(supported.at(n->kind()))) {
+    if (supported.contains(n->kind()) && opIsRegistered(supported.at(n->kind()))) {
       new_symbol = supported.at(n->kind());
     } else if (!match_schema(n, new_symbol)) {
       continue;
@@ -1017,12 +1017,7 @@ void RemoveImmutableInputDictLookups(
       continue;
     }
     keys.insert(key);
-    auto iter = dict_to_getitems.find(dict);
-    if (iter == dict_to_getitems.end()) {
-      dict_to_getitems.emplace(dict, std::vector<Node*>{getitem_node});
-      continue;
-    }
-    iter->second.push_back(getitem_node);
+    dict_to_getitems.try_emplace(dict).first->second.push_back(getitem_node);
   }
   if (keys.empty()) {
     return;
@@ -1094,7 +1089,7 @@ void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
       continue;
     }
 
-    if ((inputs.find(output) != inputs.end()) || toIValue(output).has_value() ||
+    if ((inputs.contains(output)) || toIValue(output).has_value() ||
         // If the output's owning block is not this one, it's from an outer
         // scope
         output->node()->owningBlock() != block) {
