@@ -19,7 +19,12 @@ from torch.distributed.fsdp._common_utils import (
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
-from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import (
+    CPUOffloadPolicy,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+    PartialOffloadPolicy,
+)
 from ._fsdp_collectives import (
     AllGather,
     AllGatherResult,
@@ -148,6 +153,63 @@ class AllReduceState(NamedTuple):
     event: torch.Event | None  # all-reduce event
 
 
+def _select_partial_offload(numels: list[int], offload_ratio: float) -> list[bool]:
+    """Choose which parameters in a group to offload to CPU.
+
+    Given the ordered list of per-parameter sharded ``numels`` for a group and
+    a target ``offload_ratio`` in ``[0.0, 1.0]``, return a boolean mask (one
+    entry per parameter, in the original group order) marking the parameters to
+    offload to host.
+
+    Selection is greedy and deterministic:
+
+    - Candidates are visited largest-numel-first, with ties broken by ascending
+      original index so the order is total and stable.
+    - A candidate is offloaded only if adding its numel keeps the cumulative
+      offloaded numel at or below ``floor(offload_ratio * total_numel)`` (the
+      largest integer numel budget that does not exceed the target fraction).
+    - Visiting continues past a skipped candidate so a later, smaller parameter
+      can still fit the remaining budget. This yields the largest offloaded
+      subset whose numel does not exceed the budget.
+
+    Boundary behavior matches the all-or-nothing policies exactly:
+
+    - ``offload_ratio == 0.0`` -> budget ``0`` -> no parameter is offloaded,
+      identical to :class:`OffloadPolicy`.
+    - ``offload_ratio == 1.0`` -> budget ``total_numel`` -> every parameter is
+      offloaded, identical to :class:`CPUOffloadPolicy`.
+
+    The function is pure and depends only on ``numels`` and ``offload_ratio``,
+    so every rank computes the identical mask without communication.
+    """
+    if not (0.0 <= offload_ratio <= 1.0):
+        raise ValueError(
+            f"offload_ratio must be in [0.0, 1.0], got {offload_ratio}"
+        )
+    n = len(numels)
+    mask = [False] * n
+    if n == 0:
+        return mask
+    total = sum(numels)
+    if total == 0 or offload_ratio == 0.0:
+        return mask
+    # Integer byte budget: the largest numel that does not exceed the target
+    # fraction. ``floor`` makes the rule exact and platform-independent. At
+    # ratio 1.0 this equals ``total`` so all params are selected.
+    import math
+
+    budget = math.floor(offload_ratio * total)
+    # Visit largest-first; ties broken by ascending original index. Sorting by
+    # ``(-numel, index)`` is a total order, so the result is deterministic.
+    order = sorted(range(n), key=lambda i: (-numels[i], i))
+    used = 0
+    for i in order:
+        if used + numels[i] <= budget:
+            mask[i] = True
+            used += numels[i]
+    return mask
+
+
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
@@ -168,6 +230,19 @@ class FSDPParamGroup:
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
 
+        # Compute the per-parameter offload decision for the whole group up
+        # front. ``OffloadPolicy`` and ``CPUOffloadPolicy`` keep their
+        # all-or-nothing behavior (``None`` lets each ``FSDPParam`` derive the
+        # flag from the policy type). ``PartialOffloadPolicy`` runs the
+        # deterministic greedy selector so every rank offloads the identical
+        # subset of parameters with no communication.
+        offload_to_cpu_per_param: list[bool | None] = [None] * len(params)
+        if isinstance(offload_policy, PartialOffloadPolicy):
+            numels = [param.numel() for param in params]
+            offload_to_cpu_per_param = list(
+                _select_partial_offload(numels, offload_policy.offload_ratio)
+            )
+
         self.fsdp_params = [
             FSDPParam(
                 param,
@@ -178,8 +253,11 @@ class FSDPParamGroup:
                 shard_placement_fn,
                 mp_policy,
                 offload_policy,
+                offload_to_cpu,
             )
-            for param, module_info in zip(params, param_module_infos)
+            for (param, module_info), offload_to_cpu in zip(
+                zip(params, param_module_infos), offload_to_cpu_per_param
+            )
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
@@ -1070,12 +1148,19 @@ class FSDPParamGroup:
             )
 
     def _validate_cpu_offload_params(self):
-        if not isinstance(self.offload_policy, CPUOffloadPolicy):
+        # ``CPUOffloadPolicy`` requires every param materialized on CPU.
+        # ``PartialOffloadPolicy`` only offloads a selected subset, so only the
+        # params whose ``offload_to_cpu`` flag is set must be on CPU; resident
+        # params are unconstrained. ``OffloadPolicy`` offloads nothing.
+        if not isinstance(
+            self.offload_policy, (CPUOffloadPolicy, PartialOffloadPolicy)
+        ):
             return
         fsdp_params_not_on_cpu = [
             fsdp_param
             for fsdp_param in self.fsdp_params
-            if fsdp_param.sharded_param.device.type != "cpu"
+            if fsdp_param.offload_to_cpu
+            and fsdp_param.sharded_param.device.type != "cpu"
         ]
         if fsdp_params_not_on_cpu:
             raise RuntimeError(
