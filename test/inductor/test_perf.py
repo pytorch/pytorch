@@ -30,15 +30,19 @@ from torch._inductor.utils import run_and_get_code
 # performance for that setting.
 #
 # Defines all the kernels for tests
-from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
+from torch.utils._triton import has_triton
 
 
 # set so that metrics appear
 torch._logging.set_logs(inductor_metrics=True)
 
-if HAS_GPU_AND_TRITON:
+if has_triton():
     import triton  # @manual
     import triton.language as tl  # @manual
 
@@ -81,19 +85,16 @@ def count_numel_train(f, *args):
     return str(metrics.num_bytes_accessed // 4)
 
 
-DEVICE = GPU_TYPE
-
-
-def T(*size, dtype=torch.float32, device=DEVICE, grad=False):
+def T(*size, dtype=torch.float32, device="cpu", grad=False):
     return torch.randn(size, dtype=dtype, device=device, requires_grad=grad)
 
 
-def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
+def TI(*size, mx=10, dtype=torch.int32, device="cpu"):
     return torch.randint(0, mx, size, dtype=dtype, device=device)
 
 
 class TestCase(InductorTestCase):
-    device = DEVICE
+    hw_classification = HardwareClassification.ACCELERATOR
 
 
 class NumBytesMetricTests(TestCase):
@@ -101,67 +102,69 @@ class NumBytesMetricTests(TestCase):
     Primarily used for sanity testing that the num_bytes_accessed metrics is correct.
     """
 
-    def test_pointwise(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_pointwise(self, device):
         def f(x):
             return x.cos()
 
-        inp = (T(10),)
+        inp = (T(10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """20""")
 
         def f(x, y):
             return x + y
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
         def f(x, y):
             return x + y
 
-        inp = (T(10, 10), T(10))
+        inp = (T(10, 10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """210""")
 
         def f(x):
             return x + x
 
-        inp = (T(10),)
+        inp = (T(10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """20""")
 
         def f(x):
             return x + x.t()
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
         def f(a, b, c):
             return a.cos(), b.sin() + c.sin()
 
-        inp = (T(10), T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """50""")
 
-    def test_reduction(self):
+    def test_reduction(self, device):
         def f(x):
             return x.sum(dim=1)
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """110""")
 
         def f(x):
             return x.sum(dim=0)
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """110""")
 
-    def test_extern(self):
+    def test_extern(self, device):
         def f(x):
             return torch.mm(x, x)
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
         def f(a, b):
             return torch.mm(a, b)
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """300""")
 
         def f(x):
@@ -170,7 +173,7 @@ class NumBytesMetricTests(TestCase):
             x = x.cos()
             return x
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """600""")
 
         def f(x):
@@ -179,70 +182,74 @@ class NumBytesMetricTests(TestCase):
             x = torch.mm(a, b)
             return x
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """600""")
 
-    def test_cat(self):
+    def test_cat(self, device):
         def f(a, b):
             return torch.cat([a.sin(), b.sin()])
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
         def f(a, b):
             return torch.cat([a, b])
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
         def f(a, b):
             return torch.cat([a.cos(), b])
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
         def f(a):
             return torch.cat([a.cos(), a.sin()])
 
-        inp = (T(10),)
+        inp = (T(10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
         def f(a, b):
             return torch.cat([torch.mm(a, a), b.sin()])
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
         def f(a, b, c):
             return torch.cat((a + 1, b + 2, c + 3)) + 10
 
-        inp = (T(10, 10), T(10, 10), T(10, 10))
+        inp = (
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+        )
         self.assertExpectedInline(count_numel(f, *inp), """600""")
 
         def f(a, b, c, d, e):
             return torch.cat((a + 1, b + 2, c + 3, d + 4, e + 5)) + 10
 
-        inp = [T(10, 10) for _ in range(5)]
+        inp = [T(10, 10, device=device) for _ in range(5)]
         self.assertExpectedInline(count_numel(f, *inp), """1000""")
 
         def f(a, b):
             return torch.cat([a.sum(dim=0), b.sum(dim=0)]) + 10
 
-        inp = [T(10, 10, 10), T(10, 10, 10)]
+        inp = [T(10, 10, 10, device=device), T(10, 10, 10, device=device)]
         self.assertExpectedInline(count_numel(f, *inp), """2600""")
 
     @config.patch("fx_graph_cache", False)
-    def test_cat_pointwise(self):
+    def test_cat_pointwise(self, device):
         def f(a, b):
             return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)])
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
         def f(a, b):
             return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)]).cos()
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """680""")
 
         # Should turn into pointwise even if only some of inputs are pointwise.
@@ -250,7 +257,7 @@ class NumBytesMetricTests(TestCase):
             out = torch.cat([a.cos(), torch.mm(b, b)])
             return out.cos()
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """600""")
 
         # Should not turn into pointwise if all inputs are not pointwise
@@ -258,28 +265,28 @@ class NumBytesMetricTests(TestCase):
             out = torch.cat([torch.mm(a, a), torch.mm(b, b)])
             return out.cos()
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """800""")
 
         def f(a, b):
             out = torch.cat([a, b])
             return out.cos()
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
         def f(a, b):
             b = b.cos()
             return torch.cat([a, b])
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
         def f(a, b):
             a = a @ a
             return torch.constant_pad_nd(torch.cat([a, b]), [2, 2], 0.5)
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """680""")
 
     @patch.object(config, "split_cat_fx_passes", False)
@@ -296,12 +303,12 @@ class NumBytesMetricTests(TestCase):
         },
     )
     @patch.object(config, "post_grad_fusion_options", {})
-    def test_cat_pointwise_many_complex_inputs(self):
+    def test_cat_pointwise_many_complex_inputs(self, device):
         def f(*inputs):
             input = [torch.nn.functional.gelu(val) for val in inputs]
             return torch.cat(input) + 10
 
-        inp = (T(10, 10) for _ in range(16))
+        inp = (T(10, 10, device=device) for _ in range(16))
         self.assertExpectedInline(count_numel(f, *inp), """6400""")
 
     @patch.object(config, "split_cat_fx_passes", False)
@@ -318,31 +325,31 @@ class NumBytesMetricTests(TestCase):
         },
     )
     @patch.object(config, "post_grad_fusion_options", {})
-    def test_cat_pointwise_many_simple_inputs(self):
+    def test_cat_pointwise_many_simple_inputs(self, device):
         def f(*inputs):
             input = [torch.nn.functional.relu(val) for val in inputs]
             return torch.cat(input) + 10
 
-        inp = (T(10, 10) for _ in range(16))
+        inp = (T(10, 10, device=device) for _ in range(16))
         self.assertExpectedInline(count_numel(f, *inp), """9600""")
 
     @patch.object(config, "max_pointwise_cat_inputs", 0)
-    def test_cat_pointwise_config_option(self):
+    def test_cat_pointwise_config_option(self, device):
         def f(a, b):
             return torch.cat([a + 1, b + 2]) + 3
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
-    def test_index(self):
+    def test_index(self, device):
         def f(a, b):
             return a[b]
 
-        inp = (T(10), TI(10, mx=10))
+        inp = (T(10, device=device), TI(10, mx=10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
-    @requires_gpu_and_triton
-    def test_delay_realize_cheap_outputs_shared_mask(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_delay_realize_cheap_outputs_shared_mask(self, device):
         # Shared tril mask across multiple users gets eagerly materialized
         # as an output buffer, inflating downstream read counts. With
         # delay_realize_cheap_outputs, the mask stays inlined as index
@@ -352,9 +359,9 @@ class NumBytesMetricTests(TestCase):
             return x1 + mask, x2 + mask, x3 + mask
 
         inp = (
-            T(32, 32, grad=True),
-            T(32, 32, grad=True),
-            T(32, 32, grad=True),
+            T(32, 32, grad=True, device=device),
+            T(32, 32, grad=True, device=device),
+            T(32, 32, grad=True, device=device),
         )
 
         # Without deferred realization: mask gets materialized as output buffer
@@ -376,38 +383,40 @@ class FusionTests(TestCase):
     Tests that things can be fused into a single kernel
     """
 
-    def test_horizontal_reduction_pointwise(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_horizontal_reduction_pointwise(self, device):
         def f(a):
             b = a.sum(dim=1)
             c = a.cos()
             return b, c
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """210""")
 
-    def test_horizontal_reduction_reduction(self):
+    def test_horizontal_reduction_reduction(self, device):
         def f(a):
             b = a.sum(dim=1)
             c = a.amax(dim=1)
             return b, c
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """120""")
 
-    @requires_gpu_and_triton
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @config.patch({"force_disable_caches": True, "triton.multi_kernel": 0})
-    def test_aot_autograd_cse_preserves_reduction_fusion(self):
+    def test_aot_autograd_cse_preserves_reduction_fusion(self, device):
         def fn(x):
             return x.abs().max(), x.abs().mean(), x.square().mean()
 
         def count_kernels(requires_grad):
             torch._dynamo.reset()
             metrics.reset()
-            x = torch.rand((1024, 32768), device=DEVICE, requires_grad=requires_grad)
+            x = torch.rand((1024, 32768), device=device, requires_grad=requires_grad)
             result = torch.compile(fn, fullgraph=True, dynamic=False)(x)
             expected = fn(x)
             self.assertEqual(result, expected)
-            get_interface_for_device(DEVICE).synchronize()
+            get_interface_for_device(device).synchronize()
             forward_kernel_count = metrics.generated_kernel_count
             if requires_grad:
                 result_sum = result[0] + result[1] + result[2]
@@ -422,43 +431,43 @@ class FusionTests(TestCase):
 
         self.assertEqual(autograd_kernel_count, inference_kernel_count)
 
-    def test_horizontal_reduction_pointwise2(self):
+    def test_horizontal_reduction_pointwise2(self, device):
         def f(a, b):
             c = a.sum(dim=1)
             b = b.cos()
             return b + c
 
-        inp = (T(10, 10), T(10))
+        inp = (T(10, 10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """120""")
 
-    def test_horizontal_reduction_outer_pointwise(self):
+    def test_horizontal_reduction_outer_pointwise(self, device):
         def f(a, b):
             c = a.sum(dim=0)
             b = b.cos()
             return b + c
 
-        inp = (T(10, 10), T(10))
+        inp = (T(10, 10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """120""")
 
-    def test_horizontal_sum_pw_broadcast(self):
+    def test_horizontal_sum_pw_broadcast(self, device):
         def f(a, b):
             a = a.sum(dim=1, keepdim=True)
             b = b.cos()
             return a * b
 
-        inp = (T(10, 10), T(10))
+        inp = (T(10, 10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """210""")
 
-    def test_vertical_sum_pw(self):
+    def test_vertical_sum_pw(self, device):
         def f(a):
             a = a.cos()
             a = a.sum(dim=1)
             return a.cos()
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """110""")
 
-    def test_norm_chain(self):
+    def test_norm_chain(self, device):
         def f(a):
             b = a.sum(dim=1, keepdim=True)
             a = a * b
@@ -468,81 +477,85 @@ class FusionTests(TestCase):
             a = a * b
             return a
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
-    def test_softmax_inner(self):
+    def test_softmax_inner(self, device):
         def f(a):
             return torch.softmax(a, dim=1)
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
-    def test_layer_norm(self):
+    def test_layer_norm(self, device):
         # TODO: Suboptimal! We shouldn't need to save normalization stats.
-        mod = torch.nn.LayerNorm(10, device=self.device)
+        mod = torch.nn.LayerNorm(10, device=device)
 
         def f(x):
             return mod(x)
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         with torch.no_grad():
             self.assertExpectedInline(count_numel(f, *inp), """220""")
 
-    def test_double_softmax(self):
+    def test_double_softmax(self, device):
         def f(x):
             x = torch.softmax(x, dim=1)
             x = torch.softmax(x, dim=1)
             return x
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
-    def test_softmax_backward(self):
+    def test_softmax_backward(self, device):
         def f(grad_out, out):
             return aten._softmax_backward_data(grad_out, out, 1, torch.float32)
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """300""")
 
-    def test_neighbor(self):
+    def test_neighbor(self, device):
         def f(a, b):
             return ((a - b) ** 2).sum(dim=-1).amax(dim=1)
 
-        inp = (T(10, 1, 4), T(1, 10, 4))
+        inp = (T(10, 1, 4, device=device), T(1, 10, 4, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """90""")
 
-    def test_factory_reduction(self):
+    def test_factory_reduction(self, device):
         def f():
-            a = torch.ones(10, device=self.device)
-            b = torch.ones(10, 10, device=self.device)
+            a = torch.ones(10, device=device)
+            b = torch.ones(10, 10, device=device)
             return (a + b).sum(dim=-1)
 
         inp = ()
         self.assertExpectedInline(count_numel(f, *inp), """10""")
 
-    def test_index_pointwise(self):
+    def test_index_pointwise(self, device):
         def f(a, b):
             return a[b].cos()
 
-        inp = (T(10, 10), TI(20, mx=10))
+        inp = (T(10, 10, device=device), TI(20, mx=10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """320""")
 
-    def test_index_reduction(self):
+    def test_index_reduction(self, device):
         def f(a, b):
             return a[b].cos().sum(dim=1)
 
-        inp = (T(10, 10), TI(20, mx=10))
+        inp = (T(10, 10, device=device), TI(20, mx=10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """140""")
 
-    def test_mutation_fusion(self):
+    def test_mutation_fusion(self, device):
         def f(a, b, c):
             a0 = a.add(c)
             b0 = b.add(a0)
             b.copy_(b0)
             a.copy_(a0)
 
-        inp = (T(10, 10), T(10, 10), T(10, 10))
+        inp = (
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+        )
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
     @skipIfXpu(msg="copy_(cat()) fusion not supported on XPU")
@@ -553,14 +566,14 @@ class FusionTests(TestCase):
         and tuple(int(x) for x in torch.version.cuda.split(".")) >= (13, 0),
         "copy_(cat()) fusion not supported on CUDA 13+",
     )
-    def test_copy_cat_fusion(self):
+    def test_copy_cat_fusion(self, device):
         """copy_(cat(...)) should fuse: no intermediate allocation for cat."""
 
         def f(dst, a, b):
             dst.copy_(torch.cat([a, b]))
 
-        dst = T(20)
-        inp = (dst, T(10), T(10))
+        dst = T(20, device=device)
+        inp = (dst, T(10, device=device), T(10, device=device))
         # The cat is fully fused: the generated kernel reads a and b and writes
         # them straight into dst's slices, with no intermediate allocation --
         # real traffic is 10 (read a) + 10 (read b) + 20 (write dst) = 40.
@@ -571,9 +584,9 @@ class FusionTests(TestCase):
         # a real regression. Without fusion cat would allocate intermediate: 80.
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
-    def test_reduction_pointwise_multi_level_reduction(self):
+    def test_reduction_pointwise_multi_level_reduction(self, device):
         hidden_size = 4096
-        layer_norm = torch.nn.LayerNorm(hidden_size).to(GPU_TYPE).float()
+        layer_norm = torch.nn.LayerNorm(hidden_size).to(device).float()
 
         @torch.inference_mode()
         def f(x, scale, amax_keep_dim):
@@ -583,7 +596,10 @@ class FusionTests(TestCase):
             y = torch.nn.functional.sigmoid(x_scaled)
             return (y, amax)
 
-        inp = (T(4, 2048, hidden_size, dtype=torch.float), T(1, dtype=torch.float))
+        inp = (
+            T(4, 2048, hidden_size, dtype=torch.float, device=device),
+            T(1, dtype=torch.float, device=device),
+        )
 
         # 2 kernels:
         # kernel 1: (input = X, scale, LN scale, LN bias, output = LN_pointwise(X), first-level amax (split-reduction))
@@ -607,7 +623,7 @@ class FusionTests(TestCase):
             actual_no_keep, expected_numel, delta=expected_numel * 5e-4
         )
 
-    def test_pointwise_multi_level_reduction(self):
+    def test_pointwise_multi_level_reduction(self, device):
         # TODO: this can be optimized by having the first pointwise kernel leveraging block sizes
         # of the first-level reduction kernel.
         hidden_size = 4096
@@ -619,7 +635,10 @@ class FusionTests(TestCase):
             y = torch.nn.functional.sigmoid(x_scaled)
             return (y, amax)
 
-        inp = (T(4, 2048, hidden_size, dtype=torch.float), T(1, dtype=torch.float))
+        inp = (
+            T(4, 2048, hidden_size, dtype=torch.float, device=device),
+            T(1, dtype=torch.float, device=device),
+        )
 
         compiled_f = torch.compile(f)
         compiled_f(*inp, True)
@@ -636,7 +655,7 @@ class FusionTests(TestCase):
         self.assertEqual(actual_numel_amax_keep_dim, actual_numel_amax_no_keep_dim)
         self.assertGreaterAlmostEqual(actual_numel_amax_keep_dim, str(expected_numel))
 
-    def test_create_block_mask(self):
+    def test_create_block_mask(self, device):
         def mk_3d_flex_natten_mask(dims, kernel_size):
             T, H, W = dims
             K_T, K_H, K_W = kernel_size
@@ -690,6 +709,8 @@ class SchedulerFusionTests(TestCase):
     Disables inductor rematerialization for easier reasoning of tests.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -702,7 +723,7 @@ class SchedulerFusionTests(TestCase):
         super().tearDownClass()
 
     @patch.object(config, "pattern_matcher", False)
-    def test_fusion_choice1(self):
+    def test_fusion_choice1(self, device):
         # Doesn't matter where we break fusion group here
         def f(a):
             c = a.cos()
@@ -710,11 +731,11 @@ class SchedulerFusionTests(TestCase):
             e = c.cos()
             return d + e
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """700""")
 
     @patch.object(config, "pattern_matcher", False)
-    def test_fusion_choice2(self):
+    def test_fusion_choice2(self, device):
         # We should materialize e (it's smaller!)
         # [c, e]: 210, [f]: 210, [d]: 200
         def f(a):
@@ -724,11 +745,11 @@ class SchedulerFusionTests(TestCase):
             f = d + e
             return f
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """620""")
 
     @patch.object(config, "pattern_matcher", False)
-    def test_fusion_choice3(self):
+    def test_fusion_choice3(self, device):
         # We should materialize e.
         # [c, e]: 300, [f]: 300, [d]: 200
         def f(a):
@@ -738,11 +759,31 @@ class SchedulerFusionTests(TestCase):
             f = d + e
             return f, e
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertExpectedInline(count_numel(f, *inp), """800""")
 
+
+class SchedulerFusionTestsOnlyCPU(TestCase):
+    """
+    CPU-specific fusion group creation heuristic tests.
+    Disables inductor rematerialization for easier reasoning of tests.
+    """
+
+    hw_classification = HardwareClassification.CPU
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+        cls._stack.enter_context(patch.object(config, "realize_opcount_threshold", 0))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+        super().tearDownClass()
+
     @patch.object(config, "pattern_matcher", False)
-    def test_fusion_choice4_cpu(self):
+    def test_fusion_choice4_cpu(self, device):
         # Fuse nodes with same number of elements and compatible original var ranges
         # [buf0: {d0: 60, d1: 11}, buf1: {d0: 660}] -> buf0_buf1
         def f(x, w):
@@ -750,7 +791,7 @@ class SchedulerFusionTests(TestCase):
             output = o1 + 1.0
             return output
 
-        inp = (T(2, 3, 10, 11, device="cpu"), T(11, device="cpu"))
+        inp = (T(2, 3, 10, 11, device=device), T(11, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """1331""")
 
         # [buf0_buf1: {d0: 60, d1: 11}, buf2: {d0: 660}] -> buf0_buf1_buf2
@@ -760,67 +801,84 @@ class SchedulerFusionTests(TestCase):
             output = o1 + o2
             return output
 
-        inp = (T(2, 3, 10, 11, device="cpu"), T(11, device="cpu"), T(11, device="cpu"))
+        inp = (
+            T(2, 3, 10, 11, device=device),
+            T(11, device=device),
+            T(11, device=device),
+        )
         self.assertExpectedInline(count_numel(f, *inp), """1342""")
 
 
 class TilingTests(TestCase):
-    def test_tiling_simple(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_tiling_simple(self, device):
         def f(a, b):
             return a + b.t()
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """300""")
 
         def f(a, b):
             return a.t() + b
 
-        inp = (T(10, 10), T(10, 10))
+        inp = (T(10, 10, device=device), T(10, 10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """300""")
 
-    def test_tiling_three(self):
+    def test_tiling_three(self, device):
         def f(a, b, c):
             return a + b.permute(1, 2, 0) + c.permute(2, 0, 1)
 
-        inp = (T(10, 10, 10), T(10, 10, 10), T(10, 10, 10))
+        inp = (
+            T(10, 10, 10, device=device),
+            T(10, 10, 10, device=device),
+            T(10, 10, 10, device=device),
+        )
         self.assertExpectedInline(count_numel(f, *inp), """4000""")
 
 
 class MinCutPartitioningTests(TestCase):
-    def test_partitioning_full_remat(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_partitioning_full_remat(self, device):
         def f(x):
             return x.cos().cos().cos()
 
-        inp = (T(10, grad=True),)
+        inp = (T(10, grad=True, device=device),)
         self.assertExpectedInline(count_numel_train(f, *inp), """50""")
 
-    def test_partitioning_partial_remat(self):
+    def test_partitioning_partial_remat(self, device):
         def f(a, b, c, d):
             x = a + b + c + d
             return x.cos().cos()
 
-        inp = (T(10, grad=True), T(10, grad=True), T(10, grad=True), T(10, grad=True))
+        inp = (
+            T(10, grad=True, device=device),
+            T(10, grad=True, device=device),
+            T(10, grad=True, device=device),
+            T(10, grad=True, device=device),
+        )
         self.assertExpectedInline(count_numel_train(f, *inp), """90""")
 
-    def test_partitioning_dtype(self):
+    def test_partitioning_dtype(self, device):
         def f(x):
             return (x < 0) * x
 
-        inp = (T(100, grad=True),)
+        inp = (T(100, grad=True, device=device),)
         self.assertExpectedInline(count_numel_train(f, *inp), """450""")
 
     @config.patch("fx_graph_cache", False)
     @config.patch("autotune_local_cache", False)
     @patch.object(functorch.compile.config, "max_dist_from_bw", 1000)
-    def test_partitioning_unremat_bw(self):
+    def test_partitioning_unremat_bw(self, device):
         def f(x):
             return torch.mm(x, x.new_ones(x.shape)).tanh().tanh()
 
-        inp = (T(10, 10, grad=True),)
+        inp = (T(10, 10, grad=True, device=device),)
         self.assertExpectedInline(count_numel_train(f, *inp), """1300""")
 
     @patch.object(config, "pattern_matcher", False)
-    def test_partitioning_unremat_bw2(self):
+    def test_partitioning_unremat_bw2(self, device):
         def f(a):
             a = torch.mm(a, a)
             a = a + 1
@@ -828,32 +886,32 @@ class MinCutPartitioningTests(TestCase):
             c = torch.mm(a, b)
             return c
 
-        inp = (T(10, 10, grad=True),)
+        inp = (T(10, 10, grad=True, device=device),)
         self.assertExpectedInline(count_numel_train(f, *inp), """2600""")
 
-    def test_partitioning_keops(self):
+    def test_partitioning_keops(self, device):
         def f(a, b):
             return (a * b).cos().sum(dim=1)
 
-        inp = (T(20, 1, grad=True), T(1, 20, grad=True))
+        inp = (T(20, 1, grad=True, device=device), T(1, 20, grad=True, device=device))
         self.assertExpectedInline(count_numel_train(f, *inp), """220""")
 
-    def test_partitioning_cat(self):
+    def test_partitioning_cat(self, device):
         def f(a, b):
             a = torch.tanh(a)
             return torch.cat([a, b])
 
-        inp = (T(10, grad=True), T(10, grad=True))
+        inp = (T(10, grad=True, device=device), T(10, grad=True, device=device))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
 
-    def test_partitioning_relu(self):
+    def test_partitioning_relu(self, device):
         def f(x):
             return torch.relu(x)
 
-        inp = (T(16, grad=True),)
+        inp = (T(16, grad=True, device=device),)
         self.assertExpectedInline(count_numel_train(f, *inp), """72""")
 
-    def test_partitioning_with_view(self):
+    def test_partitioning_with_view(self, device):
         class Foo(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -872,13 +930,13 @@ class MinCutPartitioningTests(TestCase):
         def f(a):
             return Foo.apply(a)
 
-        inp = (T(100, grad=True),)
+        inp = (T(100, grad=True, device=device),)
         # We do not want to recompute the x.cos().view() chain, as it's
         # materialized in backwards
         self.assertExpectedInline(count_numel_train(f, *inp), """900""")
 
     @patch.object(config, "pattern_matcher", False)
-    def test_partitioning_long_chain_add(self):
+    def test_partitioning_long_chain_add(self, device):
         def f(x):
             orig = x
             for _ in range(2):
@@ -889,7 +947,7 @@ class MinCutPartitioningTests(TestCase):
                 orig = x
             return x
 
-        inp = (T(10, 10, grad=True),)
+        inp = (T(10, 10, grad=True, device=device),)
         self.assertExpectedInline(count_numel_train(f, *inp), """3900""")
 
 
@@ -901,13 +959,15 @@ def unfusible(x):
 
 
 class NoopTests(TestCase):
-    def test_noop_clones(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_noop_clones(self, device):
         def f(a):
             b = a.clone()
             b = unfusible(b)
             return b
 
-        inp = T(10)
+        inp = T(10, device=device)
         self.assertExpectedInline(count_numel(f, inp), """20""")
 
         def f(a):
@@ -917,34 +977,34 @@ class NoopTests(TestCase):
 
         self.assertExpectedInline(count_numel(f, inp), """40""")
 
-    def test_noop_slice_scatter(self):
+    def test_noop_slice_scatter(self, device):
         def f(a):
             b = aten.slice_scatter(a, a)
             c = unfusible(b)
             return c
 
-        inp = T(10)
+        inp = T(10, device=device)
         self.assertExpectedInline(count_numel(f, inp), """20""")
 
-    def test_noop_dtype_conversion(self):
+    def test_noop_dtype_conversion(self, device):
         def f(a):
             b = torch.ops.prims.convert_element_type(a, torch.float32)
             c = unfusible(b)
             return c
 
-        inp = T(10)
+        inp = T(10, device=device)
         self.assertExpectedInline(count_numel(f, inp), """20""")
 
-    def test_noop_device_conversion(self):
+    def test_noop_device_conversion(self, device):
         def f(a):
-            b = torch.ops.prims.device_put(a, DEVICE)
+            b = torch.ops.prims.device_put(a, device)
             c = unfusible(b)
             return c
 
-        inp = T(10)
+        inp = T(10, device=device)
         self.assertExpectedInline(count_numel(f, inp), """20""")
 
-    def test_noop_int_ops(self):
+    def test_noop_int_ops(self, device):
         def f1(a):
             b = torch.ceil(a)
             c = unfusible(b)
@@ -965,18 +1025,18 @@ class NoopTests(TestCase):
             g = unfusible(f)
             return g
 
-        inp = TI(10)
+        inp = TI(10, device=device)
         self.assertExpectedInline(count_numel(f1, inp), """20""")
         self.assertExpectedInline(count_numel(f2, inp), """20""")
         self.assertExpectedInline(count_numel(f3, inp), """20""")
         self.assertExpectedInline(count_numel(f4, inp), """20""")
 
-    def test_noop_cat(self):
+    def test_noop_cat(self, device):
         def f1(a):
             b = torch.cat([a])
             return unfusible(b)
 
-        inp = T(10)
+        inp = T(10, device=device)
         self.assertExpectedInline(count_numel(f1, inp), """20""")
 
         def f2(a):
@@ -988,39 +1048,41 @@ class NoopTests(TestCase):
 
 
 class InplacingTests(TestCase):
-    def test_inplace_scatter(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_inplace_scatter(self, device):
         def f(a, b):
             a = a.cos()
             a[b] = 1
             return a
 
-        inp = (T(10), TI(2, mx=5))
+        inp = (T(10, device=device), TI(2, mx=5, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """26""")
 
         def f(a, b):
             out = aten.index_put(a, (b,), torch.tensor(1.0))
             return a.copy_(out)
 
-        inp = (T(10), TI(2, mx=5))
+        inp = (T(10, device=device), TI(2, mx=5, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """6""")
 
         def f(a, b):
             out = aten._unsafe_index_put(a, (b,), torch.tensor(1.0))
             return a.copy_(out)
 
-        inp = (T(10), TI(2, mx=5))
+        inp = (T(10, device=device), TI(2, mx=5, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """6""")
 
-    def test_inplace_scatter_noop_view(self):
+    def test_inplace_scatter_noop_view(self, device):
         def f(a, b):
             a[:, b] = 1
             return a
 
-        inp = (T(10, 10), TI(2, mx=5))
+        inp = (T(10, 10, device=device), TI(2, mx=5, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
-    @requires_gpu_and_triton
-    def test_inplace_triton_kernel_training(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_triton_kernel_training(self, device):
         @triton.jit
         def sin_kernel(
             in_ptr0,
@@ -1060,11 +1122,11 @@ class InplacingTests(TestCase):
         def f(x):
             return MySin.apply(x)
 
-        x = T(3, grad=True)
+        x = T(3, grad=True, device=device)
         self.assertExpectedInline(count_numel_train(f, x), """18""")
 
-    @requires_gpu_and_triton
-    def test_triton_kernel_not_fusable_with_users(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_triton_kernel_not_fusable_with_users(self, device):
         @triton.jit
         def _sin_kernel(
             in_ptr0,
@@ -1109,15 +1171,15 @@ class InplacingTests(TestCase):
         def f(x):
             return MySin.apply(x)
 
-        x = T(3, grad=True)
+        x = T(3, grad=True, device=device)
         # Important bit: saved.sigmoid() can be fused into its consumer (mul),
         # but not its producer (user triton kernel).
         # So we should not compute it in the fw and save it for backward
         # (it will cost an extra kernel)
         self.assertExpectedInline(count_numel_train(f, x), """27""")
 
-    @requires_gpu_and_triton
-    def test_inplace_custom_op_training_two_mutated_inputs(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_custom_op_training_two_mutated_inputs(self, device):
         @torch.library.custom_op(
             "_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"}
         )
@@ -1133,11 +1195,11 @@ class InplacingTests(TestCase):
             sin_cos(x, out0, out1)
             return x.clone(), out0, out1
 
-        x = T(3, grad=True)
+        x = T(3, grad=True, device=device)
         self.assertExpectedInline(count_numel(f, x), """21""")
 
-    @requires_gpu_and_triton
-    def test_inplace_custom_op_training(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_custom_op_training(self, device):
         @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
         def sin(x: torch.Tensor, result: torch.Tensor) -> None:
             result.copy_(x.sin())
@@ -1162,11 +1224,11 @@ class InplacingTests(TestCase):
         def f(x):
             return MySin.apply(x)
 
-        x = T(3, grad=True)
+        x = T(3, grad=True, device=device)
         self.assertExpectedInline(count_numel_train(f, x), """18""")
 
-    @requires_gpu_and_triton
-    def test_inplace_custom_op(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_custom_op(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x, Tensor(a!) out) -> ()")
 
@@ -1181,8 +1243,8 @@ class InplacingTests(TestCase):
                 torch.ops.mylib.foo(out, out)
                 return out
 
-            x = T(3)
-            out = T(3)
+            x = T(3, device=device)
+            out = T(3, device=device)
 
             compiled_out, (code,) = run_and_get_code(
                 torch.compile(f, fullgraph=True), x, out
@@ -1195,8 +1257,8 @@ class InplacingTests(TestCase):
 
             self.assertExpectedInline(count_numel(f, x, out), """21""")
 
-    @requires_gpu_and_triton
-    def test_inplace_custom_op_intermediate(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_custom_op_intermediate(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x, Tensor(a!) out) -> ()")
 
@@ -1212,8 +1274,8 @@ class InplacingTests(TestCase):
                 torch.ops.mylib.foo(out, out)
                 return out
 
-            x = T(3)
-            out = T(3)
+            x = T(3, device=device)
+            out = T(3, device=device)
 
             compiled_out, (code,) = run_and_get_code(
                 torch.compile(f, fullgraph=True), x, out
@@ -1226,8 +1288,8 @@ class InplacingTests(TestCase):
 
             self.assertExpectedInline(count_numel(f, x, out), """21""")
 
-    @requires_gpu_and_triton
-    def test_inplace_custom_op_two_mutated_inputs(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_custom_op_two_mutated_inputs(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache) -> Tensor")
 
@@ -1238,8 +1300,8 @@ class InplacingTests(TestCase):
 
             m.impl("foo", foo, "CompositeExplicitAutograd")
 
-            q = T(3)
-            k_cache = T(3)
+            q = T(3, device=device)
+            k_cache = T(3, device=device)
             v_cache = torch.rand_like(k_cache)
 
             def f():
@@ -1260,8 +1322,8 @@ class InplacingTests(TestCase):
 
             self.assertExpectedInline(count_numel(f), """45""")
 
-    @requires_gpu_and_triton
-    def test_inplace_triton_kernel_v1(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_triton_kernel_v1(self, device):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
             n_elements = output.numel()
@@ -1269,11 +1331,11 @@ class InplacingTests(TestCase):
             add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
             return output
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """50""")
 
-    @requires_gpu_and_triton
-    def test_inplace_triton_kernel_v2(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_triton_kernel_v2(self, device):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
             n_elements = output.numel()
@@ -1282,11 +1344,11 @@ class InplacingTests(TestCase):
             add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
             return output, tmp
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """70""")
 
-    @requires_gpu_and_triton
-    def test_inplace_triton_kernel_v3(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_triton_kernel_v3(self, device):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
             n_elements = output.numel()
@@ -1295,11 +1357,11 @@ class InplacingTests(TestCase):
             x.add_(1)
             return output
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """80""")
 
-    @requires_gpu_and_triton
-    def test_inplace_triton_kernel_v4(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_triton_kernel_v4(self, device):
         def f(x: torch.Tensor, y: torch.Tensor):
             x_view = x.view(-1)
             output = torch.zeros_like(x)
@@ -1309,11 +1371,11 @@ class InplacingTests(TestCase):
             output2 = x_view.mul(2)
             return output, output2
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """70""")
 
-    @requires_gpu_and_triton
-    def test_inplace_triton_kernel_v5(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_triton_kernel_v5(self, device):
         def f(x: torch.Tensor, y: torch.Tensor):
             x_view = x.view(-1)
             output = torch.zeros_like(x)
@@ -1323,11 +1385,11 @@ class InplacingTests(TestCase):
             x_view.mul_(2)
             return output
 
-        inp = (T(10), T(10))
+        inp = (T(10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(f, *inp), """80""")
 
-    @requires_gpu_and_triton
-    def test_inplace_triton_kernel_v6(self):
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_inplace_triton_kernel_v6(self, device):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
             n_elements = output.numel()
@@ -1335,17 +1397,17 @@ class InplacingTests(TestCase):
             add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
             return output
 
-        t = T(10)
+        t = T(10, device=device)
         inp = (t, t.view(-1))
         self.assertExpectedInline(count_numel(f, *inp), """50""")
 
-    def test_inplace_randperm_scatter(self):
+    def test_inplace_randperm_scatter(self, device):
         def scaled_index_add(x, y, scale_y):
             index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
             out = x.index_add_(dim=0, source=y * scale_y, index=index)
             return out
 
-        inp = (T(10, 10), T(5, 10), T(10))
+        inp = (T(10, 10, device=device), T(5, 10, device=device), T(10, device=device))
         self.assertExpectedInline(count_numel(scaled_index_add, *inp), """250""")
 
 
@@ -1390,8 +1452,26 @@ class WouldBeNiceIfItWorked:
         self.assertExpectedInline(count_numel(f, *inp), """170""")
 
 
+instantiate_device_type_tests(
+    NumBytesMetricTests, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(FusionTests, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    SchedulerFusionTests, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(SchedulerFusionTestsOnlyCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TilingTests, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    MinCutPartitioningTests, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(NoopTests, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    InplacingTests, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU_AND_TRITON:
+    if has_triton():
         run_tests(needs="filelock")
