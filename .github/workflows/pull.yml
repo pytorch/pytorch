@@ -374,7 +374,6 @@ jobs:
           { config: "dynamo_wrapped", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "onnx", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       python-version: "3.10"
       compiler: clang21
@@ -396,6 +395,48 @@ jobs:
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.10"
+      compiler: clang21
+    secrets: inherit
+
+  # ╠══════════════════════════════════════════════════════════════════════╣
+  # ║ linux-jammy-py3.11-clang21 (build + test)                            ║
+  # ╠══════════════════════════════════════════════════════════════════════╣
+
+  linux-jammy-py3_11-clang21-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.11-clang21 ') }}
+    name: linux-jammy-py3.11-clang21
+    uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - get-label-type
+      - job-filter
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.11-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "onnx", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+        ]}
+      python-version: "3.11"
+      compiler: clang21
+    secrets: inherit
+
+  linux-jammy-py3_11-clang21-test:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.11-clang21 ') }}
+    name: linux-jammy-py3.11-clang21
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-py3_11-clang21-build
+      - target-determination
+      - job-filter
+      - get-label-type
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.test-matrix }}
+      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      python-version: "3.11"
       compiler: clang21
     secrets: inherit
 
