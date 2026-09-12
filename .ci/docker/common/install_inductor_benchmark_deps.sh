@@ -60,11 +60,14 @@ install_timm
 # NS: It's very important to uninstall some of the system dependencies
 # Otherwise torchnbench test might start to fail with hard to detect errors
 # Especially if cudnn/nccl version are different between nightly and last release
+# Same for nvshmem, where a stale wheel breaks `import torch` outright
 env_run pip uninstall -y torch torchvision torchaudio triton torchao
 if [[ "${DESIRED_CUDA}" == 13.* ]]; then
   env_run pip uninstall -y nvidia-nccl-cu13
   env_run pip uninstall -y nvidia-cudnn-cu13
+  env_run pip uninstall -y nvidia-nvshmem-cu13
 else
   env_run pip uninstall -y nvidia-nccl-cu12
   env_run pip uninstall -y nvidia-cudnn-cu12
+  env_run pip uninstall -y nvidia-nvshmem-cu12
 fi

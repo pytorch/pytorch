@@ -132,6 +132,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_guarding_hint,
     ShapeEnv,
 )
+from torch.utils._config_module import _ImplicationConfigModule
 from torch.utils._device import _device_constructors
 from torch.utils._ordered_set import OrderedSet
 
@@ -1733,6 +1734,14 @@ class FxGraphHashDetails:
             for device, custom_config in custom_backend_codegen_configs.items()
             if custom_config is not None
         }
+        implication_hashes = {
+            device: custom_config._implication_hash
+            for device, custom_config in custom_backend_codegen_configs.items()
+            if isinstance(custom_config, _ImplicationConfigModule)
+        }
+        if implication_hashes:
+            # FxGraphCachePickler includes these rule fingerprints through self.__dict__.
+            self.custom_backend_codegen_implications = implication_hashes
 
         # Register the custom partitioner function
         self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(
@@ -1888,19 +1897,36 @@ class GuardedCache(Generic[T]):
     ) -> Generator[tuple[T, bytes, bool], None, None]:
         if local:
             subdir = cls._get_tmp_dir_for_key(key)
-            if os.path.exists(subdir):
-                for path in sorted(os.listdir(subdir)):
-                    if path.startswith("."):
-                        continue  # Skip temp files from concurrent write_atomic() calls
-                    try:
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            content = f.read()
-                            yield pickle.loads(content), content, True
-                    except Exception:
-                        log.warning(
-                            "fx graph cache unable to load compiled graph",
-                            exc_info=True,
-                        )
+            try:
+                names = sorted(os.listdir(subdir))
+            except FileNotFoundError:
+                # Nothing was ever written for this key, or another process cleared
+                # the cache out from under us. The local cache root is shared across
+                # processes, so checking os.path.exists() first would only narrow the
+                # race, not close it. Either way there are no candidates: a miss.
+                names = []
+            except OSError:
+                # Anything else (a bad mode on the cache dir, a dead mount) is not a
+                # race and is worth surfacing, but it still leaves no candidates.
+                log.warning(
+                    "%s unable to list cache entries", cls.__name__, exc_info=True
+                )
+                names = []
+            for path in names:
+                if path.startswith("."):
+                    continue  # Skip temp files from concurrent write_atomic() calls
+                try:
+                    with open(os.path.join(subdir, path), "rb") as f:
+                        content = f.read()
+                        yield pickle.loads(content), content, True
+                except FileNotFoundError:
+                    continue  # Raced with a concurrent cache clear
+                except Exception:
+                    log.warning(
+                        "%s unable to load compiled graph",
+                        cls.__name__,
+                        exc_info=True,
+                    )
 
         if remote_cache:
             try:

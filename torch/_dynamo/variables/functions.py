@@ -40,7 +40,7 @@ import types
 import typing
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
@@ -58,6 +58,7 @@ from ..exc import (
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -102,12 +103,17 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
+    type_qualified_name,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import (
+    is_reconstructable_decorator_ctx_manager_clone,
+    maybe_reconstruct_decorator_ctx_manager_clone,
+    UserDefinedObjectVariable,
+)
 
 
 try:
@@ -1917,6 +1923,31 @@ class UserMethodVariable(UserFunctionVariable):
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
+        if (
+            self.source is None
+            and isinstance(self.obj, variables.UserDefinedObjectVariable)
+            and isinstance(
+                self.obj.value, torch.utils._contextlib._DecoratorContextManager
+            )
+            and is_reconstructable_decorator_ctx_manager_clone(
+                self.fn, type(self.obj.value)
+            )
+        ):
+            # A bound `clone` method reached with no source -- e.g. via a
+            # closure cell wrapping a context manager created outside the
+            # traced region (see gh-194763) -- can't be inlined the normal
+            # way: constructing a fresh instance requires a `source` on the
+            # class reference (see UserDefinedClassVariable.call_function's
+            # generic-construction gate). maybe_reconstruct_decorator_ctx_manager_clone
+            # handles this the same way UserDefinedObjectVariable.call_function
+            # already does for a bound `clone` reached as a plain callable
+            # value. The predicate guarantees a supported function/class
+            # pair; only source-dependent reconstruction can still decline.
+            reconstructed = maybe_reconstruct_decorator_ctx_manager_clone(
+                tx, self.fn, self.obj.value, self.obj.source, args, kwargs
+            )
+            if reconstructed is not None:
+                return reconstructed
         return super().call_function(tx, args, kwargs)
 
     def _get_func(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -2037,10 +2068,19 @@ def invoke_and_store_as_constant(
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
+    if isinstance(res, torch.Tensor):
+        # ConstantSource reconstructs with LOAD_GLOBAL. Unlike the non-tensor
+        # branch of register_attr_or_module, the tensor branch does not install
+        # its source name as a global.
+        source_name = tx.output.install_global_by_id(name, res)
+        tx.output.update_co_names(source_name)
+        source = ConstantSource(source_name)
+    else:
+        source = ConstantSource(name)
     return tx.output.register_attr_or_module(
         res,
         name,
-        source=ConstantSource(name),
+        source=source,
     )
 
 
@@ -3632,7 +3672,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             hints=[],
         )
 
-    def is_callable(self, maybe_callable: VariableTracker) -> bool:
+    def is_callable(self, maybe_callable: object) -> bool:
         return isinstance(
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
         )
@@ -4280,13 +4320,17 @@ class TritonSetAllocatorVariable(VariableTracker):
 # the descriptor binding step faithfully.
 # ---------------------------------------------------------------------------
 
+DescriptorTypes: TypeAlias = (
+    types.MethodDescriptorType
+    | types.WrapperDescriptorType
+    | types.MemberDescriptorType
+    | types.GetSetDescriptorType
+)
+
 
 def _check_descriptor_obj_type(
     tx: "InstructionTranslatorBase",
-    descriptor: types.MethodDescriptorType
-    | types.WrapperDescriptorType
-    | types.MemberDescriptorType
-    | types.GetSetDescriptorType,
+    descriptor: DescriptorTypes,
     obj: "VariableTracker",
 ) -> None:
     """Check that obj's type is compatible with descriptor.__objclass__.
@@ -4297,12 +4341,7 @@ def _check_descriptor_obj_type(
 
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L96
     """
-    if obj is None:
-        return
-    try:
-        obj_type = obj.python_type()
-    except NotImplementedError:
-        return
+    obj_type = obj.python_type()
     if not issubclass(obj_type, descriptor.__objclass__):
         raise_type_error(
             tx,
@@ -4893,6 +4932,13 @@ class MemberDescriptorVariable(DescriptorVariable):
         from .object_protocol import _UnhandledDescriptorError
 
         attr_name = self.descriptor.__name__
+        # Prefer the VT's declarative table when it models this attribute, so a
+        # VT with no concrete Python object behind it still resolves.
+        entry = obj.lookup_tp_getset_member(attr_name)
+        if entry is not None and entry.getter is not None:
+            result = entry.getter(obj, tx)
+            if result is not None:
+                return result
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             raise _UnhandledDescriptorError(
@@ -4918,14 +4964,23 @@ class MemberDescriptorVariable(DescriptorVariable):
         obj: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
-        # Mirrors member_set (PyMember_SetOne): store into the C struct field.
-        # STORE_ATTR itself applies the descriptor, so replay via store_attr on
-        # the target (mirrors the __slots__ path in UserDefinedObjectVariable).
-        # value is None for __delete__.
+        # Mirrors member_set: descr_setcheck, then PyMember_SetOne writes the
+        # C struct field. value is None for __delete__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name = self.descriptor.__name__
+        entry = obj.lookup_tp_getset_member(name)
+        if entry is not None:
+            # A READONLY PyMemberDef is modeled by readonly_setter, which raises
+            # what PyMember_SetOne raises.
+            entry.setter(obj, tx, value)
+            return ConstantVariable.create(None)
+        # No model for this member. STORE_ATTR itself applies the descriptor, so
+        # replay via store_attr on the target (mirrors the __slots__ path in
+        # UserDefinedObjectVariable).
         stored = variables.DeletedVariable() if value is None else value
-        tx.output.side_effects.store_attr(obj, self.descriptor.__name__, stored)
-        return variables.ConstantVariable.create(None)
+        tx.output.side_effects.store_attr(obj, name, stored)
+        return ConstantVariable.create(None)
 
 
 class GetSetDescriptorVariable(DescriptorVariable):
@@ -4982,6 +5037,36 @@ class GetSetDescriptorVariable(DescriptorVariable):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name = self.descriptor.__name__
+        entry = obj.lookup_tp_getset_member(name)
+        if entry is None:
+            # No model for this getset. Dynamo cannot see whether the C setter
+            # accepts the write, rejects it as read-only, or type-checks the
+            # value, so it cannot decide between raising AttributeError and
+            # applying an ordinary attribute write. Graph break rather than
+            # guessing "writable" -- forwarding to the setattr/delattr
+            # builtins here would run type(obj).__setattr__, which getset_set
+            # bypasses, and would silently swallow a read-only rejection.
+            unmodeled_setter(obj, tx, value)
+        if entry.setter is readonly_setter:
+            # getset_set's message is more specific than readonly_setter's, and
+            # only this site knows the attribute name and its defining class.
+            raise_attribute_error(
+                tx,
+                f"attribute '{name}' of "
+                f"'{type_qualified_name(self.descriptor.__objclass__)}' objects "
+                "is not writable",
+            )
+        entry.setter(obj, tx, value)
+        return ConstantVariable.create(None)
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -4996,6 +5081,13 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # for classes/constants). Fall back to tp_getattro_impl for
         # proxy-based VTs like TensorVariable.
         _check_descriptor_obj_type(tx, self.descriptor, obj)
+        # Prefer the VT's declarative table when it models this attribute
+        entry = obj.lookup_tp_getset_member(attr_name)
+        if entry is not None and entry.getter is not None:
+            result = entry.getter(obj, tx)
+            if result is not None:
+                return result
+        # Otherwise call the C getter on the concrete Python object
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             from .object_protocol import _UnhandledDescriptorError
@@ -5045,6 +5137,64 @@ class PropertyVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    tp_members = {
+        "fget": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fget,
+                "fget",
+                lambda s: s.source and AttrSource(s.source, "fget"),
+            ),
+            readonly_setter,
+        ),
+        "fset": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fset,
+                "fset",
+                lambda s: s.source and AttrSource(s.source, "fset"),
+            ),
+            readonly_setter,
+        ),
+        "fdel": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fdel,
+                "fdel",
+                lambda s: s.source and AttrSource(s.source, "fdel"),
+            ),
+            readonly_setter,
+        ),
+        "__doc__": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.__doc__,
+                "__doc__",
+                lambda s: s.source and AttrSource(s.source, "__doc__"),
+            ),
+            getset_set("__doc__"),
+        ),
+    }
+
+    def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # property.__name__ only exists from 3.13
+        if sys.version_info >= (3, 13):
+            name = getattr(self.descriptor, "__name__", None)
+            if name is not None:
+                source = self.source and AttrSource(self.source, "__name__")
+                return VariableTracker.build(tx, name, source)
+        raise_attribute_error(
+            tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
+        )
+
+    tp_getset = {
+        "__name__": GetSet(_name_getter, getset_set("__name__")),
+        "__isabstractmethod__": GetSet(
+            getset_load_or_build(
+                lambda s: s.descriptor.__isabstractmethod__,
+                "__isabstractmethod__",
+                lambda s: s.source and AttrSource(s.source, "__isabstractmethod__"),
+            ),
+            readonly_setter,
+        ),
+    }
+
     def __init__(
         self,
         descriptor: property,
@@ -5062,6 +5212,46 @@ class PropertyVariable(VariableTracker):
 
     def as_python_constant(self) -> property:
         return self.descriptor
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        attr = "fset" if value is not None else "fdel"
+        fn = getattr(self.descriptor, attr)
+
+        if fn is None:
+            display_name = getattr(self.descriptor, "__name__", None)
+            kind = "setter" if value is not None else "deleter"
+            if sys.version_info >= (3, 11):
+                # property_descr_set formats %R of the owner's *type*, whose
+                # repr is its bare __qualname__ (no module prefix) -- unlike
+                # python_qualified_name(), which mirrors the module-qualified
+                # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
+                try:
+                    cls_name = obj.python_type().__qualname__
+                except NotImplementedError:
+                    cls_name = obj.python_type_name()
+                if display_name is not None:
+                    msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
+                else:
+                    msg = f"property of '{cls_name}' object has no {kind}"
+            else:
+                # < 3.11: no owner/property-name in the message at all.
+                verb = "set" if value is not None else "delete"
+                if display_name is not None:
+                    msg = f"can't {verb} attribute '{display_name}'"
+                else:
+                    msg = f"can't {verb} attribute"
+            raise_attribute_error(tx, msg)
+
+        args = [obj] if value is None else [obj, value]
+        VariableTracker.build(
+            tx, fn, source=self.source and AttrSource(self.source, attr)
+        ).call_function(tx, args, {})
+        return ConstantVariable.create(None)
 
     def tp_descr_get_impl(
         self,

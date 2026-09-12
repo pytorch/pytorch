@@ -487,6 +487,19 @@ def unmodeled_setter(
     )
 
 
+def type_qualified_name(type_: type) -> str:
+    """Equivalent to _PyType_GetFullyQualifiedName, for a raw type object.
+
+    See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
+    """
+    mod = type_.__module__
+    qn = type_.__qualname__
+    if mod not in ("__main__", "builtins"):
+        return f"{mod}.{qn}"
+    else:
+        return qn
+
+
 def getset_build(
     accessor: Callable[[Any], Any],
 ) -> Getter:
@@ -502,6 +515,7 @@ def store_attr_mutation(
 ) -> None:
     """Store an attribute mutation in the side effects tracker."""
     se = tx.output.side_effects
+    item = item.realize()
     if not se.is_attribute_mutation(item):
         if item.source is not None:
             raise AssertionError(
@@ -1933,12 +1947,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return "<unknown type>"
         # Direct attribute access is safe here because type objects use the getset protocol, which will only return str
         # (and not execute user code)
-        mod = type_.__module__
-        qn = type_.__qualname__
-        if mod not in ("__main__", "builtins"):
-            return f"{mod}.{qn}"
-        else:
-            return qn
+        return type_qualified_name(type_)
 
     def as_python_constant(self) -> Any:
         """For constants"""
@@ -2110,6 +2119,46 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         UDOV overrides to check self.value.__dict__ + side effects.
         """
         return None
+
+    def tp_descr_get_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_get slot.
+
+        Called when type_implements_tp_descr_get returns True for this type.
+        Subclasses override to provide the actual descriptor read.
+        """
+        unimplemented(
+            gb_type="tp_descr_get_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_get slot but no tp_descr_get_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_get C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def tp_descr_set_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_set slot (``value is None`` deletes).
+
+        Dispatched by the "__set__"/"__delete__" TPSLOT entries (via
+        _wrap_descr_set/_wrap_descr_delete) for any type whose
+        PyTypeSlots.TP_DESCR_SET bit is set. Subclasses override to provide
+        the actual descriptor write.
+        """
+        unimplemented(
+            gb_type="tp_descr_set_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_set slot but no tp_descr_set_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_set C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str

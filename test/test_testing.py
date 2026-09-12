@@ -22,12 +22,12 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    TemporaryFileName,
+    getRocmVersion, skipIfRocmVersionAtLeast, TemporaryFileName,
 )
-from torch.testing._internal.common_cuda import has_device_side_assert
+from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -555,6 +555,28 @@ instantiate_device_type_tests(TestTesting, globals())
 
 class TestFrameworkUtils(TestCase):
 
+    def test_rocm_version_uses_sdk_version(self):
+        with (
+            unittest.mock.patch(
+                "torch.testing._internal.common_cuda.TEST_WITH_ROCM", True
+            ),
+            unittest.mock.patch.object(torch.version, "rocm", "10.1.0"),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+        ):
+            self.assertEqual(_get_torch_rocm_version(), (10, 1, 0))
+            self.assertEqual(getRocmVersion(), (10, 1, 0))
+
+    def test_rocm_version_falls_back_to_hip_version(self):
+        with (
+            unittest.mock.patch(
+                "torch.testing._internal.common_cuda.TEST_WITH_ROCM", True
+            ),
+            unittest.mock.patch.object(torch.version, "rocm", None),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+        ):
+            self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
+            self.assertEqual(getRocmVersion(), (7, 15, 26306))
+
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     def test_filtering_env_var(self):
@@ -608,12 +630,15 @@ if __name__ == '__main__':
 
 
 class TestPeriodicDecorator(TestCase):
+    @parametrize("in_ci", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_gates_on_periodic_mode(self, periodic_enabled):
+    def test_periodic_gates_on_periodic_mode(self, in_ci, periodic_enabled):
         calls = []
-        with unittest.mock.patch(
-            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
-            periodic_enabled,
+        with unittest.mock.patch.multiple(
+            "torch.testing._internal.common_utils",
+            IS_CI=in_ci,
+            IS_SANDCASTLE=False,
+            TEST_WITH_PERIODIC=periodic_enabled,
         ):
             class TestP(unittest.TestCase):
                 def setUp(self):
@@ -626,19 +651,23 @@ class TestPeriodicDecorator(TestCase):
         result = unittest.TestResult()
         unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
 
+        skipped = in_ci and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
         self.assertIn("periodic", marks)
-        self.assertEqual(calls, ["setUp", "test"] if periodic_enabled else [])
-        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(calls, [] if skipped else ["setUp", "test"])
+        self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
+    @parametrize("on_sandcastle", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_class_gates_setup(self, periodic_enabled):
+    def test_periodic_class_gates_setup(self, on_sandcastle, periodic_enabled):
         calls = []
-        with unittest.mock.patch(
-            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
-            periodic_enabled,
+        with unittest.mock.patch.multiple(
+            "torch.testing._internal.common_utils",
+            IS_CI=False,
+            IS_SANDCASTLE=on_sandcastle,
+            TEST_WITH_PERIODIC=periodic_enabled,
         ):
             @periodic
             class TestP(unittest.TestCase):
@@ -656,11 +685,11 @@ class TestPeriodicDecorator(TestCase):
         result = unittest.TestResult()
         unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
 
+        skipped = on_sandcastle and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
         self.assertIn("periodic", marks)
-        expected_calls = ["setUpClass", "test", "tearDownClass"]
-        self.assertEqual(calls, expected_calls if periodic_enabled else [])
-        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(calls, [] if skipped else ["setUpClass", "test", "tearDownClass"])
+        self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
@@ -670,26 +699,18 @@ class TestPeriodicDecorator(TestCase):
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     def test_periodic_config_selects_only_periodic_tests(self):
         source = """\
-import os
-
 from torch.testing._internal.common_utils import periodic, run_tests, serialTest
 
 def test_plain_pytest():
-    if os.getenv("EXPECT_PERIODIC") == "1":
-        raise AssertionError("plain pytest test ran in periodic mode")
     print("PLAIN_PYTEST_RAN")
 
 @periodic
 def test_periodic_pytest():
-    if os.getenv("EXPECT_PERIODIC") != "1":
-        raise AssertionError("periodic pytest test ran outside periodic mode")
     print("PERIODIC_PYTEST_RAN")
 
 @serialTest()
 @periodic
 def test_periodic_serial_pytest():
-    if os.getenv("EXPECT_PERIODIC") != "1":
-        raise AssertionError("periodic serial test ran outside periodic mode")
     print("PERIODIC_SERIAL_PYTEST_RAN")
 
 if __name__ == "__main__":
@@ -720,7 +741,6 @@ if __name__ == "__main__":
 
             def run_test(periodic_mode):
                 test_env = env.copy()
-                test_env["EXPECT_PERIODIC"] = "1" if periodic_mode else "0"
                 if periodic_mode:
                     test_env["TEST_CONFIG"] = "periodic"
                     test_env["PYTORCH_TEST_WITH_SLOW"] = "1"
@@ -744,8 +764,8 @@ if __name__ == "__main__":
         self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", periodic_output)
         self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
         self.assertIn("PLAIN_PYTEST_RAN", default_output)
-        self.assertNotIn("PERIODIC_PYTEST_RAN", default_output)
-        self.assertNotIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+        self.assertIn("PERIODIC_PYTEST_RAN", default_output)
+        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
 
     def test_periodic_does_not_leak_across_parametrized_tests(self):
         with unittest.mock.patch(
@@ -767,10 +787,28 @@ if __name__ == "__main__":
 
     @periodic
     def test_periodic_smoke(self):
-        self.assertTrue(TEST_WITH_PERIODIC)
+        self.assertTrue(TEST_WITH_PERIODIC or not (IS_CI or IS_SANDCASTLE))
 
 
 instantiate_parametrized_tests(TestPeriodicDecorator)
+
+
+# Trivial tests that give the periodic-strict workflow a passing CPU and GPU
+# test to gate on; deliberately breaking one exercises its auto-revert.
+class TestPeriodicCanary(TestCase):
+    @periodic
+    @onlyCPU
+    def test_cpu_canary(self, device):
+        self.assertEqual(torch.arange(4, device=device).sum().item(), 6)
+
+    @periodic
+    @onlyCUDA
+    def test_gpu_canary(self, device):
+        x = torch.ones(4, 4, device=device)
+        self.assertEqual(x @ x, torch.full((4, 4), 4.0, device=device))
+
+
+instantiate_device_type_tests(TestPeriodicCanary, globals(), only_for=("cpu", "cuda"))
 
 
 class TestEnvironmentDefFlag(TestCase):
@@ -2832,6 +2870,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
+                           "torch._inductor.kernel.flex_gemm.quack_ops",  # depends on cutlass
                            "torch.profiler._cuspy",  # depends on cupti-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
@@ -2870,14 +2909,17 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
         self.assertEqual(out.strip(), "True")
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_no_warning_on_import(self) -> None:
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_not_import_sympy(self) -> None:
         out = self._check_python_output("import torch;import sys;print('sympy' not in sys.modules)")
         self.assertEqual(out.strip(), "True",
@@ -2889,10 +2931,12 @@ class TestImports(TestCase):
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_not_import_triton(self) -> None:
         out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
         self.assertEqual(out.strip(), "True")
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global

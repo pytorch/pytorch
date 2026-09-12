@@ -127,7 +127,9 @@ def maybe_unpack_tma_stable_metadata(
     return None
 
 
-def maybe_unpack_host_tma_descriptor(arg: Any) -> tuple[Any, TMAStableMetadata] | None:
+def maybe_unpack_host_tma_descriptor(
+    arg: object,
+) -> tuple[Tensor, TMAStableMetadata] | None:
     """Split a host-side (stable API) TMA descriptor into its base tensor and the
     metadata needed to rebuild it downstream. Returns None for non-descriptor args.
 
@@ -147,7 +149,7 @@ def maybe_unpack_host_tma_descriptor(arg: Any) -> tuple[Any, TMAStableMetadata] 
 
     from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    def matches(actual: Sequence[Any], expected: Sequence[Any]) -> bool:
+    def matches(actual: Sequence[IntLikeType], expected: Sequence[IntLikeType]) -> bool:
         # Sizes may be symbolic, so compare without installing guards.
         return len(actual) == len(expected) and all(
             a is b or statically_known_true(a == b) for a, b in zip(actual, expected)
@@ -197,7 +199,7 @@ TMADescriptorMetadata = dict[
 class KernelSideTable:
     id_to_kernel: dict[int, "TritonKernelType"] = {}
     kernel_to_id: dict["TritonKernelType", int] = {}
-    constant_args: dict[int, dict[str, Any]] = {}
+    constant_args: dict[int, dict[str, object]] = {}
     lock = threading.Lock()
 
     # Returns index on the table
@@ -220,14 +222,14 @@ class KernelSideTable:
 
     # Not every constant arg can be added to the graph. Use this side table
     # for constant args.
-    def add_constant_args(self, args: dict[str, Any]) -> int:
+    def add_constant_args(self, args: dict[str, object]) -> int:
         with self.lock:
             idx = len(self.constant_args)
             self.constant_args[idx] = args
             return idx
 
     # Returns the constant args
-    def get_constant_args(self, idx: int) -> dict[str, Any]:
+    def get_constant_args(self, idx: int) -> dict[str, object]:
         # No need to lock here as fetching from dict is atomic
         if idx not in self.constant_args:
             raise AssertionError(
@@ -372,7 +374,7 @@ def generate_ttir(
         else:
             ordered_args[name] = a
 
-    def is_stable_tensor_descriptor_arg(arg: Any) -> bool:
+    def is_stable_tensor_descriptor_arg(arg: object) -> bool:
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -380,7 +382,7 @@ def generate_ttir(
                 return True
         return False
 
-    def _is_constexpr_or_none(name: str, arg: Any) -> bool:
+    def _is_constexpr_or_none(name: str, arg: object) -> bool:
         param_idx = kernel.arg_names.index(name)
         return kernel.params[param_idx].is_constexpr or arg is None
 
@@ -397,7 +399,7 @@ def generate_ttir(
     # whereas `constexpr` are inlined, and None are excluded. We both preserve
     # scalars and tensors as this matters for "odd" ordering,
     # eg. [tensor, scalar, tensor].
-    def get_arg_names(name: str, arg: Any) -> list[str]:
+    def get_arg_names(name: str, arg: object) -> list[str]:
         if _is_constexpr_or_none(name, arg):
             return []
 
@@ -2008,7 +2010,7 @@ class TritonHOPifier:
     def raise_unsupported(self, msg: str) -> Never:
         raise NotImplementedError("abstract method")
 
-    def is_callable(self, maybe_callable: Any) -> bool:
+    def is_callable(self, maybe_callable: object) -> bool:
         raise NotImplementedError("abstract method")
 
     def get_value(self, val: Any) -> Any:
@@ -2144,7 +2146,7 @@ class TritonHOPifier:
             # The call to get_first_attr is to maintain backward-compatibility.
 
             def defaults_ok(
-                attr: str, alternates: tuple[str, ...], values: tuple[Any, ...]
+                attr: str, alternates: tuple[str, ...], values: tuple[object, ...]
             ) -> bool:
                 if attr not in defaults:
                     return True
@@ -2637,7 +2639,7 @@ class TracingTritonHOPifier(TritonHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
         raise RuntimeError(msg)
 
-    def is_callable(self, maybe_callable: Any) -> bool:
+    def is_callable(self, maybe_callable: object) -> bool:
         return callable(maybe_callable)
 
     def get_value(self, val: Any) -> Any:
@@ -2714,7 +2716,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         Put them in the side table.
         """
 
-        def is_graphable(val: Any) -> bool:
+        def is_graphable(val: object) -> bool:
             return isinstance(val, (fx.node.base_types, fx.Node))
 
         non_graphable_args = {
@@ -2726,7 +2728,7 @@ class TracingTritonHOPifier(TritonHOPifier):
 
         return graphable_args, constant_args_idx
 
-    def is_dynamic_backend_option(self, value: Any) -> bool:
+    def is_dynamic_backend_option(self, value: object) -> bool:
         # Backend options are compile-time values. In proxy tracing, a value can
         # be a Proxy/Node directly or be nested inside a tuple/list option such
         # as backend_option=(sym_size,). Reject those unless the name is later

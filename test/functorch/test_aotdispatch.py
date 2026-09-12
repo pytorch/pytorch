@@ -57,7 +57,6 @@ from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
-from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     _aot_export_function,
     aot_export_joint_simple,
@@ -73,6 +72,7 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
+from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
@@ -7366,6 +7366,74 @@ def forward(self, primals_1, tangents_1):
                     lambda msg: f"{msg}\nQuantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
+    def test_size_of_device_valued_node(self):
+        """_size_of should treat a device-valued node as zero bytes, not raise.
+
+        _size_of dispatches on the type of node.meta["val"] and raises
+        "Unknown metadata type" for anything it does not recognize. A torch.device
+        is metadata rather than data, so it occupies no activation memory and should
+        size as 0.
+
+        This is reachable from a real compile: the partitioner sizes a node's fx.Node
+        arguments (the ban_if_reduction check in min_cut_rematerialization_partition),
+        so a device passed as an operand to a factory op gets sized. Today that
+        surfaces as a BackendCompilerFailed out of inductor rather than as anything
+        actionable.
+        """
+        import torch.fx as fx
+        from torch._functorch.partitioners import _size_of
+
+        graph = fx.Graph()
+        node = graph.placeholder("dev")
+        node.meta["val"] = torch.device("cuda:0")
+        self.assertEqual(_size_of(node), 0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitions_device_valued_node(self):
+        """A device-valued node must be placeable, not just sizeable.
+
+        Sizing it as zero (test_size_of_device_valued_node) only gets past the first
+        gate. solve_min_cut still has to put the node somewhere, and it has no tensor
+        to weigh: get_node_weight gives a non-tensor output infinite weight, and the
+        op is not in the recomputable allowlist, so it can be neither saved across the
+        boundary nor recomputed in the backward.
+
+        Reaching that needs two things at once, which is why a device-valued node on
+        its own does not show it:
+          - a current_device() node, from any device= operand, and
+          - a cheap cast of a parameter, which min-cut elects to recompute in the
+            backward rather than save, dragging the device node across with it.
+        Drop either -- make the parameter already bf16, or the cast dtype-only -- and
+        min-cut keeps the device node in the forward and never has to classify it.
+
+        Mixed-precision casting of a parameter is the ordinary way a real model hits
+        this. Note the default partitioner config is the one that fails;
+        aggressive_recomputation=True happens to route around it.
+        """
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._dynamo.backends.common import aot_autograd
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+
+            def forward(self, x):
+                w = self.w.to(device="cuda", dtype=torch.bfloat16)
+                return (x @ w).relu().sum()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        torch._dynamo.reset()
+        model = M().cuda()
+        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            torch.compile(model, backend=backend, fullgraph=True)(x).backward()
+        self.assertIsNotNone(x.grad)
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_unbounded_error_message(self):
         """Test that NetworkXUnbounded errors produce user-friendly error messages."""
@@ -13058,11 +13126,14 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         make_inputs_subclasses: bool = False,
     ):
         self.inductor_cache = MockFXGraphCache()
-        AOTAutogradCache.clear()
-        with patch(
+        mock_fx_graph_cache = patch(
             "torch._inductor.codecache.FxGraphCache.load_with_key",
             new=self.inductor_cache.load_with_key,
-        ):
+        )
+        # fresh_cache() rather than AOTAutogradCache.clear(): clear() rmtree's the
+        # cache root shared by every process of this user, so under a parallel
+        # runner it deletes entries other workers are mid-read/mid-write on.
+        with fresh_cache(), mock_fx_graph_cache:
             return super().verify_aot_autograd(
                 f,
                 inp_,
