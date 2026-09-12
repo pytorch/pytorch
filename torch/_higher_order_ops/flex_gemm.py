@@ -9,7 +9,6 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.utils import (
-    autograd_not_implemented,
     potential_input_alias_or_mutation,
     reenter_make_fx,
     register_fake,
@@ -544,9 +543,56 @@ def flex_gemm_dense(gemm_op, body_fn, args, kwargs, kernel_options):
     return body_fn(*args)
 
 
-flex_gemm_hop.py_autograd_impl(
-    autograd_not_implemented(flex_gemm_hop, deferred_error=True)
-)
+@torch.library.custom_op("flex_gemm::autograd_not_implemented", mutates_args=())
+def flex_gemm_autograd_not_implemented(
+    grad: torch.Tensor, like: torch.Tensor
+) -> torch.Tensor:
+    raise NotImplementedError(
+        "Autograd not implemented for flex_gemm; wrap the call in a "
+        "torch.autograd.Function with an explicit backward"
+    )
+
+
+@flex_gemm_autograd_not_implemented.register_fake
+def _flex_gemm_autograd_not_implemented_fake(
+    grad: torch.Tensor, like: torch.Tensor
+) -> torch.Tensor:
+    return torch.empty_like(like)
+
+
+class FlexGemmNoAutograd(torch.autograd.Function):
+    """Attach the HOP outputs to the differentiable inputs; backward raises when run.
+
+    ``autograd_not_implemented(deferred_error=True)`` detaches the outputs, so under
+    AOTAutograd the inputs look unused and compiled backward silently yields None
+    grads. Raising directly in ``backward`` would fail at trace time instead, so the
+    raise goes through a custom op (fake impl succeeds) that consumes the incoming
+    gradient, which also keeps the partitioner from hoisting it into the forward.
+    """
+
+    @staticmethod
+    def forward(ctx, result, *grad_args):
+        ctx.save_for_backward(*grad_args)
+        return result
+
+    @staticmethod
+    def backward(ctx, *grads):
+        return None, *(
+            flex_gemm_autograd_not_implemented(grads[0], like)
+            for like in ctx.saved_tensors
+        )
+
+
+@flex_gemm_hop.py_autograd_impl
+def flex_gemm_autograd(gemm_op, body_fn, args, kwargs, kernel_options):
+    with torch._C._AutoDispatchBelowAutograd():
+        result = flex_gemm_hop(gemm_op, body_fn, args, kwargs, kernel_options)
+    grad_args = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
+    if not torch.is_grad_enabled() or not grad_args:
+        return result
+    flat_result, spec = pytree.tree_flatten(result)
+    outputs = FlexGemmNoAutograd.apply(tuple(flat_result), *grad_args)
+    return pytree.tree_unflatten(outputs, spec)
 
 
 @register_fake(flex_gemm_hop)
