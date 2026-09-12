@@ -2814,6 +2814,67 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_softmax_and_sort_meta_reject_out_of_range_dim(self):
+        # The Python meta registrations for _softmax and sort shadow the C++
+        # structured metas, which do range-check dim, so meta silently accepted a
+        # dim that every other device rejects with IndexError.
+        meta = torch.ones(2, 3, device="meta")
+        scalar = torch.ones((), device="meta")
+        msg = "Dimension out of range"
+
+        for dim in (5, -5):
+            for name, fn in (
+                ("softmax", lambda d=dim: torch.softmax(meta, d)),
+                ("softmin", lambda d=dim: torch.nn.functional.softmin(meta, d)),
+                ("sort", lambda d=dim: torch.sort(meta, d)),
+                ("argsort", lambda d=dim: torch.argsort(meta, d)),
+                ("sort stable", lambda d=dim: torch.sort(meta, stable=True, dim=d)),
+            ):
+                with self.assertRaisesRegex(IndexError, msg, msg=name):
+                    fn()
+
+        # 0-d accepts dim in [-1, 0] and rejects the rest, matching maybe_wrap_dim
+        torch.softmax(scalar, 0)
+        torch.softmax(scalar, -1)
+        torch.sort(scalar, 0)
+        with self.assertRaisesRegex(IndexError, msg):
+            torch.softmax(scalar, 1)
+        with self.assertRaisesRegex(IndexError, msg):
+            torch.sort(scalar, -2)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_meta_sort_binds_dim_and_descending_positionally(self):
+        # sort.default and sort.values take dim and descending positionally while
+        # `stable` is keyword-only, so the meta signature has to match that order.
+        # 1-D matters: descending=True lands in `dim` under the old ordering and
+        # dim=1 is out of range for a 1-D tensor, so a signature regression shows
+        # up here as a spurious IndexError rather than as a missed check.
+        for eager in (torch.randn(4), torch.randn(3, 5)):
+            meta = eager.to("meta")
+            for dim in range(-eager.dim(), eager.dim()):
+                for descending in (False, True):
+                    expected = torch.sort(eager, dim, descending)
+                    got = torch.sort(meta, dim, descending)
+                    self.assertEqual(expected[0].shape, got[0].shape)
+                    self.assertEqual(expected[1].shape, got[1].shape)
+                    for stable in (True, False):
+                        expected = torch.sort(
+                            eager, stable=stable, dim=dim, descending=descending
+                        )
+                        got = torch.sort(
+                            meta, stable=stable, dim=dim, descending=descending
+                        )
+                        self.assertEqual(expected[0].shape, got[0].shape)
+                        self.assertEqual(expected[1].shape, got[1].shape)
+
+        # the out= overloads take the same positional dim/descending
+        values = torch.empty(0, device="meta")
+        indices = torch.empty(0, dtype=torch.long, device="meta")
+        torch.sort(meta, 1, True, out=(values, indices))
+        torch.sort(meta, stable=True, dim=1, out=(values, indices))
+
+
 instantiate_device_type_tests(TestMeta, globals())
 
 
