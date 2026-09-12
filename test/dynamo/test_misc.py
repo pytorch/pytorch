@@ -5634,6 +5634,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             fn(torch.randn(4))
 
+    @parametrize(
+        "case",
+        [
+            subtest("no_args", name="no_args"),
+            subtest("one_arg", name="one_arg"),
+            subtest("too_many_args", name="too_many_args"),
+            subtest("keyword_arg", name="keyword_arg"),
+        ],
+    )
+    def test_getattr_wrong_args_raises(self, case):
+        def fn(x):
+            try:
+                if case == "no_args":
+                    return getattr()
+                if case == "one_arg":
+                    return getattr(x)
+                if case == "too_many_args":
+                    return getattr(x, "shape", None, None)
+                return getattr(x, name="shape")
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
