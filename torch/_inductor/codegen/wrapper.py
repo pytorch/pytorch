@@ -1659,12 +1659,7 @@ class PythonWrapperCodegen(CodeGen):
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
         self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
-        # Mutation outputs can be views into the same allocation. Preserve that aliasing
-        # when generating compile-time autotune inputs instead of allocating every view.
-        self.kernel_autotune_storage_args: dict[str, tuple[str, str]] = {}
-        self.kernel_autotune_arg_to_storage: dict[str, str] = {}
         self.kernel_autotune_tmp_arg_idx: int = 0
-        self.kernel_autotune_storage_idx: int = 0
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
@@ -4163,15 +4158,7 @@ class PythonWrapperCodegen(CodeGen):
 
         return [wrap_arg(arg) for arg in call_args]
 
-    def generate_example_arg_value(
-        self,
-        arg,
-        arg_type,
-        raw_arg=None,
-        *,
-        kernel_name: str | None = None,
-        per_kernel_storage_args: dict[str, str] | None = None,
-    ):
+    def generate_example_arg_value(self, arg, arg_type, raw_arg=None):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
@@ -4191,84 +4178,17 @@ class PythonWrapperCodegen(CodeGen):
 
             if buf is None:
                 raise AssertionError(f"Failed to find a buffer for arg {arg}")
-            layout = buf.get_layout()
-            alias_view: ir.IRNode | None = None
-            base_buffer: ir.Buffer | None = None
-            if not isinstance(raw_arg, ir.TMADescriptor):
-                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
-                    alias_view = layout.target
-                    base_buffer = layout.get_buffer()
-                elif isinstance(layout, ir.NonOwningLayout):
-                    alias_view = layout.view
-                    if isinstance(alias_view, ir.ReinterpretView):
-                        storage = alias_view.data
-                        if isinstance(storage, ir.StorageBox) and isinstance(
-                            storage.data, ir.Buffer
-                        ):
-                            base_buffer = storage.data
+            size = V.graph.sizevars.optimization_hints(buf.get_size())
+            allocation_size = V.graph.sizevars.optimization_hints(
+                V.graph.get_allocation_size(buf)
+            )
+            stride = V.graph.sizevars.optimization_hints(buf.get_stride())
 
-            if (
-                alias_view is not None
-                and base_buffer is not None
-                and alias_view.get_dtype() == base_buffer.get_dtype()
-            ):
-                storage_key = base_buffer.get_name()
-                storage_name = None
-                if per_kernel_storage_args is not None:
-                    storage_name = per_kernel_storage_args.get(storage_key)
-                elif storage_key in self.kernel_autotune_storage_args:
-                    storage_name = self.kernel_autotune_storage_args[storage_key][0]
-
-                if storage_name is None:
-                    storage_name = (
-                        f"_autotune_storage_{self.kernel_autotune_storage_idx}"
-                    )
-                    self.kernel_autotune_storage_idx += 1
-                    storage_size = V.graph.sizevars.optimization_hint(
-                        V.graph.get_allocation_storage_size(base_buffer)
-                    )
-                    device = base_buffer.get_device()
-                    dtype = base_buffer.get_dtype()
-                    value = f"generate_example_value(({storage_size},), (1,), '{coor_device_str(device)}', {dtype}, 0, ({storage_size},))"
-                    self.kernel_autotune_calls.writeline(f"{storage_name} = {value}")
-                    if per_kernel_storage_args is not None:
-                        per_kernel_storage_args[storage_key] = storage_name
-                    else:
-                        if kernel_name is None:
-                            raise AssertionError(
-                                "kernel_name is required for shared autotune storage"
-                            )
-                        self.kernel_autotune_storage_args[storage_key] = (
-                            storage_name,
-                            kernel_name,
-                        )
-
-                size = V.graph.sizevars.optimization_hints(alias_view.get_size())
-                stride = V.graph.sizevars.optimization_hints(alias_view.get_stride())
-                offset = V.graph.sizevars.optimization_hint(
-                    alias_view.get_layout().offset
-                )
-                self.kernel_autotune_calls.writeline(
-                    f"{buf_name} = torch.as_strided({storage_name}, {size}, {stride}, {offset})"
-                )
-                if per_kernel_storage_args is None:
-                    if not isinstance(arg, str):
-                        raise AssertionError(
-                            "Shared autotune storage requires a named tensor argument"
-                        )
-                    self.kernel_autotune_arg_to_storage[arg] = storage_key
-            else:
-                size = V.graph.sizevars.optimization_hints(buf.get_size())
-                allocation_size = V.graph.sizevars.optimization_hints(
-                    V.graph.get_allocation_size(buf)
-                )
-                stride = V.graph.sizevars.optimization_hints(buf.get_stride())
-
-                device = buf.get_device()
-                dtype = buf.get_dtype()
-                offset = V.graph.sizevars.optimization_hint(layout.offset)
-                value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
-                self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
+            device = buf.get_device()
+            dtype = buf.get_dtype()
+            offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
+            value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
+            self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
                 # generate another line initializing a host-side TMA
@@ -4441,11 +4361,6 @@ class PythonWrapperCodegen(CodeGen):
                     for tensor, kn in self.kernel_autotune_example_args.values()
                     if kn == kernel_name
                 ]
-                tensors_to_delete.extend(
-                    storage
-                    for storage, kn in self.kernel_autotune_storage_args.values()
-                    if kn == kernel_name
-                )
                 if tensors_to_delete:
                     return f"del {', '.join(tensors_to_delete)}\n"
                 return ""
@@ -4485,7 +4400,6 @@ class PythonWrapperCodegen(CodeGen):
 
             all_args = []
             tensor_arg_strs = []  # used only when _per_kernel is True
-            per_kernel_storage_args: dict[str, str] = {}
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
                 if raw_keys is not None:
@@ -4532,32 +4446,17 @@ class PythonWrapperCodegen(CodeGen):
                         arg_str = arg
                     elif _per_kernel:
                         arg_str = self.generate_example_arg_value(
-                            arg,
-                            arg_type,
-                            raw_arg,
-                            kernel_name=kernel_name,
-                            per_kernel_storage_args=per_kernel_storage_args,
+                            arg, arg_type, raw_arg
                         )
                         tensor_arg_strs.append(arg_str)
                     elif arg not in self.kernel_autotune_example_args:
                         arg_str = self.generate_example_arg_value(
-                            arg,
-                            arg_type,
-                            raw_arg,
-                            kernel_name=kernel_name,
+                            arg, arg_type, raw_arg
                         )
                     else:
                         arg_str = self.kernel_autotune_example_args[arg][0]
                     if not _per_kernel:
                         self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
-                        if storage_key := self.kernel_autotune_arg_to_storage.get(arg):
-                            storage_name, _ = self.kernel_autotune_storage_args[
-                                storage_key
-                            ]
-                            self.kernel_autotune_storage_args[storage_key] = (
-                                storage_name,
-                                kernel_name,
-                            )
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
 
@@ -4583,11 +4482,8 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.do_unindent()
 
             if _per_kernel and tensor_arg_strs:
-                tensors_to_delete = tensor_arg_strs + list(
-                    per_kernel_storage_args.values()
-                )
                 self.kernel_autotune_calls.writeline(
-                    f"del {', '.join(tensors_to_delete)}"
+                    f"del {', '.join(tensor_arg_strs)}"
                 )
             elif not _per_kernel:
                 self.kernel_autotune_calls.writeline(
