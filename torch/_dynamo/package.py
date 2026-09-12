@@ -15,7 +15,6 @@ import dataclasses
 import functools
 import hashlib
 import importlib
-import inspect
 import itertools
 import json
 import logging
@@ -881,13 +880,15 @@ class PrecompileCacheEntry:
     dynamo: _DynamoCacheEntry
     backends: dict[_BackendId, Any]
 
-    @staticmethod
+@staticmethod
     def from_cache_entry(
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
     ) -> Optional["PrecompileCacheEntry"]:
         backend_content: dict[_BackendId, Any] = {}
+        valid_codes = []
 
         for code in cache_entry.codes:
+            missing_backend = False
             for backend_id in code.backend_ids:
                 if backend_id not in backends:
                     logger.warning("Backend not found")
@@ -906,10 +907,21 @@ class PrecompileCacheEntry:
                         payload_fn=lambda: debug_str,
                         expect_trace_id=False,
                     )
-                    code.bypassed = True
+                    missing_backend = True
                     break
-                else:
+
+            # If all required backends exist, keep this code object and store backend content
+            if not missing_backend:
+                valid_codes.append(code)
+                for backend_id in code.backend_ids:
                     backend_content[backend_id] = backends[backend_id]
+
+        # Update cache entry to retain only valid codes
+        cache_entry.codes = valid_codes
+
+        # Return None if all code variants were pruned
+        if not cache_entry.codes:
+            return None
 
         return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
 
