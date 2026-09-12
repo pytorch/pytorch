@@ -1000,22 +1000,41 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function. Guards
-                   are evaluated against this dict by reference, so a global
-                   rebound after loading is seen on the next call, and a guarded
-                   global the dict lacks fails the guard (there is no fallback to
-                   the values serialized with the artifact). Loading mutates the
-                   dict: the ``__import_*`` module aliases and the
-                   ``__builtins_dict___N`` key recorded at capture are inserted
-                   (plus ``__builtins__`` when the dict lacks it), never
-                   overwriting an existing key. There is a single compiled
-                   graph: a rebound global that fails its guard raises
-                   ``RuntimeError: GuardManager check failed`` on the next call
-                   rather than selecting a different graph. The bytecode runs
-                   against a snapshot built at load time in which ``f_globals``
-                   entries override the globals captured with the artifact. (An
-                   ``nn.Module`` artifact differs: its bytecode reads only the
-                   globals serialized at capture.)
+        f_globals: Optional global scope enclosing the compiled function. It
+                   REPLACES the dict the guard tree resolves globals against, so
+                   it must bind every global the kept guards read, with values
+                   that satisfy them: pass ``vars()`` of the module that DEFINED
+                   the original function, which is usually not the module doing
+                   the loading, or any dict that binds those names. Guards read
+                   it by reference, so a global rebound in it after loading is
+                   seen on the next call, and a guarded global it lacks fails the
+                   guard until that name is bound in it -- there is no fallback
+                   to the values serialized with the artifact. A failing guard
+                   raises ``RuntimeError: GuardManager check failed`` rather than
+                   selecting a different graph, since an artifact holds one.
+                   Loading may insert names of its own, never overwriting an
+                   existing key: the Dynamo-generated globals a kept guard is
+                   rooted at, and ``__builtins__`` when it seeds the builtins
+                   dict one of those names holds. The compiled bytecode does not
+                   read this dict: it reads a snapshot, taken at load time, of
+                   the globals serialized with the artifact with this dict
+                   merged over them. So a name this dict omits still resolves
+                   there, and a name it binds is the value the graph uses
+                   whether or not a kept guard checks it. A global rebound in
+                   this dict after loading changes the result only when a guard
+                   rejects the new value: a kept ``TENSOR_MATCH`` compares
+                   metadata, not values, so a rebinding it accepts leaves the
+                   call serving the load-time value, while one it rejects fails
+                   the call, naming the property that differed. What it compares
+                   is more than dtype and device -- among others the exact Python
+                   type, shape, strides, device index, ``requires_grad``, the
+                   whole dispatch key set, and the dimension markings the tensor
+                   carries -- so a rebinding that looks equivalent can still be
+                   rejected. Omitting it resolves global guards against the scope
+                   rebuilt from the artifact instead: a global the graph lifted
+                   is checked against the value serialized with it, one it did
+                   not lift is simply absent and fails the guard, and either way
+                   a rebinding in this process is invisible.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
