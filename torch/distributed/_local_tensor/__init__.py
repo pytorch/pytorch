@@ -797,12 +797,17 @@ class _LocalOffsetBasedRNGTracker:
                 any_rank_state = lm._any_local_rng_state()
                 any_rank_cpu, any_rank_cuda = any_rank_state
 
-                if self._device.type in {"cuda", "xpu"}:
+                # _collect_accelerator_rng_states collects the state of the
+                # current accelerator (whatever backend registered it through
+                # torch.accelerator), so any non-cpu device type — cuda, xpu,
+                # hpu, npu, ... — must be served from that dict keyed by
+                # device index; only cpu uses the cpu state.
+                if self._device.type == "cpu":
+                    any_rank_device_state = any_rank_cpu
+                else:
                     if self._device.index not in any_rank_cuda:
                         raise AssertionError
                     any_rank_device_state = any_rank_cuda[self._device.index]
-                else:
-                    any_rank_device_state = any_rank_cpu
 
                 from torch.distributed.tensor._random import _PhiloxState
 
