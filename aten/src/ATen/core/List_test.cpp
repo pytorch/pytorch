@@ -1,6 +1,8 @@
 #include <ATen/core/List.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 using namespace c10;
 
 namespace {
@@ -17,6 +19,22 @@ constexpr bool list_iterators_conform =
      ...);
 
 static_assert(list_iterators_conform<
+              c10::IValue,
+              int64_t,
+              at::Tensor,
+              std::optional<std::string>>);
+
+template <class T>
+using ListMoveIter = std::move_iterator<ListIter<T>>;
+
+template <class... Ts>
+constexpr bool list_move_iterators_conform =
+    ((std::random_access_iterator<ListMoveIter<Ts>> &&
+      std::same_as<std::iter_rvalue_reference_t<ListIter<Ts>>, Ts> &&
+      std::same_as<std::iter_reference_t<ListMoveIter<Ts>>, Ts>) &&
+     ...);
+
+static_assert(list_move_iterators_conform<
               c10::IValue,
               int64_t,
               at::Tensor,
@@ -1230,6 +1248,15 @@ TEST(ListTest, canAccessStringByReference) {
   const std::string& strRef = listRef[1];
   EXPECT_EQ("two", str);
   EXPECT_EQ("two", strRef);
+}
+
+TEST(ListTest, rangesMoveTransfersElements) {
+  List<std::string> source({"one", "two"});
+  std::vector<std::string> destination;
+
+  std::ranges::move(source, std::back_inserter(destination));
+
+  EXPECT_EQ((std::vector<std::string>{"one", "two"}), destination);
 }
 
 TEST(ListTest, canAccessOptionalStringByReference) {

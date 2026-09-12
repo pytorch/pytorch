@@ -69,11 +69,8 @@ class Enumerator {
 
   class Proxy {
    public:
-    using difference_type = ssize_t;
-    using value_type = typename std::iterator_traits<Iterator>::value_type;
     using reference = typename std::iterator_traits<Iterator>::reference;
     using pointer = typename std::iterator_traits<Iterator>::pointer;
-    using iterator_category = std::input_iterator_tag;
 
     C10_ALWAYS_INLINE constexpr explicit Proxy(const Enumerator& e)
         : index(e.idx_), element(*e.it_) {}
@@ -101,6 +98,13 @@ class Enumerator {
     reference element;
   };
 
+  using iterator_concept = std::input_iterator_tag;
+  using iterator_category = std::input_iterator_tag;
+  using value_type = Proxy;
+  using difference_type = ssize_t;
+
+  Enumerator() = default;
+
   C10_ALWAYS_INLINE constexpr Proxy operator*() const {
     return Proxy(*this);
   }
@@ -109,6 +113,12 @@ class Enumerator {
     ++it_;
     ++idx_;
     return *this;
+  }
+
+  C10_ALWAYS_INLINE constexpr Enumerator operator++(int) {
+    auto old = *this;
+    ++*this;
+    return old;
   }
 
   template <typename OtherIterator>
