@@ -41,12 +41,12 @@ L1:
   - NVIDIA-dev/pytorch-oot-internal
   - NVIDIA/pytorch-windows-ci
   - google-pytorch/torch_tpu
-  - Isalia20/pytorch-mps-ci
 
 L2:
   - TorchedHat/pytorch-redhat-ci
   - torch-spyre/torch-spyre
   - vllm-project/vllm
+  - Isalia20/pytorch-mps-ci
 
 L3:
   # Canonical test repos for CRCR.
