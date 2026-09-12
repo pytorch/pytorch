@@ -22,7 +22,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
     getRocmVersion, skipIfRocmVersionAtLeast, TemporaryFileName,
@@ -630,12 +630,15 @@ if __name__ == '__main__':
 
 
 class TestPeriodicDecorator(TestCase):
+    @parametrize("in_ci", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_gates_on_periodic_mode(self, periodic_enabled):
+    def test_periodic_gates_on_periodic_mode(self, in_ci, periodic_enabled):
         calls = []
-        with unittest.mock.patch(
-            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
-            periodic_enabled,
+        with unittest.mock.patch.multiple(
+            "torch.testing._internal.common_utils",
+            IS_CI=in_ci,
+            IS_SANDCASTLE=False,
+            TEST_WITH_PERIODIC=periodic_enabled,
         ):
             class TestP(unittest.TestCase):
                 def setUp(self):
@@ -648,19 +651,23 @@ class TestPeriodicDecorator(TestCase):
         result = unittest.TestResult()
         unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
 
+        skipped = in_ci and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
         self.assertIn("periodic", marks)
-        self.assertEqual(calls, ["setUp", "test"] if periodic_enabled else [])
-        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(calls, [] if skipped else ["setUp", "test"])
+        self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
+    @parametrize("on_sandcastle", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_class_gates_setup(self, periodic_enabled):
+    def test_periodic_class_gates_setup(self, on_sandcastle, periodic_enabled):
         calls = []
-        with unittest.mock.patch(
-            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
-            periodic_enabled,
+        with unittest.mock.patch.multiple(
+            "torch.testing._internal.common_utils",
+            IS_CI=False,
+            IS_SANDCASTLE=on_sandcastle,
+            TEST_WITH_PERIODIC=periodic_enabled,
         ):
             @periodic
             class TestP(unittest.TestCase):
@@ -678,11 +685,11 @@ class TestPeriodicDecorator(TestCase):
         result = unittest.TestResult()
         unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
 
+        skipped = on_sandcastle and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
         self.assertIn("periodic", marks)
-        expected_calls = ["setUpClass", "test", "tearDownClass"]
-        self.assertEqual(calls, expected_calls if periodic_enabled else [])
-        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(calls, [] if skipped else ["setUpClass", "test", "tearDownClass"])
+        self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
@@ -692,26 +699,18 @@ class TestPeriodicDecorator(TestCase):
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     def test_periodic_config_selects_only_periodic_tests(self):
         source = """\
-import os
-
 from torch.testing._internal.common_utils import periodic, run_tests, serialTest
 
 def test_plain_pytest():
-    if os.getenv("EXPECT_PERIODIC") == "1":
-        raise AssertionError("plain pytest test ran in periodic mode")
     print("PLAIN_PYTEST_RAN")
 
 @periodic
 def test_periodic_pytest():
-    if os.getenv("EXPECT_PERIODIC") != "1":
-        raise AssertionError("periodic pytest test ran outside periodic mode")
     print("PERIODIC_PYTEST_RAN")
 
 @serialTest()
 @periodic
 def test_periodic_serial_pytest():
-    if os.getenv("EXPECT_PERIODIC") != "1":
-        raise AssertionError("periodic serial test ran outside periodic mode")
     print("PERIODIC_SERIAL_PYTEST_RAN")
 
 if __name__ == "__main__":
@@ -742,7 +741,6 @@ if __name__ == "__main__":
 
             def run_test(periodic_mode):
                 test_env = env.copy()
-                test_env["EXPECT_PERIODIC"] = "1" if periodic_mode else "0"
                 if periodic_mode:
                     test_env["TEST_CONFIG"] = "periodic"
                     test_env["PYTORCH_TEST_WITH_SLOW"] = "1"
@@ -766,8 +764,8 @@ if __name__ == "__main__":
         self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", periodic_output)
         self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
         self.assertIn("PLAIN_PYTEST_RAN", default_output)
-        self.assertNotIn("PERIODIC_PYTEST_RAN", default_output)
-        self.assertNotIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+        self.assertIn("PERIODIC_PYTEST_RAN", default_output)
+        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
 
     def test_periodic_does_not_leak_across_parametrized_tests(self):
         with unittest.mock.patch(
@@ -789,10 +787,28 @@ if __name__ == "__main__":
 
     @periodic
     def test_periodic_smoke(self):
-        self.assertTrue(TEST_WITH_PERIODIC)
+        self.assertTrue(TEST_WITH_PERIODIC or not (IS_CI or IS_SANDCASTLE))
 
 
 instantiate_parametrized_tests(TestPeriodicDecorator)
+
+
+# Trivial tests that give the periodic-strict workflow a passing CPU and GPU
+# test to gate on; deliberately breaking one exercises its auto-revert.
+class TestPeriodicCanary(TestCase):
+    @periodic
+    @onlyCPU
+    def test_cpu_canary(self, device):
+        self.assertEqual(torch.arange(4, device=device).sum().item(), 6)
+
+    @periodic
+    @onlyCUDA
+    def test_gpu_canary(self, device):
+        x = torch.ones(4, 4, device=device)
+        self.assertEqual(x @ x, torch.full((4, 4), 4.0, device=device))
+
+
+instantiate_device_type_tests(TestPeriodicCanary, globals(), only_for=("cpu", "cuda"))
 
 
 class TestEnvironmentDefFlag(TestCase):
