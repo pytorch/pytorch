@@ -4527,33 +4527,28 @@ _constant_base_methods: dict[type, set[Any]] = {
 }
 
 
-class UserDefinedConstantVariable(UserDefinedObjectVariable):
+class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
     """
     Represents user-defined objects that subclass immutable constant types
     (int, float, str).
-
-    Uses a ConstantVariable as _base_vt for the underlying constant value.
     """
 
-    def __init__(self, value: object, **kwargs: Any) -> None:
-        from .constant import ConstantVariable
-
+    def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
         for base in type(value).__mro__:
             if base in _CONSTANT_BASE_TYPES:
-                self._base_vt = ConstantVariable.create(base(value))
+                self._constant_base = base
                 self._base_methods = _constant_base_methods[base]
                 break
-        if self._base_vt is None:
+        else:
             raise AssertionError(f"No constant base type found in MRO of {type(value)}")
 
     def as_python_constant(self) -> Any:
         return self.value
 
-    def as_proxy(self) -> object:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in as_proxy")
-        return self._base_vt.as_proxy()
+    def as_proxy(self) -> Any:
+        # Put the plain builtin in the graph, not the user subclass instance.
+        return self._constant_base(self.value)
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
