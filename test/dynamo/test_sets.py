@@ -72,6 +72,46 @@ class CustomSetTests(_BaseSetTests):
         self.assertTrue(s.contains(3))
 
 
+class CustomNewSetTests(_BaseSetTests):
+    # `set`/`frozenset` subclasses overriding `__new__` and calling
+    # `super().__new__(cls, arg)` (mirrors CPython test_set.py
+    # test_keywords_in_subclass).
+    class CustomSetWithNew(set):
+        def __new__(cls, arg, newarg=None):
+            self = super().__new__(cls, arg)
+            self.newarg = newarg
+            return self
+
+    class CustomFrozensetWithNew(frozenset):
+        def __new__(cls, arg, newarg=None):
+            self = super().__new__(cls, arg)
+            return self
+
+    @make_dynamo_test
+    def test_set_subclass_new_via_super(self):
+        s = self.CustomSetWithNew([1, 2])
+        self.assertTrue(type(s) is self.CustomSetWithNew)
+        self.assertTrue(set(s) == {1, 2})
+        self.assertTrue(s.newarg is None)
+
+    @make_dynamo_test
+    def test_frozenset_subclass_new_via_super(self):
+        s = self.CustomFrozensetWithNew([1, 2])
+        self.assertTrue(type(s) is self.CustomFrozensetWithNew)
+        self.assertTrue(set(s) == {1, 2})
+
+    @make_dynamo_test
+    def test_set_new_exact_type(self):
+        s = set.__new__(set)
+        s.add(1)
+        self.assertTrue(s == {1})
+
+    @make_dynamo_test
+    def test_frozenset_new_exact_type(self):
+        s = frozenset.__new__(frozenset)
+        self.assertTrue(s == frozenset())
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_isdisjoint_with_generator(self):
         n = 0

@@ -1092,6 +1092,37 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return variables.LambdaVariable(fake_cross_entropy_loss)
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Caller must have already checked
+        # UserDefinedClassVariable.is_supported_new_method(self.value.__new__).
+        if self.value is collections.OrderedDict:
+            # Exact OrderedDict: represent as a bare OrderedDictVariable,
+            # mirroring dict.__new__(dict) -> ConstDictVariable.
+            return OrderedDictVariable({}, mutation_type=ValueMutationNew())
+        # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
+        # extra args — only the type arg matters.  Pass init_args=[] for
+        # those so reconstruction emits base_cls.__new__(cls) without
+        # unreconstructable args (e.g. generators).  Other tp_new functions
+        # (tuple.__new__, BaseException.__new__) use the extra args.
+        new_fn = self.value.__new__
+        if new_fn in (
+            dict.__new__,
+            set.__new__,
+            collections.deque.__new__,
+            types.SimpleNamespace.__new__,
+        ):
+            init_args: list[VariableTracker] = []
+        else:
+            init_args = list(args[1:])
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], init_args, tx=tx
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1161,31 +1192,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
-            if self.value is collections.OrderedDict:
-                # Exact OrderedDict: represent as a bare OrderedDictVariable,
-                # mirroring dict.__new__(dict) -> ConstDictVariable.
-                return OrderedDictVariable({}, mutation_type=ValueMutationNew())
-            # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
-            # extra args — only the type arg matters.  Pass init_args=[] for
-            # those so reconstruction emits base_cls.__new__(cls) without
-            # unreconstructable args (e.g. generators).  Other tp_new functions
-            # (tuple.__new__, BaseException.__new__) use the extra args.
-            new_fn = self.value.__new__
-            if new_fn in (
-                dict.__new__,
-                set.__new__,
-                collections.deque.__new__,
-                types.SimpleNamespace.__new__,
-            ):
-                init_args: list[VariableTracker] = []
-            else:
-                init_args = list(args[1:])
-            return tx.output.side_effects.track_new_user_defined_object(
-                self,
-                args[0],
-                init_args,
-                tx=tx,
-            )
+            return self.tp_new_impl(tx, args, kwargs)
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
                 gb_type="Class attribute mutation when the __dict__ was already materialized",
