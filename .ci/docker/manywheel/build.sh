@@ -77,7 +77,7 @@ case ${image} in
     manylinux2_28-builder:rocm*)
         MANY_LINUX_VERSION="2_28"
         DEVTOOLSET_VERSION="13"
-        PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151"
+        PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1250"
         TARGET=rocm_final
         GPU_IMAGE=amd64/almalinux:8
         if [[ "${GPU_ARCH_VERSION}" == "7.14" ]]; then
