@@ -951,11 +951,6 @@ class TestOperators(TestCase):
                 decorate(
                     "linalg.householder_product", decorator=runOnRocm
                 ),  # works on ROCm
-                xfail(
-                    # nans
-                    "masked.softmax",
-                    device_type="cpu",
-                ),
                 xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
                 # got a batched tensor as input while the running_mean or running_var,
                 # which will be updated in place, were not batched.
