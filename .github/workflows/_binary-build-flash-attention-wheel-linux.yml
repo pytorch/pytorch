@@ -35,7 +35,7 @@ jobs:
             docker_image: "pytorch/manylinux2_28-builder:cuda12.6"
             runner: "mt-l-x86iavx512-48-384"
             manylinux_plat: "manylinux_2_28_x86_64"
-          - cuda_version: "13.0.2"
+          - cuda_version: "13.0.3"
             arch: "x86_64"
             cuda_short: "130"
             torch_cuda_arch_list: "8.0;8.6;9.0;10.0"
@@ -52,7 +52,7 @@ jobs:
             nvcc_threads: "2"
             manylinux_plat: "manylinux_2_34_aarch64"
             cuda_installer_name: "cuda_12.6.3_560.35.05_linux"
-          - cuda_version: "13.0.2"
+          - cuda_version: "13.0.3"
             arch: "aarch64"
             cuda_short: "130"
             torch_cuda_arch_list: "9.0;10.0"
@@ -61,7 +61,7 @@ jobs:
             max_jobs: "4"
             nvcc_threads: "2"
             manylinux_plat: "manylinux_2_34_aarch64"
-            cuda_installer_name: "cuda_13.0.2_580.95.05_linux"
+            cuda_installer_name: "cuda_13.0.3_580.126.20_linux"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 1440
     # Build inside the manylinux builder image (the pod is the builder): ARC has
