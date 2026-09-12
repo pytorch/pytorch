@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _maybe_wrap_fsdp,
+    FSDP_DEVICES,
     FSDPTest,
     FSDPTestContinuous,
     get_devtype,
@@ -344,7 +345,7 @@ class TestFSDPCheckpointSubmodule(FSDPTestContinuous):
             self.assertTrue(p1.grad.allclose(p2.grad))
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(
     TestFSDPCheckpointSubmodule, globals(), only_for=devices, allow_xpu=True
 )

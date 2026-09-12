@@ -26,6 +26,7 @@ from torch.testing._internal.common_fsdp import (
     AlwaysWrapNestedWrappedModule,
     DEVICEInitMode,
     DummyDDP,
+    FSDP_DEVICES,
     FSDPInitMode,
     FSDPTest,
     get_devtype,
@@ -518,7 +519,7 @@ class TestAutograd(FSDPTest):
             FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(TestHooks, globals(), only_for=devices, allow_xpu=True)
 instantiate_device_type_tests(
     TestParityWithDDP, globals(), only_for=devices, allow_xpu=True

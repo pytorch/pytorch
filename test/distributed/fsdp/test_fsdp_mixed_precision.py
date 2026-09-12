@@ -9,7 +9,11 @@ from itertools import product
 from typing import Any
 
 import torch
-import torch.cuda.nccl as nccl
+
+
+if torch.cuda.is_available():
+    import torch.cuda.nccl as nccl
+
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
@@ -89,7 +93,9 @@ mp_only_param_and_buf = MixedPrecision(
 # Nothing is cast (thus param, comm, grad, and buffer should be in the full precision)
 mp_no_mixed_precision = MixedPrecision()
 
-nccl_supports_bf16 = dist.is_nccl_available() and nccl.version() >= (2, 10)
+nccl_supports_bf16 = (
+    dist.is_nccl_available() and torch.cuda.is_available() and nccl.version() >= (2, 10)
+)
 
 mp_configs = [default_mp, mp_only_reduce, mp_only_param_and_buf, mp_no_mixed_precision]
 if nccl_supports_bf16:

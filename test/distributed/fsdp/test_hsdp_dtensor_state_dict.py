@@ -17,7 +17,7 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fsdp import get_devtype
+from torch.testing._internal.common_fsdp import FSDP_DEVICES, get_devtype
 from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
@@ -324,7 +324,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
                 self.assertIsInstance(state["exp_avg_sq"], torch.Tensor)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(
     TestHSDPWithDeviceMeshAndDTensor, globals(), only_for=devices, allow_xpu=True
 )
