@@ -1830,6 +1830,10 @@ if(USE_CUDA)
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
+  # SYSTEM so CUTLASS's own warnings do not trip -Werror.
+  target_include_directories(torch_cuda SYSTEM PRIVATE
+      ${PROJECT_SOURCE_DIR}/third_party/cutlass/include
+      ${PROJECT_SOURCE_DIR}/third_party/cutlass/tools/util/include)
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
 
