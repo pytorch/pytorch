@@ -2324,6 +2324,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K", "0") == "1"
     )
 
+    # Benchmark a materialized ATen MM against a bounded pair of fused Triton
+    # decompose-K plans for eligible two-input cat/cast producers.
+    enable_blackwell_decompose_k_cat2_fusion = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K_CAT2_FUSION", "0")
+        == "1"
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.

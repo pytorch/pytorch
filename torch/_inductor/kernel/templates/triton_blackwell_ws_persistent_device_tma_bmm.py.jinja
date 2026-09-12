@@ -109,6 +109,7 @@
                 unfused_load="b_desc.load([offs_k, offs_bn])",
                 prologue_descriptor_offsets=("offs_k", "offs_bn") if not TWO_CTAS else None,
                 prologue_descriptor_block_shape=("BLOCK_K", "BLOCK_N") if not TWO_CTAS else None,
+                prologue_descriptor_cat2=(LOGICAL_N == 128 and BLOCK_N == 128),
             )}}
             {%- else %}
             b = b_desc.load(

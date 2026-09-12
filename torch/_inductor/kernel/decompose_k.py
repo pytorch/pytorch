@@ -11,9 +11,11 @@ from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import can_use_tma, get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._ordered_set import OrderedSet
 
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
+from ..virtualized import V
 from .bmm import (
     blackwell_ws_persistent_tma_bmm_template,
     BlackwellBMMConfig,
@@ -34,7 +36,62 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
     # A single-CTA BK64 pipeline for the M=128, N=256 producer-fusion path.
     BlackwellBMMConfig(128, 128, 64, 4, 8, 2, 1, True, False),
+    # A single-CTA BK64 pipeline for the M=128, N=128 cat/cast producer path.
+    BlackwellBMMConfig(128, 128, 64, 3, 8, 2, 1, True, False),
 )
+
+
+def get_cat2_fp32_prologue_sources(input_node) -> list[str] | None:
+    """Match an exact contiguous ``cat([Kx64, Kx64], 1).to(BF16)`` producer."""
+    node = input_node
+    while isinstance(node, (ir.TensorBox, ir.StorageBox)):
+        node = node.data
+    if not isinstance(node, ir.ComputedBuffer) or not isinstance(
+        node.data, ir.Pointwise
+    ):
+        return None
+
+    size = tuple(V.graph.sizevars.simplify(s) for s in node.get_size())
+    origin_targets = OrderedSet(origin.target for origin in node.get_origins())
+    cat_cast_targets = OrderedSet(
+        [
+            torch.ops.aten.cat.default,
+            torch.ops.prims.convert_element_type.default,
+        ]
+    )
+    if (
+        len(size) != 2
+        or node.get_dtype() != torch.bfloat16
+        or not V.graph.sizevars.statically_known_equals(size[1], 128)
+        or not cat_cast_targets.issubset(origin_targets)
+        or not origin_targets.issubset(
+            cat_cast_targets | OrderedSet([torch.ops.aten.mm.default])
+        )
+    ):
+        return None
+
+    source_names = list(node.get_read_names())
+    if len(source_names) != 2:
+        return None
+    for source_name in source_names:
+        source = V.graph.get_buffer(source_name)
+        source_size = tuple(V.graph.sizevars.simplify(s) for s in source.get_size())
+        source_stride = tuple(V.graph.sizevars.simplify(s) for s in source.get_stride())
+        if (
+            source.get_dtype() != torch.float32
+            or len(source_size) != 2
+            or not V.graph.sizevars.statically_known_equals(source_size[0], size[0])
+            or not V.graph.sizevars.statically_known_equals(source_size[1], 64)
+            or not V.graph.sizevars.statically_known_equals(source_stride[1], 1)
+            or not V.graph.sizevars.statically_known_equals(
+                source_stride[0], source_size[1]
+            )
+            or not V.graph.sizevars.statically_known_equals(
+                source.get_layout().offset, 0
+            )
+        ):
+            return None
+    return source_names
 
 
 def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
@@ -105,6 +162,64 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
 
 
 decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
+
+
+def _cat2_mm(a, left, right):
+    return a @ torch.cat((left, right), dim=1).to(torch.bfloat16)
+
+
+def _cat2_decompose_k(a, left, right, k_split, bmm_config_index):
+    b = torch.cat((left, right), dim=1).to(torch.bfloat16)
+    return decomposeK(a, b, k_split, "triton", bmm_config_index)
+
+
+class Cat2DecomposeKWholePlanTemplate(SubgraphTemplate):
+    """Complete producer-plus-MM choices for bounded fusion-aware selection."""
+
+    def __init__(self):
+        super().__init__(name="decompose_k_cat2_whole_plan")
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        *,
+        k_split: int | None = None,
+        bmm_config_index: int = -1,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        if k_split is None:
+            name = "decompose_k_cat2_materialized_aten"
+            function = _cat2_mm
+            description = "materialized cat/cast + ATen MM"
+        else:
+            name = f"decompose_k_cat2_fused_triton_split_{k_split}"
+            function = functools.partial(
+                _cat2_decompose_k,
+                k_split=k_split,
+                bmm_config_index=bmm_config_index,
+            )
+            description = f"fused cat/cast + Triton decompose-K, {k_split=}"
+
+        with enable_python_dispatcher():
+            graph = make_fx(function, select_decomp_table())
+            choice = SubgraphChoiceCaller(
+                name=name,
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=graph,
+                description=description,
+            )
+            choice.config_patches = {
+                "triton.enable_blackwell_decompose_k_cat2_fusion": False
+            }
+            return choice
+
+
+cat2_decompose_k_whole_plan_template = Cat2DecomposeKWholePlanTemplate()
 
 
 def _aligned_k_part(k: int, k_split: int, block_k: int) -> int:
@@ -245,6 +360,10 @@ def lower_blackwell_decompose_k_partial(
     m_pad: int,
     k_part: int,
 ):
+    # The descriptor template requires a named buffer. Realizing an inlined
+    # pointwise producer creates that schedulable boundary without forcing it
+    # to remain materialized; prologue fusion can still consume the buffer.
+    mat2 = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(mat2))
     try:
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[int(config_index)]
     except IndexError as error:
@@ -302,7 +421,7 @@ def lower_blackwell_decompose_k_partial(
     # Opt this narrow source-fusion target into replacing a BF16 materialization
     # with up to two contiguous FP32/BF16 inputs. Other templates retain the
     # default scheduler limit on increased prologue traffic.
-    if (m, n) == (128, 256) and not partial_config.two_ctas:
+    if int(config_index) in (6, 7) and not partial_config.two_ctas:
         result.data.data.annotations.update(
             {
                 "prefer_template_prologue_fusion": True,
