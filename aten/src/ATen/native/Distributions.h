@@ -310,7 +310,7 @@ C10_DEVICE inline scalar_t digamma_one(scalar_t x) {
   }
 
   // Compute asymptotic digamma
-  static const accscalar_t A[] = {
+  static constexpr accscalar_t A[] = {
      8.33333333333333333333E-2,
     -2.10927960927960927961E-2,
      7.57575757575757575758E-3,
@@ -323,7 +323,7 @@ C10_DEVICE inline scalar_t digamma_one(scalar_t x) {
   accscalar_t y = 0;
   if (x < 1.0e17f) {
     accscalar_t z = 1.0 / (x * x);
-    y = z * polevl<accscalar_t>(z, A, 6);
+    y = z * polevl(z, A);
   }
   return static_cast<scalar_t>(
       result + compat_log(x) - (0.5f / x) - y + additional_summand);
