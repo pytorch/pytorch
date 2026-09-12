@@ -8879,6 +8879,70 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_unbound_builtin_method_calls_fullgraph(self):
+        def fn(x):
+            a = [1, 2, 3]
+            list.append(a, 9)
+            return (
+                x + 1,
+                list.__len__(a),
+                a,
+                list.__eq__(a, [1, 2, 3, 9]),
+                list.__ne__(a, [1, 2, 3, 9]),
+                list.__lt__(a, [1, 2, 3, 9, 10]),
+                list.__le__(a, [1, 2, 3, 9]),
+                list.__gt__(a, [1, 2, 3]),
+                list.__ge__(a, [1, 2, 3, 9]),
+                int.__add__(1, 2),
+                int.bit_length(5),
+                bool.__and__(True, False),
+                float.__add__(1.0, 2.0),
+                complex.__add__(1 + 1j, 2 + 2j),
+                bytes.decode(b"abc"),
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1:], expected[1:])
+
+    def test_unbound_method_call_user_defined_class_variable(self):
+        def fn(x):
+            dq = collections.deque([1, 2, 3])
+            collections.deque.append(dq, 9)
+            return x + 1, list(dq)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1], expected[1])
+
+    def test_unbound_method_call_user_defined_object_subclass(self):
+        class MyList(list):
+            pass
+
+        def fn(x):
+            a = MyList([1, 2, 3])
+            list.append(a, 9)
+            return x + 1, list.__len__(a), list(a)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1:], expected[1:])
+
+    def test_unbound_classmethod_descriptor_not_split(self):
+        def fn():
+            return dict.fromkeys([1, 2, 3]), int.from_bytes(b"\x01\x00", "little")
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()

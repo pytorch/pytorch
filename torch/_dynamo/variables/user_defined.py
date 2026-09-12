@@ -128,6 +128,7 @@ from .object_protocol import (
     mro_lookup,
     pynumber_as_ssize_t,
     pynumber_index,
+    resolve_descriptor_owner,
     type_disallows_instantiation,
     type_implements_nb_slot,
 )
@@ -693,40 +694,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, resolved)
         return variables.GetAttrVariable(self, name, type(resolved), source=source)
 
-    def _descriptor_defining_class_vt(
-        self,
-        tx: "InstructionTranslatorBase",
-        descriptor: types.WrapperDescriptorType | types.MethodDescriptorType,
-    ) -> VariableTracker:
-        """VT for the class that actually implements an unbound C descriptor.
-
-        Consider the following example:
-
-            # Metaclass defines __neg__, so `-SomeClass` would call Meta.__neg__(cls).
-            class Meta(type):
-                def __neg__(cls):
-                    return 999
-
-
-            class Base(metaclass=Meta):
-                # Alias int's unary __neg__ slot wrapper into this class's dict under a
-                # different name. __objclass__ == int, __name__ == '__neg__', but looked
-                # up on Base, whose metaclass separately defines __neg__.
-                sneaky = int.__neg__
-
-        This helper function determines the correct owner of the descriptor based on the `__objclass__` attribute.
-
-            class Foo(int):
-                ...
-
-            assert Foo.__neg__ == int.__neg__
-            assert Foo.__neg__.__objclass__ is int
-        """
-        objclass = descriptor.__objclass__
-        if objclass is self.value:
-            return self
-        return VariableTracker.build(tx, objclass)
-
     def resolve_cls_descriptor(
         self,
         tx: "InstructionTranslatorBase",
@@ -817,7 +784,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return variables.WrapperDescriptorVariable(
                 cls_attr,
-                owner=self._descriptor_defining_class_vt(tx, cls_attr),
+                owner=resolve_descriptor_owner(tx, cls_attr, self, self.value),
                 source=source,
             )
 
@@ -829,7 +796,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return variables.MethodDescriptorVariable(
                 cls_attr,
-                owner=self._descriptor_defining_class_vt(tx, cls_attr),
+                owner=resolve_descriptor_owner(tx, cls_attr, self, self.value),
                 source=source,
             )
 
@@ -1130,6 +1097,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # copy.replace(ns) resolves type(ns).__replace__ and calls it with
             # the instance as the sole positional argument.
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
+        elif (
+            args
+            # Only for plain classes (metaclass `type`): a custom metaclass
+            # (e.g. EnumMeta) may define `name` itself, which must be looked
+            # up via the metaclass MRO below, not misread here as an unbound
+            # call to a descriptor inherited into self.value's own MRO (e.g.
+            # `x in SomeStrEnum` hitting `str.__contains__` via the StrEnum
+            # mixin instead of EnumMeta.__contains__).
+            and type(self.value) is type
+            and isinstance(
+                inspect.getattr_static(self.value, name, None),
+                (types.WrapperDescriptorType, types.MethodDescriptorType),
+            )
+            and any(name in klass.__dict__ for klass in self.value.__mro__)
+        ):
+            if (
+                isinstance(args[0], UserDefinedObjectVariable)
+                and args[0]._base_vt is not None
+            ):
+                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
+            return args[0].call_method(tx, name, args[1:], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_size
 
