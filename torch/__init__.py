@@ -1865,7 +1865,6 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
