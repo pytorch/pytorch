@@ -22,6 +22,7 @@ from torch._subclasses.fake_tensor import (
 )
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
+    dtypes as device_dtypes,
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
     OpDTypes,
@@ -41,6 +42,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MI200_ARCH,
+    parametrize,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -99,6 +101,13 @@ u16 = torch.uint16  # not tested
 u32 = torch.uint32  # not tested
 u64 = torch.uint64  # not tested
 
+NEXTAFTER_DTYPE_CONFIG = {
+    torch.float16: (torch.int16, 0x7C00, 0x0200),
+    torch.bfloat16: (torch.int16, 0x7F80, 0x0040),
+    torch.float32: (torch.int32, 0x7F800000, 0x00400000),
+    torch.float64: (torch.int64, 0x7FF0000000000000, 0x0008000000000000),
+}
+
 _ops = partial(
     ops,
     dtypes=OpDTypes.supported,
@@ -125,6 +134,8 @@ if START is not None or END is not None:
 else:
     START = 0
     END = len(op_db)
+
+NEXTAFTER_IN_RANGE = any(op.name == "nextafter" for op in op_db[START:END])
 
 seen_failed = defaultdict(set)
 failed_reasons = defaultdict(set)
@@ -1312,6 +1323,85 @@ class TestInductorOpInfo(TestCase):
 
     check_model = check_model
     check_model_gpu = check_model_gpu
+
+    @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("noncontiguous", (False, True))
+    @unittest.skipUnless(NEXTAFTER_IN_RANGE, "nextafter is outside this OpInfo shard")
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+    @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
+    def test_nextafter(self, device, dtype, noncontiguous):
+        int_dtype = NEXTAFTER_DTYPE_CONFIG[dtype][0]
+        int_min = torch.iinfo(int_dtype).min
+        subnormals = torch.tensor(
+            [int_min + 1, 1], device=device, dtype=int_dtype
+        ).view(dtype)
+        values = torch.cat(
+            (
+                torch.tensor(
+                    [float("-inf"), -2.0, -1.0, -0.0, 0.0, 1.0, 2.0, float("inf")],
+                    device=device,
+                    dtype=dtype,
+                ),
+                subnormals,
+                torch.tensor([float("nan")], device=device, dtype=dtype),
+            )
+        )
+        x = values[:, None].repeat(1, values.numel())
+        y = values[None, :].repeat(values.numel(), 1)
+        if noncontiguous:
+            x = x.T
+            y = y.T
+
+        expected = torch.nextafter(x, y)
+        actual = torch.compile(torch.nextafter, fullgraph=True)(x, y)
+        not_nan = ~expected.isnan()
+
+        self.assertEqual(
+            actual[not_nan].view(int_dtype), expected[not_nan].view(int_dtype)
+        )
+        self.assertEqual(actual.isnan(), expected.isnan())
+
+    @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @unittest.skipUnless(NEXTAFTER_IN_RANGE, "nextafter is outside this OpInfo shard")
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+    @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
+    def test_prims_nextafter(self, device, dtype):
+        int_dtype = NEXTAFTER_DTYPE_CONFIG[dtype][0]
+        x = torch.tensor([0.0, -0.0, 1.0, -1.0], device=device, dtype=dtype)
+        y = torch.tensor([1.0, -1.0, 2.0, -2.0], device=device, dtype=dtype)
+
+        expected = torch.ops.prims.nextafter.default(x, y)
+        actual = torch.compile(torch.ops.prims.nextafter.default, fullgraph=True)(x, y)
+
+        self.assertEqual(actual.view(int_dtype), expected.view(int_dtype))
+
+    @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @unittest.skipUnless(NEXTAFTER_IN_RANGE, "nextafter is outside this OpInfo shard")
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+    @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
+    def test_nextafter_quiets_nan(self, device, dtype):
+        int_dtype, inf_bits, quiet_nan_bit = NEXTAFTER_DTYPE_CONFIG[dtype]
+        int_min = torch.iinfo(int_dtype).min
+        signaling_nan = inf_bits + 1
+        quiet_nan = signaling_nan | quiet_nan_bit
+        nan_bits = torch.tensor(
+            [signaling_nan, quiet_nan, int_min + signaling_nan, int_min + quiet_nan],
+            device=device,
+            dtype=int_dtype,
+        )
+        nan_values = nan_bits.view(dtype)
+        one = torch.ones_like(nan_values)
+        compiled = torch.compile(torch.nextafter, fullgraph=True)
+
+        for actual in (compiled(nan_values, one), compiled(one, nan_values)):
+            self.assertEqual(actual.isnan(), torch.ones_like(actual, dtype=torch.bool))
+            self.assertEqual(
+                torch.bitwise_and(actual.view(int_dtype), quiet_nan_bit),
+                torch.full_like(nan_bits, quiet_nan_bit),
+            )
 
     @onlyNativeDeviceTypes
     @suppress_warnings

@@ -8798,7 +8798,68 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
-register_pointwise_numeric(aten.nextafter)
+
+register_op_dtype_propagation_rules(
+    "nextafter",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    override_return_dtype=None,
+)
+
+
+@register_lowering(
+    aten.nextafter,
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+)
+@register_lowering(prims.nextafter, broadcast=True, type_promotion_kind=None)
+def nextafter(x, y):
+    dtype = x.get_dtype()
+    dtype_config = {
+        torch.float16: (torch.int16, 0x7C00, 0x0200),
+        torch.bfloat16: (torch.int16, 0x7F80, 0x0040),
+        torch.float32: (torch.int32, 0x7F800000, 0x00400000),
+        torch.float64: (torch.int64, 0x7FF0000000000000, 0x0008000000000000),
+    }.get(dtype)
+    if dtype_config is None:
+        return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)
+
+    int_dtype, inf_bits, quiet_nan_bit = dtype_config
+    bits = torch.iinfo(int_dtype).bits
+    int_min = -(1 << (bits - 1))
+    int_max = (1 << (bits - 1)) - 1
+    x_bits = to_dtype_bitcast(x, int_dtype)
+    y_bits = to_dtype_bitcast(y, int_dtype)
+
+    def nextafter_bits(x_bits, y_bits):
+        zero = ops.constant(0, int_dtype)
+        one = ops.constant(1, int_dtype)
+        abs_x = ops.bitwise_and(x_bits, ops.constant(int_max, int_dtype))
+        abs_y = ops.bitwise_and(y_bits, ops.constant(int_max, int_dtype))
+        x_nan = ops.gt(abs_x, ops.constant(inf_bits, int_dtype))
+        y_nan = ops.gt(abs_y, ops.constant(inf_bits, int_dtype))
+
+        safe_decrement = ops.where(ops.eq(x_bits, int_min), zero, x_bits)
+        safe_increment = ops.where(ops.eq(x_bits, int_max), zero, x_bits)
+        decremented = ops.sub(safe_decrement, one)
+        incremented = ops.add(safe_increment, one)
+        signs_differ = ops.ne(ops.lt(x_bits, zero), ops.lt(y_bits, zero))
+        step_down = ops.logical_or(ops.gt(abs_x, abs_y), signs_differ)
+        stepped = ops.where(step_down, decremented, incremented)
+
+        zero_result = ops.where(
+            ops.eq(abs_y, zero),
+            y_bits,
+            ops.where(ops.lt(y_bits, zero), ops.constant(int_min + 1, int_dtype), one),
+        )
+        result = ops.where(ops.eq(abs_x, zero), zero_result, stepped)
+        result = ops.where(ops.eq(x_bits, y_bits), x_bits, result)
+        quiet_nan = ops.constant(quiet_nan_bit, int_dtype)
+        result = ops.where(y_nan, ops.bitwise_or(y_bits, quiet_nan), result)
+        return ops.where(x_nan, ops.bitwise_or(x_bits, quiet_nan), result)
+
+    result_bits = make_pointwise(nextafter_bits)(x_bits, y_bits)
+    return to_dtype_bitcast(result_bits, dtype)
+
 
 from .codegen.common import BackendFeature, pointwise_overrides_data
 
