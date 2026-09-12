@@ -2,12 +2,14 @@
 import contextlib
 import re
 import unittest
+from functools import partial
 from unittest.mock import patch
 
 import functorch
 import torch
 import torch._inductor.config as config
 import torch.autograd
+import torch.nn.functional as F
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
@@ -47,8 +49,10 @@ if HAS_GPU_AND_TRITON:
 aten = torch.ops.aten
 
 
-def compile_but_use_eager(gm, example_inputs):
+def compile_but_use_eager(gm, example_inputs, graph_collector=None):
     def inner_compile(gm, *args, **kwargs):
+        if graph_collector is not None:
+            graph_collector.append(gm)
         compile_fx_inner(gm, *args, **kwargs)
         return gm
 
@@ -65,20 +69,26 @@ def count_numel(f, *args):
     return str(metrics.num_bytes_accessed // 4)
 
 
-def count_numel_train(f, *args):
+def count_numel_train(f, *args, return_outputs=False, graph_collector=None):
     """
     Assumes all inputs are fp32
     """
     metrics.reset()
 
-    f = torch.compile(f, backend=compile_but_use_eager)
+    backend = compile_but_use_eager
+    if graph_collector is not None:
+        backend = partial(compile_but_use_eager, graph_collector=graph_collector)
+    f = torch.compile(f, backend=backend)
     out = f(*args)
     res = 0
     for o in out:
         res += o.mean()
     res.backward()
     print(metrics.nodes_num_elem)
-    return str(metrics.num_bytes_accessed // 4)
+    count = str(metrics.num_bytes_accessed // 4)
+    if return_outputs:
+        return count, out
+    return count
 
 
 DEVICE = GPU_TYPE
@@ -845,6 +855,180 @@ class MinCutPartitioningTests(TestCase):
 
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
+
+    def _assert_cat_partition(
+        self,
+        graphs,
+        num_user_outputs,
+        *,
+        recomputed,
+        expect_saved_cat=False,
+        expect_no_large_saved_intermediate=False,
+    ):
+        self.assertEqual(len(graphs), 2)
+        fw_graph, bw_graph = graphs
+        fw_cats = fw_graph.graph.find_nodes(op="call_function", target=aten.cat.default)
+        self.assertEqual(len(fw_cats), 1)
+        fw_output = next(node for node in fw_graph.graph.nodes if node.op == "output")
+        saved_values = tuple(fw_output.args[0])[num_user_outputs:]
+        bw_cats = bw_graph.graph.find_nodes(op="call_function", target=aten.cat.default)
+
+        self.assertEqual(len(bw_cats), int(recomputed))
+        if recomputed or expect_saved_cat:
+            self.assertEqual(fw_cats[0] in saved_values, not recomputed)
+        if expect_no_large_saved_intermediate:
+            cat_inputs = fw_cats[0].args[0]
+            largest_input_bytes = max(
+                node.meta["val"].numel() * node.meta["val"].element_size()
+                for node in cat_inputs
+            )
+            self.assertFalse(
+                any(
+                    node.op == "call_function"
+                    and isinstance((value := node.meta.get("val")), torch.Tensor)
+                    and value.numel() * value.element_size() >= largest_input_bytes
+                    for node in saved_values
+                )
+            )
+
+    def _run_and_assert_cat_partition(
+        self,
+        f,
+        inp,
+        *,
+        recomputed,
+        expect_saved_cat=False,
+        expect_no_large_saved_intermediate=False,
+    ):
+        torch._dynamo.reset()
+        ref_inputs = tuple(
+            arg.detach().clone().requires_grad_(arg.requires_grad) for arg in inp
+        )
+        ref = f(*ref_inputs)
+        sum(output.mean() for output in ref).backward()
+
+        graphs = []
+        count, actual_outputs = count_numel_train(
+            f,
+            *inp,
+            return_outputs=True,
+            graph_collector=graphs,
+        )
+        self.assertEqual(actual_outputs, ref)
+        for actual, expected in zip(inp, ref_inputs):
+            self.assertEqual(actual.grad, expected.grad)
+        self._assert_cat_partition(
+            graphs,
+            len(ref),
+            recomputed=recomputed,
+            expect_saved_cat=expect_saved_cat,
+            expect_no_large_saved_intermediate=expect_no_large_saved_intermediate,
+        )
+        return count
+
+    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
+    def test_partitioning_cat_log_softmax(self):
+        def f(base, correction, targets, weights):
+            base_3d = base.reshape(2, 16, 33)
+            final = torch.cat(
+                (
+                    base_3d[:, :1],
+                    base_3d[:, 1:] + correction.reshape(2, 15, 33),
+                ),
+                dim=1,
+            ).reshape_as(base)
+            valid_token_count = weights.sum() + 1e-6
+            final_loss = (
+                F.cross_entropy(final, targets, reduction="none") * weights
+            ).sum() / valid_token_count
+            base_loss = (
+                F.cross_entropy(base, targets, reduction="none") * weights
+            ).sum() / valid_token_count
+            return (
+                final_loss,
+                base_loss,
+                final.argmax(-1).float(),
+                base.argmax(-1).float(),
+            )
+
+        inp = (
+            T(32, 33, dtype=torch.bfloat16, grad=True),
+            T(30, 33, dtype=torch.bfloat16, grad=True),
+            torch.arange(32, device=DEVICE) % 33,
+            torch.rand(32, device=DEVICE),
+        )
+        self.assertExpectedInline(
+            self._run_and_assert_cat_partition(
+                f,
+                inp,
+                recomputed=True,
+                expect_no_large_saved_intermediate=True,
+            ),
+            """7344""",
+        )
+
+    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
+    def test_partitioning_cat_equal_mm_inputs(self):
+        def f(left_hidden, left_weight, right_hidden, right_weight, targets):
+            left = left_hidden @ left_weight
+            right = right_hidden @ right_weight
+            logits = torch.cat((left, right), dim=-1)
+            return (F.cross_entropy(logits, targets),)
+
+        inp = (
+            T(16, 8, dtype=torch.bfloat16, grad=True),
+            T(8, 128, dtype=torch.bfloat16, grad=True),
+            T(16, 8, dtype=torch.bfloat16, grad=True),
+            T(8, 128, dtype=torch.bfloat16, grad=True),
+            torch.arange(16, device=DEVICE) % 256,
+        )
+        self._run_and_assert_cat_partition(
+            f, inp, recomputed=False, expect_saved_cat=True
+        )
+
+    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
+    def test_partitioning_cat_mm_consumer(self):
+        def f(base, correction, weight):
+            joined = torch.cat((base, correction), dim=-1)
+            return (joined @ weight, base.square())
+
+        inp = (
+            T(16, 6, grad=True),
+            T(16, 2, grad=True),
+            T(8, 4, grad=True),
+        )
+        self._run_and_assert_cat_partition(f, inp, recomputed=False)
+
+    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
+    def test_partitioning_cat_forward_only(self):
+        from torch._functorch import partitioners
+        from torch._inductor.lowering import can_fuse_cat_as_producer
+
+        def f(hidden, weight):
+            projected = hidden @ weight
+            first = projected + 1
+            second = projected + 2
+            prediction = torch.cat((first, second), dim=-1).sin().detach()
+            return (projected.exp(), prediction)
+
+        inp = (
+            T(16, 8, dtype=torch.bfloat16, grad=True),
+            T(8, 16, dtype=torch.bfloat16, grad=True),
+        )
+        with patch.object(
+            partitioners,
+            "choose_saved_values_set",
+            wraps=partitioners.choose_saved_values_set,
+        ) as choose_saved:
+            self._run_and_assert_cat_partition(f, inp, recomputed=False)
+
+        self.assertEqual(choose_saved.call_count, 1)
+        (cat,) = choose_saved.call_args.args[0].find_nodes(
+            op="call_function", target=aten.cat.default
+        )
+        self.assertTrue(choose_saved.call_args.args[1].is_required_fw(cat))
+        self.assertTrue(can_fuse_cat_as_producer(cat))
+        self.assertNotIn(cat, choose_saved.call_args.kwargs["fusible_cat_nodes"])
 
     def test_partitioning_relu(self):
         def f(x):
