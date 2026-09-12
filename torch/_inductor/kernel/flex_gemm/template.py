@@ -20,6 +20,7 @@ from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
+    LOCAL_REDUCE_COMBINE_NAMES,
     LOCAL_REDUCE_FINALIZE_NAMES,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
 )
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
     from torch._inductor.kernel.flex_gemm.compile_pool import InductorCompilePool
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import FlexGemmEpiModSource
     from torch._inductor.kernel.flex_gemm.runtime import FlexGemmRuntimeLocalReducePlan
+
+
+_BUILTIN_CALLBACKS = LOCAL_REDUCE_COMBINE_NAMES | LOCAL_REDUCE_FINALIZE_NAMES
 
 
 @dataclasses.dataclass(frozen=True)
@@ -67,6 +71,8 @@ class FlexGemmEpilogueLocalReduceConfig:
     binary_store_finalize: bool = False
     prepass_combine: str | None = None
     prepass_finalize: str | None = None
+    reduce_planes: int = 1
+    fragment_reduced: bool = False
 
     @classmethod
     def from_plan(
@@ -90,6 +96,8 @@ class FlexGemmEpilogueLocalReduceConfig:
             source.local_reduce_binary_store_finalize,
             source.local_reduce_prepass_combine,
             source.local_reduce_prepass_finalize,
+            source.local_reduce_planes,
+            source.local_reduce_fragment_reduced,
         )
 
     def runtime_plan(
@@ -102,18 +110,17 @@ class FlexGemmEpilogueLocalReduceConfig:
         )
 
         def callback(name: str | None) -> Any:
-            if name is None or name in LOCAL_REDUCE_FINALIZE_NAMES:
-                return name
-            return resolve(name)
+            return name if name is None or name in _BUILTIN_CALLBACKS else resolve(name)
 
         prepass_name = f"{epilogue_name}{LOCAL_REDUCE_PREPASS_FN_SUFFIX}"
         return FlexGemmRuntimeLocalReducePlan(
             self.geometry,
             stores=self.out_index is not None,
             feeds_main=self.feeds_main,
-            combine=self.combine,
+            combine=callback(self.combine),
             finalize=callback(self.finalize),
             finalize_operands=self.finalize_operands,
+            reduce_planes=self.reduce_planes,
             store_finalize=callback(self.store_finalize),
             binary_store_finalize=self.binary_store_finalize,
             prepass=None if self.prepass_combine is None else resolve(prepass_name),
@@ -284,8 +291,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
 
     @staticmethod
     def _callback_reference(name: str) -> str:
-        """Render a built-in finalizer name or generated callable reference."""
-        return repr(name) if name in LOCAL_REDUCE_FINALIZE_NAMES else name
+        """Render a built-in callback name or generated callable reference."""
+        return repr(name) if name in _BUILTIN_CALLBACKS else name
 
     def _local_reduce_geometry(
         self, local_reduce: FlexGemmEpilogueLocalReduceConfig
@@ -312,7 +319,13 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             plan += f", output_layout={local_reduce.output_layout.codegen_reference()}"
         if local_reduce.feeds_main:
             plan += ", feeds_main=True"
-        plan += f", combine={local_reduce.combine!r}"
+        if local_reduce.combine is None:
+            raise RuntimeError("FlexGEMM EpiMod local reductions require a combine")
+        plan += f", combine={self._callback_reference(local_reduce.combine)}"
+        if local_reduce.reduce_planes != 1:
+            plan += f", reduce_planes={local_reduce.reduce_planes}"
+        if local_reduce.fragment_reduced:
+            plan += ", fragment_reduced=True"
         if local_reduce.finalize is not None:
             plan += f", finalize={self._callback_reference(local_reduce.finalize)}"
         if local_reduce.finalize_operands:
