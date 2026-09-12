@@ -1305,8 +1305,9 @@ def _with_outer_contiguous_storage(tensor):
 
 def _mxfp_operand_layouts(a, b, a_is_transposed, b_is_transposed):
     a_arg = _with_outer_contiguous_storage(a) if a_is_transposed else a
-    b_nk = b if b_is_transposed else _with_outer_contiguous_storage(b)
-    return a_arg, b_nk.view(torch.uint8).t().view(b.dtype), b_nk
+    b_storage = b if b_is_transposed else _with_outer_contiguous_storage(b)
+    b_arg = b_storage.view(torch.uint8).t().view(b.dtype)
+    return a_arg, b_arg
 
 
 class TestFlyDSLMXFPMetadata(TestCase):
@@ -1597,7 +1598,7 @@ class TestFlyDSLMXFPDevice(TestCase):
         m, n, k = 64, 96, 256
         a, scale_a, a_ref = _make_mxfp_operand(mxfp_format, m, k, device)
         b, scale_b, b_ref = _make_mxfp_operand(mxfp_format, n, k, device)
-        a_arg, _, b_nk = _mxfp_operand_layouts(
+        a_arg, b_arg = _mxfp_operand_layouts(
             a, b, a_is_transposed, b_is_transposed
         )
         actual = _run_mxfp_tile(
@@ -1606,7 +1607,7 @@ class TestFlyDSLMXFPDevice(TestCase):
             (32, 32, 128, 2, 1, 1, 0, 0),
             torch.bfloat16,
             a_arg,
-            b_nk,
+            b_arg,
             scale_a,
             scale_b,
             a_is_transposed=a_is_transposed,
@@ -1658,8 +1659,9 @@ class TestFlyDSLMXFPDevice(TestCase):
         m, n, k = shape
         a, scale_a, a_ref = _make_mxfp_operand(mxfp_format, m, k, device)
         b, scale_b, b_ref = _make_mxfp_operand(mxfp_format, n, k, device)
+        a_arg, b_arg = _mxfp_operand_layouts(a, b, False, True)
         actual = _run_mxfp_tile(
-            mxfp_format, shape, tile, out_dtype, a, b, scale_a, scale_b
+            mxfp_format, shape, tile, out_dtype, a_arg, b_arg, scale_a, scale_b
         )
         self._assert_close(actual, a_ref @ b_ref.t(), out_dtype)
 

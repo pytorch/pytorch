@@ -408,12 +408,14 @@ def make_mxfp_ab_lds_layouts(
 def gemm_mxfp_gfx950_kernel(
     out: fx.Tensor,
     a: fx.Tensor,
-    b_nk: fx.Tensor,
+    b: fx.Tensor,
     scale_a_u8: fx.Tensor,
     scale_b_u8: fx.Tensor,
     m: fx.Int32,
     n: fx.Int32,
     k: fx.Int32,
+    a_leading_stride: fx.Int32,
+    b_leading_stride: fx.Int32,
     param: MXFPGemmParams,
 ):
     block_m = param.block_m
@@ -501,16 +503,9 @@ def gemm_mxfp_gfx950_kernel(
         )
         return fx.rocdl.make_buffer_tensor(flat, max_size=True)
 
-    a_leading_stride = fx.Int32(
-        fx.get_scalar(a.stride[1] if a_is_transposed else a.stride[0])
-    )
-    b_leading_stride = fx.Int32(
-        fx.get_scalar(b_nk.stride[1] if not b_is_transposed else b_nk.stride[0])
-    )
-
     # A and B arrive as uint8 views, so their flat extents are byte counts.
     a_flat = make_flat_buffer(a, m * k_bytes)
-    b_flat = make_flat_buffer(b_nk, n * k_bytes)
+    b_flat = make_flat_buffer(b, n * k_bytes)
     if const_expr(param.lds_scale):
         sa_flat = fx.logical_divide(
             make_flat_buffer(scale_a_u8, m * scale_k), fx.make_layout(1, 1)
@@ -1113,7 +1108,7 @@ def gemm_mxfp_gfx950_kernel(
 def gemm_mxfp_gfx950(
     out: fx.Tensor,
     a: fx.Tensor,
-    b_nk: fx.Tensor,
+    b: fx.Tensor,
     scale_a_u8: fx.Tensor,
     scale_b_u8: fx.Tensor,
     param: MXFPGemmParams,
@@ -1123,14 +1118,40 @@ def gemm_mxfp_gfx950(
         2 if const_expr(param.mxfp_format_id == MXFP_FORMAT_FP4) else 1
     )
     m = fx.Int32(fx.get_scalar(a.shape[0]))
-    n = fx.Int32(fx.get_scalar(b_nk.shape[0]))
+    n = fx.Int32(fx.get_scalar(b.shape[1]))
     k = fx.Int32(fx.get_scalar(a.shape[1])) * fx.Int32(elements_per_byte)
+    a_leading_stride = fx.Int32(
+        fx.get_scalar(
+            a.stride[1]
+            if const_expr(param.a_is_transposed)
+            else a.stride[0]
+        )
+    )
+    b_leading_stride = fx.Int32(
+        fx.get_scalar(
+            b.stride[1]
+            if const_expr(param.b_is_transposed)
+            else b.stride[0]
+        )
+    )
     num_pid_m = (m - 1) // param.block_m + 1
     num_pid_n = (n - 1) // param.block_n + 1
     kernel = gemm_mxfp_gfx950_kernel
     kernel._known_block_size = [param.block_threads, 1, 1]
     kernel._func.__name__ = make_mxfp_gemm_kernel_name(param)
-    kernel(out, a, b_nk, scale_a_u8, scale_b_u8, m, n, k, param).launch(
+    kernel(
+        out,
+        a,
+        b,
+        scale_a_u8,
+        scale_b_u8,
+        m,
+        n,
+        k,
+        a_leading_stride,
+        b_leading_stride,
+        param,
+    ).launch(
         grid=(num_pid_m * num_pid_n, 1, 1),
         block=(param.block_threads, 1, 1),
         stream=stream,

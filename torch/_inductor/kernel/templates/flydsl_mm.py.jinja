@@ -90,7 +90,6 @@ def _make_param():
 {% endif %}
     output = {{get_output()}}
 {% if IS_MXFP %}
-    mat2 = mat2.transpose(0, 1)
     mat1 = mat1.view(torch.uint8)
     mat2 = mat2.view(torch.uint8)
     scale_a = scale_a.view(torch.uint8)
