@@ -86,7 +86,7 @@ from .utils import (
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
-    get_autotune_cache_fp32_precision,
+    fp32_matmul_precision_key,
     get_dtype_size,
     is_gpu,
     Placeholder,
@@ -3918,7 +3918,7 @@ def create_precompile_key(
         [
             name,
             inputs_key,
-            get_autotune_cache_fp32_precision(),
+            fp32_matmul_precision_key(),
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )

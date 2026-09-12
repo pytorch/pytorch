@@ -3643,19 +3643,13 @@ def parallel_num_threads() -> int:
     return threads
 
 
-def get_autotune_cache_fp32_precision() -> str:
-    """Precision string for Inductor autotune / PersistentCache keys.
-
-    Prefer the per-backend CUDA matmul API. Calling the legacy
-    ``torch.get_float32_matmul_precision()`` after the new API has been used
-    (e.g. ``fp32_precision="bfx9"`` or ``"tf32"``) raises a mixed-API error —
-    see #196728. Fall back to the legacy getter only when the new API reports
-    ``"none"``.
-    """
-    precision = torch.backends.cuda.matmul.fp32_precision
-    if precision != "none":
-        return precision
-    return torch.get_float32_matmul_precision()
+def fp32_matmul_precision_key() -> str:
+    # Read resolved per-backend fp32 precision instead of
+    # torch.get_float32_matmul_precision(), which raises if the legacy and
+    # per-backend APIs have been mixed (#196728). Key on the (cuda, mkldnn)
+    # pair so legacy "high" (tf32/tf32) and "medium" (tf32/bf16) stay distinct.
+    getter = torch._C._get_fp32_precision_getter
+    return f"cuda:{getter('cuda', 'matmul')},mkldnn:{getter('mkldnn', 'matmul')}"
 
 
 @functools.cache

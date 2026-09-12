@@ -5936,15 +5936,16 @@ class TestAutotuneCacheFp32Precision(TestCase):
     after the per-backend API has been used (#196728)."""
 
     @recover_orig_fp32_precision
-    def test_helper_prefers_new_api_and_avoids_mixed_api_error(self):
-        from torch._inductor.utils import get_autotune_cache_fp32_precision
+    def test_helper_avoids_mixed_api_error_and_keys_both_backends(self):
+        from torch._inductor.utils import fp32_matmul_precision_key
 
         torch.set_float32_matmul_precision("highest")
         torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch.backends.mkldnn.matmul.fp32_precision = "bf16"
         with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
             torch.get_float32_matmul_precision()
 
-        self.assertEqual(get_autotune_cache_fp32_precision(), "tf32")
+        self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:bf16")
 
     @recover_orig_fp32_precision
     def test_create_precompile_key_and_persistent_cache_lookup(self):
@@ -5953,23 +5954,25 @@ class TestAutotuneCacheFp32Precision(TestCase):
 
         torch.set_float32_matmul_precision("highest")
         torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch.backends.mkldnn.matmul.fp32_precision = "bf16"
         with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
             torch.get_float32_matmul_precision()
 
         key = create_precompile_key("mm", "inputs", [])
-        self.assertIn("tf32", key)
+        self.assertIn("cuda:tf32,mkldnn:bf16", key)
 
         timings = PersistentCache().lookup([], "mm", "inputs", None)
         self.assertEqual(timings, {})
 
     @recover_orig_fp32_precision
-    def test_helper_uses_synced_new_api_value(self):
-        from torch._inductor.utils import get_autotune_cache_fp32_precision
+    def test_helper_distinguishes_legacy_high_vs_medium(self):
+        from torch._inductor.utils import fp32_matmul_precision_key
 
-        # Legacy setter syncs both APIs; helper should read the per-backend value.
-        torch.set_float32_matmul_precision("highest")
-        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
-        self.assertEqual(get_autotune_cache_fp32_precision(), "ieee")
+        torch.set_float32_matmul_precision("high")
+        self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:tf32")
+
+        torch.set_float32_matmul_precision("medium")
+        self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:bf16")
 
 
 if __name__ == "__main__":
