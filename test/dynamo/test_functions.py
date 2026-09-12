@@ -3115,6 +3115,72 @@ partial_fn = functools.partial(fn, scale=2)
             case {"b": param}:
                 return x / param
 
+    @parametrize("name, expected", (("ceil", 42), ("floor", 7), ("trunc", 3)))
+    def test_math_ceil_floor_trunc_custom_object(self, name, expected):
+        class C:
+            def __ceil__(self):
+                return 42
+
+            def __floor__(self):
+                return 7
+
+            def __trunc__(self):
+                return 3
+
+        fn = getattr(math, name)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + fn(C())
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + expected)
+
+    def test_math_ceil_floor_trunc_special_lookup(self):
+        class C:
+            def __ceil__(self):
+                return 42
+
+        obj = C()
+        obj.__ceil__ = lambda: 99
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + math.ceil(obj)
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + 42)
+
+    def test_math_ceil_floor_float_fallback(self):
+        class FloatLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + math.ceil(FloatLike(42.5)) + math.floor(FloatLike(41.9))
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + 43 + 41)
+
+    def test_math_ceil_floor_trunc_unchanged(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def constant(x):
+            return x + math.ceil(2.3) + math.floor(-2.3) + math.trunc(-2.3)
+
+        x = torch.rand(10)
+        self.assertEqual(constant(x), x + 3 - 3 - 2)
+
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def symbolic(t):
+            return t.new_zeros(math.ceil(t.shape[0] / 2))
+
+        self.assertEqual(symbolic(torch.ones(7)).shape[0], 4)
+        self.assertEqual(symbolic(torch.ones(9)).shape[0], 5)
+
     def test_math_radians(self):
         def func(x, a):
             return x + math.radians(a)

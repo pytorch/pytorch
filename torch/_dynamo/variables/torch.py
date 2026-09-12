@@ -1153,6 +1153,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 kwargs,
             )
 
+        @register(math.ceil, math.floor, math.trunc)
+        def handle_ceil_floor_trunc(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            # User-defined objects follow the corresponding special method.
+            # ceil/floor also fall back to float conversion when it is missing.
+            from .object_protocol import pynumber_float
+
+            if len(args) != 1 or kwargs:
+                return None
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, f"__{self.value.__name__}__", [])
+            if result is not None:
+                return result
+
+            if self.value is math.trunc:
+                raise_type_error(
+                    tx, f"type {arg.python_type_name()} doesn't define __trunc__ method"
+                )
+
+            return self.call_function(tx, [pynumber_float(tx, arg)], {})
+
         @register(math.radians)
         def handle_radians(
             self,
