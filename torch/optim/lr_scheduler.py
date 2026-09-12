@@ -1165,10 +1165,13 @@ class SequentialLR(LRScheduler):
         self.recursive_undo()
 
         # Perform the initial step for only the scheduler meant to run at step 0.
+        self._initial_step()
+
+    def _initial_step(self) -> None:
         idx = bisect_right(self._milestones, 0)
         self._schedulers[idx]._initial_step()
 
-        self._last_lr = schedulers[idx].get_last_lr()
+        self._last_lr = self._schedulers[idx].get_last_lr()
 
     def recursive_undo(self, sched=None) -> None:
         """
@@ -1534,6 +1537,17 @@ class ChainedScheduler(LRScheduler):
                 )
         self._schedulers = schedulers
         self.optimizer = optimizer
+        # Unlike the other schedulers, this does not end with
+        # `self._initial_step()`: every scheduler in `schedulers` already took
+        # its own initial step when it was constructed, and those compose into
+        # the chained learning rate. Calling it here would apply each factor a
+        # second time. `_initial_step` is for an enclosing composite scheduler
+        # to call once it has undone those constructor steps.
+        self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
+
+    def _initial_step(self) -> None:
+        for scheduler in self._schedulers:
+            scheduler._initial_step()
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     def step(self) -> None:  # type: ignore[override]
