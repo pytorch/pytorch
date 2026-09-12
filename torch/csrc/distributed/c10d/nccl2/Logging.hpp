@@ -47,8 +47,8 @@ inline std::string getRankPrefix(Comm* comm) {
 #define TC_LOG_PICKER(x, level, comm, FUNC, ...) FUNC
 #define TC_LOG(...)                            \
   TC_LOG_PICKER(                               \
-      ,                                        \
-      ##__VA_ARGS__,                           \
+                                               \
+      __VA_OPT__(, ) __VA_ARGS__,              \
       TC_LOG_WITH_PREFIX_BUILDER(__VA_ARGS__), \
       TC_LOG_PLAIN(__VA_ARGS__))
 
