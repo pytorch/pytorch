@@ -7703,6 +7703,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # If this doesn't crash, the test passes
         fn(torch.ones(3))
 
+    @parametrize("sequence_type", [torch.Size, tuple, list])
+    @parametrize("shape", [(), (0,), (1, 4), (3, 4)])
+    @parametrize("dynamic", [False, True])
+    def test_tensor_ctor_sequence_shape(self, sequence_type, shape, dynamic):
+        def fn(x):
+            return torch.Tensor(sequence_type(x.size()))
+
+        x = torch.empty(shape)
+        expected_shape = shape if sequence_type is torch.Size else (len(shape),)
+        self.assertEqual(fn(x).shape, expected_shape)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=dynamic)
+        self.assertEqual(compiled(x).shape, expected_shape)
+
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_ctor_list_of_tensor(self):
         def fn(x):

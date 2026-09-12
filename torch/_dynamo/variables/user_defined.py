@@ -1611,7 +1611,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
-            from .lists import ListVariable
+            from .lists import ListVariable, SizeVariable
+
+            if (
+                self.value is torch.Tensor
+                and len(args) == 1
+                and isinstance(args[0], SizeVariable)
+                and "size" not in kwargs
+            ):
+                # FX normalizes torch.Size to tuple; keep the size overload explicit.
+                kwargs = {**kwargs, "size": args[0]}
+                args = []
 
             if (
                 np
