@@ -35,7 +35,7 @@ sudo apt-get update
 sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0
 
 # Detect CUDA version and use appropriate wheel index
-# DESIRED_CUDA is set as ENV in the Dockerfile (e.g., "13.0.2", "12.8.1")
+# DESIRED_CUDA is set as ENV in the Dockerfile (e.g., "13.0.3", "12.8.1")
 if [[ "${DESIRED_CUDA}" == 13.* ]]; then
   CUDA_INDEX_URL="https://download.pytorch.org/whl/cu130"
   echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu130 wheels"
