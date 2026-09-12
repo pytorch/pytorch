@@ -167,9 +167,13 @@ struct GroupInfo {
 C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
 
 // Identical to empty_strided, but allows symmetric memory access to be
-// established for the allocated tensor via SymmetricMemory::rendezvous(). This
-// function itself is not a collective operation. It invokes
-// SymmetricMemoryAllocator::alloc() for the requested device under the hood.
+// established for the allocated tensor via SymmetricMemory::rendezvous(). It
+// invokes SymmetricMemoryAllocator::alloc() for the requested device under the
+// hood.
+//
+// Whether this is a collective operation is backend-dependent. The NVSHMEM
+// allocator calls nvshmem_malloc and barriers inside alloc(), so with that
+// backend every rank must call this the same number of times in the same order.
 //
 // NOTE [symmetric memory persistent allocation]
 // If an `alloc_id` is supplied, empty_strided_p2p will perform persistent
