@@ -2137,8 +2137,11 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
                             low=None, high=None,
                             requires_grad=requires_grad)
 
-            if large_number and t.dim() > 0:
-                t[0] = 10000
+            # Place the large value at the *end* of `dim` so early prefixes
+            # do not contain the global max (regresses #196705). Putting it
+            # first makes every prefix safe under a naive global-max JVP.
+            if large_number and t.dim() > 0 and t.size(dim) > 0:
+                t.select(dim, -1).fill_(10000)
             yield SampleInput(t, dim)
 
 def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):

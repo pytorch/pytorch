@@ -178,6 +178,20 @@ class TestFwdGradients(TestGradients):
             device, dtype, op, self._get_safe_inplace(op.get_inplace()), is_inplace=True
         )
 
+    def test_logcumsumexp_jvp_large_range(self, device):
+        # Regression for #196705: early-prefix JVP must not underflow to 0 when
+        # a later element along dim is much larger.
+        dtype = torch.float64
+
+        def f(t):
+            x = torch.stack((t, 1 - t, 2 * t + 3, -t, t + 2, 3 * t - 1)).reshape(2, 3)
+            w = torch.tensor([[1, 2, -1], [3, -2, 4]], dtype=t.dtype, device=t.device)
+            return (torch.logcumsumexp(x, dim=-1) * w).sum()
+
+        t = torch.tensor(-400.0, dtype=dtype, device=device)
+        _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
+        self.assertEqual(actual, torch.tensor(-5.0, dtype=dtype, device=device))
+
 
 instantiate_device_type_tests(TestFwdGradients, globals(), allow_xpu=True)
 
