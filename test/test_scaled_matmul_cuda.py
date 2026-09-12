@@ -734,6 +734,19 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
 
 class TestFP8Matmul(TestCase):
 
+    def _fp8_layout_supported(self, x_cm: bool, y_cm: bool) -> bool:
+        # hipBLASLt takes every permutation. On CUDA, SM 8.9/9 are TN-only,
+        # SM 10/11 take all layouts, and SM 12 depends on CUDA version.
+        if torch.version.hip:
+            return True
+        major, minor = torch.cuda.get_device_capability(0)
+        cuda_version = _get_torch_cuda_version()
+        if major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
+            return True
+        if major == 12 and (minor == 1 or cuda_version >= (13, 1)):
+            return x_cm
+        return (x_cm, y_cm) == (True, False)
+
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
                               y_dtype: torch.dtype = e4m3_type,
@@ -827,17 +840,7 @@ class TestFP8Matmul(TestCase):
     def test_float8_basics_layout_permutations(self, device) -> None:
         if "cuda" in device:
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                # SM 8.9 and 9 only support TN
-                # SM 10 and 11 support all permutations
-                # SM 12 support depends on CUDA version
-                major, minor = torch.cuda.get_device_capability(0)
-                cuda_version = _get_torch_cuda_version()
-                if major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
-                    layouts_supported = True
-                elif major == 12 and (minor == 1 or cuda_version >= (13, 1)):
-                    layouts_supported = x_cm
-                else:
-                    layouts_supported = (x_cm, y_cm) == (True, False)
+                layouts_supported = self._fp8_layout_supported(x_cm, y_cm)
                 with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
                     self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
         else:
@@ -1153,8 +1156,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("x_cm", [True, False])
     @parametrize("y_cm", [True, False])
     def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device):
-        # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
-        if torch.cuda.is_available() and (x_cm, y_cm) != (True, False) and torch.cuda.get_device_properties(0).major != 10:
+        if "cuda" in device and not self._fp8_layout_supported(x_cm, y_cm):
             raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type

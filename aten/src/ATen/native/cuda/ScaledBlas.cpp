@@ -467,10 +467,14 @@ _scaled_gemm(
       swizzle_choice_a,
       swizzle_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-  // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
+  // H100 only supports row-major x column-major, but all permutations are supported on
+  // Blackwells and on every hipBLASLt arch. The ROCm scaled_mm_arch_allowed() ignores
+  // sm90_only/sm100_only, so ROCm has to be excluded here rather than through the gate.
+#ifndef USE_ROCM
   if (scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false)) {
     TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
   }
+#endif
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
   // Some cuBLASLt algorithms skip the D write for distinct C/D when M=1.
   if (effective_accumulator && mat1.size(0) == 1 &&
@@ -578,7 +582,7 @@ _scaled_rowwise_rowwise(
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
-//  - Only works if mat1 is row-major and mat2 is column-major
+//  - On CUDA SM90, only row-major mat1 x column-major mat2 is supported
 //  - Only works if matrices sizes are divisible by 32
 //  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
 //    and scale_b should have size = to mat2.size(1)
