@@ -198,7 +198,7 @@ void embedding_bag_impl(
   for (uint32_t indices_idx = indices_start; indices_idx < indices_end;
        indices_idx++) {
     I weight_idx = indices[indices_idx];
-    if (weight_idx < 0 || static_cast<uint32_t>(weight_idx) > num_weights) {
+    if (weight_idx < 0 || static_cast<uint32_t>(weight_idx) >= num_weights) {
       TORCH_REPORT_ERROR(
           error_buf,
           "Index ",
@@ -206,7 +206,7 @@ void embedding_bag_impl(
           " is out of bounds: ",
           weight_idx,
           ", range 0 to ",
-          num_weights);
+          num_weights - 1);
       return;
     }
     bool pad = (weight_idx == padding_idx);
@@ -330,9 +330,13 @@ void embedding_bag_backward_sum_mean_impl(
             per_sample_weights_stride),
         static_cast<opmath_t<T>>(bag_size_val));
 
+    // Clamp keeps the atomic write in bounds for invalid indices, which the
+    // forward bounds check reports.
+    auto safe_weight_idx =
+        clamp(long(weight_idx), 0L, long(params.num_weights) - 1);
     AtomicType<T>::atomic_add(
         weight_grad,
-        static_cast<int32_t>(weight_idx) * weight_grad_strides[0] +
+        static_cast<int32_t>(safe_weight_idx) * weight_grad_strides[0] +
             feature_idx * weight_grad_strides[1],
         static_cast<T>(weight_grad_val));
   }
@@ -359,10 +363,14 @@ void embedding_bag_backward_max_impl(
     auto output_grad_val = output_grad
         [bag_idx * output_grad_strides[0] +
          feature_idx * output_grad_strides[1]];
-    auto max_index =
-        static_cast<uint32_t>(max_indices
-                                  [bag_idx * max_indices_strides[0] +
-                                   feature_idx * max_indices_strides[1]]);
+    // Clamp keeps the atomic write in bounds for invalid stored indices,
+    // which the forward bounds check reports.
+    auto max_index = static_cast<uint32_t>(clamp(
+        long(max_indices
+                 [bag_idx * max_indices_strides[0] +
+                  feature_idx * max_indices_strides[1]]),
+        0L,
+        long(params.num_weights) - 1));
 
     AtomicType<T>::atomic_add(
         weight_grad,
@@ -427,8 +435,12 @@ kernel void embedding_bag_per_sample_weights_backward(
     constant auto& weight_strides = params.weight_strides;
     auto per_sample_weights_grad_stride = params.per_sample_weights_grad_stride;
 
+    // Clamp keeps the read in bounds for invalid indices, which the forward
+    // bounds check reports.
+    auto safe_weight_idx =
+        clamp(long(weight_idx), 0L, long(params.num_weights) - 1);
     auto weight_val = weight
-        [static_cast<uint32_t>(weight_idx) * weight_strides[0] +
+        [static_cast<uint32_t>(safe_weight_idx) * weight_strides[0] +
          feature_idx * weight_strides[1]];
     auto output_grad_val = output_grad
         [bag_idx * output_grad_strides[0] +
