@@ -906,8 +906,9 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
 .. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
+    A first-order backward pass with respect to :attr:`input` is supported on
+    CPU and CUDA for positive :attr:`input`. Differentiating that gradient
+    again is not supported. Its value is ``nan`` when :attr:`input` is zero.
 
 """
     + r"""
@@ -955,8 +956,9 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
 .. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
+    A first-order backward pass with respect to :attr:`input` is supported on
+    CPU and CUDA for positive :attr:`input`. Differentiating that gradient
+    again is not supported. Its value is ``nan`` when :attr:`input` is zero.
 
 """
     + r"""

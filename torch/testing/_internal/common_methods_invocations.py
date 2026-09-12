@@ -11889,6 +11889,25 @@ def sample_inputs_abs(op_info, device, dtype, requires_grad, op_kwargs=None, **k
 
 
 # Operator database (sorted alphabetically)
+_igamma_backward_skips = tuple(
+    DecorateInfo(
+        unittest.skip("Shape gradients are implemented on CPU and CUDA"),
+        cls,
+        test,
+        device_type=device,
+    )
+    for device in ("mps", "xpu", "hpu")
+    for cls, test in (
+        ("TestCompositeCompliance", "test_backward"),
+        ("TestCompositeCompliance", "test_cow_input"),
+        ("TestFakeTensor", "test_fake_crossref_backward_no_amp"),
+        ("TestFakeTensor", "test_fake_crossref_backward_amp"),
+        ("TestMathBits", "test_neg_view"),
+        ("TestConsistency", "test_output_grad_match"),
+    )
+)
+
+
 op_db: list[OpInfo] = [
     UnaryUfuncInfo('abs',
                    aliases=('absolute', ),
@@ -17756,91 +17775,72 @@ op_db: list[OpInfo] = [
             ),
         ),
     ),
-    # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
-    # standard entry, second is to run gradcheck tests on the second argument.
-    BinaryUfuncInfo('igamma',
-                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
-                    aliases=('torch.special.gammainc',),
-                    dtypesIfCUDA=floating_types(),
-                    # TODO: FIXME
-                    supports_rhs_python_scalar=False,
-                    supports_autograd=False,
-                    skips=(
-                        # FIXME: incorrectly tries to pass a rhs scalar
-                        DecorateInfo(unittest.expectedFailure, 'TestJit',
-                                     'test_jit_alias_remapping'),
-                    )),
-    # TODO: FIXME, ideally by implemented grad for both inputs
-    # BinaryUfuncInfo('igamma',
-    #                 variant_test_name='grad_other',
-    #                 # Since autograd formula is implemented only for other and
-    #                 # gradcheck test verifies the formula for input in SampleInput,
-    #                 # we permute the arguments.
-    #                 op=lambda self, other, **kwargs: torch.igamma(other, self, **kwargs),
-    #                 inplace_variant=None,
-    #                 method_variant=None,
-    #                 supports_rhs_python_scalar=False,
-    #                 rhs_make_tensor_kwargs=dict(requires_grad=False),
-    #                 dtypes=floating_types_and(torch.bfloat16, torch.float16),
-    #                 backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
-    #                 dtypesIfCUDA=floating_types(),
-    #                 backward_dtypesIfCUDA=floating_types(),
-    #                 supports_inplace_autograd=False,
-    #                 skips=(
-    #                     # Derivative wrt first tensor not implemented
-    #                     DecorateInfo(unittest.expectedFailure, "TestCommon",
-    #                                  "test_floating_inputs_are_differentiable"),"),
-    #                     # test does not work with passing lambda for op
-    #                     # AssertionError: False is not true : Tensors failed to compare as equal!
-    #                     DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-    #                     # test fails are we permute the arguments function variant
-    #                     # but not for inplace or method.
-    #                     DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-    #                     # TypeError: igamma(): argument 'input' (position 1) must be Tensor, not float
-    #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice'),
-    #                 )),
-    BinaryUfuncInfo('igammac',
-                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
-                    aliases=('torch.special.gammaincc',),
-                    dtypesIfCUDA=floating_types(),
-                    supports_autograd=False,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        # FIXME: incorrectly tries to pass a rhs scalar
-                        DecorateInfo(unittest.expectedFailure, 'TestJit',
-                                     'test_jit_alias_remapping'),
-                    )),
-    # TODO: FIXME, ideally by implementing grad for both inputs
-    # BinaryUfuncInfo('igammac',
-    #                 variant_test_name='grad_other',
-    #                 # Since autograd formula is implemented only for other and
-    #                 # gradcheck test verifies the formula for input in SampleInput,
-    #                 # we permute the arguments
-    #                 op=lambda self, other, **kwargs: torch.igammac(other, self, **kwargs),
-    #                 inplace_variant=None,
-    #                 method_variant=None,
-    #                 supports_rhs_python_scalar=False,
-    #                 rhs_make_tensor_kwargs=dict(requires_grad=False),
-    #                 dtypes=floating_types_and(torch.bfloat16, torch.float16),
-    #                 backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
-    #                 dtypesIfCUDA=floating_types(),
-    #                 backward_dtypesIfCUDA=floating_types(),
-    #                 supports_inplace_autograd=False,
-    #                 decorators=[
-    #                     # Derivative wrt first tensor not implemented
-    #                     DecorateInfo(unittest.expectedFailure, "TestCommon",
-    #                                  "test_floating_inputs_are_differentiable"),
-    #                 ],
-    #                 skips=(
-    #                     # test does not work with passing lambda for op
-    #                     # AssertionError: False is not true : Tensors failed to compare as equal!
-    #                     DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-    #                     # test fails are we permute the arguments function variant
-    #                     # but not for inplace or method.
-    #                     DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-    #                     # TypeError: igammac(): argument 'input' (position 1) must be Tensor, not float
-    #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice'),
-    #                 )),
+    BinaryUfuncInfo(
+        "igamma",
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        aliases=("torch.special.gammainc",),
+        dtypesIfCUDA=floating_types(),
+        backward_dtypesIfMPS=(),
+        backward_dtypesIfXPU=(),
+        backward_dtypesIfHpu=(),
+        lhs_make_tensor_kwargs=dict(low=0.1),
+        rhs_make_tensor_kwargs=dict(low=0.1),
+        supports_rhs_python_scalar=False,
+        supports_autograd=True,
+        supports_gradgrad=False,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        skips=(
+            # The JIT alias test passes an unsupported RHS Python scalar.
+            DecorateInfo(unittest.expectedFailure, "TestJit", "test_jit_alias_remapping"),
+            DecorateInfo(
+                unittest.skip("Shape gradients do not support gradgrad"),
+                "TestBwdGradients", "test_inplace_gradgrad",
+            ),
+            DecorateInfo(
+                unittest.skip("Forward and higher-order shape differentiation are unsupported"),
+                "TestOperators", "test_jvpvjp",
+            ),
+            DecorateInfo(
+                unittest.skip("Forward and higher-order shape differentiation are unsupported"),
+                "TestOperators", "test_vmapjvpvjp",
+            ),
+            *_igamma_backward_skips,
+        ),
+    ),
+    BinaryUfuncInfo(
+        "igammac",
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        aliases=("torch.special.gammaincc",),
+        dtypesIfCUDA=floating_types(),
+        backward_dtypesIfMPS=(),
+        backward_dtypesIfXPU=(),
+        backward_dtypesIfHpu=(),
+        lhs_make_tensor_kwargs=dict(low=0.1),
+        rhs_make_tensor_kwargs=dict(low=0.1),
+        supports_rhs_python_scalar=False,
+        supports_autograd=True,
+        supports_gradgrad=False,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        skips=(
+            # The JIT alias test passes an unsupported RHS Python scalar.
+            DecorateInfo(unittest.expectedFailure, "TestJit", "test_jit_alias_remapping"),
+            DecorateInfo(
+                unittest.skip("Shape gradients do not support gradgrad"),
+                "TestBwdGradients", "test_inplace_gradgrad",
+            ),
+            DecorateInfo(
+                unittest.skip("Forward and higher-order shape differentiation are unsupported"),
+                "TestOperators", "test_jvpvjp",
+            ),
+            DecorateInfo(
+                unittest.skip("Forward and higher-order shape differentiation are unsupported"),
+                "TestOperators", "test_vmapjvpvjp",
+            ),
+            *_igamma_backward_skips,
+        ),
+    ),
     UnaryUfuncInfo('nn.functional.softshrink',
                    aten_name="softshrink",
                    aten_backward_name='softshrink_backward',

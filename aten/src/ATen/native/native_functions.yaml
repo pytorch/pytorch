@@ -9917,6 +9917,17 @@
   variants: method
   tags: pointwise
 
+- func: _igamma_grad_a.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: _igamma_grad_a_out
+  tags: pointwise
+
+- func: _igamma_grad_a(Tensor self, Tensor other) -> Tensor
+  structured_delegate: _igamma_grad_a.out
+  tags: pointwise
+
 - func: igamma.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
