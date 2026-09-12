@@ -43,9 +43,11 @@
 
 #include <chrono>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 
 // Uncomment next line to count instructions for guard eval.
@@ -1570,27 +1572,77 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
 }
 
 /**
- * Computes the indices of the tensors that might overlap.
+ * Computes connected groups of tensors that might overlap.
  *
- * Checks which of the given tensors have overlapping storages with ANY of
- * the other tensors.
+ * Tensors are first bucketed by storage, so distinct-storage inputs do not
+ * incur pairwise overlap checks. Within each bucket, overlapping tensors are
+ * merged into connected components.
  *
  * So, for example, if tensor 1 overlaps with tensor 2, and tensor 3 with
- * tensor 4, all of them will be in the output of this function. Even if
- * tensor 1 and 4 don't overlap.
+ * tensor 4, the output contains the groups [1, 2] and [3, 4].
  */
+template <class Meta>
+std::vector<std::vector<int64_t>> compute_overlapping_tensor_groups(
+    const std::vector<Tensor>& tensors) {
+  std::unordered_map<c10::StorageImpl*, std::vector<int64_t>>
+      storage_to_indices;
+  for (const auto i : c10::irange(tensors.size())) {
+    storage_to_indices[tensors[i]
+                           .unsafeGetTensorImpl()
+                           ->unsafe_storage()
+                           .unsafeGetStorageImpl()]
+        .push_back(i);
+  }
+
+  std::vector<int64_t> parents(tensors.size());
+  std::iota(parents.begin(), parents.end(), 0);
+
+  const auto find = [&](int64_t i) {
+    while (parents[i] != i) {
+      parents[i] = parents[parents[i]];
+      i = parents[i];
+    }
+    return i;
+  };
+
+  for (const auto& [_, indices] : storage_to_indices) {
+    for (const auto i_pos : c10::irange(indices.size())) {
+      const auto i = indices[i_pos];
+      for (const auto j_pos : c10::irange(i_pos)) {
+        const auto j = indices[j_pos];
+        if (!tensors_definitely_do_not_overlap<Meta>(tensors[i], tensors[j])) {
+          const auto root_i = find(i);
+          const auto root_j = find(j);
+          if (root_i != root_j) {
+            parents[root_j] = root_i;
+          }
+        }
+      }
+    }
+  }
+
+  std::unordered_map<int64_t, std::vector<int64_t>> components;
+  for (const auto i : c10::irange(tensors.size())) {
+    components[find(i)].push_back(i);
+  }
+
+  std::vector<std::vector<int64_t>> overlapping_groups;
+  for (auto& [_, component] : components) {
+    if (component.size() > 1) {
+      std::sort(component.begin(), component.end());
+      overlapping_groups.push_back(std::move(component));
+    }
+  }
+  std::sort(overlapping_groups.begin(), overlapping_groups.end());
+  return overlapping_groups;
+}
+
 template <class Meta>
 std::unordered_set<int64_t> compute_overlapping_tensors(
     const std::vector<Tensor>& tensors) {
   std::unordered_set<int64_t> aliased_tensor_indices;
-  for (int64_t i = 0; i < static_cast<int64_t>(tensors.size()); i++) {
-    const auto& tensor_i = tensors[i];
-    for (int64_t j = 0; j < i; j++) {
-      if (!tensors_definitely_do_not_overlap<Meta>(tensor_i, tensors[j])) {
-        aliased_tensor_indices.insert(i);
-        aliased_tensor_indices.insert(j);
-      }
-    }
+  for (const auto& group : compute_overlapping_tensor_groups<Meta>(tensors)) {
+    aliased_tensor_indices.insert(group.begin(), group.end());
   }
   return aliased_tensor_indices;
 }
@@ -2778,6 +2830,93 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
   bool _overlapping;
   // Actual checker for this guard.
   std::shared_ptr<StorageOverlapChecker> _checker;
+};
+
+class StorageOverlapPartitionChecker {
+ public:
+  StorageOverlapPartitionChecker(
+      size_t expected_inputs,
+      std::vector<std::vector<int64_t>> expected_partition)
+      : _expected_partition(std::move(expected_partition)),
+        _inputs(expected_inputs, nullptr) {}
+
+  void add(PyObject* obj, size_t input_index) {
+    TORCH_CHECK(input_index < _inputs.size());
+    TORCH_CHECK(_inputs[input_index] == nullptr);
+    Py_INCREF(obj);
+    _inputs[input_index] = obj;
+    _seen++;
+  }
+
+  void reset(size_t input_index) {
+    TORCH_CHECK(input_index < _inputs.size());
+    if (_inputs[input_index] != nullptr) {
+      Py_DECREF(_inputs[input_index]);
+      _inputs[input_index] = nullptr;
+      _seen--;
+    }
+  }
+
+  bool maybe_check() {
+    if (_seen < _inputs.size()) {
+      return true;
+    }
+
+    std::vector<Tensor> tensors;
+    std::vector<int64_t> tensor_positions;
+    tensors.reserve(_inputs.size());
+    tensor_positions.reserve(_inputs.size());
+    for (const auto i : c10::irange(_inputs.size())) {
+      auto* obj = _inputs[i];
+      TORCH_CHECK(obj != nullptr);
+      if (THPVariable_CheckExact(obj) || THPVariable_Check(obj)) {
+        tensors.push_back(THPVariable_Unpack(obj));
+        tensor_positions.push_back(static_cast<int64_t>(i));
+      }
+    }
+
+    auto partition = compute_overlapping_tensor_groups<StaticMeta>(tensors);
+    for (auto& group : partition) {
+      for (auto& index : group) {
+        index = tensor_positions[index];
+      }
+    }
+    return partition == _expected_partition;
+  }
+
+ private:
+  std::vector<std::vector<int64_t>> _expected_partition;
+  std::vector<PyObject*> _inputs;
+  size_t _seen{0};
+};
+
+class STORAGE_OVERLAP_PARTITION : public RelationalGuard {
+ public:
+  STORAGE_OVERLAP_PARTITION(
+      RootGuardManager* root_guard_manager,
+      size_t input_index,
+      std::shared_ptr<StorageOverlapPartitionChecker> checker,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _input_index(input_index),
+        _checker(std::move(checker)) {}
+
+  bool check_nopybind(PyObject* value) override {
+    _checker->add(value, _input_index);
+    return _checker->maybe_check();
+  }
+
+  void reset_state() final {
+    _checker->reset(_input_index);
+  }
+
+ private:
+  size_t _input_index;
+  std::shared_ptr<StorageOverlapPartitionChecker> _checker;
 };
 
 /**
@@ -7463,6 +7602,34 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
+void install_storage_overlap_partition_guard(
+    const py::list& guard_managers,
+    const py::object& expected_partition,
+    const py::object& verbose_code_parts,
+    const py::object& user_stack) {
+  if (guard_managers.empty()) {
+    return;
+  }
+
+  std::shared_ptr<StorageOverlapPartitionChecker> checker =
+      std::make_shared<StorageOverlapPartitionChecker>(
+          guard_managers.size(),
+          py::cast<std::vector<std::vector<int64_t>>>(expected_partition));
+
+  for (const auto i : c10::irange(guard_managers.size())) {
+    auto* guard_manager = py::cast<GuardManager*>(guard_managers[i]);
+    std::shared_ptr<RelationalGuard> guard =
+        std::make_shared<STORAGE_OVERLAP_PARTITION>(
+            guard_manager->get_root(),
+            i,
+            checker,
+            verbose_code_parts,
+            user_stack);
+    guard_manager->get_root()->add_relational_guard_resetter(guard);
+    guard_manager->add_leaf_guard(guard);
+  }
+}
+
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-volatile")
 char flush_cache_by_eviction() {
   constexpr size_t evict_size = 32 * 1024 * 1024;
@@ -8936,6 +9103,9 @@ PyObject* torch_c_dynamo_guards_init() {
   py_m.def(
       "install_storage_overlapping_guard", install_storage_overlapping_guard);
   py_m.def(
+      "install_storage_overlap_partition_guard",
+      install_storage_overlap_partition_guard);
+  py_m.def(
       "compute_overlapping_tensors",
       [](const std::vector<Tensor> tensors, bool symbolic) {
         // Pick the correct Meta class, depending on whether we are
@@ -8944,6 +9114,17 @@ PyObject* torch_c_dynamo_guards_init() {
           return compute_overlapping_tensors<DynamicMeta>(tensors);
         } else {
           return compute_overlapping_tensors<StaticMeta>(tensors);
+        }
+      },
+      py::arg("tensors"),
+      py::arg("symbolic") = true);
+  py_m.def(
+      "compute_overlapping_tensor_groups",
+      [](const std::vector<Tensor> tensors, bool symbolic) {
+        if (symbolic) {
+          return compute_overlapping_tensor_groups<DynamicMeta>(tensors);
+        } else {
+          return compute_overlapping_tensor_groups<StaticMeta>(tensors);
         }
       },
       py::arg("tensors"),
