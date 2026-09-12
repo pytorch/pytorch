@@ -3,7 +3,6 @@
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 namespace py = pybind11;
 
 namespace torch {

@@ -59,6 +59,8 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
+    DictKeysVariable,
+    DictValuesVariable,
     DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
@@ -121,10 +123,13 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeIteratorVariable,
+    DequeReverseIteratorVariable,
     DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
+    SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -187,6 +192,7 @@ from .tensor import (
     UntypedStorageVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch_function import TensorWithTFOverrideVariable
 from .user_defined import (
     DefaultDictVariable,
     FrozenDataClassVariable,
@@ -194,6 +200,7 @@ from .user_defined import (
     MutableMappingVariable,
     NamedTupleVariable,
     RemovableHandleVariable,
+    SimpleNamespaceVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -275,6 +282,7 @@ __all__ = [
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
     "SetAttrBuiltinVariable",
+    "SimpleNamespaceVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StopIterationVariable",

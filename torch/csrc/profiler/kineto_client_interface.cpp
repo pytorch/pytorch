@@ -4,8 +4,6 @@
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/mtia/profiler/MTIAMemoryProfiler.h>
 #include <torch/csrc/profiler/kineto_client_interface.h>
-#include <chrono>
-#include <thread>
 
 // Ondemand tracing is not supported on Apple or edge platform
 #if defined(__APPLE__) || defined(EDGE_PROFILER_USE_KINETO)

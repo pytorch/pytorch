@@ -358,7 +358,7 @@ class IndexPropagation(DefaultHandler):
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
             # We still need to (perhaps) wrap the expression and add bound checks
-            # We want to do this "constant folding", as we don't allow to fuse
+            # We want to do this "constant folding", as we don't allow fusing
             # kernels into indirect indexing
 
             expr = sympy.sympify(index.value.expr)

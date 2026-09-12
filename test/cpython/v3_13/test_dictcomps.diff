@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_dictcomps.py b/test/cpython/v3_13/test_dictcomps.py
-index 26b56dac503..9f9ad85ba1c 100644
+index 26b56dac5032fa8ecf3738e037bb113ae1425b21..9f9ad85ba1c4ab41ae54210e96d8cda34a0c9173 100644
 --- a/test/cpython/v3_13/test_dictcomps.py
 +++ b/test/cpython/v3_13/test_dictcomps.py
 @@ -1,3 +1,21 @@

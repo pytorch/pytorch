@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch.fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     raise_on_run_directly,
     TestCase,
@@ -12,6 +13,8 @@ from torch.testing._internal.common_utils import (
 
 
 class TestDCE(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _custom_is_impure_node(self, node: torch.fx.Node) -> bool:
         if node.is_impure():
             return True

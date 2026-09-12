@@ -90,7 +90,7 @@ std::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const 
   while (!typeStack.empty()) {
     TypePtr current = typeStack.top();
     typeStack.pop();
-    if (!containedTypes.count(current)) {
+    if (!containedTypes.contains(current)) {
       for (const TypePtr& containedType : current->containedTypes()) {
         typeStack.push(containedType);
       }

@@ -68,9 +68,9 @@ jobs:
     secrets: inherit
 
   # B200 runner (OSDC), always use OSDC runner to test this workflow
-  opmicrobenchmark-build-b200:
+  attention-microbenchmark-build-b200:
     if: github.repository_owner == 'pytorch'
-    name: opmicrobenchmark-build-b200
+    name: attention-microbenchmark-build-b200
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -82,24 +82,24 @@ jobs:
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
 
-  opmicrobenchmark-test-b200:
-    name: opmicrobenchmark-test-b200
+  attention-microbenchmark-test-b200:
+    name: attention-microbenchmark-test-b200
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - opmicrobenchmark-build-b200
+      - attention-microbenchmark-build-b200
       - get-label-type
     with:
       timeout-minutes: 500
-      build-environment: ${{ needs.opmicrobenchmark-build-b200.outputs.build-environment }}
-      docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
-      test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
+      build-environment: ${{ needs.attention-microbenchmark-build-b200.outputs.build-environment }}
+      docker-image: ${{ needs.attention-microbenchmark-build-b200.outputs.docker-image }}
+      test-matrix: ${{ needs.attention-microbenchmark-build-b200.outputs.test-matrix }}
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"

@@ -3,10 +3,16 @@
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test, skipIfCrossRef
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+    skipIfCrossRef,
+)
 
 
 class NbFloatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- float / int / bool (ConstantVariable) ---
 
     @make_dynamo_test

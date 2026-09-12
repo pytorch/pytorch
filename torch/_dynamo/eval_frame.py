@@ -1275,7 +1275,7 @@ class _TorchDynamoContext:
                     except ShortenTraceback as e:
                         # Failures in the backend likely don't have useful
                         # data in the TorchDynamo frames, so we strip them out.
-                        raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                        raise e.remove_dynamo_frames() from None
                     finally:
                         # Restore the dynamic layer stack depth if necessary.
                         set_eval_frame(None)
@@ -1612,6 +1612,16 @@ def _optimize_catch_errors(
     )
 
 
+def _maybe_fire_backend_init(backend: Callable[..., Any]) -> None:
+    # _TorchCompileWrapper and AotAutograd forward the attribute to the
+    # backend they wrap via a @property.
+    backend_init = getattr(backend, "_dynamo_backend_init", None)
+    if backend_init is not None:
+        # Fires on every resolution, before any invocation; backends that
+        # need one-time setup deduplicate themselves (e.g. functools.cache).
+        backend_init()
+
+
 def get_compiler_fn(
     compiler_fn: str | Callable[..., Any] | None,
 ) -> WrapBackendDebug:
@@ -1631,6 +1641,7 @@ def get_compiler_fn(
     else:
         compiler_str = None
     compiler_fn = lookup_backend(compiler_fn)  # type: ignore[arg-type]
+    _maybe_fire_backend_init(compiler_fn)
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
@@ -1816,7 +1827,10 @@ def _optimize(
             graph faster.
             One can also provide additional context for the backend, like
             torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
-            See AOTAutogradMemoryEfficientFusionWithContext for the usage.
+            Backends can also define a ``_dynamo_backend_init`` no-arg callable
+            for eager initialization; it fires every time the backend is
+            resolved, before any invocation. See the "Eager Backend
+            Initialization" section of torch.compiler_custom_backends.md.
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.

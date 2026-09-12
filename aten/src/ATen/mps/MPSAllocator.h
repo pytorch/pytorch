@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <mach/vm_page_size.h>
 #include <cstdio>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <unordered_set>
@@ -84,18 +85,17 @@ struct BufferBlock {
   MPSEventPtr event;
   // Stream for which this buffer was allocated.
   MPSStream* stream = nullptr;
+  // Contains streams that have been recorded on this buffer with
+  // `recordStream`, along with the most recent event for that stream. All of
+  // these events must complete before the buffer can be reused or freed. This
+  // is similar to the `Block::stream_uses` member that CUDACachingAllocator
+  // uses, but with one main difference: CUDA lazily creates events, so
+  // `stream_uses` only tracks streams, not events, but in Metal events have to
+  // be created eagerly, so `stream_uses` keeps track of them.
+  ska::flat_hash_map<MPSStream*, MPSEventPtr> stream_uses;
 
   BufferBlock(size_t Size, size_t Offset = 0, HeapBlock* Heap = nullptr) : size(Size), offset(Offset), heap(Heap) {}
 
-  static bool Comparator(const BufferBlock* a, const BufferBlock* b) {
-    if (a->size != b->size) {
-      return a->size < b->size;
-    }
-    if (a->heap != b->heap) {
-      return reinterpret_cast<uintptr_t>(a->heap) < reinterpret_cast<uintptr_t>(b->heap);
-    }
-    return a->offset < b->offset;
-  }
   static size_t alignUp(size_t Size, size_t Alignment) {
     assert(((Alignment - 1) & Alignment) == 0);
     return ((Size + Alignment - 1) & ~(Alignment - 1));
@@ -104,12 +104,26 @@ struct BufferBlock {
     return [buffer retainCount];
   }
 };
-typedef bool (*BufferComparison)(const BufferBlock*, const BufferBlock*);
+
+struct BufferComparison {
+  bool operator()(const BufferBlock* a, const BufferBlock* b) const {
+    if (a->size != b->size) {
+      return a->size < b->size;
+    }
+    if (a->heap != b->heap) {
+      return std::less<>{}(a->heap, b->heap);
+    }
+    return a->offset < b->offset;
+  }
+};
 
 struct BufferPool;
 struct AllocParams {
-  AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool)
-      : search_key(Alloc_Size), pool(Pool), requested_size(Requested_Size) {}
+  AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool, bool Allow_In_Flight_Reuse)
+      : search_key(Alloc_Size),
+        pool(Pool),
+        requested_size(Requested_Size),
+        allow_in_flight_reuse(Allow_In_Flight_Reuse) {}
   size_t size() const {
     return search_key.size;
   }
@@ -119,6 +133,8 @@ struct AllocParams {
   BufferPool* pool;
   BufferBlock* buffer_block = nullptr;
   size_t requested_size;
+  // GPU work is ordered by its stream; immediate CPU access is not.
+  bool allow_in_flight_reuse;
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
@@ -203,9 +219,6 @@ struct HeapBlock {
     }
     return heapBlock;
   }
-  static bool Comparator(const HeapBlock* a, const HeapBlock* b) {
-    return a->heap_id < b->heap_id;
-  }
   id<MTLBuffer> newMTLBuffer(size_t length, uint32_t usage, size_t offset) {
     id<MTLBuffer> buf = [heap newBufferWithLength:length options:getOptions(usage) offset:offset];
     if (buf) {
@@ -234,7 +247,12 @@ struct HeapBlock {
     return [heap retainCount];
   }
 };
-typedef bool (*HeapComparison)(const HeapBlock*, const HeapBlock*);
+
+struct HeapComparison {
+  bool operator()(const HeapBlock* a, const HeapBlock* b) const {
+    return a->heap_id < b->heap_id;
+  }
+};
 
 struct BufferPool {
   enum class Kind {
@@ -247,9 +265,7 @@ struct BufferPool {
       : device(Device),
         usage(Usage),
         alignment([Device heapBufferSizeAndAlignWithLength:1 options:HeapBlock::getOptions(Usage)].align),
-        min_split((Usage & UsageFlags::SMALL) ? alignment : kMaxSmallAlloc),
-        heaps(HeapBlock::Comparator),
-        available_buffers(BufferBlock::Comparator) {}
+        min_split((Usage & UsageFlags::SMALL) ? alignment : kMaxSmallAlloc) {}
 
   const id<MTLDevice> device;
   // usage flags to customize the pool for various purposes (see UsageFlags enum)
@@ -285,7 +301,6 @@ class MPSHeapAllocatorImpl {
   explicit MPSHeapAllocatorImpl()
       : m_device(at::mps::MPSDevice::getInstance()->device()),
         m_max_buffer_size([m_device maxBufferLength]),
-        m_stream(getDefaultMPSStream()),
         m_event_pool(getMPSEventPool()) {
     init_allocator();
   }
@@ -294,6 +309,9 @@ class MPSHeapAllocatorImpl {
   }
   // interface exposed to at::Allocator
   id<MTLBuffer> malloc(size_t size, uint32_t usage);
+  // same as malloc(), but for memory the CPU accesses immediately: never
+  // reuses a cached buffer still retained by in-flight GPU work
+  id<MTLBuffer> malloc_host(size_t size, uint32_t usage);
   // frees a buffer and returns it into buffer pool
   void free(void* ptr);
   // releases all the cached buffers and their associated heaps
@@ -327,6 +345,11 @@ class MPSHeapAllocatorImpl {
   // on the passed shared-buffer data pointers (list is used to lock the mutex once)
   // returns true if actually waited on any event
   bool waitForEvents(c10::ArrayRef<const void*> buffers);
+  // Marks a `ptr` as in use on a consumer `stream` that did not allocate it.
+  // The buffer block won't be reused or deallocated until each recorded stream
+  // completes work. Returns `true` if `ptr` is a currently-allocated
+  // shared-storage buffer.
+  bool recordStream(const void* ptr, MPSStream* stream);
   // this indicates how far (in Megabytes) the current total allocations are from the
   // low watermark limit which is used to detect if we're under memory pressure
   // This returns zero if we've reached the low watermark limit
@@ -396,6 +419,9 @@ class MPSHeapAllocatorImpl {
   // currently active memory allocations in use (i.e., blocks not in pools);
   // tracked as a Stat to expose current/peak/accumulated allocated bytes
   c10::CachingAllocator::Stat m_current_allocated_memory;
+  // bytes unavailable for reuse: in-use plus freed-but-pending GPU completion;
+  // feeds active_bytes in getDeviceStats (semantics follow CUDACachingAllocator)
+  c10::CachingAllocator::Stat m_active_bytes;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size = 0;
   // maximum total size allowed to be allocated
@@ -417,8 +443,6 @@ class MPSHeapAllocatorImpl {
   size_t m_low_watermark_limit;
   // use "PYTORCH_DEBUG_MPS_ALLOCATOR" env-var to set debug verbosity
   uint32_t m_debug_verbosity;
-  // default MPS stream
-  MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
   std::shared_ptr<MPSEventPool> m_event_pool;
 
@@ -430,7 +454,7 @@ class MPSHeapAllocatorImpl {
   bool insert_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
   void erase_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
   BufferBlock* get_allocated_buffer_block(const void* ptr);
-  BufferBlock* alloc_buffer_block(size_t size, uint32_t usage);
+  BufferBlock* alloc_buffer_block(size_t size, uint32_t usage, bool allow_in_flight_reuse);
   void free_buffer(BufferBlock* buffer_block);
   bool release_cached_buffers();
   // waits for buffers parked in-flight in the pool's pending-free list to finish

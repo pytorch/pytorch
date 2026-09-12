@@ -293,7 +293,7 @@ struct PythonPrintImpl {
 
   Node* scanNode(Node* n) {
     // don't bother to scan nodes we have already determined to be inline
-    if (output_inline_.count(n)) {
+    if (output_inline_.contains(n)) {
       return n;
     }
     for (auto b : n->blocks()) {
@@ -339,7 +339,7 @@ struct PythonPrintImpl {
   void buildConstantList(Node* n, std::vector<Node*>& constants) {
     for (auto input : n->inputs()) {
       if (input->node()->kind() == prim::Constant &&
-          seen_constants.count(input->node()) == 0) {
+          !seen_constants.contains(input->node())) {
         constants.push_back(input->node());
         seen_constants.insert(input->node());
       }
@@ -362,7 +362,7 @@ struct PythonPrintImpl {
       const std::string& candidate,
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
-    while (used.count(name) || reserved_names.count(name)) {
+    while (used.contains(name) || reserved_names.contains(name)) {
       auto suffix = (next_id[name]++);
       name.resize(candidate.size());
       name.append(std::to_string(suffix));
@@ -407,12 +407,12 @@ struct PythonPrintImpl {
     // Ident refs take precedent over expression refs, since presence in
     // the ident ref table indicates we have already emitted a statement
     // assigning the given value.
-    if (ident_refs_.count(v)) {
+    if (ident_refs_.contains(v)) {
       auto rv = std::make_shared<TaggedStringStream>(&source_range_stack_);
       (*rv) << ident_refs_.at(v);
       return rv;
     }
-    if (expr_table_.count(v)) {
+    if (expr_table_.contains(v)) {
       return expr_table_.at(v);
     }
     TORCH_INTERNAL_ASSERT(
@@ -522,7 +522,7 @@ struct PythonPrintImpl {
     // (Python doesn't allow type annotations in multiple assignment)
     if (lhs.size() == 1) {
       Value* v = lhs.at(0);
-      if (!annotated_unions_.count(v) && !expr_table_.count(v) &&
+      if (!annotated_unions_.contains(v) && !expr_table_.contains(v) &&
           (v->type()->kind() == UnionType::Kind ||
            v->type()->kind() == OptionalType::Kind)) {
         body_ << " : " << v->type()->annotation_str();
@@ -637,13 +637,13 @@ struct PythonPrintImpl {
   }
 
   bool isLongInline(Node* node) {
-    return output_inline_.count(node) &&
+    return output_inline_.contains(node) &&
         isLongLine(useOf(node->output())->str());
   }
 
   bool isNonConstantInline(Value* input) {
     return input->node()->kind() != prim::Constant &&
-        output_inline_.count(input->node());
+        output_inline_.contains(input->node());
   }
 
   // [reordering of inlines]
@@ -686,7 +686,7 @@ struct PythonPrintImpl {
       }
     }
     visited_split_inline_uses_[user] = static_cast<int64_t>(offset);
-    if (!present && output_inline_.count(user)) {
+    if (!present && output_inline_.contains(user)) {
       Use u = user->output()->uses().at(0);
       scanLongInlines(u.user, u.offset - 1, to_split_reversed);
       // -1 because the actual use is still being
@@ -910,7 +910,7 @@ struct PythonPrintImpl {
         // we prevent long constants from inlining here.
         // it is not safe to do the same thing for non-constants here
         // because of [reordering of inlines]
-        if (output_inline_.count(node) == 0 ||
+        if (!output_inline_.contains(node) ||
             (node->kind() == prim::Constant && isLongLine(ss->str()))) {
           printOutputDefinition(node, *ss);
         } else {
@@ -982,7 +982,7 @@ struct PythonPrintImpl {
         {aten::backward, "torch.autograd.backward"},
         {aten::grad, "torch.autograd.grad"},
     };
-    if (override_symbols.find(kind) != override_symbols.end()) {
+    if (override_symbols.contains(kind)) {
       stmt << override_symbols.at(kind);
     } else if (kind.is_aten()) {
       // special case aten -> torch because we want to rename
@@ -1520,13 +1520,13 @@ struct PythonPrintImpl {
       }
       std::set<std::string> already_printed;
       for (auto& hook : classType->getForwardHooks()) {
-        if (already_printed.count(hook->name()) == 0) {
+        if (!already_printed.contains(hook->name())) {
           already_printed.insert(hook->name());
           printFunction(*hook);
         }
       }
       for (auto& pre_hook : classType->getForwardPreHooks()) {
-        if (already_printed.count(pre_hook->name()) == 0) {
+        if (!already_printed.contains(pre_hook->name())) {
           already_printed.insert(pre_hook->name());
           printFunction(*pre_hook);
         }

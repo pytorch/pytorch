@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_augassign.py b/test/cpython/v3_13/test_augassign.py
-index 5930d9e7a29..9e2623eadb4 100644
+index 5930d9e7a29fa2a2ee0d46d1f1f041b27703475c..9e2623eadb4e24babdc83cdaf81cf8c57c46cf0b 100644
 --- a/test/cpython/v3_13/test_augassign.py
 +++ b/test/cpython/v3_13/test_augassign.py
 @@ -1,9 +1,27 @@

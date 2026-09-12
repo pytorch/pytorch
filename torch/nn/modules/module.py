@@ -1377,10 +1377,14 @@ class Module:
                     non_blocking,
                 )
             except NotImplementedError as e:
-                if str(e) == "Cannot copy out of meta tensor; no data!":
+                message = str(e)
+                base_message = "Cannot copy out of meta tensor; no data!"
+                if message.startswith(base_message):
+                    diagnostic_suffix = message[len(base_message) :]
                     raise NotImplementedError(
-                        f"{e} Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() "
-                        f"when moving module from meta to a different device."
+                        f"{base_message} Please use torch.nn.Module.to_empty() instead of "
+                        f"torch.nn.Module.to() when moving module from meta to a different device."
+                        f"{diagnostic_suffix}"
                     ) from None
                 else:
                     raise

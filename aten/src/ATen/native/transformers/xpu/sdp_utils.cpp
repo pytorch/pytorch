@@ -54,7 +54,7 @@ inline bool check_flash_attention_datatype(
   constexpr auto supported_dtypes =
       std::to_array<at::ScalarType>({at::kBFloat16, at::kHalf});
 
-  auto query_dtype = params.query.dtype();
+  const auto query_dtype = params.query.dtype();
   if (!(query_dtype == params.key.dtype() &&
         query_dtype == params.value.dtype() &&
         (std::find(

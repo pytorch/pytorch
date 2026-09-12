@@ -29,8 +29,8 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> tuple[tuple[Any, ...], tuple[str,
         assert kwargs == {"a": 3, "b": 4}
     Returns:
         Tuple[Tuple[Any, ...], Tuple[str, ...]]: The first tuple element gives
-        gives both positional args and kwarg values, where the positional args
-        proceed kwarg values and kwarg values are ordered consistently with the
+        both positional args and kwarg values, where the positional args
+        precede kwarg values and kwarg values are ordered consistently with the
         kwarg keys. The second tuple element gives the kwarg keys.
         The second tuple element's length is at most the first tuple element's length.
     """
