@@ -523,6 +523,7 @@
 # /test/test_function_schema.py
 # /test/test_functionalization.py
 # /test/test_futures.py
+# /test/test_gpu_trace.py
 /test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
 # /test/test_hub.py
 # /test/test_img/
@@ -612,7 +613,6 @@
 # /test/test_cuda_nvml_based_avail.py
 # /test/test_cuda_primary_ctx.py
 # /test/test_cuda_sanitizer.py
-# /test/test_cuda_trace.py
 /torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
 /torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/backends/cusparselt/
