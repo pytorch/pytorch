@@ -81,7 +81,6 @@ from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
     _get_torch_rocm_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -20856,25 +20855,7 @@ if RUN_GPU:
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
         @requires_cuda_and_triton
         @config.patch(implicit_fallbacks=True)
-        @parametrize("backend", ["cublaslt", "cutlass"])
-        def test_grouped_mm(self, backend):
-            if backend == "cublaslt":
-                if _get_torch_cuda_version() < (13, 3):
-                    self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
-                sm_major = torch.cuda.get_device_capability()[0]
-                if sm_major < 9 or sm_major >= 12:
-                    self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
-            prev = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
-            torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = (
-                backend == "cublaslt"
-            )
-            self.addCleanup(
-                setattr,
-                torch.backends.cuda.matmul,
-                "prefer_cublaslt_grouped_gemm",
-                prev,
-            )
-
+        def test_grouped_mm(self):
             @torch.compile(fullgraph=True)
             def f(a, b, offs, out_dtype):
                 return F.grouped_mm(

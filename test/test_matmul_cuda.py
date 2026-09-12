@@ -105,16 +105,6 @@ def rocm_group_gemm_ck_env(value):
 
 
 @contextlib.contextmanager
-def prefer_cublaslt_grouped_gemm():
-    old = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
-    try:
-        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = True
-        yield
-    finally:
-        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = old
-
-
-@contextlib.contextmanager
 def sm_carveout(value: int | None):
     torch._C._set_sm_carveout_experimental(value)
     try:
@@ -969,8 +959,6 @@ class TestMatmulCuda(InductorTestCase):
             else:
                 B = torch.randn(k, n_align, device=device, dtype=dtype).t()[:n, :]
 
-            aligned = (jagged_size % align == 0) or (not a_row_major and not b_row_major)
-
         elif op == "2d/3d":
             # Jagged M with aligned offsets.
             n, k = 7, 32
@@ -992,8 +980,6 @@ class TestMatmulCuda(InductorTestCase):
                     -2, -1
                 )[:, :n, :]
 
-            aligned = (jagged_size % align == 0) or not (not a_row_major and b_row_major)
-
         elif op == "3d/2d":
             # Jagged N with aligned offsets.
             m, k = 3, 32
@@ -1014,8 +1000,6 @@ class TestMatmulCuda(InductorTestCase):
                 B = torch.randn(n, k_align, device=device, dtype=dtype)[:, :k]
             else:
                 B = torch.randn(k, n_align, device=device, dtype=dtype).t()[:n, :]
-
-            aligned = (jagged_size % align == 0) or not (a_row_major and not b_row_major)
 
         elif op == "3d/3d":
             # No jagged dimension, all dims fixed. Use non-multiple-of-8
@@ -1040,9 +1024,7 @@ class TestMatmulCuda(InductorTestCase):
                     -2, -1
                 )[:, :n, :]
 
-            aligned = (jagged_size % align == 0) or (not a_row_major and not b_row_major)
-
-        return A, B.transpose(-2, -1), offs, aligned
+        return A, B.transpose(-2, -1), offs
 
     def grouped_gemm_reference(self, A, B, offs):
         if A.dim() == 2 and B.dim() == 2:
@@ -1074,17 +1056,6 @@ class TestMatmulCuda(InductorTestCase):
             return torch.cat(outputs, dim=1)
         return torch.stack([torch.mm(a, b) for a, b in zip(A, B)])
 
-    def grouped_gemm_cublaslt_alignment_error(self, op):
-        if op == "2d/2d":
-            return "cublasLt grouped GEMM with jagged K not aligned to 16 bytes"
-        if op == "2d/3d":
-            return "cublasLt grouped GEMM with jagged M not aligned to 16 bytes"
-        if op == "3d/2d":
-            return "cublasLt grouped GEMM with jagged N not aligned to 16 bytes"
-        if op == "3d/3d":
-            return "cublasLt grouped GEMM with K not aligned to 16 bytes"
-        raise AssertionError(f"Invalid op: {op}")
-
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
     @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
     @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
@@ -1093,24 +1064,12 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
-    def test_grouped_gemm_cublaslt_alignment(self, op, jagged_size, a_row_major, b_row_major, dtype):
-        # Verify that cuBLASLt grouped GEMM succeeds with all expected combinations
-        # Always succeeds if jagged_size * sizeof(dtype) is divisible by 16
-        # Otherwise:
-        # For 2d/2d and 3d/3d, both inputs must be column major
-        # For 2d/3d, A needs to be row major or B needs to be column major
-        # For 3d/2d, A needs to be column major or B needs to be row major
-
-        A, B, offs, aligned = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
-        if not aligned:
-            with self.assertRaisesRegex(RuntimeError, self.grouped_gemm_cublaslt_alignment_error(op)):
-                with prefer_cublaslt_grouped_gemm():
-                    torch._grouped_mm(A, B, offs=offs)
-            return
-
+    def test_grouped_gemm_cublaslt(self, op, jagged_size, a_row_major, b_row_major, dtype):
+        if dtype == torch.bfloat16 and _get_torch_cuda_version() < (13, 4):
+            self.skipTest("bfloat16 cuBLASLt grouped gemm requires CUDA Toolkit >= 13.4")
+        A, B, offs = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
         C_ref = self.grouped_gemm_reference(A, B, offs)
-        with prefer_cublaslt_grouped_gemm():
-            C = torch._grouped_mm(A, B, offs=offs)
+        C = torch._grouped_mm(A, B, offs=offs)
         self.assertEqual(C, C_ref)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
@@ -1123,20 +1082,16 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("mode", ["default", "reduce-overhead"])
     def test_grouped_gemm_cublaslt_compiled(self, op, jagged_size, a_row_major, b_row_major, dtype, mode):
+        if dtype == torch.bfloat16 and _get_torch_cuda_version() < (13, 4):
+            self.skipTest("bfloat16 cuBLASLt grouped gemm requires CUDA Toolkit >= 13.4")
+
         def f_ref(A, B, offs):
             return torch._grouped_mm(A, B, offs=offs)
 
-        A, B, offs, aligned = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
-        if not aligned:
-            with self.assertRaisesRegex(RuntimeError, self.grouped_gemm_cublaslt_alignment_error(op)):
-                with prefer_cublaslt_grouped_gemm():
-                    f_ref(A, B, offs)
-            return
-
-        with prefer_cublaslt_grouped_gemm():
-            f = torch.compile(f_ref, fullgraph=True, mode=mode)
-            C_ref = f_ref(A, B, offs)
-            C = f(A, B, offs)
+        A, B, offs = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
+        f = torch.compile(f_ref, fullgraph=True, mode=mode)
+        C_ref = f_ref(A, B, offs)
+        C = f(A, B, offs)
         self.assertEqual(C, C_ref)
 
     def test_grouped_gemm_doubly_non_contiguous(self):
@@ -1167,7 +1122,7 @@ class TestMatmulCuda(InductorTestCase):
         # with M=1 or N=1 so only a small amount of storage is needed
         # despite the large stride.
         device = "cuda"
-        dtype = torch.bfloat16
+        dtype = torch.float16
 
         big_ld = (1 << 31)  # > INT32_MAX, divisible by 8
         K = 8
@@ -1217,8 +1172,7 @@ class TestMatmulCuda(InductorTestCase):
         else:
             raise AssertionError(f"Invalid op: {op}")
 
-        with prefer_cublaslt_grouped_gemm():
-            C = torch._grouped_mm(A, B, offs=offs)
+        C = torch._grouped_mm(A, B, offs=offs)
         self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm

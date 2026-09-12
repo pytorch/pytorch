@@ -1377,13 +1377,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
 
-    def test_cublaslt_prefer_grouped_gemm_get_set(self):
-        orig = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
-        self.assertEqual(torch._C._get_cublaslt_prefer_grouped_gemm(), orig)
-        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = not orig
-        self.assertEqual(torch._C._get_cublaslt_prefer_grouped_gemm(), not orig)
-        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = orig
-
     @recover_orig_fp32_precision
     def test_float32_matmul_precision_get_set(self):
         orig = torch.get_float32_matmul_precision()
