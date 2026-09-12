@@ -2557,8 +2557,9 @@ class CleanupHook:
             CleanupManager.count -= 1
         # Hooks fire when the owning code object is collected, which can happen
         # after something else has taken over this name -- CompilePackage.install()
-        # reinstalls precompiled state under names a pre-reset compile still
-        # owns. Only clean up while nothing has claimed the name out from under us.
+        # rebinds one a pre-reset compile still owns, and an aot_compile load claims
+        # a builtins-dict key while leaving the binding as it is. Only clean up
+        # while nothing has claimed the name out from under us.
         key = (id(self.scope), self.name)
         if _cleanup_owners.pop(key, None) is not self.token:
             return
