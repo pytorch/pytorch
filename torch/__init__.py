@@ -6,7 +6,11 @@ Tensors and arbitrary types, and other useful utilities.
 
 It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
+It also has an XPU counterpart, that enables you to run your tensor computations
+on an Intel GPU with XPU support.
 """
+
+# [DON'T MERGE] This is a dummy PR for XPU build testing only.
 
 import builtins
 import ctypes
