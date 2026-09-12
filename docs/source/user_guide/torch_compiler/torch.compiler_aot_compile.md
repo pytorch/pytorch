@@ -145,15 +145,22 @@ Load a previously saved AOT-compiled function from a file.
 - **file** -- A file-like object (opened in binary read mode) containing the
   serialized compiled function.
 - **f_globals** (`dict | None`) -- Optional global scope enclosing the compiled
-  function. Guards are evaluated against this dict by reference, so a global
-  rebound after loading is seen on the next call, and a guarded global the dict
-  lacks fails the guard -- there is no fallback to the values serialized with
-  the artifact. Loading mutates it: the `__import_*` module aliases and the
-  `__builtins_dict___N` key recorded at capture are inserted, plus `__builtins__`
-  when the dict lacks it (never overwriting an existing key). When omitted, the
-  reconstructed capture-time globals are
-  used. Pass it when the original function references user-defined types or
-  other non-standard globals.
+  function, and the scope the kept guards resolve against: it must bind every
+  global they read, with values that satisfy them, which normally means `vars()`
+  of the module that defined the original function (as in the example below)
+  rather than a dict of a few extra names. Guards read this dict by reference, so
+  a global rebound after loading is seen on the next call, and a guarded global
+  the dict lacks fails the guard until that name is bound in it -- there is no
+  fallback to the values serialized with the artifact. Loading may insert names
+  of its own, never overwriting an existing key: the Dynamo-generated globals a
+  kept guard is rooted at, and `__builtins__` when it seeds the builtins dict
+  one of those names holds. The bytecode does not read this dict: it reads a
+  snapshot, taken at load time, of the globals serialized with the artifact with
+  this dict merged over them, so a name the dict omits still resolves and a name
+  it binds is what the graph uses whether or not a guard checks it. A rebind
+  after loading changes the result only when a guard on the value refuses the
+  call. When omitted, global guards are resolved against the scope rebuilt from
+  the artifact instead, where a rebinding in this process is invisible.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
   that could not be serialized (e.g., `nn.Module` instances). The keys should
@@ -200,7 +207,9 @@ with open("scaled_add.pt", "rb") as f:
 ```
 
 When the function references user-defined types that cannot be found by the
-deserializer, pass `f_globals` to provide the necessary namespace:
+deserializer, pass `f_globals` to provide the necessary namespace. The same dict
+is what the kept guards resolve against, so pass the defining module's namespace
+rather than a dict of the missing names alone:
 
 ```python
 with open("my_fn.pt", "rb") as f:
