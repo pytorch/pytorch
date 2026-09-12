@@ -2230,7 +2230,9 @@ def load_inline(name,
         sycl_sources: A string, or list of strings, containing SYCL source code.
         functions: A list of function names for which to generate function
             bindings. If a dictionary is given, it should map function names to
-            docstrings (which are otherwise just the function names).
+            docstrings (which are otherwise just the function names). Generated
+            bindings declare that they support running with the GIL disabled,
+            so the bound functions and any state they access must be thread-safe.
         with_cuda: Determines whether CUDA headers and libraries are added to
             the build. If set to ``None`` (default), this value is
             automatically determined based on whether ``cuda_sources`` is
@@ -2302,7 +2304,10 @@ def load_inline(name,
     # function names to function docstrings.
     if functions is not None:
         module_def = []
-        module_def.append('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {')
+        module_def.append(
+            'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m, '
+            'pybind11::mod_gil_not_used()) {'
+        )
         if isinstance(functions, str):
             functions = [functions]
         if isinstance(functions, list):
