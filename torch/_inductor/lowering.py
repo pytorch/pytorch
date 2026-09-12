@@ -979,7 +979,18 @@ def to_dtype(
             result = ops.to_dtype(result, dtype)
         return result
 
-    return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
+    result = make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
+    if src_dtype == torch.float32 and dtype == torch.bfloat16:
+        source_node = x
+        result_node = result
+        while isinstance(source_node, (ir.TensorBox, ir.StorageBox)):
+            source_node = source_node.data
+        while isinstance(result_node, (ir.TensorBox, ir.StorageBox)):
+            result_node = result_node.data
+        source_names = source_node.annotations.get(ir.CAT2_FP32_TO_BF16_SOURCES)
+        if source_names is not None:
+            result_node.annotations[ir.CAT2_FP32_TO_BF16_SOURCES] = source_names
+    return result
 
 
 register_pointwise_op("to_dtype")
@@ -1927,12 +1938,39 @@ def pointwise_cat(inputs, dim=0):
     new_size = list(inputs[0].get_size())
     new_size[dim] = inputs_ranges[-1][-1]
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=inputs[0].get_device(),
         dtype=inputs[0].get_dtype(),
         inner_fn=inner_fn,
         ranges=new_size,
     )
+
+    # Preserve this exact semantic pattern before cat is represented as a
+    # generic Pointwise node. Consumers still validate source layouts.
+    if len(inputs) == 2 and dim == 1 and inputs[0].get_dtype() == torch.float32:
+        source_names = []
+        for inp in inputs:
+            node = inp
+            while isinstance(node, (ir.TensorBox, ir.StorageBox)):
+                node = node.data
+            size = tuple(V.graph.sizevars.simplify(s) for s in inp.get_size())
+            if (
+                not isinstance(node, ir.Buffer)
+                or len(size) != 2
+                or not V.graph.sizevars.statically_known_equals(size[0], new_size[0])
+                or not V.graph.sizevars.statically_known_equals(size[1], 64)
+            ):
+                break
+            source_names.append(node.get_name())
+        else:
+            result_node = result
+            while isinstance(result_node, (ir.TensorBox, ir.StorageBox)):
+                result_node = result_node.data
+            if not isinstance(result_node, ir.Pointwise):
+                raise AssertionError("cat lowering must produce pointwise IR")
+            result_node.annotations[ir.CAT2_FP32_TO_BF16_SOURCES] = tuple(source_names)
+
+    return result
 
 
 @register_lowering(quantized_decomposed.quantize_per_channel, type_promotion_kind=None)
