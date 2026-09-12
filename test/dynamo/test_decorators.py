@@ -310,6 +310,56 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Check for graph break
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_disallow_in_graph_no_id_reuse(self):
+        # gh-196171: `disallow_in_graph` registers `id(fn)` in a global set
+        # but (unlike `allow_in_graph`) never deregisters it when `fn` is
+        # garbage collected. When CPython reuses the freed id() for an
+        # unrelated function, that function wrongly inherits the stale
+        # "disallowed" state and Dynamo refuses to trace it.
+        def make_old():
+            captured = 11
+
+            def old(x):
+                return x + captured
+
+            return old
+
+        def make_candidate():
+            scale = 2.5
+
+            def candidate(x):
+                return torch.sin(x) * scale
+
+            return candidate
+
+        def find_reused_id(target_id, factory):
+            for _ in range(4096):
+                batch = [factory() for _ in range(128)]
+                for value in batch:
+                    if id(value) == target_id:
+                        return value
+            raise RuntimeError("CPython did not reuse the function id")
+
+        victim = make_old()
+        torch._dynamo.allow_in_graph(victim)
+        torch._dynamo.disallow_in_graph(victim)
+        stale_id = id(victim)
+        del victim
+        candidate = find_reused_id(stale_id, make_candidate)
+        self.assertEqual(id(candidate), stale_id)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def run(a):
+            return candidate(a) + a.square()
+
+        x = torch.tensor([-1.0, 0.25, 2.0])
+        expected = run(x)
+        out = torch.compile(run, backend=cnts, fullgraph=True)(x)
+        # The candidate was never disallowed: it must be traced, not skipped.
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertTrue(torch.allclose(out, expected, atol=1e-5))
+
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaisesRegex(RuntimeError, "disallow_in_graph is expected"):
 

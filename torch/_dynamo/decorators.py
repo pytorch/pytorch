@@ -763,9 +763,19 @@ def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )
-        trace_rules._allowed_callable_ids.remove(id(fn))
-        trace_rules._nonstrict_trace_callable_ids.remove(id(fn))
-        trace_rules._disallowed_callable_ids.add(id(fn))
+        fn_id = id(fn)
+        trace_rules._allowed_callable_ids.remove(fn_id)
+        trace_rules._nonstrict_trace_callable_ids.remove(fn_id)
+        trace_rules._disallowed_callable_ids.add(fn_id)
+
+        # Avoid id reuse which creates subtle bugs: when fn is garbage
+        # collected, drop its id so a freshly-created unrelated function
+        # that happens to reuse the id() does not inherit the stale
+        # disallowed state (gh-196171).
+        def deregister() -> None:
+            trace_rules._disallowed_callable_ids.remove(fn_id)
+
+        weakref.finalize(fn, deregister)
         return fn
 
     return inner
