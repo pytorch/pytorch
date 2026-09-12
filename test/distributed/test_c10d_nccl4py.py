@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -15,10 +16,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 try:
     import nccl.core  # noqa: F401
 
-    from torch.distributed.nccl4py_backend import (
-        _create_nccl4py_backend,
-        NCCL4PyBackend,
-    )
+    from torch.distributed.nccl4py import _create_nccl4py_backend, NCCL4PyBackend
 
     HAS_NCCL4PY = True
 except ImportError:
@@ -73,13 +71,17 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _init_pg(self):
+    def _init_pg(self, device_id=None):
         dist.Backend.register_backend(
             "nccl4py", _create_nccl4py_backend, devices=["cuda"]
         )
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl4py", store=store, rank=self.rank, world_size=self.world_size
+            "nccl4py",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device_id,
         )
 
     def _destroy_pg(self):
@@ -346,6 +348,49 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
             torch.cuda.synchronize(device)
             self.assertEqual(t, torch.full((4,), 7.0, device=device))
         dist.barrier()
+        self._destroy_pg()
+
+    def _split_pg(self, device, timeout=None):
+        # new_group() builds a fresh backend through the creator function;
+        # split_group() is the only path that reaches Backend.split().
+        self._init_pg(device_id=device)
+        subgroup = dist.split_group(split_ranks=[[0, 1]], timeout=timeout)
+        return subgroup, subgroup._get_backend(device)
+
+    @skip_if_lt_x_gpu(2)
+    def test_split_group(self):
+        device = torch.device(f"cuda:{self.rank}")
+        subgroup, child = self._split_pg(device)
+        self.assertEqual(child.rank(), self.rank)
+        self.assertEqual(child.size(), self.world_size)
+        self.assertEqual(child._device, device)
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        dist.all_reduce(t, group=subgroup)
+        torch.cuda.synchronize(device)
+        self.assertEqual(t, torch.full((4,), 3.0, device=device))
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_split_group_coalescing(self):
+        device = torch.device(f"cuda:{self.rank}")
+        _, child = self._split_pg(device)
+        t1 = torch.ones(4, device=device) * (self.rank + 1)
+        t2 = torch.ones(4, device=device) * (self.rank + 1) * 10
+        child.start_coalescing()
+        child.allreduce([t1], dist.AllreduceOptions())
+        child.allreduce([t2], dist.AllreduceOptions())
+        child.end_coalescing().wait()
+        torch.cuda.synchronize(device)
+        self.assertEqual(t1, torch.full((4,), 3.0, device=device))
+        self.assertEqual(t2, torch.full((4,), 30.0, device=device))
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_split_group_timeout(self):
+        timeout = timedelta(seconds=123)
+        device = torch.device(f"cuda:{self.rank}")
+        _, child = self._split_pg(device, timeout=timeout)
+        self.assertEqual(child.options._timeout, timeout)
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
