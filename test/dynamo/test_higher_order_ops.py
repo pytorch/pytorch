@@ -7128,10 +7128,10 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
-        # One graph for torch.sin on the input, and other for torch.cos.
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)
-        self.assertEqual(len(backend.graphs), 2)
+        # sin and cos graphs in fn, plus gn compiled after its graph break
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 4)
+        self.assertEqual(len(backend.graphs), 3)
 
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
