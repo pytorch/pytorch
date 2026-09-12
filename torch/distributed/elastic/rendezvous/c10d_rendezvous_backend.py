@@ -23,7 +23,11 @@ from .api import (
     RendezvousStateError,
 )
 from .dynamic_rendezvous import RendezvousBackend, Token
-from .utils import _matches_machine_hostname, parse_rendezvous_endpoint, should_use_libuv
+from .utils import (
+    _matches_machine_hostname,
+    parse_rendezvous_endpoint,
+    should_use_libuv,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -161,7 +165,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 is_master=is_server,
                 multi_tenant=True,
                 timeout=timedelta(seconds=read_timeout),
-                use_libuv=use_libuv
+                use_libuv=use_libuv,
             )
 
             if is_server:

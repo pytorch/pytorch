@@ -286,6 +286,7 @@ class _PeriodicTimer:
 
         thread.join()
 
+
 def should_use_libuv() -> bool:
     """
     Determine whether or not should use the libuv-based TCPStore backend.

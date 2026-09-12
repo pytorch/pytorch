@@ -18,7 +18,10 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousParameters,
     RendezvousStoreInfo,
 )
-from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint, should_use_libuv
+from torch.distributed.elastic.rendezvous.utils import (
+    parse_rendezvous_endpoint,
+    should_use_libuv,
+)
 
 
 __all__ = ["StaticTCPRendezvous", "create_rdzv_handler"]
