@@ -209,6 +209,7 @@ def _create_c10d_store(
             world_size=world_size,
             is_master=False,
             timeout=timeout,
+            use_libuv=use_libuv,
         )
     else:
         start_daemon = rank == 0

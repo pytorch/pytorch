@@ -6,9 +6,11 @@
 # LICENSE file in the root directory of this source tree.
 
 import ipaddress
+import os
 import random
 import re
 import socket
+import sys
 import time
 import weakref
 from collections.abc import Callable
@@ -17,7 +19,7 @@ from threading import Event, Thread
 from typing import Any
 
 
-__all__ = ["parse_rendezvous_endpoint"]
+__all__ = ["parse_rendezvous_endpoint", "should_use_libuv"]
 
 
 def _parse_rendezvous_config(config_str: str) -> dict[str, str]:
@@ -283,3 +285,12 @@ class _PeriodicTimer:
         stop_event.set()
 
         thread.join()
+
+def should_use_libuv() -> bool:
+    """
+    Determine whether or not should use the libuv-based TCPStore backend.
+
+    Returns:
+        bool: True if libuv should be used, False otherwise.
+    """
+    return os.environ.get("USE_LIBUV", "0" if sys.platform == "win32" else "1") == "1"
