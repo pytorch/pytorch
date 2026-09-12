@@ -5557,11 +5557,6 @@ def grid_sample(
         to build `Spatial Transformer Networks`_ .
 
     Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
-    Note:
         NaN values in :attr:`grid` would be interpreted as ``-1``.
 
     Args:
