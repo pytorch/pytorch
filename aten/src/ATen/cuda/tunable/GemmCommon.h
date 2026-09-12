@@ -31,6 +31,7 @@
 namespace at::cuda::tunable {
 
 using at::blas::ScalingType;
+using at::blas::SwizzleType;
 
 enum class BlasOp {
   N = 0,
@@ -727,18 +728,26 @@ struct ScaledGemmParams : OpParams {
     // params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
     //
     // In TunableOp, we must distinguish in param signature these two cases: with and without a bias vector.
-    return fmt::sprintf(
-      "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
+    //
+    // The swizzle suffix is only appended when a swizzle is in play, so that
+    // previously recorded tuning results keep their keys. It keeps the two MX
+    // layouts' keys distinct; it does not make the hipBLASLt candidates
+    // swizzle-aware -- see the BlockWise1x32 note in GemmHipblaslt.h.
+    auto sig = fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
       transa, transb, m, n, k, lda, ldb, ldc,
       a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
       bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
+    if (a_swizzle_type != SwizzleType::NO_SWIZZLE || b_swizzle_type != SwizzleType::NO_SWIZZLE) {
+      sig += fmt::sprintf("_swz_%d_%d", static_cast<int>(a_swizzle_type), static_cast<int>(b_swizzle_type));
+    }
+    return sig;
   }
 
   std::string DynamicSignature() const override {
     const bool dynamic_m = this->IsDynamicM();
     const bool dynamic_n = this->IsDynamicN();
     const bool dynamic_k = this->IsDynamicK();
-    return fmt::sprintf(
+    auto sig = fmt::sprintf(
       "%c%c_%s_%s_%s_ld_%s_%s_%s_rw_%d_bias_%s",
       transa, transb,
       MaybeWildcardInt(m, dynamic_m),
@@ -749,6 +758,10 @@ struct ScaledGemmParams : OpParams {
       MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
       a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
       bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
+    if (a_swizzle_type != SwizzleType::NO_SWIZZLE || b_swizzle_type != SwizzleType::NO_SWIZZLE) {
+      sig += fmt::sprintf("_swz_%d_%d", static_cast<int>(a_swizzle_type), static_cast<int>(b_swizzle_type));
+    }
+    return sig;
   }
 
   size_t GetSizeA() const {
@@ -824,12 +837,14 @@ struct ScaledGemmParams : OpParams {
   ScalarType a_dtype{};
   ScalarType a_scale_dtype{};
   ScalingType a_scaling_type{};
+  SwizzleType a_swizzle_type{SwizzleType::NO_SWIZZLE};
   const void* b{};
   const void* b_scale_ptr{};
   int64_t ldb{};
   ScalarType b_dtype{};
   ScalarType b_scale_dtype{};
   ScalingType b_scaling_type{};
+  SwizzleType b_swizzle_type{SwizzleType::NO_SWIZZLE};
   const void* bias_ptr{};
   ScalarType bias_dtype{};
   void* c{};

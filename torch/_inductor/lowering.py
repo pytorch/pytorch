@@ -1963,9 +1963,12 @@ def pointwise_cat(inputs, dim=0):
                 break
             source_names.append(node.get_name())
         else:
-            result.data.data.annotations[ir.CAT2_FP32_TO_BF16_SOURCES] = tuple(
-                source_names
-            )
+            result_node = result
+            while isinstance(result_node, (ir.TensorBox, ir.StorageBox)):
+                result_node = result_node.data
+            if not isinstance(result_node, ir.Pointwise):
+                raise AssertionError("cat lowering must produce pointwise IR")
+            result_node.annotations[ir.CAT2_FP32_TO_BF16_SOURCES] = tuple(source_names)
 
     return result
 
