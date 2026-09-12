@@ -70,6 +70,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/TensorAdvancedIndexingUtils.h>
@@ -554,6 +555,19 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
   return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
       .set_sizes(std::move(info.indexed_sizes))
       .set_strides(std::move(info.indexed_strides));
+}
+
+TORCH_META_FUNC2(count_nonzero, dim_IntList)
+(const Tensor& self, IntArrayRef dim, std::optional<ScalarType> dtype) {
+  auto out_dtype = dtype.value_or(ScalarType::Long);
+  TORCH_CHECK(
+      c10::isIntegralType(out_dtype, /*includeBool*/ false) ||
+          c10::isFloatingType(out_dtype),
+      "count_nonzero: Expected out tensor to have integral or floating type "
+      "but got scalar type ",
+      out_dtype);
+
+  resize_reduction(*this, self, dim, /*keepdim=*/false, out_dtype);
 }
 
 } // namespace at::meta
@@ -2826,43 +2840,33 @@ static int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   return num_nonzero;
 }
 
-static void check_count_nonzero_dtype(std::optional<ScalarType> opt_dtype) {
-  if (opt_dtype.has_value()) {
-    auto out_dtype = opt_dtype.value();
-    TORCH_CHECK(
-        c10::isIntegralType(out_dtype, /*includeBool*/ false) ||
-            c10::isFloatingType(out_dtype),
-        "count_nonzero: Expected out tensor to have integral or floating type "
-        "but got scalar type ",
-        out_dtype);
-  }
-}
 
-Tensor count_nonzero_cuda(
-    const Tensor& self,
-    IntArrayRef dims,
-    std::optional<ScalarType> opt_dtype) {
-  check_count_nonzero_dtype(opt_dtype);
+TORCH_IMPL_FUNC(count_nonzero_out_cuda)
+(const Tensor& self,
+ IntArrayRef dims,
+ std::optional<ScalarType> opt_dtype,
+ const Tensor& result) {
   auto out_type = opt_dtype.value_or(ScalarType::Long);
   auto reduce = self;
   if (reduce.scalar_type() != kBool) {
     reduce = reduce != 0;
   }
-  return reduce.sum(dims, /*keepdim*/ false, /*dtypes=*/out_type);
+  result.copy_(reduce.sum(dims, /*keepdim*/ false, /*dtypes=*/out_type));
 }
 
-Tensor count_nonzero_cpu(
-    const Tensor& self,
-    IntArrayRef dims,
-    std::optional<ScalarType> opt_dtype) {
-  check_count_nonzero_dtype(opt_dtype);
+TORCH_IMPL_FUNC(count_nonzero_out_cpu)
+(const Tensor& self,
+ IntArrayRef dims,
+ std::optional<ScalarType> opt_dtype,
+ const Tensor& result) {
   auto out_type = opt_dtype.value_or(ScalarType::Long);
   if (!dims.empty()) {
     auto reduce = self;
     if (reduce.scalar_type() != kBool) {
       reduce = reduce != 0;
     }
-    return reduce.sum(dims, /*keepdim=*/false, /*dtypes=*/out_type);
+    result.copy_(reduce.sum(dims, /*keepdim=*/false, /*dtypes=*/out_type));
+    return;
   }
 
   // Optimized all-reduce
@@ -2894,21 +2898,17 @@ Tensor count_nonzero_cpu(
   for (const auto i : c10::irange(1, num_threads)) {
     thread_count_nonzero[0] += thread_count_nonzero[i];
   }
-  auto out = at::empty({}, out_type);
   AT_DISPATCH_ALL_TYPES_AND2(
       kHalf, kBFloat16, out_type, "nonzero_count_cpu", [&] {
-        *out.mutable_data_ptr<scalar_t>() =
+        *result.mutable_data_ptr<scalar_t>() =
             static_cast<scalar_t>(thread_count_nonzero[0]);
       });
-
-  return out;
 }
 
 Tensor count_nonzero(
     const Tensor& self,
     std::optional<int64_t> dim,
     std::optional<ScalarType> opt_dtype) {
-  check_count_nonzero_dtype(opt_dtype);
   if (dim) {
     return at::count_nonzero(self, IntArrayRef{*dim}, opt_dtype);
   }

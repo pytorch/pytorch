@@ -6825,6 +6825,11 @@ def deg2rad(self: TensorLikeType):
 def count_nonzero(
     self, dim: DimsType | None = None, *, dtype: torch.dtype | None = None
 ):
+    if dtype is not None:
+        torch._check(
+            utils.is_integer_dtype(dtype) or utils.is_float_dtype(dtype),
+            lambda: f"count_nonzero: Expected out tensor to have integral or floating type but got scalar type {dtype}.",
+        )
     return (self != 0).sum(dim, dtype=dtype)
 
 
