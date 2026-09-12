@@ -14,6 +14,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
+from ..virtualized import V
 from .bmm import (
     blackwell_ws_persistent_tma_bmm_template,
     BlackwellBMMConfig,
@@ -32,7 +33,58 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 128, 3, 4, 2, 1, True, False),
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
+    # Single-CTA schedule for the M=128, N=128 cat/cast producer path.
+    BlackwellBMMConfig(128, 128, 64, 3, 8, 2, 1, True, False),
 )
+
+
+def get_cat2_fp32_prologue_sources(input_node) -> tuple[str, str] | None:
+    """Return sources from an explicitly tagged FP32 cat-to-BF16 lowering."""
+    node = input_node
+    while isinstance(node, (ir.TensorBox, ir.StorageBox)):
+        node = node.data
+    if isinstance(node, ir.ComputedBuffer):
+        node = node.data
+    if not isinstance(node, ir.Pointwise):
+        return None
+
+    size = tuple(V.graph.sizevars.simplify(s) for s in node.get_size())
+    if (
+        len(size) != 2
+        or node.get_dtype() != torch.bfloat16
+        or not V.graph.sizevars.statically_known_equals(size[1], 128)
+    ):
+        return None
+
+    source_names = node.annotations.get(ir.CAT2_FP32_TO_BF16_SOURCES)
+    if not (
+        isinstance(source_names, tuple)
+        and len(source_names) == 2
+        and all(isinstance(name, str) for name in source_names)
+        and tuple(node.get_read_names()) == source_names
+    ):
+        return None
+    for source_name in source_names:
+        source = V.graph.try_get_buffer(source_name)
+        if source is None:
+            return None
+        source_size = tuple(V.graph.sizevars.simplify(s) for s in source.get_size())
+        source_stride = tuple(V.graph.sizevars.simplify(s) for s in source.get_stride())
+        if (
+            source.get_dtype() != torch.float32
+            or len(source_size) != 2
+            or not V.graph.sizevars.statically_known_equals(source_size[0], size[0])
+            or not V.graph.sizevars.statically_known_equals(source_size[1], 64)
+            or not V.graph.sizevars.statically_known_equals(source_stride[1], 1)
+            or not V.graph.sizevars.statically_known_equals(
+                source_stride[0], source_size[1]
+            )
+            or not V.graph.sizevars.statically_known_equals(
+                source.get_layout().offset, 0
+            )
+        ):
+            return None
+    return source_names
 
 
 def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
@@ -92,12 +144,16 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
                 ),
                 decompositions,
             )
-            return super().generate(
+            return SubgraphChoiceCaller(
                 name=name,
                 input_nodes=input_nodes,
                 layout=layout,
                 make_fx_graph=fn,
                 description=description,
+                inline_after_autotune=(
+                    bmm_backend == "triton"
+                    and get_cat2_fp32_prologue_sources(input_nodes[1]) is not None
+                ),
             )
 
 
@@ -189,6 +245,10 @@ def lower_blackwell_decompose_k_partial(
     m_pad: int,
     k_part: int,
 ):
+    if get_cat2_fp32_prologue_sources(mat2) is not None:
+        # Give the descriptor template a schedulable named boundary without
+        # forcing the single-use cat/cast producer to remain materialized.
+        mat2 = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(mat2))
     try:
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[int(config_index)]
     except IndexError as error:
@@ -245,7 +305,15 @@ def lower_blackwell_decompose_k_partial(
     )
     if choice is None:
         raise NotImplementedError("Blackwell decompose-K partial choice is unavailable")
-    return choice.output_node()
+    result = choice.output_node()
+    if int(config_index) == 6 and not partial_config.two_ctas:
+        result.data.data.annotations.update(
+            {
+                "prefer_template_prologue_fusion": True,
+                "prologue_fusion_max_input_bytes_to_output_ratio": 4.0,
+            }
+        )
+    return result
 
 
 def blackwell_decompose_k_partial(a, b, k_split, config_index):
