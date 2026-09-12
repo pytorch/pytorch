@@ -2389,7 +2389,7 @@ Tensor compute_T8(const Tensor& A) {
   constexpr scalar_t x4 = (-271. + 29. * sqrt_177) / (315. * x3);
   constexpr scalar_t x5 = (-11. + 11. * sqrt_177) / (1260. * x3);
   constexpr scalar_t x6 = (-99. + 11. * sqrt_177) / (5040. * x3);
-  constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
+  constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3 * x3);
   constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
 
   auto As = _allocate_buffer(A, 5);
