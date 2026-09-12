@@ -3198,6 +3198,41 @@ class UnevenFlattenedReduceScatterTest(DTensorContinuousTestBase):
             )
 
 
+class UnevenFlattenedAllGatherTest(DTensorContinuousTestBase):
+    """Test for correctness of flattened all_gather with uneven tensor dimensions.
+
+    When redistributing Shard(dim),Shard(dim) -> Replicate,Replicate on a 2D
+    mesh, uneven tensor dimensions produce nested chunk boundaries that do not
+    coincide with the chunk boundaries of a single flattened all_gather, so
+    the flattened optimization must not be applied (same rule reduce_scatter
+    already enforces).
+    """
+
+    world_size = 4  # 2 x 2 mesh
+
+    def test_shard_shard_to_replicate_replicate_uneven(self):
+        """Test that Shard(0),Shard(0) -> Replicate,Replicate round-trips uneven dims.
+
+        With mesh [2, 2] and tensor dim 0 size = 5:
+        - Nested chunking: dim split [3, 2] across mesh dim 0, then [2, 1] and
+          [1, 1] across mesh dim 1 -> local sizes (2, 1, 1, 1).
+        - A single flattened all_gather over 4 ranks assumes flat chunk sizes
+          (2, 2, 1, 0), so gathering the nested shards with it reassembles the
+          tensor with rows misplaced and zero padding injected.
+        """
+        mesh = init_device_mesh(self.device_type, (2, 2), mesh_dim_names=("A", "B"))
+        # Create flattened mesh so the flattened optimization is eligible
+        mesh["A", "B"]._flatten("A_B")
+
+        # Tensor size 5 on dim 0 is not divisible by the flattened mesh size 4
+        full_tensor = torch.arange(5 * 3, dtype=torch.float32).reshape(5, 3)
+        dt = distribute_tensor(full_tensor, mesh, (Shard(0), Shard(0)))
+
+        result = dt.redistribute(mesh, (Replicate(), Replicate()))
+
+        self.assertEqual(result.to_local(), full_tensor)
+
+
 RedistributeTestWithLocalTensor = create_local_tensor_test_class(
     RedistributeTest,
     base_class=LocalDTensorContinuousTestBase,
