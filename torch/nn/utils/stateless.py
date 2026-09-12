@@ -134,6 +134,20 @@ def _reparametrize_module(
         orig_parameters_and_buffers, _ = accessor.swap_tensors_dict(
             untied_parameters_and_buffers, allow_missing=True
         )
+        # Shared submodules can map multiple names to the same slot;
+        # keep the first original per slot.
+        slot_to_orig: dict[tuple[int, str], Tensor] = {}
+        for name, orig in orig_parameters_and_buffers.items():
+            prefix, _, attr = name.rpartition(".")
+            try:
+                submod = accessor.get_submodule(prefix)
+            except (AttributeError, TypeError):
+                continue
+            slot = (id(submod), attr)
+            if slot in slot_to_orig:
+                orig_parameters_and_buffers[name] = slot_to_orig[slot]
+            else:
+                slot_to_orig[slot] = orig
         yield
     finally:
         if stack_weights:
@@ -144,6 +158,19 @@ def _reparametrize_module(
         new_parameters_and_buffers, _ = accessor.swap_tensors_dict(
             orig_parameters_and_buffers, allow_missing=True
         )
+        # Same for restore: keep the first value per slot.
+        slot_to_new: dict[tuple[int, str], Tensor] = {}
+        for name, new in new_parameters_and_buffers.items():
+            prefix, _, attr = name.rpartition(".")
+            try:
+                submod = accessor.get_submodule(prefix)
+            except (AttributeError, TypeError):
+                continue
+            slot = (id(submod), attr)
+            if slot in slot_to_new:
+                new_parameters_and_buffers[name] = slot_to_new[slot]
+            else:
+                slot_to_new[slot] = new
         # Sometimes the module is not completely stateless and has some in-place modifications on
         # the _parameters and _buffers dictionaries.
         # Write the changed parameters and buffers back to the original dict.
