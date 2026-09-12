@@ -17,6 +17,7 @@ import re
 import sys
 import unittest
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import torch
@@ -35,6 +36,65 @@ from . import config, utils
 
 
 log = logging.getLogger(__name__)
+
+
+_AutocastStateSpec = tuple[str, Callable[[], Any], Callable[[Any], None]]
+_AutocastState = tuple[Any, ...]
+
+
+def _autocast_nesting() -> int:
+    # There is no direct getter for the autocast nesting counter, only
+    # autocast_increment_nesting()/autocast_decrement_nesting(), so read it
+    # via a no-net-effect increment+decrement pair.
+    n = torch.autocast_increment_nesting()
+    torch.autocast_decrement_nesting()
+    return n - 1
+
+
+def _restore_autocast_nesting(target: int) -> None:
+    delta = _autocast_nesting() - target
+    for _ in range(delta):
+        if torch.autocast_decrement_nesting() == 0:
+            torch.clear_autocast_cache()
+    for _ in range(-delta):
+        torch.autocast_increment_nesting()
+
+
+def _autocast_state_specs() -> tuple[_AutocastStateSpec, ...]:
+    # Enabled state and dtype are per-device; cache and nesting are shared.
+    device_specs = tuple(
+        spec
+        for device in ("cpu", "cuda")
+        for spec in (
+            (
+                f"{device} autocast enabled state",
+                partial(torch.is_autocast_enabled, device),
+                partial(torch.set_autocast_enabled, device),
+            ),
+            (
+                f"{device} autocast dtype",
+                partial(torch.get_autocast_dtype, device),
+                partial(torch.set_autocast_dtype, device),
+            ),
+        )
+    )
+    return device_specs + (
+        (
+            "autocast cache enabled state",
+            torch.is_autocast_cache_enabled,
+            torch.set_autocast_cache_enabled,
+        ),
+        ("autocast nesting depth", _autocast_nesting, _restore_autocast_nesting),
+    )
+
+
+def _snapshot_autocast_state() -> _AutocastState:
+    return tuple(get() for _, get, _ in _autocast_state_specs())
+
+
+def _restore_autocast_state(snapshot: _AutocastState) -> None:
+    for (_, _, set_), value in zip(_autocast_state_specs(), snapshot):
+        set_(value)
 
 
 def run_tests(needs: str | tuple[str, ...] = ()) -> None:
@@ -88,6 +148,7 @@ class TestCase(TorchTestCase):
 
     def setUp(self) -> None:
         self._prior_is_grad_enabled = torch.is_grad_enabled()
+        self._prior_autocast_state = _snapshot_autocast_state()
         self._prior_nested_graph_breaks = config.nested_graph_breaks
         config.nested_graph_breaks = True
         super().setUp()
@@ -95,17 +156,65 @@ class TestCase(TorchTestCase):
         self.handler = logging.NullHandler()
         trace_log.addHandler(self.handler)
 
+    def _restore_prior_autocast_state(self) -> None:
+        current_autocast_state = _snapshot_autocast_state()
+        if current_autocast_state != self._prior_autocast_state:
+            specs = _autocast_state_specs()
+            changed = ", ".join(
+                label
+                for (label, _, _), prior, current in zip(
+                    specs, self._prior_autocast_state, current_autocast_state
+                )
+                if prior != current
+            )
+            log.warning("Running test %s changed %s", self.id(), changed)
+            _restore_autocast_state(self._prior_autocast_state)
+
+    def _restore_prior_test_state(self) -> None:
+        errors: list[tuple[str, Exception]] = []
+        if self._prior_is_grad_enabled is not torch.is_grad_enabled():
+            log.warning("Running test %s changed grad mode", self.id())
+            try:
+                torch.set_grad_enabled(self._prior_is_grad_enabled)
+            except Exception as error:
+                errors.append(("grad mode", error))
+        try:
+            self._restore_prior_autocast_state()
+        except Exception as error:
+            errors.append(("autocast state", error))
+        try:
+            config.nested_graph_breaks = self._prior_nested_graph_breaks
+        except Exception as error:
+            errors.append(("nested_graph_breaks", error))
+        if errors:
+            # Raise the first failure as primary, but preserve every later failure in logs.
+            for label, error in errors[1:]:
+                log.error(
+                    "Additional failure restoring %s",
+                    label,
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+            raise errors[0][1]
+
     def tearDown(self) -> None:
         trace_log.removeHandler(self.handler)
         for k, v in utils.counters.items():
             log.debug("%s %s", k, v.most_common())
         utils.counters.clear()
         torch._C._autograd._saved_tensors_hooks_enable()
-        super().tearDown()
-        if self._prior_is_grad_enabled is not torch.is_grad_enabled():
-            log.warning("Running test changed grad mode")
-            torch.set_grad_enabled(self._prior_is_grad_enabled)
-        config.nested_graph_breaks = self._prior_nested_graph_breaks
+        teardown_error: BaseException | None = None
+        try:
+            super().tearDown()
+        except BaseException as error:
+            teardown_error = error
+            raise
+        finally:
+            try:
+                self._restore_prior_test_state()
+            except Exception:
+                if teardown_error is None:
+                    raise
+                log.exception("Failed to restore test state during teardown")
 
     def before_cuda_memory_leak_check(self) -> None:
         super().before_cuda_memory_leak_check()
