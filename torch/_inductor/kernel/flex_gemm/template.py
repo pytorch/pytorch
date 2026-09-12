@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
 import dataclasses
+from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 import sympy
 
+import torch
 from torch._higher_order_ops.flex_gemm import FlexGemmOpSpec
 from torch._inductor.codegen.common import IndentedBuffer
 from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
@@ -27,6 +30,7 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     from torch._inductor.ir import TensorBox
+    from torch._inductor.kernel.flex_gemm.compile_pool import InductorCompilePool
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import FlexGemmEpiModSource
     from torch._inductor.kernel.flex_gemm.runtime import FlexGemmRuntimeLocalReducePlan
 
@@ -71,18 +75,21 @@ class FlexGemmEpilogueLocalReduceConfig:
             source.local_reduce_prepass_finalize,
         )
 
-    def selection_plan(self) -> "FlexGemmRuntimeLocalReducePlan":
-        """The runtime plan with generated callbacks replaced, for config selection."""
+    def runtime_plan(
+        self, resolve: Callable[[str], Any], epilogue_name: str
+    ) -> "FlexGemmRuntimeLocalReducePlan":
+        """The runtime plan (without its ``out`` buffer) with generated callback
+        names resolved through ``resolve``; built-in names pass through."""
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeLocalReducePlan,
-            selection_callback,
         )
 
         def callback(name: str | None) -> Any:
             if name is None or name in LOCAL_REDUCE_FINALIZE_NAMES:
                 return name
-            return selection_callback
+            return resolve(name)
 
+        prepass_name = f"{epilogue_name}{LOCAL_REDUCE_PREPASS_FN_SUFFIX}"
         return FlexGemmRuntimeLocalReducePlan(
             self.geometry,
             stores=self.out_index is not None,
@@ -92,7 +99,7 @@ class FlexGemmEpilogueLocalReduceConfig:
             finalize_operands=self.finalize_operands,
             store_finalize=callback(self.store_finalize),
             binary_store_finalize=self.binary_store_finalize,
-            prepass=None if self.prepass_combine is None else selection_callback,
+            prepass=None if self.prepass_combine is None else resolve(prepass_name),
             prepass_combine=self.prepass_combine,
             prepass_finalize=callback(self.prepass_finalize),
             output_layout=self.output_layout,
@@ -128,6 +135,36 @@ class FlexGemmEpilogueConfig:
     aux_out_indices: tuple[int, ...]
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     output_contraction: FlexGemmOutputContraction | None
+
+    def epimod(
+        self,
+        epilogue_fn: Any,
+        input_dtypes: Sequence[torch.dtype],
+        resolve: Callable[[str], Any],
+    ) -> Any:
+        """Build the QuACK EpiMod the generated ``_main`` builds at runtime.
+
+        ``input_dtypes`` are the template inputs' dtypes and ``resolve`` maps a
+        generated local-reduce callback name to its callable. Lowering passes
+        the selection stub for both; compile workers pass the loaded module.
+        """
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            flex_gemm_epimod,
+            quack_epilogue_dtype,
+        )
+
+        return flex_gemm_epimod(
+            epilogue_fn,
+            tuple(
+                quack_epilogue_dtype(input_dtypes[i]) for i in self.epilogue_arg_indices
+            ),
+            self.epilogue_arg_kinds,
+            len(self.aux_out_indices),
+            None
+            if self.local_reduce is None
+            else self.local_reduce.runtime_plan(resolve, self.epilogue_name),
+            self.output_contraction,
+        )
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -198,9 +235,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 flex_gemm_epilogue({", ".join((*call_args, config.epilogue_name))}{call_kwargs})
 
             def {self.kernel_name}_precompile(**metadata):
-                # Compile workers cannot initialize CUDA; the template caller
-                # compiles each choice's pinned QuACK kernel in-process instead
-                # (see FlexGemmEpilogueCaller.precompile).
+                # The template caller compiles each choice's pinned QuACK
+                # kernel itself (see FlexGemmEpilogueCaller.precompile).
                 pass
             """
         )
@@ -340,19 +376,53 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
         description = "default" if quack_config is None else dict(quack_config)
         return f"CuteDSL template {name} (QUACK config={description})"
 
-    def precompile(self) -> None:
-        """Compile this choice's pinned QuACK kernel in-process.
+    def precompile(self, *, use_workers: bool = True) -> None:
+        """Compile this choice's pinned QuACK kernel, in a compile worker if any.
 
-        The cold ``jit_cache`` miss compiles on first run. Inductor precompiles
-        choices from several threads and CuTeDSL compilation is not thread-safe,
-        so compile under the process-wide lock shared with every other in-process
-        CuTeDSL compile; allocating inside it keeps waiting threads from holding
-        buffers.
+        Running the kernel once with a compile pool active ships the cold
+        ``jit_cache`` miss to an Inductor compile worker (NOTE [FlexGEMM compile
+        workers]). Without workers, or with ``use_workers=False`` for a lone
+        choice that would only pay the worker's cold import, it compiles
+        in-process.
         """
+        from torch._inductor.kernel.flex_gemm import compile_pool
+
+        if use_workers and compile_pool.workers_ready():
+            bmreq = self.bmreq
+            pool = compile_pool.InductorCompilePool(
+                compile_pool.FlexGemmCompileRecipe(
+                    bmreq.module_cache_key,
+                    bmreq.module_path,
+                    self.config,
+                    tuple(meta.dtype for meta in bmreq.input_tensor_meta),
+                )
+            )
+            sha = self._run_once(pool)
+            if sha is None or pool.wait(sha):
+                return
+        self._run_once(None)
+
+    def _run_once(self, pool: "InductorCompilePool | None") -> str | None:
+        """Run the kernel on fresh buffers under the compile lock.
+
+        Inductor precompiles from several threads and CuTeDSL compilation is
+        not thread-safe. Buffers live only inside this call so a thread
+        waiting on the lock or on a worker holds none. Returns the pending
+        ``jit_cache`` key when ``pool`` took the compile, else None.
+        """
+        from torch._vendor.quack.cache.async_compile import CompilePending, pool_active
+
+        bmreq = self.bmreq
         with CUTEDSL_COMPILE_LOCK:
-            inputs = [meta.to_tensor() for meta in self.bmreq.input_tensor_meta]
-            out = self.bmreq.output_tensor_meta.to_tensor()
-            self.bmreq.make_run_fn(*inputs, out=out)()
+            inputs = [meta.to_tensor() for meta in bmreq.input_tensor_meta]
+            out = bmreq.output_tensor_meta.to_tensor()
+            run = bmreq.make_run_fn(*inputs, out=out)
+            try:
+                with pool_active(pool) if pool is not None else nullcontext():
+                    run()
+            except CompilePending as pending:
+                return pending.sha
+        return None
 
 
 class FlexGemmEpilogueTemplate(CuteDSLTemplate):

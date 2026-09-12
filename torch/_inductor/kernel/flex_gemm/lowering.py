@@ -219,9 +219,7 @@ def flex_gemm_quack_configs(
     ``FlexGemmEpilogueCaller.output_node`` guards the shape-dependent rules.
     """
     from torch._inductor.kernel.flex_gemm.runtime import (
-        flex_gemm_epimod,
         flex_gemm_problem,
-        quack_epilogue_dtype,
         selection_callback,
     )
     from torch._inductor.virtualized import V
@@ -229,14 +227,10 @@ def flex_gemm_quack_configs(
     from torch._vendor.quack.gemm_runtime.autotune import legal_mod_configs
 
     output_contraction = template_config.output_contraction
-    local_reduce = template_config.local_reduce
-    epimod = flex_gemm_epimod(
+    epimod = template_config.epimod(
         selection_callback,
-        tuple(quack_epilogue_dtype(node.get_dtype()) for node in epilogue_input_nodes),
-        template_config.epilogue_arg_kinds,
-        len(template_config.aux_out_indices),
-        None if local_reduce is None else local_reduce.selection_plan(),
-        output_contraction,
+        [node.get_dtype() for node in (*gemm_input_nodes, *epilogue_input_nodes)],
+        lambda name: selection_callback,
     )
     sizevars = V.graph.sizevars
     mat1 = gemm_input_nodes[template_config.gemm_op.mat1_index]
@@ -639,7 +633,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         # autotune_select_algorithm skips a lone tuned candidate; compile it now so
         # tuned=True never defers compilation to the first call. Untuned calls keep
         # lazy first-call compilation and allocate no example tensors.
-        choices[0].precompile()
+        choices[0].precompile(use_workers=False)
     structural_outs = {}
     if local_reduce_store is not None:
         structural_outs[local_reduce_store.node] = local_reduce_outs[0]
