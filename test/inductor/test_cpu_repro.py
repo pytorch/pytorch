@@ -4335,6 +4335,23 @@ class CPUReproTests(TestCase):
                 1,
             )
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_local_buffer_with_mutation_output(self):
+        # https://github.com/pytorch/pytorch/issues/196570
+        # m depends on x so that dropping the index_put changes the output.
+        def fn(x):
+            m = x.clone()
+            m[torch.arange(8).unsqueeze(0), torch.arange(8).unsqueeze(1)] = 0
+            return torch.softmax(x + m, dim=-1)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, (torch.randn(8, 8),))
+        counts = metrics.cpp_outer_loop_fused_inner_counts
+        self.assertEqual(len(counts), 1)
+        self.assertEqual(counts[0].inner_kernel_number, 3)
+        self.assertEqual(counts[0].local_buffer_number, 1)
+
     @requires_vectorization
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_outer_loop_local_buffer_with_tiled_outer_dim(self):
