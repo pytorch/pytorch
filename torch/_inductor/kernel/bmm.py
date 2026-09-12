@@ -160,7 +160,6 @@ blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
     grid=blackwell_bmm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_inputs=True,
 )
 
 
@@ -191,8 +190,10 @@ def is_blackwell_bmm_2cta_compatible(
     padded tile aliases the following batch. A rank-3 TMA output keeps the batch
     boundary explicit and safely suppresses the padded partner tile.
     """
-    return output_batch_rows > 1 and tma_store and (
-        not flatten_output or output_batch_rows % (2 * block_m) == 0
+    return (
+        output_batch_rows > 1
+        and tma_store
+        and (not flatten_output or output_batch_rows % (2 * block_m) == 0)
     )
 
 
