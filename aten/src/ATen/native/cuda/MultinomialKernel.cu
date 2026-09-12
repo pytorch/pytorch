@@ -11,6 +11,7 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <c10/cuda/CUDAMathCompat.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CUDAFunctions.h>
@@ -112,7 +113,7 @@ __device__ int binarySearchForMultinomial(const scalar_t* cumdist,
   CUDA_KERNEL_ASSERT(cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
-    int mid = start + (end - start) / 2;
+    int mid = c10::cuda::compat::midpoint(start, end);
 
     scalar_t midVal = cumdist[mid];
     if (midVal < val) {
