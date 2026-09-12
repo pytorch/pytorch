@@ -84,6 +84,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
+    recover_orig_fp32_precision,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -5928,6 +5929,50 @@ class TestAutotuneCacheExtraOptions(TestCase):
         mock_local_backend.put.assert_called_once()
         saved_data = mock_local_backend.put.call_args[0][1]
         self.assertNotIn("extra_options", saved_data)
+
+
+class TestAutotuneCacheFp32Precision(TestCase):
+    """Autotune cache keys must not call the legacy matmul-precision getter
+    after the per-backend API has been used (#196728)."""
+
+    @recover_orig_fp32_precision
+    def test_helper_avoids_mixed_api_error_and_keys_both_backends(self):
+        from torch._inductor.utils import fp32_matmul_precision_key
+
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch.backends.mkldnn.matmul.fp32_precision = "bf16"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            torch.get_float32_matmul_precision()
+
+        self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:bf16")
+
+    @recover_orig_fp32_precision
+    def test_create_precompile_key_and_persistent_cache_lookup(self):
+        from torch._inductor.codecache import PersistentCache
+        from torch._inductor.select_algorithm import create_precompile_key
+
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch.backends.mkldnn.matmul.fp32_precision = "bf16"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            torch.get_float32_matmul_precision()
+
+        key = create_precompile_key("mm", "inputs", [])
+        self.assertIn("cuda:tf32,mkldnn:bf16", key)
+
+        timings = PersistentCache().lookup([], "mm", "inputs", None)
+        self.assertEqual(timings, {})
+
+    @recover_orig_fp32_precision
+    def test_helper_distinguishes_legacy_high_vs_medium(self):
+        from torch._inductor.utils import fp32_matmul_precision_key
+
+        torch.set_float32_matmul_precision("high")
+        self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:tf32")
+
+        torch.set_float32_matmul_precision("medium")
+        self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:bf16")
 
 
 if __name__ == "__main__":
