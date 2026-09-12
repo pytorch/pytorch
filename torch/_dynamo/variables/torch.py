@@ -2721,6 +2721,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.current_stream,
             torch.cuda.current_stream,
+            torch.mtia.current_stream,
             torch.xpu.current_stream,
         )
         def handle_current_stream(
