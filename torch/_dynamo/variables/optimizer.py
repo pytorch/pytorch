@@ -50,6 +50,7 @@ from .user_defined import UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
@@ -120,7 +121,21 @@ class OptimizerVariable(UserDefinedObjectVariable):
             self.graph_break_if_pending_mutation(tx)
             self.move_step_if_cpu()
             py_args, py_kwargs = self.get_python_args(*args, **kwargs)
-            ret_val = self.value._init_group(*py_args, **py_kwargs)
+            # Eager _init_group is not traced; it reads the live dict to
+            # place state["step"]. Temporarily set capturable=True so GPU
+            # steps land on device, then restore so the flag does not leak
+            # into eager (see OptimizerCapturableVariable for the trace path).
+            saved_capturables: list[tuple[dict[str, Any], bool]] = []
+            for group in self.value.param_groups:
+                if not self._safe_to_set_capturable(group):
+                    continue
+                saved_capturables.append((group, group["capturable"]))
+                group["capturable"] = True
+            try:
+                ret_val = self.value._init_group(*py_args, **py_kwargs)
+            finally:
+                for group, orig in saved_capturables:
+                    group["capturable"] = orig
             self.map_sources_and_install_guards(tx)
             self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
             # stash a weak_ptr to optimizer to invalidate code
@@ -180,35 +195,35 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
+    def _safe_to_set_capturable(self, group: dict[str, Any]) -> bool:
+        # Live-dict flip is only for eager _init_group: GPU params need step on
+        # device. CPU must keep capturable=False so step matches eager.
+        all_uninitialized = True
+        all_gpu = True
+        for p in group.get("params", []):
+            all_gpu &= p.is_cuda or p.is_xpu
+            all_uninitialized &= p not in self.value.state
+        return "capturable" in group and all_uninitialized and all_gpu
+
     def _set_capturable(self, tx: "InstructionTranslatorBase") -> None:
         from . import LazyVariableTracker
 
-        # We only set capturable if params are on cuda
-        # and the state is not initialized
-        def safe_to_set_capturable(group: dict[str, Any]) -> bool:
-            all_uninitialized = True
-            all_gpu = True
-
-            for p in group.get("params", []):
-                all_gpu &= p.is_cuda or p.is_xpu
-                all_uninitialized &= p not in self.value.state
-
-            return "capturable" in group and all_uninitialized and all_gpu
-
-        # track indices to not set so we don't need to
-        # in the variable tracker realize the whole state
-        # we handle guarding the state specially
-        for group in self.value.param_groups:
-            if safe_to_set_capturable(group):
-                group["capturable"] = True
-
+        # Rewrite the VT only. Do not mutate the live param_groups dict; that
+        # leak is what issue 182706 is about. Tracing must see capturable=True
+        # for every group (including CPU) so adam()/radam() take the tensor
+        # path instead of .item(). Reconstruction uses orig_value.
         source = self.source and AttrSource(self.source, "param_groups")
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableTracker.build(tx, self.value.param_groups, source)
         )
         for param_group_vt in param_groups_vt.items:
             key = HashableTracker(ConstantVariable.create("capturable"))
-            param_group_vt.items[key] = ConstantVariable.create(True)
+            orig_vt = param_group_vt.items.get(key)
+            if orig_vt is None or isinstance(orig_vt, OptimizerCapturableVariable):
+                continue
+            param_group_vt.items[key] = OptimizerCapturableVariable(
+                value=True, orig_value=orig_vt.as_python_constant()
+            )
 
     def get_python_args(
         self, *args: Any, **kwargs: Any
@@ -421,3 +436,29 @@ class OptimizerVariable(UserDefinedObjectVariable):
             weakref.finalize(value, clear_static_tensor_refs)
 
         tx.output.add_graph_finalizer(init_finalizer)
+
+
+class OptimizerCapturableVariable(VariableTracker):
+    """Trace-time capturable=True that reconstructs as the user's original value.
+
+    Optimizer step() branches on capturable. Tracing must take the True (tensor)
+    path even on CPU, or .item() graph-breaks. If this VT implemented
+    as_python_constant() as True, dict reconstruction would write True back into
+    the live param group. Omitting it forces reconstruct(), which emits orig_value.
+    """
+
+    _nonvar_fields = {"orig_value", *VariableTracker._nonvar_fields}
+
+    def __init__(self, value: bool, orig_value: bool, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+        self.orig_value = orig_value
+
+    def python_type(self) -> type:
+        return bool
+
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return ConstantVariable.create(self.value)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(ConstantVariable.create(self.orig_value))

@@ -60,6 +60,7 @@ from torch.testing._internal.common_optimizers import (
     optims,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
     skipIfWindows,
@@ -1077,6 +1078,34 @@ class CompiledOptimizerTests(TestCase):
         for param, param_ref in zip(params, params_ref):
             self.assertEqual(param, param_ref)
 
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_capturable_does_not_leak_to_param_groups(self, device):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+        m = torch.nn.Linear(2, 2, device=device)
+        opt = AdamW(m.parameters(), lr=0.01)
+        original_capturable = opt.param_groups[0]["capturable"]
+        m(torch.randn(2, 2, device=device)).sum().backward()
+
+        # Compile step while state is empty so eager _init_group runs. On GPU
+        # that path temporarily sets capturable=True on the live dict.
+        def step():
+            opt.step()
+
+        torch.compile(step, backend="eager")()
+        self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
+
+        # Accessing param_groups traces OptimizerCapturableVariable. Reconstruct
+        # (state_dict / lr mutation) must emit the original value, not True.
+        def fn():
+            opt.param_groups[0]["lr"] = 5.0
+            sd = deepcopy(opt.state_dict())
+            opt.param_groups[0]["lr"] = 0.01
+            return sd
+
+        torch._dynamo.optimize("eager_noexcept", nopython=False)(fn)()
+        self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
+
 
 @skipIfRocm(msg="ROCm may have different numerical behavior")
 @requires_gpu_and_triton
@@ -1274,6 +1303,8 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
             _make_bitwise_test(optim_cls, kernel_count=kernel_count, **optim_kwargs),
         )
 
+
+instantiate_parametrized_tests(CompiledOptimizerTests)
 
 instantiate_device_type_tests(
     CompiledOptimizerParityTests, globals(), allow_xpu=True, except_for="cpu"
