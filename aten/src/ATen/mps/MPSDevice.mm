@@ -4,6 +4,9 @@
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
+#include <c10/util/env.h>
+
+#include <cstdio>
 
 namespace at::mps {
 
@@ -125,9 +128,41 @@ bool is_apple_family_or_newer(AppleGPUFamily family) {
   return [MPSDevice::getInstance()->device() supportsFamily:mtl_family];
 }
 
+unsigned max_metal_language_version() {
+  static const unsigned rc = []() {
+    unsigned version = 31;
+    if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
+      // Metal-3.2 allows lambdas in shader code
+      version = 32;
+    }
+    if (is_macos_at_least(MacOSVersion::MACOS_26_0)) {
+      // Metal-4.0 allows tensor template arguments
+      version = 40;
+    }
+    const auto env_val = c10::utils::get_env("PYTORCH_MPS_METAL_VERSION");
+    if (!env_val) {
+      return version;
+    }
+    unsigned major = 0, minor = 0;
+    if (std::sscanf(env_val->c_str(), "%u.%u", &major, &minor) != 2) {
+      TORCH_WARN("Ignoring PYTORCH_MPS_METAL_VERSION=", *env_val, ", expected a value like 3.1 or 4.0");
+      return version;
+    }
+    return std::min(version, 10 * major + minor);
+  }();
+  return rc;
+}
+
 bool has_mpp() {
+#if defined(CAN_BUILD_METAL_4) || defined(PYTORCH_JIT_COMPILE_SHADERS)
   // MetalPerformancePrimitives matmul2d (cooperative tensors) needs macOS 26.2+
-  return is_macos_at_least(MacOSVersion::MACOS_26_2);
+  // and shaders compiled with -std=metal4.0
+  return is_macos_at_least(MacOSVersion::MACOS_26_2) && max_metal_language_version() >= 40;
+#else
+  // Metal toolchain used to build this binary could not compile the Metal 4.0
+  // shaders, so kernels_40.metallib is not embedded into libtorch_cpu
+  return false;
+#endif
 }
 
 } // namespace at::mps

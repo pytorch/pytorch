@@ -92,7 +92,14 @@ class TORCH_API MPSDevice {
 TORCH_API bool is_available();
 TORCH_API bool is_macos_at_least(MacOSVersion version);
 TORCH_API bool is_apple_family_or_newer(AppleGPUFamily family);
-// Whether MetalPerformancePrimitives (cooperative tensors) is usable;
+// Highest Metal language version usable at runtime, as major * 10 + minor.
+// Derived from the OS version, but can be lowered via PYTORCH_MPS_METAL_VERSION
+// (e.g. `3.1`) to opt out of the Metal 4.0 code paths on hosts where they are
+// broken, such as virtualized macOS
+TORCH_API unsigned max_metal_language_version();
+// Whether MetalPerformancePrimitives (cooperative tensors) is usable, i.e. the
+// OS is new enough, the Metal 4.0 shaders were compiled into this binary and
+// PYTORCH_MPS_METAL_VERSION did not ask for an older language version
 TORCH_API bool has_mpp();
 TORCH_API at::Allocator* GetMPSAllocator();
 
