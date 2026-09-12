@@ -632,31 +632,6 @@ if torch.backends.mps.is_available():
 
         return ops
 
-    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
-        # Error input samples do not take a dtype argument.
-        XFAILLIST = {
-            # Exceptions are not raised
-            "__rmod__",
-            "__rsub__",
-            "__rpow__",
-            "clamp_max",
-            "clamp_min",
-            "masked_scatter",
-            # MPS does not support tensor dimensions > 16
-            "amax",
-            "amin",
-            "aminmax",
-        }
-
-        def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
-            op.decorators = op.decorators + (d,)
-
-        for op in ops:
-            key = op.name + op.variant_test_name
-            if key in XFAILLIST:
-                addDecorator(op, DecorateInfo(unittest.expectedFailure))
-
-        return ops
 else:
 
     def mps_ops_modifier(
@@ -668,7 +643,4 @@ else:
         return ops
 
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
-        return ops
-
-    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         return ops
