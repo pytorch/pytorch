@@ -1086,6 +1086,20 @@ class RangeVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if maybe_get_python_type(args[0]) not in (int, bool):
+            # Specialize symbolic bounds, as in the arithmetic path below.
+            iterator = RangeIteratorVariable(
+                self.start(), self.stop(), self.step(), self.range_length()
+            )
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.index),
+                [iterator, args[0]],
+                {
+                    "not_found_msg": ConstantVariable.create(
+                        "sequence.index(x): x not in sequence"
+                    )
+                },
+            )
         x = args[0].as_python_constant()
         start, stop, step = self.start(), self.stop(), self.step()
         in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
@@ -1097,8 +1111,6 @@ class RangeVariable(BaseListVariable):
             args=[f"{x} is not in range"],
         )
 
-    # Reuse BaseListVariable's table, overriding index/count with range's
-    # arithmetic implementations.
     def range_reversed(
         self,
         tx: "InstructionTranslatorBase",

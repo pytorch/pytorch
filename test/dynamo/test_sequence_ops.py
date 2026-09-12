@@ -1463,6 +1463,117 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), "type_error")
 
 
+@instantiate_parametrized_tests
+class TestRangeIndex(torch._dynamo.test_case.TestCase):
+    @parametrize("value", [1.0, 1 + 0j])
+    def test_numeric_equality_returns_int(self, value):
+        def fn():
+            return range(3).index(value)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 1)
+        self.assertIs(type(result), int)
+
+    @parametrize(
+        "bounds,expected",
+        [((1, 8, 2), (1, [1, 3])), ((7, 0, -2), (2, [7, 5, 3]))],
+    )
+    def test_custom_equality_stops_at_first_match(self, bounds, expected):
+        seen = []
+
+        class Match:
+            def __eq__(self, other):
+                seen.append(other)
+                return other % 3 == 0
+
+            def __index__(self):
+                raise AssertionError("index() must use equality, not __index__")
+
+        def fn():
+            return range(*bounds).index(Match()), seen
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
+
+    def test_int_subclass_uses_overridden_equality(self):
+        class Match(int):
+            def __eq__(self, other):
+                return other == 2
+
+        def fn():
+            return range(5).index(Match(99))
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 2)
+
+    def test_comparison_exception_propagates(self):
+        seen = []
+
+        class Match:
+            def __eq__(self, other):
+                seen.append(other)
+                if other == 2:
+                    raise RuntimeError("comparison failed")
+                return False
+
+        def fn():
+            try:
+                range(5).index(Match())
+            except RuntimeError:
+                return seen
+            return None
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), [0, 1, 2]
+        )
+
+    @parametrize("stop", [0, 3])
+    def test_missing_value_does_not_format_needle(self, stop):
+        seen = []
+
+        class Missing:
+            def __eq__(self, other):
+                seen.append(other)
+                return False
+
+            def __repr__(self):
+                raise RuntimeError("index() must not format the missing value")
+
+        def fn():
+            try:
+                range(stop).index(Missing())
+            except ValueError:
+                return seen
+            return None
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), list(range(stop))
+        )
+
+    def test_large_range_non_integer_match(self):
+        def fn():
+            return range(2**100).index(1 + 0j)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 1)
+
+    def test_dynamic_bounds_and_search_value(self):
+        class EqualTo:
+            def __init__(self, target):
+                self.target = target
+
+            def __eq__(self, other):
+                return other == self.target
+
+        def fn(x, values, needle):
+            return x + values.index(needle)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        x = torch.zeros(3)
+        needle = EqualTo(3)
+        self.assertEqual(compiled(x, range(-1, 8, 2), needle), x + 2)
+        needle.target = 5
+        self.assertEqual(compiled(x, range(-1, 8, 2), needle), x + 3)
+        self.assertEqual(compiled(x, range(9, -2, -2), needle), x + 2)
+
+
 class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):
     # range_iterator.__setstate__(k) sets the iterator index, clamped to
     # [0, len], mirroring CPython rangeiter_setstate.
