@@ -8,6 +8,7 @@ import os
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
@@ -72,25 +73,6 @@ def flex_gemm_preferred_config(problem: Any) -> Any:
             problem.m, problem.n, device_capacity=capacity
         )
     return default_config(problem.device)
-
-
-def check_flex_gemm_config(epimod: Any, quack_config: Any, problem: Any) -> None:
-    """Fail closed if a pinned GemmConfig is illegal for the runtime problem.
-
-    Inductor pins the config it selected at lowering time from concrete shape
-    hints; QuACK's ``config=`` path skips its own pruning, so problem-size rules
-    such as ``GroupedMainStore.supports_problem`` are re-applied here.
-    """
-    from torch._vendor.quack.autotuner import AutotuneConfig
-    from torch._vendor.quack.gemm_runtime.autotune import prune_mod_configs
-
-    try:
-        prune_mod_configs(epimod, None, [AutotuneConfig(config=quack_config)], problem)
-    except ValueError as e:
-        raise RuntimeError(
-            f"pinned FlexGEMM GemmConfig {quack_config!r} is not legal for "
-            f"m={problem.m}, n={problem.n}: {e}"
-        ) from e
 
 
 # NOTE [Byte-backed epilogue tensor storage]
@@ -416,7 +398,7 @@ def gemm_epilogue(
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
     output_contraction: FlexGemmOutputContraction | None = None,
     cu_seqlens_m: torch.Tensor | None = None,
-    config: tuple[tuple[str, Any], ...],
+    config: QuackConfigKey,
     stream: int | None = None,
 ) -> torch.Tensor:
     """Run a dense, block-scaled or varlen-M FlexGEMM call through the vendored QuACK EpiMod.
@@ -526,18 +508,6 @@ def gemm_epilogue(
         None if output_contraction is None else output_contraction.concat_layout
     )
     quack_config = GemmConfig(**dict(config))
-    check_flex_gemm_config(
-        epimod,
-        quack_config,
-        flex_gemm_problem(
-            a.device,
-            a.shape[-2],
-            b.shape[-1],
-            concat_layout,
-            blockscaled=SFA is not None,
-            varlen_m=cu_seqlens_m is not None,
-        ),
-    )
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
         if stream is not None
