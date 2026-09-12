@@ -31,7 +31,8 @@ enum class MacOSVersion : uint32_t {
   MACOS_27_0,
 };
 
-// Metal language version to compile shaders with; values match MTLLanguageVersion
+// Metal language version to compile shaders with
+// Values match MTLLanguageVersion
 enum class MetalLanguageVersion : uint32_t {
   METAL_3_1 = (3 << 16) + 1,
   METAL_3_2 = (3 << 16) + 2, // allows lambdas in shader code

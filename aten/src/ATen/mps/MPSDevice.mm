@@ -166,13 +166,11 @@ bool has_mpp() {
   // shaders, so kernels_40.metallib is not embedded into libtorch_cpu
   return false;
 #endif
-  // MetalPerformancePrimitives matmul2d (cooperative tensors) needs macOS 26.2+
-  // and shaders compiled with -std=metal4.0. The Apple family check rules out
-  // the paravirtual device virtualized macOS exposes: it advertises no Apple
-  // family at all, and fails to build cooperative-tensor pipelines even though
-  // it loads the metallib. See https://github.com/pytorch/pytorch/issues/196582
-  return is_macos_at_least(MacOSVersion::MACOS_26_2) &&
-      metal_language_version() >= MetalLanguageVersion::METAL_4_0 &&
+  // MetalPerformancePrimitives needs macOS 26.2+ and shaders compiled with Metal 4.0
+  // Also check device family, it's older than M1 on virtualized Mac and it fails to
+  // JIT-compile MPP, even though rest of Metal 4 feature work fine
+  // https://github.com/pytorch/pytorch/issues/196582
+  return is_macos_at_least(MacOSVersion::MACOS_26_2) && metal_language_version() >= MetalLanguageVersion::METAL_4_0 &&
       is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS);
 }
 
