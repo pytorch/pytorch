@@ -119,6 +119,11 @@ template <typename... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
     IValue*& dest,
     Args&&... args) {
+  // Argument order matters here: each boxToStack advances dest, so the
+  // arguments have to be boxed into consecutive slots left to right. The
+  // built-in comma operator sequences its left operand before its right,
+  // so this fold evaluates the calls strictly in pack order. (boxToStack
+  // returns void, so no overloaded operator, can be selected instead.)
   (boxToStack(dest, std::forward<Args>(args)), ...);
 }
 
