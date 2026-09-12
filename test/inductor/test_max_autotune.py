@@ -44,12 +44,14 @@ from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import override_template_heuristics
+from torch._inductor.heuristics.template.bmm import (
+    CUDABlackwellBMMTemplateConfigHeuristic,
+)
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
     CUDAAddMMTemplateConfigHeuristic,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-    CUDABlackwellBMMTemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
