@@ -707,7 +707,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -720,7 +719,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
