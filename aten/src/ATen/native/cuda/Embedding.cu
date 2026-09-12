@@ -123,6 +123,9 @@ __global__ void embedding_backward_feature_kernel
         }
       }
     }
+    // Wait for every warp to finish consuming the current indices_batch before
+    // any thread reloads it for the next batch.
+    __syncthreads();
   }
 }
 
