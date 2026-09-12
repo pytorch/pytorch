@@ -370,6 +370,83 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
+def _collect_namedtuple_types(
+    value: Any, seen: OrderedSet[type] | None = None
+) -> list[type]:
+    """Return NamedTuple types referenced by ``value``, dependencies first.
+
+    Used so generated Triton modules can eval ``triton_meta={...!r}`` when a
+    user passes a NamedTuple as a ``tl.constexpr`` (see #192288).
+    """
+    if seen is None:
+        seen = OrderedSet()
+    result: list[type] = []
+
+    def visit(obj: Any) -> None:
+        if pytree.is_namedtuple_instance(obj):
+            cls = type(obj)
+            # Nested NamedTuple fields first so parents can reference them.
+            for field_name in cls._fields:
+                visit(getattr(obj, field_name))
+            if cls not in seen:
+                seen.add(cls)
+                result.append(cls)
+            return
+        if isinstance(obj, dict):
+            for item in obj.values():
+                visit(item)
+            return
+        if isinstance(obj, (list, tuple)):
+            for item in obj:
+                visit(item)
+
+    visit(value)
+    return result
+
+
+def codegen_namedtuple_defs(constants: dict[str, Any]) -> str:
+    """Emit NamedTuple defs so ``repr`` of constexpr constants can eval.
+
+    Always reconstructs via ``namedtuple_helpers.namedtuple_type`` (never
+    ``from user_module import ...``): generated sources are cached and may be
+    reloaded on another machine, and classes defined in
+    ``compile_tasks.<hash>`` are not pickle-safe across compile workers.
+    """
+    types: list[type] = []
+    seen: OrderedSet[type] = OrderedSet()
+    for value in constants.values():
+        types.extend(_collect_namedtuple_types(value, seen))
+
+    if not types:
+        return ""
+
+    buf = IndentedBuffer()
+    lines: list[str] = []
+    # Repr binds by ``cls.__name__``; key on name+fields and error on conflicts.
+    emitted: dict[str, tuple[str, ...]] = {}
+    for cls in types:
+        name = cls.__name__
+        fields = tuple(cls._fields)
+        if name in emitted:
+            if emitted[name] != fields:
+                raise RuntimeError(
+                    f"Cannot embed two NamedTuple types named {name!r} with "
+                    f"different fields ({emitted[name]} vs {fields}) as "
+                    f"tl.constexpr values; rename one so generated repr can eval."
+                )
+            continue
+        emitted[name] = fields
+        lines.append(f"{name} = namedtuple_type({name!r}, {fields!r})")
+
+    buf.writeline(
+        "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type"
+    )
+    for line in lines:
+        buf.writeline(line)
+    buf.newline()
+    return buf.getvalue()
+
+
 def user_defined_triton_kernel_transitive_closure_source_code(
     kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
 ) -> str:
@@ -3756,6 +3833,9 @@ class PythonWrapperCodegen(CodeGen):
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
+                    # Keep NamedTuple constexprs as-is; codegen_namedtuple_defs emits
+                    # their type into the generated module so triton_meta={...!r} evals
+                    # (see #192288). Do not substitute a non-tuple stand-in.
                     constants[arg.name] = kwargs[arg.name]
 
             else:
@@ -4003,6 +4083,10 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        # NamedTuple tl.constexpr values stringify as TypeName(...); emit the
+        # type so triton_meta={triton_meta!r} can eval in this module (#192288).
+        if namedtuple_defs := codegen_namedtuple_defs(triton_meta.get("constants", {})):
+            compile_wrapper.splice(namedtuple_defs)
         for type_spec in get_importable_constexpr_types(
             triton_meta.get("constants", {}).values()
         ):
