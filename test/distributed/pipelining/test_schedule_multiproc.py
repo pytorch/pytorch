@@ -408,7 +408,11 @@ class ScheduleTest(MultiProcContinuousTest):
                 self.config, mod, stages_per_rank, n_stages
             )
             schedule = ScheduleClass(
-                stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+                stages,
+                num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+                reuse_recv_buffers=True,
             )
         else:
             # Single-stage schedules
@@ -777,7 +781,11 @@ class ScheduleTest(MultiProcContinuousTest):
 
         # Create schedule
         schedule = ScheduleClass(
-            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+            reuse_recv_buffers=True,
         )
 
         # Run pipeline with tensor leak checking
@@ -1052,8 +1060,9 @@ class ScheduleTest(MultiProcContinuousTest):
         "schedule_class",
         [ScheduleZBVZeroBubble, ScheduleDualPipeV],
     )
+    @parametrize("reuse_recv_buffers", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_v_shape_schedules(self, schedule_class):
+    def test_v_shape_schedules(self, schedule_class, reuse_recv_buffers):
         n_stages = 8
         rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -1071,7 +1080,11 @@ class ScheduleTest(MultiProcContinuousTest):
         )
 
         schedule = schedule_class(
-            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
 
         # Run pipeline - special case where first and last stage are on rank 0
