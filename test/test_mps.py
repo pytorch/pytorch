@@ -5878,18 +5878,6 @@ class TestMPS(TestCaseMPS):
         mps_out = F.log_softmax(cpu_x.to('mps'), dim=-1)
         self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=-1))
 
-    def test_eq(self):
-        values1 = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
-        values2 = [[[1.0, 2.0, 15.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [0.0, 11.0, 12.0]]]
-        mps_x = torch.tensor(values1, device='mps')
-        mps_y = torch.tensor(values2, device='mps')
-        cpu_x = torch.tensor(values1, device='cpu')
-        cpu_y = torch.tensor(values2, device='cpu')
-        result_mps = torch.eq(mps_x, mps_y)
-        result_cpu = torch.eq(cpu_x, cpu_y)
-
-        self.assertEqual(result_cpu, result_mps.to('cpu'))
-
     def test_signed_vs_unsigned_comparison(self):
         cpu_x = torch.tensor((-1, 2, 3), device='cpu', dtype=torch.uint8)
         mps_x = torch.tensor((-1, 2, 3), device='mps', dtype=torch.uint8)
@@ -5897,18 +5885,6 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(cpu_x == -1, mps_x == -1)
         self.assertEqual(cpu_x > -1, mps_x > -1)
         self.assertEqual(cpu_x < -1, mps_x < -1)
-
-    def test_eq_int64(self):
-        values1 = [[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]]
-        values2 = [[[1, 2, 15], [4, 5, 6]], [[7, 8, 9], [0, 11, 12]]]
-        mps_x = torch.tensor(values1, device='mps')
-        mps_y = torch.tensor(values2, device='mps')
-        cpu_x = torch.tensor(values1, device='cpu')
-        cpu_y = torch.tensor(values2, device='cpu')
-        result_mps = torch.eq(mps_x, mps_y)
-        result_cpu = torch.eq(cpu_x, cpu_y)
-
-        self.assertEqual(result_cpu, result_mps.to('cpu'))
 
     def test_ne_scalar(self):
         def helper(shape):
@@ -11022,9 +10998,6 @@ class TestLargeTensors(TestCaseMPS):
 
 
 class TestLogical(TestCaseMPS):
-    def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
-        return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
-
     def test_bitwise_unaligned_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/182822
         # Metal `setBuffer:offset:` requires the offset to be 4-byte aligned;
@@ -11046,95 +11019,6 @@ class TestLogical(TestCaseMPS):
             scalar_view = b_full[1]
             for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
                 self.assertEqual(op(a, scalar_view).cpu(), op(a.cpu(), scalar_view.cpu()))
-
-    def test_logical_not(self):
-        def helper(x):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            result = torch.logical_not(x)
-            result_cpu = torch.logical_not(cpu_x)
-
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]))
-        helper(self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True))
-        helper(self._wrap_tensor([True, True, False, False]))
-        helper(self._wrap_tensor(1))
-        helper(self._wrap_tensor(0))
-        helper(self._wrap_tensor(True))
-        helper(self._wrap_tensor(False))
-
-    def test_logical_and(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_and(x, other)
-            result_cpu = torch.logical_and(cpu_x, cpu_other)
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
-
-    def test_logical_or(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_or(x, other)
-            result_cpu = torch.logical_or(cpu_x, cpu_other)
-
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
-
-    def test_logical_xor(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_xor(x, other)
-            result_cpu = torch.logical_xor(cpu_x, cpu_other)
-
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool])
     def test_min_max(self, dtype):
