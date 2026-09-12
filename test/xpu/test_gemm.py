@@ -1419,22 +1419,23 @@ class TestBasicGEMM(TestCase):
     @parametrize("m", [128])
     @parametrize("k", [512, 1024])
     @parametrize("n", [512, 1024])
-    def test__int4_mm(self, device, m, k, n):
-        q_group = 32
+    @parametrize("q_group", [32, 64, 128])
+    @parametrize("act_dtype", [torch.bfloat16, torch.float16])
+    @parametrize("scale_dtype_fp32", [True, False])
+    @parametrize("symmetric", [True, False])
+    def test__int4_mm(
+        self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32, symmetric
+    ):
         inner_k_tiles = 2
-
         torch.manual_seed(1)
-        a_bf16 = torch.rand((m, k), dtype=torch.float32, device=device)
-        b_bf16 = torch.rand((k, n), dtype=torch.float32, device=device)
+        a_fp32 = torch.rand((m, k), dtype=torch.float32, device=device)
+        b_fp32 = torch.rand((k, n), dtype=torch.float32, device=device)
 
         def convert_weight_to_int4pack(b):
-            # b_uint8 [n, k //2]
             b_uint8, scales, zeros = self._group_quantize_tensor(
                 b, n_bit=4, q_group_size=q_group
             )
-            # b_int4pack [k//8, n]
             b_int4pack = torch._convert_weight_to_int4pack(b_uint8, inner_k_tiles)
-
             return b_int4pack, scales, zeros
 
         def weight_int4pack_mm(a, b_int4pack, qscale, qzeros):
@@ -1442,18 +1443,19 @@ class TestBasicGEMM(TestCase):
                 a, b_int4pack, q_group, qscale, qzeros
             )
 
-        b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_bf16)
+        b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_fp32)
 
-        for dtype in [torch.bfloat16, torch.float16]:
-            a = a_bf16.to(dtype=dtype)
-            b = b_bf16.to(dtype=dtype)
-            b_scales = b_scales.to(dtype=dtype)
-            ref = torch.mm(a, b)
+        a = a_fp32.to(dtype=act_dtype)
+        b = b_fp32.to(dtype=act_dtype)
+        scale_dtype = torch.float32 if scale_dtype_fp32 else act_dtype
+        scales = b_scales.to(dtype=scale_dtype)
+        qzeros = None if symmetric else zeros_int8
+        ref = torch.mm(a, b)
 
-            res = weight_int4pack_mm(a, b_int4pack, b_scales, zeros_int8)
+        res = weight_int4pack_mm(a, b_int4pack, scales, qzeros)
 
-            mean_err = ((res - ref).abs() / ref).mean()
-            self.assertTrue(mean_err < 0.05)
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
 
     def test_mm_with_offset(self, device):
         from torch._dynamo.testing import rand_strided
