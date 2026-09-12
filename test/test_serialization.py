@@ -5264,6 +5264,22 @@ class TestGetStateSubclass(torch.Tensor):
         self.reloaded = True
 
 
+class TestDunderStateSubclass(torch.Tensor):
+    # Keeps a dunder-named attribute in its Python state. Has no __setstate__,
+    # so the state is restored through torch._utils._set_obj_state.
+    def __getstate__(self):
+        return {"__custom_dunder__": 42}
+
+
+class TestDunderStateWithSetStateSubclass(torch.Tensor):
+    # Same, but defines __setstate__, so _set_obj_state is never reached.
+    def __getstate__(self):
+        return {"__custom_dunder__": 7}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+
 class TestEmptySubclass(torch.Tensor):
     ...
 
@@ -5305,6 +5321,67 @@ class TestSubclassSerialization(TestCase):
         self.assertEqual(new_tensor.elem, my_tensor.elem)
         self.assertEqual(new_tensor.foo, foo_val)
         self.assertTrue(new_tensor.reloaded)
+
+    def test_dunder_state_restored_when_unrestricted(self):
+        # BC: unrestricted loading must still restore dunder-named state, which
+        # weights_only=True deliberately rejects (see the test below).
+        my_tensor = TestDunderStateSubclass(torch.rand(2))
+
+        with BytesIOContext() as f:
+            torch.save(my_tensor, f)
+            f.seek(0)
+            new_tensor = torch.load(f, weights_only=False)
+
+        self.assertIsInstance(new_tensor, TestDunderStateSubclass)
+        self.assertEqual(new_tensor.__custom_dunder__, 42)
+
+    def test_dunder_state_rejected_when_weights_only(self):
+        my_tensor = TestDunderStateSubclass(torch.rand(2))
+
+        with BytesIOContext() as f:
+            torch.save(my_tensor, f)
+            f.seek(0)
+            with safe_globals([TestDunderStateSubclass]):
+                with self.assertRaisesRegex(UnpicklingError, "__custom_dunder__"):
+                    torch.load(f, weights_only=True)
+
+    def test_dunder_state_with_setstate_allowed_when_weights_only(self):
+        # A subclass that defines __setstate__ never routes its state through
+        # _set_obj_state, so it keeps full control of its own state.
+        my_tensor = TestDunderStateWithSetStateSubclass(torch.rand(2))
+
+        with BytesIOContext() as f:
+            torch.save(my_tensor, f)
+            f.seek(0)
+            with safe_globals([TestDunderStateWithSetStateSubclass]):
+                new_tensor = torch.load(f, weights_only=True)
+
+        self.assertEqual(new_tensor.__custom_dunder__, 7)
+
+    def test_parameter_dunder_state_rejected_when_weights_only(self):
+        # A Parameter with non-empty state serializes via
+        # _rebuild_parameter_with_state, the other path into _set_obj_state.
+        p = torch.nn.Parameter(torch.rand(2))
+        p.__dict__["__class__"] = torch.Tensor
+
+        with BytesIOContext() as f:
+            torch.save(p, f)
+            f.seek(0)
+            with self.assertRaisesRegex(UnpicklingError, "__class__"):
+                torch.load(f, weights_only=True)
+
+    def test_parameter_with_attribute_still_loads_when_weights_only(self):
+        # Non-dunder state on a Parameter is unaffected.
+        p = torch.nn.Parameter(torch.rand(2))
+        p.foo = "bar"
+
+        with BytesIOContext() as f:
+            torch.save(p, f)
+            f.seek(0)
+            new_p = torch.load(f, weights_only=True)
+
+        self.assertIsInstance(new_p, torch.nn.Parameter)
+        self.assertEqual(new_p.foo, "bar")
 
     def test_tensor_subclass_deepcopy(self):
         wrapped_tensor = torch.rand(2)
