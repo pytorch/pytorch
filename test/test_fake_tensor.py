@@ -67,6 +67,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -105,6 +106,8 @@ def expectedFailurePropagateRealTensors(fn):
 
 
 class FakeTensorTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def fake_with_unbacked_batch(self, *tensors):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
@@ -130,15 +133,6 @@ class FakeTensorTest(TestCase):
         self.assertTrue(is_fake_tensor(t))
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cuda_initialized(self):
-        # doesn't error
-        with FakeTensorMode():
-            p = torch.randn(4, 2, requires_grad=True, device="cuda")
-            x = torch.randn(8, 4, device="cuda")
-            y = torch.mm(x, p).square().sum()
-            y.backward()
 
     def test_basic(self):
         x = torch.empty(2, 2, device="cpu")
@@ -584,21 +578,6 @@ class FakeTensorTest(TestCase):
         self.assertIsInstance(fake_t.grad.a, FakeTensor)
         self.assertIsInstance(fake_t.grad.b, FakeTensor)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    @parametrize(
-        "dtype",
-        all_types_complex_float8_and(),
-    )
-    def test_index_cuda_with_cpu(self, dtype):
-        with FakeTensorMode():
-            x = torch.ones([2048], device="cuda", dtype=dtype)
-            out = x[torch.zeros([36], dtype=torch.int64)]
-            self.checkType(out, "cuda", [36])
-            self.assertEqual(out.dtype, dtype)
-
     @skipIfTorchDynamo("test directly checks FakeTensorMode outputs")
     def test_scalar_tensor_index(self):
         for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
@@ -635,16 +614,6 @@ class FakeTensorTest(TestCase):
             mode.epoch += 1
 
             self.assertIsNone(scalar.item_memo)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_shape_take_not_device(self):
-        with FakeTensorMode():
-            x = torch.empty(1, device="cpu")
-            y = torch.empty(8, 8, device="cuda")
-            out = x.resize_as_(y)
-            self.assertEqual(out.shape, (8, 8))
-            self.assertEqual(out.device.type, "cpu")
-            self.assertTrue(is_fake_tensor(out))
 
     def test_repr(self):
         with FakeTensorMode():
@@ -808,85 +777,6 @@ class FakeTensorTest(TestCase):
                 x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
             )
 
-    @unittest.skipUnless(RUN_CUDA, "requires cuda")
-    def test_conv_mismatched_device_error_matches_eager(self):
-        error = "Expected all tensors to be on the same device.*weight is on cuda:0"
-
-        for name, ctx in (
-            ("eager", contextlib.nullcontext()),
-            ("fake", FakeTensorMode()),
-        ):
-            with self.subTest(name), ctx:
-                x = torch.empty(1, 3, 8, 8)
-                w = torch.empty(3, 3, 3, 3, device="cuda")
-                b = torch.empty(3, device="cuda")
-
-                with self.assertRaisesRegex(RuntimeError, error):
-                    torch.ops.aten.convolution.default(
-                        x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
-                    )
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_zero_dim(self):
-        with FakeTensorMode() as mode:
-            x = torch.tensor(0.0)
-            y = torch.rand([4, 4], device="cuda")
-            out = x + y
-            self.assertEqual(out.shape, (4, 4))
-            self.assertEqual(out.device, y.device)
-            self.assertTrue(is_fake_tensor(out))
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_op_with_zero_dim_bypassed(self):
-        if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.skipTest("Propagate real tensor not supported")
-        shape_env = ShapeEnv()
-        mode = FakeTensorMode(shape_env=shape_env)
-        x = torch.tensor(1.0, device="cuda")
-        y = torch.tensor(2.0)
-        fake_x = mode.from_tensor(x)
-        fake_y = mode.from_tensor(y)
-
-        with self.assertRaisesRegex(
-            FakeTensorDeviceMismatchError,
-            "Expected all tensors to be on the same device",
-        ) as exc:
-            torch.nextafter(fake_x, fake_y)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_diagonal_scatter_one_dim_single_elem_cpu_with_cuda_tensor(self):
-        with FakeTensorMode():
-            base = torch.zeros((1, 2), device="cuda")
-            src = torch.tensor([1.0])
-            out = torch.diagonal_scatter(base, src, dim1=0, dim2=1)
-            self.assertEqual(out.shape, (1, 2))
-            self.assertEqual(out.device, base.device)
-            self.assertTrue(is_fake_tensor(out))
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_diagonal_scatter_two_dim_cpu_with_cuda_tensor(self):
-        with FakeTensorMode():
-            base = torch.zeros((3, 3, 3))
-            src = torch.ones((3, 3), device="cuda")
-            out = torch.diagonal_scatter(base, src)
-            self.assertEqual(out.shape, (3, 3, 3))
-            self.assertEqual(out.device, base.device)
-            self.assertTrue(is_fake_tensor(out))
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_add_one_dim_single_elem_cpu_with_cuda_tensor(self):
-        if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.skipTest("Propagate real tensor not supported")
-        with FakeTensorMode():
-            x = torch.randn([1])
-            y = torch.randn(10, device="cuda")
-
-            with self.assertRaisesRegex(
-                FakeTensorDeviceMismatchError,
-                "Expected all tensors to be on the same device",
-            ) as exc:
-                x + y
-
     def test_nan_to_num(self):
         with FakeTensorMode():
             for dtype in [torch.float16, torch.float32]:
@@ -895,55 +785,6 @@ class FakeTensorTest(TestCase):
                 z = torch.nan_to_num(x, 0.0)
                 self.assertEqual(dtype, y.dtype)
                 self.assertEqual(dtype, z.dtype)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_throw(self):
-        x = torch.tensor(0.0)  # TODO: tensor() errors
-        with FakeTensorMode() as mode:
-            x_conv = mode.from_tensor(x)
-            y = torch.rand([4, 4], device="cuda")
-            z = torch.rand([4, 4], device="cpu")
-            self.assertRaises(Exception, lambda: torch.lerp(x_conv, y, z))
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_type_as(self):
-        with FakeTensorMode():
-            x = torch.rand([16, 1], device="cpu")
-            y = torch.rand([4, 4], device="cuda")
-            out = x.type_as(y)
-            self.assertEqual(out.device.type, "cuda")
-            self.assertTrue(is_fake_tensor(out))
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_setitem(self):
-        for device in ["cpu", "cuda"]:
-            with FakeTensorMode():
-                x = torch.rand([16, 1], device=device)
-                x[..., 0] = 0
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_device_inplace_copy(self):
-        with FakeTensorMode():
-            x = torch.rand([8, 8], device="cpu")
-            y = torch.rand([8, 8], device="cuda")
-            if x.copy_(y).device.type != "cpu":
-                raise AssertionError("expected cpu device")
-            if y.copy_(x).device.type != "cuda":
-                raise AssertionError("expected cuda device")
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_fake_device(self):
-        t = torch.ones(3)
-        t = t.view(1, 3)
-
-        fake_mode1 = FakeTensorMode(allow_non_fake_inputs=True)
-        fake_t = fake_mode1.from_tensor(t)
-        fake_t.fake_device = torch.device("cuda")
-
-        fake_mode2 = FakeTensorMode(allow_non_fake_inputs=True)
-        new_fake_t = fake_mode2.from_tensor(fake_t)
-
-        self.assertEqual(new_fake_t.device, fake_t.device)
 
     def test_fake_dispatch_keys(self):
         with FakeTensorMode():
@@ -1246,15 +1087,6 @@ class FakeTensorTest(TestCase):
 
             prims.utils.compare_tensor_meta(a, b, check_strides=True)
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_non_kwarg_device(self):
-        with FakeTensorMode():
-            x = torch.rand([16, 1], device="cpu")
-            y = x.to(torch.device("cpu"))
-            self.assertIs(x, y)
-            z = x.to(torch.device("cuda"))
-            self.assertEqual(z.device.type, "cuda")
-
     def test_non_overlapping_stride_zero(self):
         def foo():
             x = torch.empty_strided([1, 3, 427, 640], (0, 1, 1920, 3))
@@ -1318,38 +1150,6 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(is_fake_tensor(fake_x.grad))
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_index_put_error(self):
-        mode = FakeTensorMode()
-        for context in [contextlib.nullcontext, lambda: mode]:
-            with context():
-                y = torch.randn(2, 2, 3)
-                x = torch.randn(2, 2, 3).to("cuda")
-                with self.assertRaises(RuntimeError):
-                    x[[1, 1]] = y
-
-                with self.assertRaises(RuntimeError):
-                    torch.ops.aten.index_put(x, torch.tensor([1, 1], device="cuda"), y)
-
-                # no error
-                torch.ops.aten.index_put(
-                    x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.0)
-                )
-                torch.ops.aten.index_put_(
-                    x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.0)
-                )
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_like_constructor(self):
-        with FakeTensorMode():
-            x = torch.rand([4, 4])
-            y = torch.ones_like(x)
-            self.assertTrue(is_fake_tensor(y))
-            self.assertEqual(y.device.type, "cpu")
-            z = torch.ones_like(x, device="cuda")
-            self.assertTrue(is_fake_tensor(z))
-            self.assertEqual(z.device.type, "cuda")
-
     def test_binary_op_type_promotion(self):
         with FakeTensorMode():
             x = torch.empty([2, 2], dtype=torch.float)
@@ -1383,25 +1183,6 @@ class FakeTensorTest(TestCase):
         if "FakeTensor" in out:
             raise AssertionError("FakeTensor should not be in output")
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_upsample_bilinear_small_channels(self):
-        out = []
-        mode = FakeTensorMode()
-        for context in [contextlib.nullcontext, lambda: mode]:
-            with context():
-                arg0_1 = torch.empty_strided(
-                    (3, 427, 640), (1, 1920, 3), dtype=torch.float32, device="cuda"
-                )
-                unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 0)
-                out.append(
-                    torch.ops.aten.upsample_bilinear2d.default(
-                        unsqueeze, [800, 1199], False
-                    )
-                )
-
-        self.assertTrue(out[1].is_contiguous())
-        self.checkMetaProps(out[0], out[1])
-
     def test_split_return_self(self):
         def fn(x):
             return torch.functional.split(x, 0)[0]
@@ -1433,53 +1214,6 @@ class FakeTensorTest(TestCase):
             with self.assertRaisesRegex(RuntimeError, error):
                 torch.as_strided(x, (17, 18), (-80, 1), 1)
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cpu_fallback(self):
-        with FakeTensorMode(allow_fallback_kernels=False):
-            filters = torch.randn(8, 4, 3, 3).cuda()
-            inputs = torch.randn(1, 4, 5, 5).cuda()
-            out = torch.nn.functional.conv2d(inputs, filters, padding=1)
-            self.assertEqual(out.device.type, "cuda")
-            self.assertEqual(list(out.size()), [1, 8, 5, 5])
-
-        with FakeTensorMode(allow_fallback_kernels=True):
-            # intentionally bad inputs
-            filters = torch.randn(8, 20, 3, 3).cuda()
-            inputs = torch.randn(1, 7, 10, 5).cuda()
-            with self.assertRaises(RuntimeError):
-                torch.nn.functional.conv2d(inputs, filters, padding=1)
-
-        with FakeTensorMode(allow_fallback_kernels=True):
-            filters = torch.randn(8, 4, 3, 3).cuda()
-            inputs = torch.randn(1, 4, 5, 5).cuda()
-
-            out = torch.nn.functional.conv2d(inputs, filters, padding=1)
-            self.assertEqual(out.device.type, "cuda")
-            self.assertEqual(list(out.size()), [1, 8, 5, 5])
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_out_multi_device(self):
-        with FakeTensorMode():
-            x = torch.rand([4])
-            y = torch.rand([4], device="cuda")
-
-            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
-                torch.sin(x, out=y)
-
-            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
-                x.add_(y)
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_normalize_device(self):
-        with FakeTensorMode():
-            x = torch.empty(1, device="cuda")
-            y = torch.empty(1, device=f"cuda:{torch.cuda.current_device()}")
-            out = x + y
-        self.checkType(out, "cuda", [1])
-
     def test_recursive_invocation(self):
         mode = FakeTensorMode()
         with mode:
@@ -1487,209 +1221,6 @@ class FakeTensorTest(TestCase):
             mode.in_kernel_invocation = True
             y = x + x
             self.assertTrue(mode.in_kernel_invocation)
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @parametrize(
-        "allow_fallback_kernels",
-        [False, True],
-        lambda a: "with_fallback" if a else "without_fallback",
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cudnn_rnn(self, allow_fallback_kernels):
-        def fn(
-            a0,
-            b0,
-            b1,
-            b2,
-            b3,
-            b4,
-            b5,
-            b6,
-            b7,
-            b8,
-            b9,
-            b10,
-            b11,
-            b12,
-            b13,
-            b14,
-            b15,
-            a3,
-            a4,
-            a5,
-        ):
-            a1 = [
-                b0,
-                b1,
-                b2,
-                b3,
-                b4,
-                b5,
-                b6,
-                b7,
-                b8,
-                b9,
-                b10,
-                b11,
-                b12,
-                b13,
-                b14,
-                b15,
-            ]
-
-            if torch.version.cuda:
-                return torch.ops.aten._cudnn_rnn(
-                    a0,
-                    a1,
-                    4,
-                    a3,
-                    a4,
-                    a5,
-                    2,
-                    2048,
-                    0,
-                    2,
-                    False,
-                    0.0,
-                    False,
-                    True,
-                    [],
-                    None,
-                )
-            else:
-                return torch.ops.aten.miopen_rnn(
-                    a0,
-                    a1,
-                    4,
-                    # weight_buf is cudnn only
-                    a4,
-                    a5,
-                    2,
-                    2048,
-                    # proj_size is cudnn only
-                    2,
-                    False,
-                    0.0,
-                    False,
-                    True,
-                    [],
-                    None,
-                )
-
-        mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
-        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
-            with context():
-                inps1 = [
-                    torch.randn([92, 8, 2048]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192, 4096]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192, 4096]).cuda(),
-                    torch.randn([8192, 2048]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([8192]).cuda(),
-                    torch.randn([167837696]).cuda(),
-                    torch.randn([4, 8, 2048]).cuda(),
-                    torch.randn([4, 8, 2048]).cuda(),
-                ]
-                inps2 = inps1
-                inps2[len(inps2) - 1] = None  # argument `cx` can be None
-
-                for inps in [inps1, inps2]:
-                    out = fn(*inps)
-                    # weight_buf is cudnn only <- this is a3 and inps[-3]
-                    # in cudnn_rnn, it passthroughs the inps[-3] to out[4],
-                    #   so the test expects self.assertIs(out[4], inps[-3])
-                    # in miopen_rnn, it does not need the input argument weight_buf,
-                    #   the miopen_rnn generate a new weight_buf instead,
-                    #   and it returns via out[4]
-                    if torch.version.hip:
-                        self.assertIsNotNone(out[4])
-                    else:
-                        self.assertIs(out[4], inps[-3])
-                    for ten in out:
-                        if i == 1:
-                            self.assertTrue(is_fake_tensor(ten))
-                        self.assertEqual(ten.device.type, "cuda")
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cuda_lstm(self):
-        # Ensure CUDA (non-cuDNN) impl succeeds with fake tensors.
-        with torch.backends.cudnn.flags(enabled=False):
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
-            with fake_tensor_mode:
-                N = 5
-                L = 4
-                H_in = 2
-                hidden_size = 3
-                proj_size = 2
-                num_layers = 2
-                bidir = False
-                D = 2 if bidir else 1
-                H_out = proj_size if proj_size > 0 else hidden_size
-
-                lstm = torch.nn.LSTM(
-                    input_size=H_in,
-                    hidden_size=hidden_size,
-                    num_layers=num_layers,
-                    proj_size=proj_size,
-                    batch_first=False,
-                    bias=True,
-                    bidirectional=bidir,
-                    device="cuda",
-                )
-
-                h_0 = torch.randn((num_layers * D, N, H_out), device="cuda")
-                c_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
-                inp = torch.randn((L, N, H_in), device="cuda")
-                (output, (h_n, c_n)) = lstm(inp, (h_0, c_0))
-                output.sum().backward()
-
-                self.assertEqual(output.shape, (L, N, D * H_out))
-                self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
-                self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cuda_gru(self):
-        with torch.backends.cudnn.flags(enabled=False):
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
-            with fake_tensor_mode:
-                N = 5
-                L = 4
-                H_in = 2
-                hidden_size = 3
-                num_layers = 2
-                bidir = False
-                D = 2 if bidir else 1
-
-                gru = torch.nn.GRU(
-                    input_size=H_in,
-                    hidden_size=hidden_size,
-                    num_layers=num_layers,
-                    batch_first=False,
-                    bias=True,
-                    bidirectional=bidir,
-                    device="cuda",
-                )
-
-                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
-                inp = torch.randn((L, N, H_in), device="cuda")
-                output, h_n = gru(inp, h_0)
-                output.sum().backward()
-
-                self.assertEqual(output.shape, (L, N, D * hidden_size))
-                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
 
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
@@ -1951,19 +1482,6 @@ def forward(self, x_1):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_new(self):
-        with FakeTensorMode():
-            a = torch.rand([16, 1])
-            self.checkType(a.new(10, 10), "cpu", [10, 10])
-            self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
-            b = torch.rand([4, 4], device="cuda")
-            self.checkType(b.new(device="cuda"), "cuda", [0])
-            self.checkType(a.new(torch.rand([1])), "cpu", [1])
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
     def test_scalar_inputs(self):
         with FakeTensorMode():
             self.checkType(torch.div(3, 2), "cpu", [])
@@ -2111,84 +1629,6 @@ def forward(self, x_1):
         with FakeTensorMode(allow_non_fake_inputs=True):
             out = mod(torch.randn(1, 1, 3, 3))
         self.checkType(out, "cpu", (1, 1, 3, 3))
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_aten_copy_multi_device(self):
-        with FakeTensorMode():
-            x1 = torch.rand(4, device="cpu")
-            x2 = torch.rand(4, device="cuda")
-            copy1 = torch.ops.aten.copy.default(x1, x2)
-            copy2 = torch.ops.aten.copy.default(x2, x1)
-            out = torch.empty(4, device="cpu")
-            torch.ops.aten.copy.out(x1, x2, out=out)
-        self.checkType(copy1, "cpu", (4,))
-        self.checkType(copy2, "cuda", (4,))
-        self.checkType(out, "cpu", (4,))
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_aten_index_multi_device(self):
-        with FakeTensorMode():
-            x1 = torch.rand(4, 4, device="cpu")
-            x2 = torch.rand(4, 4, device="cuda")
-            i1 = torch.tensor([0, 1], device="cuda")
-            i2 = torch.tensor([0, 1], device="cpu")
-            # NB: This one does not work: cuda indices not allowed on cpu
-            # tensor
-            # r1 = torch.ops.aten.index(x1, i1)
-            r2 = torch.ops.aten.index(x2, i2)
-
-            y1 = torch.rand(4, device="cpu")
-            y2 = torch.rand(4, device="cuda")
-            j1 = torch.tensor([2], device="cuda")
-            j2 = torch.tensor([2], device="cpu")
-            r3 = torch.ops.aten.index_put.default(x1, j1, y1)
-            r4 = torch.ops.aten.index_put.default(x2, j2, y2)
-        # self.checkType(r1, "cpu", ())
-        self.checkType(r2, "cuda", ())
-        self.checkType(r3, "cpu", (4, 4))
-        self.checkType(r4, "cuda", (4, 4))
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_aten_slice_scatter_multi_device(self):
-        with FakeTensorMode():
-            x1 = torch.rand(4, 4, device="cpu")
-            y1 = torch.rand(2, 4, device="cuda")
-            x2 = torch.rand(4, 4, device="cuda")
-            y2 = torch.rand(2, 4, device="cpu")
-            out = torch.empty(4, 4, device="cpu")
-            r1 = torch.ops.aten.slice_scatter.default(x1, y1, start=2)
-            r2 = torch.ops.aten.slice_scatter.default(x2, y2, start=2)
-            r3 = torch.ops.aten.slice_scatter.out(x1, y1, out=out, start=2)
-        self.checkType(r1, "cpu", (4, 4))
-        self.checkType(r2, "cuda", (4, 4))
-        self.checkType(r3, "cpu", (4, 4))
-        self.checkType(out, "cpu", (4, 4))
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_aten_set_data_multi_device(self):
-        with FakeTensorMode():
-            x1 = torch.rand(4, device="cpu")
-            x2 = torch.rand(4, device="cuda")
-            # cpu -> cuda
-            torch.ops.aten.shallow_copy_data_(x1, x2)
-            self.checkType(x1, "cuda", (4,))
-            # cuda -> cpu
-            x3 = torch.rand(4, device="cuda")
-            x4 = torch.rand(4, device="cpu")
-            torch.ops.aten.shallow_copy_data_(x3, x4)
-            self.checkType(x3, "cpu", (4,))
 
     def test__adaptive_avg_pool2d_backward(self):
         with FakeTensorMode():
@@ -2353,104 +1793,6 @@ def forward(self, x_1):
         self.assertEqual(out[1].dtype, eye.dtype)
         self.assertEqual(out[2].dtype, eye.dtype)
 
-    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
-    def test_fake_device_guard_no_use_after_free(self):
-        # Regression test: when CUDA is compiled but no devices are visible,
-        # FakeTensorMode installs a FakeGuardImpl into the global
-        # device_guard_impl_registry.  The impl must outlive all threads that
-        # use it; previously it was stored as a thread-local unique_ptr, so
-        # the pointer became dangling after the thread exited, causing a
-        # segfault when a later thread called deviceCount() on it.
-        #
-        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so we
-        # run the repro in a subprocess.
-
-        script = """\
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-import threading
-import torch
-
-def f(x):
-    return x * x
-
-def run_compile():
-    g = torch.compile(f, backend="eager")
-    for i in range(10):
-        g(torch.randn(i))
-
-threads = [threading.Thread(target=run_compile) for _ in range(2)]
-for t in threads:
-    t.start()
-for t in threads:
-    t.join()
-
-torch._dynamo.reset()
-
-threads = [threading.Thread(target=run_compile) for _ in range(2)]
-for t in threads:
-    t.start()
-for t in threads:
-    t.join()
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            timeout=60,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
-        )
-
-    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
-    def test_cuda_fake_tensor_new_methods_no_device_init(self):
-        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so run
-        # the repro in a subprocess.
-
-        script = """\
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
-# Import numpy before torch to avoid an MKL threading-layer conflict in this
-# subprocess environment.
-import numpy
-import torch
-from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
-
-fake_mode = FakeTensorMode()
-with fake_mode:
-    x = torch.randn(3, device="cuda")
-
-assert not torch.cuda.is_initialized()
-
-new_tensors = [
-    x.new_empty([2, 1], device="cuda:0", dtype=torch.float32),
-    x.new_empty_strided([2, 1], [1, 2], device="cuda:0", dtype=torch.float32),
-    x.new_full([2, 1], 1.0, device="cuda:0", dtype=torch.float32),
-    x.new_ones([2, 1], device="cuda:0", dtype=torch.float32),
-    x.new_zeros([2, 1], device="cuda:0", dtype=torch.float32),
-]
-
-for y in new_tensors:
-    assert is_fake_tensor(y)
-    assert y.device == torch.device("cuda:0")
-    assert y.dtype is torch.float32
-
-assert not torch.cuda.is_initialized()
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            timeout=60,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
-        )
-
     @unittest.skipIf(
         TEST_ACCELERATOR, "Only execute when an accelerator is not present"
     )
@@ -2570,7 +1912,720 @@ def make_propagate_real_tensors_cls(cls):
 make_propagate_real_tensors_cls(FakeTensorTest)
 
 
+class FakeTensorTestCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def checkType(self, t, device_str, size):
+        self.assertTrue(is_fake_tensor(t))
+        self.assertEqual(t.device.type, device_str)
+        self.assertEqual(list(t.size()), size)
+
+    def checkMetaProps(self, t1, t2):
+        prims.utils.compare_tensor_meta(t1, t2, check_strides=True)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_initialized(self):
+        # doesn't error
+        with FakeTensorMode():
+            p = torch.randn(4, 2, requires_grad=True, device="cuda")
+            x = torch.randn(8, 4, device="cuda")
+            y = torch.mm(x, p).square().sum()
+            y.backward()
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    @parametrize(
+        "dtype",
+        all_types_complex_float8_and(),
+    )
+    def test_index_cuda_with_cpu(self, dtype):
+        with FakeTensorMode():
+            x = torch.ones([2048], device="cuda", dtype=dtype)
+            out = x[torch.zeros([36], dtype=torch.int64)]
+            self.checkType(out, "cuda", [36])
+            self.assertEqual(out.dtype, dtype)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_shape_take_not_device(self):
+        with FakeTensorMode():
+            x = torch.empty(1, device="cpu")
+            y = torch.empty(8, 8, device="cuda")
+            out = x.resize_as_(y)
+            self.assertEqual(out.shape, (8, 8))
+            self.assertEqual(out.device.type, "cpu")
+            self.assertTrue(is_fake_tensor(out))
+
+    @unittest.skipUnless(RUN_CUDA, "requires cuda")
+    def test_conv_mismatched_device_error_matches_eager(self):
+        error = "Expected all tensors to be on the same device.*weight is on cuda:0"
+
+        for name, ctx in (
+            ("eager", contextlib.nullcontext()),
+            ("fake", FakeTensorMode()),
+        ):
+            with self.subTest(name), ctx:
+                x = torch.empty(1, 3, 8, 8)
+                w = torch.empty(3, 3, 3, 3, device="cuda")
+                b = torch.empty(3, device="cuda")
+
+                with self.assertRaisesRegex(RuntimeError, error):
+                    torch.ops.aten.convolution.default(
+                        x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
+                    )
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_zero_dim(self):
+        with FakeTensorMode() as mode:
+            x = torch.tensor(0.0)
+            y = torch.rand([4, 4], device="cuda")
+            out = x + y
+            self.assertEqual(out.shape, (4, 4))
+            self.assertEqual(out.device, y.device)
+            self.assertTrue(is_fake_tensor(out))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_op_with_zero_dim_bypassed(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        shape_env = ShapeEnv()
+        mode = FakeTensorMode(shape_env=shape_env)
+        x = torch.tensor(1.0, device="cuda")
+        y = torch.tensor(2.0)
+        fake_x = mode.from_tensor(x)
+        fake_y = mode.from_tensor(y)
+
+        with self.assertRaisesRegex(
+            FakeTensorDeviceMismatchError,
+            "Expected all tensors to be on the same device",
+        ) as exc:
+            torch.nextafter(fake_x, fake_y)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_diagonal_scatter_one_dim_single_elem_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            base = torch.zeros((1, 2), device="cuda")
+            src = torch.tensor([1.0])
+            out = torch.diagonal_scatter(base, src, dim1=0, dim2=1)
+            self.assertEqual(out.shape, (1, 2))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(is_fake_tensor(out))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_diagonal_scatter_two_dim_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            base = torch.zeros((3, 3, 3))
+            src = torch.ones((3, 3), device="cuda")
+            out = torch.diagonal_scatter(base, src)
+            self.assertEqual(out.shape, (3, 3, 3))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(is_fake_tensor(out))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_add_one_dim_single_elem_cpu_with_cuda_tensor(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        with FakeTensorMode():
+            x = torch.randn([1])
+            y = torch.randn(10, device="cuda")
+
+            with self.assertRaisesRegex(
+                FakeTensorDeviceMismatchError,
+                "Expected all tensors to be on the same device",
+            ) as exc:
+                x + y
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_throw(self):
+        x = torch.tensor(0.0)  # TODO: tensor() errors
+        with FakeTensorMode() as mode:
+            x_conv = mode.from_tensor(x)
+            y = torch.rand([4, 4], device="cuda")
+            z = torch.rand([4, 4], device="cpu")
+            self.assertRaises(Exception, lambda: torch.lerp(x_conv, y, z))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_type_as(self):
+        with FakeTensorMode():
+            x = torch.rand([16, 1], device="cpu")
+            y = torch.rand([4, 4], device="cuda")
+            out = x.type_as(y)
+            self.assertEqual(out.device.type, "cuda")
+            self.assertTrue(is_fake_tensor(out))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_setitem(self):
+        for device in ["cpu", "cuda"]:
+            with FakeTensorMode():
+                x = torch.rand([16, 1], device=device)
+                x[..., 0] = 0
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_device_inplace_copy(self):
+        with FakeTensorMode():
+            x = torch.rand([8, 8], device="cpu")
+            y = torch.rand([8, 8], device="cuda")
+            if x.copy_(y).device.type != "cpu":
+                raise AssertionError("expected cpu device")
+            if y.copy_(x).device.type != "cuda":
+                raise AssertionError("expected cuda device")
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_fake_device(self):
+        t = torch.ones(3)
+        t = t.view(1, 3)
+
+        fake_mode1 = FakeTensorMode(allow_non_fake_inputs=True)
+        fake_t = fake_mode1.from_tensor(t)
+        fake_t.fake_device = torch.device("cuda")
+
+        fake_mode2 = FakeTensorMode(allow_non_fake_inputs=True)
+        new_fake_t = fake_mode2.from_tensor(fake_t)
+
+        self.assertEqual(new_fake_t.device, fake_t.device)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_non_kwarg_device(self):
+        with FakeTensorMode():
+            x = torch.rand([16, 1], device="cpu")
+            y = x.to(torch.device("cpu"))
+            self.assertIs(x, y)
+            z = x.to(torch.device("cuda"))
+            self.assertEqual(z.device.type, "cuda")
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_index_put_error(self):
+        mode = FakeTensorMode()
+        for context in [contextlib.nullcontext, lambda: mode]:
+            with context():
+                y = torch.randn(2, 2, 3)
+                x = torch.randn(2, 2, 3).to("cuda")
+                with self.assertRaises(RuntimeError):
+                    x[[1, 1]] = y
+
+                with self.assertRaises(RuntimeError):
+                    torch.ops.aten.index_put(x, torch.tensor([1, 1], device="cuda"), y)
+
+                # no error
+                torch.ops.aten.index_put(
+                    x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.0)
+                )
+                torch.ops.aten.index_put_(
+                    x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.0)
+                )
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_like_constructor(self):
+        with FakeTensorMode():
+            x = torch.rand([4, 4])
+            y = torch.ones_like(x)
+            self.assertTrue(is_fake_tensor(y))
+            self.assertEqual(y.device.type, "cpu")
+            z = torch.ones_like(x, device="cuda")
+            self.assertTrue(is_fake_tensor(z))
+            self.assertEqual(z.device.type, "cuda")
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_upsample_bilinear_small_channels(self):
+        out = []
+        mode = FakeTensorMode()
+        for context in [contextlib.nullcontext, lambda: mode]:
+            with context():
+                arg0_1 = torch.empty_strided(
+                    (3, 427, 640), (1, 1920, 3), dtype=torch.float32, device="cuda"
+                )
+                unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 0)
+                out.append(
+                    torch.ops.aten.upsample_bilinear2d.default(
+                        unsqueeze, [800, 1199], False
+                    )
+                )
+
+        self.assertTrue(out[1].is_contiguous())
+        self.checkMetaProps(out[0], out[1])
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cpu_fallback(self):
+        with FakeTensorMode(allow_fallback_kernels=False):
+            filters = torch.randn(8, 4, 3, 3).cuda()
+            inputs = torch.randn(1, 4, 5, 5).cuda()
+            out = torch.nn.functional.conv2d(inputs, filters, padding=1)
+            self.assertEqual(out.device.type, "cuda")
+            self.assertEqual(list(out.size()), [1, 8, 5, 5])
+
+        with FakeTensorMode(allow_fallback_kernels=True):
+            # intentionally bad inputs
+            filters = torch.randn(8, 20, 3, 3).cuda()
+            inputs = torch.randn(1, 7, 10, 5).cuda()
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.conv2d(inputs, filters, padding=1)
+
+        with FakeTensorMode(allow_fallback_kernels=True):
+            filters = torch.randn(8, 4, 3, 3).cuda()
+            inputs = torch.randn(1, 4, 5, 5).cuda()
+
+            out = torch.nn.functional.conv2d(inputs, filters, padding=1)
+            self.assertEqual(out.device.type, "cuda")
+            self.assertEqual(list(out.size()), [1, 8, 5, 5])
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_out_multi_device(self):
+        with FakeTensorMode():
+            x = torch.rand([4])
+            y = torch.rand([4], device="cuda")
+
+            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
+                torch.sin(x, out=y)
+
+            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
+                x.add_(y)
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_normalize_device(self):
+        with FakeTensorMode():
+            x = torch.empty(1, device="cuda")
+            y = torch.empty(1, device=f"cuda:{torch.cuda.current_device()}")
+            out = x + y
+        self.checkType(out, "cuda", [1])
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @parametrize(
+        "allow_fallback_kernels",
+        [False, True],
+        lambda a: "with_fallback" if a else "without_fallback",
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cudnn_rnn(self, allow_fallback_kernels):
+        def fn(
+            a0,
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            b5,
+            b6,
+            b7,
+            b8,
+            b9,
+            b10,
+            b11,
+            b12,
+            b13,
+            b14,
+            b15,
+            a3,
+            a4,
+            a5,
+        ):
+            a1 = [
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12,
+                b13,
+                b14,
+                b15,
+            ]
+
+            if torch.version.cuda:
+                return torch.ops.aten._cudnn_rnn(
+                    a0,
+                    a1,
+                    4,
+                    a3,
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    0,
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+            else:
+                return torch.ops.aten.miopen_rnn(
+                    a0,
+                    a1,
+                    4,
+                    # weight_buf is cudnn only
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    # proj_size is cudnn only
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+
+        mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
+        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
+            with context():
+                inps1 = [
+                    torch.randn([92, 8, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 4096]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 4096]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([167837696]).cuda(),
+                    torch.randn([4, 8, 2048]).cuda(),
+                    torch.randn([4, 8, 2048]).cuda(),
+                ]
+                inps2 = inps1
+                inps2[len(inps2) - 1] = None  # argument `cx` can be None
+
+                for inps in [inps1, inps2]:
+                    out = fn(*inps)
+                    # weight_buf is cudnn only <- this is a3 and inps[-3]
+                    # in cudnn_rnn, it passthroughs the inps[-3] to out[4],
+                    #   so the test expects self.assertIs(out[4], inps[-3])
+                    # in miopen_rnn, it does not need the input argument weight_buf,
+                    #   the miopen_rnn generate a new weight_buf instead,
+                    #   and it returns via out[4]
+                    if torch.version.hip:
+                        self.assertIsNotNone(out[4])
+                    else:
+                        self.assertIs(out[4], inps[-3])
+                    for ten in out:
+                        if i == 1:
+                            self.assertTrue(is_fake_tensor(ten))
+                        self.assertEqual(ten.device.type, "cuda")
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_lstm(self):
+        # Ensure CUDA (non-cuDNN) impl succeeds with fake tensors.
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                proj_size = 2
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+                H_out = proj_size if proj_size > 0 else hidden_size
+
+                lstm = torch.nn.LSTM(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    proj_size=proj_size,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, H_out), device="cuda")
+                c_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                (output, (h_n, c_n)) = lstm(inp, (h_0, c_0))
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * H_out))
+                self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
+                self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_gru(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+
+                gru = torch.nn.GRU(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                output, h_n = gru(inp, h_0)
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * hidden_size))
+                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_new(self):
+        with FakeTensorMode():
+            a = torch.rand([16, 1])
+            self.checkType(a.new(10, 10), "cpu", [10, 10])
+            self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
+            b = torch.rand([4, 4], device="cuda")
+            self.checkType(b.new(device="cuda"), "cuda", [0])
+            self.checkType(a.new(torch.rand([1])), "cpu", [1])
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_aten_copy_multi_device(self):
+        with FakeTensorMode():
+            x1 = torch.rand(4, device="cpu")
+            x2 = torch.rand(4, device="cuda")
+            copy1 = torch.ops.aten.copy.default(x1, x2)
+            copy2 = torch.ops.aten.copy.default(x2, x1)
+            out = torch.empty(4, device="cpu")
+            torch.ops.aten.copy.out(x1, x2, out=out)
+        self.checkType(copy1, "cpu", (4,))
+        self.checkType(copy2, "cuda", (4,))
+        self.checkType(out, "cpu", (4,))
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_aten_index_multi_device(self):
+        with FakeTensorMode():
+            x1 = torch.rand(4, 4, device="cpu")
+            x2 = torch.rand(4, 4, device="cuda")
+            i1 = torch.tensor([0, 1], device="cuda")
+            i2 = torch.tensor([0, 1], device="cpu")
+            # NB: This one does not work: cuda indices not allowed on cpu
+            # tensor
+            # r1 = torch.ops.aten.index(x1, i1)
+            r2 = torch.ops.aten.index(x2, i2)
+
+            y1 = torch.rand(4, device="cpu")
+            y2 = torch.rand(4, device="cuda")
+            j1 = torch.tensor([2], device="cuda")
+            j2 = torch.tensor([2], device="cpu")
+            r3 = torch.ops.aten.index_put.default(x1, j1, y1)
+            r4 = torch.ops.aten.index_put.default(x2, j2, y2)
+        # self.checkType(r1, "cpu", ())
+        self.checkType(r2, "cuda", ())
+        self.checkType(r3, "cpu", (4, 4))
+        self.checkType(r4, "cuda", (4, 4))
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_aten_slice_scatter_multi_device(self):
+        with FakeTensorMode():
+            x1 = torch.rand(4, 4, device="cpu")
+            y1 = torch.rand(2, 4, device="cuda")
+            x2 = torch.rand(4, 4, device="cuda")
+            y2 = torch.rand(2, 4, device="cpu")
+            out = torch.empty(4, 4, device="cpu")
+            r1 = torch.ops.aten.slice_scatter.default(x1, y1, start=2)
+            r2 = torch.ops.aten.slice_scatter.default(x2, y2, start=2)
+            r3 = torch.ops.aten.slice_scatter.out(x1, y1, out=out, start=2)
+        self.checkType(r1, "cpu", (4, 4))
+        self.checkType(r2, "cuda", (4, 4))
+        self.checkType(r3, "cpu", (4, 4))
+        self.checkType(out, "cpu", (4, 4))
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_aten_set_data_multi_device(self):
+        with FakeTensorMode():
+            x1 = torch.rand(4, device="cpu")
+            x2 = torch.rand(4, device="cuda")
+            # cpu -> cuda
+            torch.ops.aten.shallow_copy_data_(x1, x2)
+            self.checkType(x1, "cuda", (4,))
+            # cuda -> cpu
+            x3 = torch.rand(4, device="cuda")
+            x4 = torch.rand(4, device="cpu")
+            torch.ops.aten.shallow_copy_data_(x3, x4)
+            self.checkType(x3, "cpu", (4,))
+
+    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
+    def test_fake_device_guard_no_use_after_free(self):
+        # Regression test: when CUDA is compiled but no devices are visible,
+        # FakeTensorMode installs a FakeGuardImpl into the global
+        # device_guard_impl_registry.  The impl must outlive all threads that
+        # use it; previously it was stored as a thread-local unique_ptr, so
+        # the pointer became dangling after the thread exited, causing a
+        # segfault when a later thread called deviceCount() on it.
+        #
+        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so we
+        # run the repro in a subprocess.
+
+        script = """\
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+import threading
+import torch
+
+def f(x):
+    return x * x
+
+def run_compile():
+    g = torch.compile(f, backend="eager")
+    for i in range(10):
+        g(torch.randn(i))
+
+threads = [threading.Thread(target=run_compile) for _ in range(2)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+torch._dynamo.reset()
+
+threads = [threading.Thread(target=run_compile) for _ in range(2)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
+        )
+
+    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
+    def test_cuda_fake_tensor_new_methods_no_device_init(self):
+        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so run
+        # the repro in a subprocess.
+
+        script = """\
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+# Import numpy before torch to avoid an MKL threading-layer conflict in this
+# subprocess environment.
+import numpy
+import torch
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+
+fake_mode = FakeTensorMode()
+with fake_mode:
+    x = torch.randn(3, device="cuda")
+
+assert not torch.cuda.is_initialized()
+
+new_tensors = [
+    x.new_empty([2, 1], device="cuda:0", dtype=torch.float32),
+    x.new_empty_strided([2, 1], [1, 2], device="cuda:0", dtype=torch.float32),
+    x.new_full([2, 1], 1.0, device="cuda:0", dtype=torch.float32),
+    x.new_ones([2, 1], device="cuda:0", dtype=torch.float32),
+    x.new_zeros([2, 1], device="cuda:0", dtype=torch.float32),
+]
+
+for y in new_tensors:
+    assert is_fake_tensor(y)
+    assert y.device == torch.device("cuda:0")
+    assert y.dtype is torch.float32
+
+assert not torch.cuda.is_initialized()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
+        )
+
+    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    def test_move_module_under_fake(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.buffer = torch.nn.Buffer(torch.rand(2, 2))
+                self.param = torch.nn.Parameter(torch.rand(2, 2))
+
+            def forward(self, x):
+                return self.linear(x) + self.buffer + self.param
+
+        m = Module()
+        input = torch.rand(2, 2)
+        gpu_device = torch.device(GPU_TYPE, 0)
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            m.to(device=gpu_device)
+            arg = input.to(device=gpu_device)
+            out = m(arg)
+
+        for p in m.parameters():
+            self.assertTrue(is_fake_tensor(p))
+            self.assertEqual(p.device, gpu_device)
+        for b in m.buffers():
+            self.assertTrue(is_fake_tensor(b))
+            self.assertEqual(b.device, gpu_device)
+
+        self.assertTrue(is_fake_tensor(out))
+        self.assertEqual(out.device, gpu_device)
+
+
+instantiate_parametrized_tests(FakeTensorTestCUDA)
+make_propagate_real_tensors_cls(FakeTensorTestCUDA)
+
+
 class FakeTensorConstHandling(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assertConst(self, *args):
         for arg in args:
             self.assertTrue(arg.constant is not None)
@@ -2672,6 +2727,8 @@ def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
 
 
 class FakeTensorOpInfoTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2691,6 +2748,8 @@ instantiate_device_type_tests(
 
 
 class FakeTensorConverterTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
@@ -2969,6 +3028,8 @@ make_propagate_real_tensors_cls(FakeTensorConverterTest)
 
 
 class FakeTensorOperatorInvariants(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def get_aten_op(self, schema):
         namespace, name = schema.name.split("::")
         overload = schema.overload_name if schema.overload_name else "default"
@@ -3174,81 +3235,6 @@ class FakeTensorOperatorInvariants(TestCase):
                 torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE).device.type, GPU_TYPE
             )
 
-    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
-    def test_move_module_under_fake(self):
-        if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.skipTest("Propagate real tensor not supported")
-
-        class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-                self.buffer = torch.nn.Buffer(torch.rand(2, 2))
-                self.param = torch.nn.Parameter(torch.rand(2, 2))
-
-            def forward(self, x):
-                return self.linear(x) + self.buffer + self.param
-
-        m = Module()
-        input = torch.rand(2, 2)
-        gpu_device = torch.device(GPU_TYPE, 0)
-
-        with FakeTensorMode(allow_non_fake_inputs=True):
-            m.to(device=gpu_device)
-            arg = input.to(device=gpu_device)
-            out = m(arg)
-
-        for p in m.parameters():
-            self.assertTrue(is_fake_tensor(p))
-            self.assertEqual(p.device, gpu_device)
-        for b in m.buffers():
-            self.assertTrue(is_fake_tensor(b))
-            self.assertEqual(b.device, gpu_device)
-
-        self.assertTrue(is_fake_tensor(out))
-        self.assertEqual(out.device, gpu_device)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_move_meta_tensor(self):
-        if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.skipTest("Propagate real tensor not supported")
-
-        meta_tensor = torch.ones(2, device="meta")
-        with FakeTensorMode(allow_non_fake_inputs=True):
-            self.assertEqual(meta_tensor.to(device="cpu").device.type, "cpu")
-            self.assertEqual(meta_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_conv_c1_backward(self):
-        class Repro(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, arg1, arg2, arg3):
-                torch.ops.aten.convolution_backward.default(
-                    arg1,
-                    arg2,
-                    arg3,
-                    [1],
-                    [1, 1],
-                    [1, 1],
-                    [1, 1],
-                    False,
-                    [0, 0],
-                    1,
-                    [True, True, False],
-                )
-
-        args_new = [
-            ((16, 1, 128, 128), (16384, 16384, 128, 1), torch.float16, "cuda"),
-            ((16, 64, 128, 128), (1048576, 1, 8192, 64), torch.float16, "cuda"),
-            ((1, 64, 3, 3), (576, 9, 3, 1), torch.float16, "cuda"),
-        ]
-        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args_new]
-
-        with torch._subclasses.CrossRefFakeMode():
-            Repro()(*args)
-
     def test_convolution_backward_channels_last_memory_format(self):
         """Regression test: meta convolution_backward must predict channels_last
         output strides when inputs are channels_last, matching CUDA/MPS backends.
@@ -3315,28 +3301,11 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
     # PropagateRealTensors installs weakrefs
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/165387",
-    )
-    @expectedFailurePropagateRealTensors
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_module_to(self):
-        def _check_device(sd, device_type):
-            for v in sd.values():
-                self.assertEqual(v.device.type, device_type)
-
-        with FakeTensorMode():
-            m = torch.nn.Linear(2, 2)
-            _check_device(m.state_dict(), "cpu")
-            m.to("cuda")
-            _check_device(m.state_dict(), "cuda")
-
-
-make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 
 
 class FakeTensorPropTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
             def __init__(self) -> None:
@@ -3474,90 +3443,6 @@ class FakeTensorPropTest(TestCase):
         self.assertEqual(x.size(), y.size())
         self.assertEqual(x.stride(), y.stride())
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_torch_load_with_fake_mode(self):
-        model = torch.nn.Linear(5, 10)
-        sd = model.state_dict()
-        sd["tt"] = TwoTensor(torch.randn(2), torch.randn(2))
-
-        def _read_tensor_and_check(key, sd_loaded, sd_orig, all_bytes, device):
-            dtype = torch.float32
-            t = sd_loaded[key]
-            self.assertEqual(t.device.type, device)
-            if isinstance(t, TwoTensor):
-                untyped_storage_a, untyped_storage_b = (
-                    t.a.untyped_storage(),
-                    t.b.untyped_storage(),
-                )
-                self.assertEqual(
-                    untyped_storage_a.nbytes(),
-                    sd_orig[key].a.untyped_storage().nbytes(),
-                )
-                self.assertEqual(
-                    untyped_storage_b.nbytes(),
-                    sd_orig[key].b.untyped_storage().nbytes(),
-                )
-                offset_a, offset_b = (
-                    untyped_storage_a._checkpoint_offset,
-                    untyped_storage_b._checkpoint_offset,
-                )
-                nbytes_a, nbytes_b = (
-                    untyped_storage_a.nbytes() // 4,
-                    untyped_storage_b.nbytes() // 4,
-                )
-                result_a = torch.frombuffer(
-                    all_bytes, dtype=dtype, count=nbytes_a, offset=offset_a
-                ).resize_(t.a.size())
-                result_b = torch.frombuffer(
-                    all_bytes, dtype=dtype, count=nbytes_b, offset=offset_b
-                ).resize_(t.b.size())
-                self.assertEqual(TwoTensor(result_a, result_b), sd_orig[key])
-            else:
-                untyped_storage = t.untyped_storage()
-                self.assertEqual(
-                    untyped_storage.nbytes(), sd_orig[key].untyped_storage().nbytes()
-                )
-                offset = untyped_storage._checkpoint_offset
-                nbytes = untyped_storage.nbytes() // 4
-                result = torch.frombuffer(
-                    all_bytes, dtype=dtype, count=nbytes, offset=offset
-                ).resize_(t.size())
-                self.assertEqual(result, sd_orig[key])
-
-        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
-            # Create state_dict to be loaded later
-            torch.save(sd, f)
-            with open(f, "rb") as g:
-                all_bytes = g.read()
-
-            fake_mode = FakeTensorMode()
-            with fake_mode:
-                sd_loaded = torch.load(f)
-            for k in sd:
-                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
-            with fake_mode:
-                sd_loaded = torch.load(f, map_location="cuda")
-            for k in sd:
-                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
-
-        for k in sd:
-            sd[k] = sd[k].to("cuda")
-
-        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
-            torch.save(sd, f)
-            with open(f, "rb") as g:
-                all_bytes = g.read()
-
-            fake_mode = FakeTensorMode()
-            with fake_mode:
-                sd_loaded = torch.load(f)
-            for k in sd:
-                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
-            with fake_mode:
-                sd_loaded = torch.load(f, map_location="cpu")
-            for k in sd:
-                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
-
     def test_inference_mode_nonzero_memo(self):
         """D106102842: nonzero() memo must be stored for inference FakeTensors.
 
@@ -3592,6 +3477,8 @@ make_propagate_real_tensors_cls(FakeTensorPropTest)
 
 
 class FakeTensorSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_serialization(self):
         x = torch.tensor([0], device="cpu")
         with FakeTensorMode():
@@ -3611,6 +3498,8 @@ class FakeTensorSerialization(TestCase):
 
 
 class FakeTensorDispatchCache(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_shape_env_settings(self):
         """
         Validation that any boolean settings in ShapeEnv are present in the
@@ -3663,14 +3552,6 @@ class FakeTensorDispatchCache(TestCase):
             x = torch.randn(4, 2)
             y = torch.randn(4, 2)
             z = x.as_strided((4, 2), (1, 2))
-            self._test_cache_key(fm, x, y, z)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cache_key_device(self):
-        with FakeTensorMode() as fm:
-            x = torch.randn(4, 3)
-            y = torch.randn(4, 3)
-            z = x.to(device="cuda")
             self._test_cache_key(fm, x, y, z)
 
     def test_cache_key_memory_format(self):
@@ -3827,36 +3708,6 @@ class FakeTensorDispatchCache(TestCase):
             self.assertEqual(y.dtype, torch.float32)
             self.assertHitsMisses(1, 2)
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cache_default_device(self):
-        """
-        Test that the default device is respected when serving cached results.
-        """
-        with FakeTensorMode():
-            FakeTensorMode.cache_clear()
-            self.assertHitsMisses(0, 0)
-
-            try:
-                torch.set_default_device("cpu")
-                x = torch.tensor([1, 2])
-                y = x + 1.0
-                self.assertEqual(y.device.type, "cpu")
-                self.assertHitsMisses(0, 1)
-
-                torch.set_default_device("cuda")
-                x = torch.tensor([1, 2])
-                y = x + 1.0
-                self.assertEqual(y.device.type, "cuda")
-                self.assertHitsMisses(0, 2)
-
-                torch.set_default_device("cpu")
-                x = torch.tensor([1, 2])
-                y = x + 1.0
-                self.assertEqual(y.device.type, "cpu")
-                self.assertHitsMisses(1, 2)
-            finally:
-                torch.set_default_device(None)
-
     def test_cache_inplace_op(self):
         """
         Test that inplace ops served from the cache correctly reference the
@@ -4010,66 +3861,6 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res2),
                 extract_tensor_metadata(res4),
             )
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_wrapper_tensor_subclass_different_device(self):
-        class DifferentDeviceTensor(torch.Tensor):
-            @staticmethod
-            def __new__(cls, a):
-                kwargs = {}
-                kwargs["strides"] = a.stride()
-                kwargs["storage_offset"] = a.storage_offset()
-                kwargs["device"] = torch.device("cpu")
-                kwargs["layout"] = a.layout
-                kwargs["requires_grad"] = a.requires_grad
-                kwargs["dtype"] = a.dtype
-                out = torch.Tensor._make_wrapper_subclass(cls, a.size(), **kwargs)
-                return out
-
-            def __init__(self, a):
-                self.inner_tensor = a
-
-            def __repr__(self):
-                return f"DifferentDeviceTensor({repr(self.inner_tensor)})"
-
-            def __tensor_flatten__(self):
-                return ["inner_tensor"], None
-
-            @staticmethod
-            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                if meta is not None:
-                    raise AssertionError(f"expected meta is None, got {meta}")
-                return DifferentDeviceTensor(inner_tensors["inner_tensor"])
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if kwargs is None:
-                    kwargs = {}
-                args = pytree.tree_map_only(
-                    DifferentDeviceTensor, lambda x: x.inner_tensor, args
-                )
-                kwargs = pytree.tree_map_only(
-                    DifferentDeviceTensor, lambda x: x.inner_tensor, kwargs
-                )
-                # Returns unwrapped tensor
-                return func(*args, **kwargs)
-
-        a = torch.ones(2, 2, 768, device="cuda")
-        wrapped_a = DifferentDeviceTensor(a)
-
-        # Outer Tensor is on cpu, inner is on cuda
-        self.assertTrue(wrapped_a.is_cpu)
-        self.assertFalse(wrapped_a.inner_tensor.is_cpu)
-
-        with FakeTensorMode() as fake_mode:
-            fake_wrapped_a = fake_mode.from_tensor(wrapped_a)
-
-        self.assertTrue(fake_wrapped_a.is_cpu)
-        if not isinstance(fake_wrapped_a, DifferentDeviceTensor):
-            raise AssertionError(
-                f"expected DifferentDeviceTensor, got {type(fake_wrapped_a)}"
-            )
-        self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
 
     def test__upsample_bilinear2d_aa_backward_dynamic_shapes(self):
         def f(x):
@@ -4395,6 +4186,93 @@ def forward(self, dummy_1):
 
 
 class FakeTensorPreferDeviceType(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_fake_tensor_prefer_device_type_cpu_only(self):
+        """
+        Test that fake_tensor_prefer_device_type works correctly when only CPU tensors are involved.
+        """
+        with torch._functorch.config.patch(fake_tensor_prefer_device_type="cuda"):
+            with FakeTensorMode():
+                # When all tensors are CPU, the result should still be CPU
+                x = torch.randn(2, 3, device="cpu")
+                y = torch.randn(2, 3, device="cpu")
+                result = x + y
+                self.assertEqual(result.device.type, "cpu")
+                self.assertTrue(is_fake_tensor(result))
+
+
+class FakeTensorMetaDevicePropagation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("device", ["cpu", "cuda"])
+    def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
+        if device == "cuda" and not RUN_CUDA:
+            self.skipTest("requires cuda")
+
+        with FakeTensorMode():
+            log_det = torch.zeros(2, device=device)
+            log_det += torch.zeros(2, device="meta")
+
+            self.assertEqual(log_det.device.type, device)
+            self.assertTrue(is_fake_tensor(log_det))
+
+
+instantiate_parametrized_tests(FakeTensorMetaDevicePropagation)
+
+
+class FakeTensorViewCopy(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_expand_then_view_copy_matches_eager_mode(self):
+        x = torch.arange(7)
+        y = x.expand(12, 7)
+
+        # Eager baseline
+        eager = torch.ops.aten.view_copy.default(y, [84])
+        self.assertEqual(eager.shape, (84,))
+        self.assertIsNone(eager._base)  # non-aliasing
+
+        # FakeTensor behavior should match eager
+        with FakeTensorMode():
+            xf = torch.arange(7)
+            yf = xf.expand(12, 7)
+            fake = torch.ops.aten.view_copy.default(yf, [84])
+            self.assertEqual(fake.shape, (84,))
+            self.assertIsNone(fake._base)  # non-aliasing
+
+    def test_expand_then_view_still_not_allowed(self):
+        with FakeTensorMode():
+            xf = torch.arange(7)
+            yf = xf.expand(12, 7)
+            with self.assertRaisesRegex(
+                ValueError, "Cannot view a tensor with shape *"
+            ):
+                _ = yf.view(-1)
+
+    def test_expand_then_view_copy_unbacked_matches_eager_mode(self):
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            with FakeTensorMode():
+                xf = torch.arange(7)
+                yf = xf.expand(12, 7)
+                fake = torch.ops.aten.view_copy.default(yf, [84])
+                self.assertEqual(fake.shape, (84,))
+                self.assertIsNone(fake._base)  # non-aliasing
+
+    def test_expand_then_view_unbacked_still_not_allowed(self):
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            with FakeTensorMode():
+                xf = torch.arange(7)
+                yf = xf.expand(12, 7)
+                with self.assertRaisesRegex(
+                    ValueError, "Cannot view a tensor with shape *"
+                ):
+                    _ = yf.view(-1)
+
+
+class FakeTensorPreferDeviceTypeCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fake_tensor_prefer_device_type(self):
         """
@@ -4458,83 +4336,266 @@ class FakeTensorPreferDeviceType(TestCase):
             ):
                 mixed_device_op(cuda_tensor, None)
 
-    def test_fake_tensor_prefer_device_type_cpu_only(self):
+
+class FakeTensorPropTestCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_torch_load_with_fake_mode(self):
+        model = torch.nn.Linear(5, 10)
+        sd = model.state_dict()
+        sd["tt"] = TwoTensor(torch.randn(2), torch.randn(2))
+
+        def _read_tensor_and_check(key, sd_loaded, sd_orig, all_bytes, device):
+            dtype = torch.float32
+            t = sd_loaded[key]
+            self.assertEqual(t.device.type, device)
+            if isinstance(t, TwoTensor):
+                untyped_storage_a, untyped_storage_b = (
+                    t.a.untyped_storage(),
+                    t.b.untyped_storage(),
+                )
+                self.assertEqual(
+                    untyped_storage_a.nbytes(),
+                    sd_orig[key].a.untyped_storage().nbytes(),
+                )
+                self.assertEqual(
+                    untyped_storage_b.nbytes(),
+                    sd_orig[key].b.untyped_storage().nbytes(),
+                )
+                offset_a, offset_b = (
+                    untyped_storage_a._checkpoint_offset,
+                    untyped_storage_b._checkpoint_offset,
+                )
+                nbytes_a, nbytes_b = (
+                    untyped_storage_a.nbytes() // 4,
+                    untyped_storage_b.nbytes() // 4,
+                )
+                result_a = torch.frombuffer(
+                    all_bytes, dtype=dtype, count=nbytes_a, offset=offset_a
+                ).resize_(t.a.size())
+                result_b = torch.frombuffer(
+                    all_bytes, dtype=dtype, count=nbytes_b, offset=offset_b
+                ).resize_(t.b.size())
+                self.assertEqual(TwoTensor(result_a, result_b), sd_orig[key])
+            else:
+                untyped_storage = t.untyped_storage()
+                self.assertEqual(
+                    untyped_storage.nbytes(), sd_orig[key].untyped_storage().nbytes()
+                )
+                offset = untyped_storage._checkpoint_offset
+                nbytes = untyped_storage.nbytes() // 4
+                result = torch.frombuffer(
+                    all_bytes, dtype=dtype, count=nbytes, offset=offset
+                ).resize_(t.size())
+                self.assertEqual(result, sd_orig[key])
+
+        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
+            # Create state_dict to be loaded later
+            torch.save(sd, f)
+            with open(f, "rb") as g:
+                all_bytes = g.read()
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                sd_loaded = torch.load(f)
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
+            with fake_mode:
+                sd_loaded = torch.load(f, map_location="cuda")
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
+
+        for k in sd:
+            sd[k] = sd[k].to("cuda")
+
+        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
+            torch.save(sd, f)
+            with open(f, "rb") as g:
+                all_bytes = g.read()
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                sd_loaded = torch.load(f)
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
+            with fake_mode:
+                sd_loaded = torch.load(f, map_location="cpu")
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
+
+
+make_propagate_real_tensors_cls(FakeTensorPropTestCUDA)
+
+
+class FakeTensorDispatchCacheCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cache_key_device(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+            z = x.to(device="cuda")
+            self._test_cache_key(fm, x, y, z)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cache_default_device(self):
         """
-        Test that fake_tensor_prefer_device_type works correctly when only CPU tensors are involved.
+        Test that the default device is respected when serving cached results.
         """
-        with torch._functorch.config.patch(fake_tensor_prefer_device_type="cuda"):
-            with FakeTensorMode():
-                # When all tensors are CPU, the result should still be CPU
-                x = torch.randn(2, 3, device="cpu")
-                y = torch.randn(2, 3, device="cpu")
-                result = x + y
-                self.assertEqual(result.device.type, "cpu")
-                self.assertTrue(is_fake_tensor(result))
+        with FakeTensorMode():
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            try:
+                torch.set_default_device("cpu")
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, "cpu")
+                self.assertHitsMisses(0, 1)
+
+                torch.set_default_device("cuda")
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, "cuda")
+                self.assertHitsMisses(0, 2)
+
+                torch.set_default_device("cpu")
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, "cpu")
+                self.assertHitsMisses(1, 2)
+            finally:
+                torch.set_default_device(None)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_wrapper_tensor_subclass_different_device(self):
+        class DifferentDeviceTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a):
+                kwargs = {}
+                kwargs["strides"] = a.stride()
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = torch.device("cpu")
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                out = torch.Tensor._make_wrapper_subclass(cls, a.size(), **kwargs)
+                return out
+
+            def __init__(self, a):
+                self.inner_tensor = a
+
+            def __repr__(self):
+                return f"DifferentDeviceTensor({repr(self.inner_tensor)})"
+
+            def __tensor_flatten__(self):
+                return ["inner_tensor"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                if meta is not None:
+                    raise AssertionError(f"expected meta is None, got {meta}")
+                return DifferentDeviceTensor(inner_tensors["inner_tensor"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args = pytree.tree_map_only(
+                    DifferentDeviceTensor, lambda x: x.inner_tensor, args
+                )
+                kwargs = pytree.tree_map_only(
+                    DifferentDeviceTensor, lambda x: x.inner_tensor, kwargs
+                )
+                # Returns unwrapped tensor
+                return func(*args, **kwargs)
+
+        a = torch.ones(2, 2, 768, device="cuda")
+        wrapped_a = DifferentDeviceTensor(a)
+
+        # Outer Tensor is on cpu, inner is on cuda
+        self.assertTrue(wrapped_a.is_cpu)
+        self.assertFalse(wrapped_a.inner_tensor.is_cpu)
+
+        with FakeTensorMode() as fake_mode:
+            fake_wrapped_a = fake_mode.from_tensor(wrapped_a)
+
+        self.assertTrue(fake_wrapped_a.is_cpu)
+        if not isinstance(fake_wrapped_a, DifferentDeviceTensor):
+            raise AssertionError(
+                f"expected DifferentDeviceTensor, got {type(fake_wrapped_a)}"
+            )
+        self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
 
 
-class FakeTensorMetaDevicePropagation(TestCase):
-    @parametrize("device", ["cpu", "cuda"])
-    def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
-        if device == "cuda" and not RUN_CUDA:
-            self.skipTest("requires cuda")
+class FakeTensorOperatorInvariantsCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_move_meta_tensor(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
+        meta_tensor = torch.ones(2, device="meta")
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            self.assertEqual(meta_tensor.to(device="cpu").device.type, "cpu")
+            self.assertEqual(meta_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_conv_c1_backward(self):
+        class Repro(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, arg1, arg2, arg3):
+                torch.ops.aten.convolution_backward.default(
+                    arg1,
+                    arg2,
+                    arg3,
+                    [1],
+                    [1, 1],
+                    [1, 1],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                    [True, True, False],
+                )
+
+        args_new = [
+            ((16, 1, 128, 128), (16384, 16384, 128, 1), torch.float16, "cuda"),
+            ((16, 64, 128, 128), (1048576, 1, 8192, 64), torch.float16, "cuda"),
+            ((1, 64, 3, 3), (576, 9, 3, 1), torch.float16, "cuda"),
+        ]
+        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args_new]
+
+        with torch._subclasses.CrossRefFakeMode():
+            Repro()(*args)
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/165387",
+    )
+    @expectedFailurePropagateRealTensors
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_module_to(self):
+        def _check_device(sd, device_type):
+            for v in sd.values():
+                self.assertEqual(v.device.type, device_type)
 
         with FakeTensorMode():
-            log_det = torch.zeros(2, device=device)
-            log_det += torch.zeros(2, device="meta")
-
-            self.assertEqual(log_det.device.type, device)
-            self.assertTrue(is_fake_tensor(log_det))
-
-
-instantiate_parametrized_tests(FakeTensorMetaDevicePropagation)
+            m = torch.nn.Linear(2, 2)
+            _check_device(m.state_dict(), "cpu")
+            m.to("cuda")
+            _check_device(m.state_dict(), "cuda")
 
 
-class FakeTensorViewCopy(TestCase):
-    def test_expand_then_view_copy_matches_eager_mode(self):
-        x = torch.arange(7)
-        y = x.expand(12, 7)
+make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 
-        # Eager baseline
-        eager = torch.ops.aten.view_copy.default(y, [84])
-        self.assertEqual(eager.shape, (84,))
-        self.assertIsNone(eager._base)  # non-aliasing
 
-        # FakeTensor behavior should match eager
-        with FakeTensorMode():
-            xf = torch.arange(7)
-            yf = xf.expand(12, 7)
-            fake = torch.ops.aten.view_copy.default(yf, [84])
-            self.assertEqual(fake.shape, (84,))
-            self.assertIsNone(fake._base)  # non-aliasing
-
-    def test_expand_then_view_still_not_allowed(self):
-        with FakeTensorMode():
-            xf = torch.arange(7)
-            yf = xf.expand(12, 7)
-            with self.assertRaisesRegex(
-                ValueError, "Cannot view a tensor with shape *"
-            ):
-                _ = yf.view(-1)
-
-    def test_expand_then_view_copy_unbacked_matches_eager_mode(self):
-        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
-            with FakeTensorMode():
-                xf = torch.arange(7)
-                yf = xf.expand(12, 7)
-                fake = torch.ops.aten.view_copy.default(yf, [84])
-                self.assertEqual(fake.shape, (84,))
-                self.assertIsNone(fake._base)  # non-aliasing
-
-    def test_expand_then_view_unbacked_still_not_allowed(self):
-        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
-            with FakeTensorMode():
-                xf = torch.arange(7)
-                yf = xf.expand(12, 7)
-                with self.assertRaisesRegex(
-                    ValueError, "Cannot view a tensor with shape *"
-                ):
-                    _ = yf.view(-1)
-
+make_propagate_real_tensors_cls(FakeTensorOperatorInvariantsCUDA)
 
 if __name__ == "__main__":
     run_tests()
