@@ -773,14 +773,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
-    if grouped_mm and (
-        epilogue_analysis.required_geometries
-        or outputs.local_reduce is not None
-        or outputs.output_contraction is not None
-    ):
+    if grouped_mm and outputs.local_reduce is not None:
         raise QuackFallbackUnsupported(
-            "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped "
-            "reductions or grouped-main outputs"
+            "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped reductions"
         )
     indexed_output = outputs.indexed_output
     indexed_input = None
