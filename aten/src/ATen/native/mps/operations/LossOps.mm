@@ -287,17 +287,6 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 
 } // namespace BCELoss
 
-static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
-  auto* div = [mpsGraph divisionWithPrimaryTensor:divident
-                                  secondaryTensor:castMPSTensor(mpsGraph, divisor, divident.dataType)
-                                             name:@"divisionTensor"];
-  // Replace NaNs with 0 for divident elements equal to 0
-  return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
-                         truePredicateTensor:div
-                        falsePredicateTensor:[mpsGraph constantWithScalar:0.0 dataType:div.dataType]
-                                        name:nil];
-}
-
 // NLLLoss
 static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                      const Tensor& grad_output_arg,
@@ -308,116 +297,87 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                      int64_t ignore_index,
                                      const Tensor& total_weight,
                                      bool is2D) {
+  TORCH_CHECK(input_arg.is_mps(), "input must be an MPS tensor");
+  TORCH_CHECK(grad_input_arg.is_mps(), "grad_input must be an MPS tensor");
+  TORCH_CHECK(grad_output_arg.is_mps(), "grad_output must be an MPS tensor");
+  TORCH_CHECK(target_arg.is_mps(), "target must be an MPS tensor");
+  TORCH_CHECK(!weight_arg.defined() || weight_arg.is_mps(), "weight must be an MPS tensor");
+  TORCH_CHECK(total_weight.is_mps(), "total_weight must be an MPS tensor");
   if (grad_input_arg.numel() == 0) {
     return;
   }
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* targetTensor_ = nil;
-    MPSGraphTensor* weightTensor_ = nil;
-    MPSGraphTensor* totalWeightTensor_ = nil;
-    MPSGraphTensor* gradInputTensor_ = nil;
-    MPSGraphTensor* gradOutputTensor_ = nil;
+  TORCH_CHECK_TYPE(grad_input_arg.scalar_type() == input_arg.scalar_type(),
+                   "expected scalar type ",
+                   input_arg.scalar_type(),
+                   " but found ",
+                   grad_input_arg.scalar_type());
+  TORCH_CHECK_TYPE(grad_output_arg.scalar_type() == input_arg.scalar_type(),
+                   "expected scalar type ",
+                   input_arg.scalar_type(),
+                   " but found ",
+                   grad_output_arg.scalar_type());
+  TORCH_CHECK_TYPE(!weight_arg.defined() || weight_arg.scalar_type() == input_arg.scalar_type(),
+                   "expected scalar type ",
+                   input_arg.scalar_type(),
+                   " but found ",
+                   weight_arg.scalar_type());
+  grad_input_arg.zero_();
+
+  const bool has_weight = weight_arg.defined() && weight_arg.numel() > 0;
+  const Tensor target =
+      (target_arg.scalar_type() == ScalarType::Long ? target_arg : target_arg.to(ScalarType::Long)).contiguous();
+  const Tensor grad_output = grad_output_arg.contiguous();
+  const Tensor weight = has_weight ? weight_arg.contiguous() : grad_input_arg;
+  const Tensor total_weight_cast =
+      (total_weight.scalar_type() == input_arg.scalar_type() ? total_weight : total_weight.to(input_arg.scalar_type()))
+          .contiguous();
+
+  const auto class_dim = input_arg.dim() == 1 ? 0 : 1;
+  const auto map_size = is2D ? input_arg.size(2) * input_arg.size(3) : 1;
+  const NLLLossBackwardParams<> params{
+      .n_classes = input_arg.size(class_dim),
+      .map_size = map_size,
+      .batch_stride = input_arg.dim() == 1 ? 0 : grad_input_arg.stride(0),
+      .class_stride = grad_input_arg.stride(class_dim),
+      .grad_input_offset = grad_input_arg.storage_offset(),
+      .grad_output_offset = grad_output.storage_offset(),
+      .target_offset = target.storage_offset(),
+      .weight_offset = has_weight ? weight.storage_offset() : 0,
+      .total_weight_offset = total_weight_cast.storage_offset(),
+      .ignore_index = ignore_index,
+      .tid_offset = 0,
+      .is_reduction = reduction != Reduction::None,
+      .is_mean = reduction == Reduction::Mean,
+      .has_weight = has_weight,
   };
-  bool isWeightsArrayValid = weight_arg.defined() && weight_arg.numel() > 0;
-  bool isTargetCasted = target_arg.scalar_type() != ScalarType::Long;
-  int64_t channel_dim = grad_input_arg.dim() < 2 ? 0 : 1;
-  auto input = input_arg.dim() == 1 ? input_arg.view({1, input_arg.size(0)}) : input_arg;
-  auto target = target_arg.dim() == 0 ? target_arg.view({1}) : target_arg;
-  auto grad_input = grad_input_arg.dim() == 1 ? grad_input_arg.view({1, grad_input_arg.size(0)}) : grad_input_arg;
-  auto numClasses = grad_input.sizes()[1];
-  auto weight = weight_arg;
-  auto grad_output = grad_output_arg;
 
-  if (isWeightsArrayValid) {
-    std::vector<int64_t> weightShape(input.dim(), 1);
-    weightShape[1] = input.size(1);
-    weight = weight_arg.view(weightShape);
-  }
-  if (grad_output_arg.dim() < grad_input.dim() && grad_output_arg.dim() > 0) {
-    grad_output = grad_output_arg.unsqueeze(channel_dim);
-  }
-  @autoreleasepool {
-    std::string key = "nllnd_loss_backward" + getTensorsStringKey({input, grad_output, target, weight, total_weight}) +
-        std::to_string(numClasses) + ":" + std::to_string(ignore_index) + ":" + std::to_string(isWeightsArrayValid) +
-        ":" + std::to_string(isTargetCasted) + ":" + reductionToString(reduction);
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
-      MPSGraphTensor* castedTargetTensor =
-          isTargetCasted ? castMPSTensor(mpsGraph, targetTensor, MPSDataTypeInt64) : targetTensor;
-      MPSGraphTensor* weightTensor = nil;
-      if (isWeightsArrayValid) {
-        weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("nllnd_loss_backward_" + scalarToMetalTypeString(input_arg));
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder,
+                  getMTLBufferStorage(grad_input_arg),
+                  getMTLBufferStorage(grad_output),
+                  getMTLBufferStorage(target),
+                  getMTLBufferStorage(weight),
+                  getMTLBufferStorage(total_weight_cast));
+      // For 1D (no batch dim) input the loss has a single element and only
+      // target[0] is used; dispatching target.numel() threads would read
+      // grad_output (a single element) out of bounds and scatter garbage into
+      // grad_input. See https://github.com/pytorch/pytorch/issues/195391.
+      const int64_t num_outputs = input_arg.dim() == 1 ? 1 : target.numel();
+      // Chunk only when the target exceeds Metal's uint32 thread-grid limit.
+      constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
+      auto dispatch_params = params;
+      for (auto offset = int64_t{0}; offset < num_outputs; offset += max_threads) {
+        dispatch_params.tid_offset = offset;
+        mtl_setArgs<5>(encoder, dispatch_params, stream->getErrorBuffer());
+        mtl_dispatch1DJob(encoder, pso, std::min(max_threads, num_outputs - offset));
       }
-      MPSGraphTensor* totalWeightTensor = mpsGraphRankedPlaceHolder(mpsGraph, total_weight);
-      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-
-      MPSGraphTensor* updatedTargetTensor = castedTargetTensor;
-
-      // Replace ignored_index with length depth + 1 so that oneHotAPI ignores it
-      MPSGraphTensor* ignoreIndexTensor = [mpsGraph constantWithScalar:ignore_index dataType:MPSDataTypeInt64];
-      MPSGraphTensor* numClassesTensor = [mpsGraph constantWithScalar:(numClasses + 1) dataType:MPSDataTypeInt64];
-      MPSGraphTensor* isEqualTensor = [mpsGraph equalWithPrimaryTensor:castedTargetTensor
-                                                       secondaryTensor:ignoreIndexTensor
-                                                                  name:@"isEqualTensor"];
-      updatedTargetTensor = [mpsGraph selectWithPredicateTensor:isEqualTensor
-                                            truePredicateTensor:numClassesTensor
-                                           falsePredicateTensor:castedTargetTensor
-                                                           name:@"predicateTensor"];
-
-      // oneHotWithIndicesTensor only works for Float32 dtype
-      // cast it explicitly later if needed
-      auto* oneHotTensor = [mpsGraph oneHotWithIndicesTensor:updatedTargetTensor
-                                                       depth:numClasses
-                                                        axis:1
-                                                    dataType:MPSDataTypeFloat32
-                                                     onValue:-1.0f
-                                                    offValue:0.0f
-                                                        name:nil];
-      oneHotTensor = castMPSTensor(mpsGraph, oneHotTensor, [inputTensor dataType]);
-      if (isWeightsArrayValid) {
-        oneHotTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
-                                                 secondaryTensor:weightTensor
-                                                            name:@"scaleByWeightTensor"];
-      }
-      if (reduction == Reduction::Mean) {
-        oneHotTensor = divisionNoNaN(mpsGraph, oneHotTensor, totalWeightTensor);
-      }
-      MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
-                                                                  secondaryTensor:gradOutputTensor
-                                                                             name:nil];
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->targetTensor_ = targetTensor;
-      newCachedGraph->weightTensor_ = weightTensor;
-      newCachedGraph->totalWeightTensor_ = totalWeightTensor;
-      newCachedGraph->gradInputTensor_ = gradInputTensor;
-      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-    });
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-    auto targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
-    Placeholder weightPlaceholder = Placeholder();
-    if (isWeightsArrayValid) {
-      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight);
     }
-    auto totalWeightPlaceholder = Placeholder(cachedGraph->totalWeightTensor_, total_weight);
-    auto gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
-
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
-    feeds[totalWeightPlaceholder.getMPSGraphTensor()] = totalWeightPlaceholder.getMPSGraphTensorData();
-    feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
-
-    if (isWeightsArrayValid) {
-      feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
-    }
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, gradInputPlaceholder);
-  }
+  });
 }
 
 static void nllnd_loss_forward_impl(Tensor& output,
@@ -1249,8 +1209,21 @@ static void nll_loss2d_backward_out_mps_template(Tensor& grad_input,
                                                  int64_t ignore_index,
                                                  const Tensor& total_weight) {
   check_inputs_nll_loss2d(input, target, weight);
+  if (reduction == Reduction::None) {
+    TORCH_CHECK(grad_output.dim() == 3,
+                "grad_output must have same dimension as target (3) but got dimension: ",
+                grad_output.sizes());
+    TORCH_CHECK(grad_output.sizes() == target.sizes(),
+                "size mismatch (got grad_output: ",
+                grad_output.sizes(),
+                " target: ",
+                target.sizes());
+  } else {
+    TORCH_CHECK(grad_output.dim() <= 1 && grad_output.numel() == 1,
+                "Expected a single element grad_output tensor, but got: ",
+                grad_output.sizes());
+  }
   grad_input.resize_as_(input);
-  grad_input.zero_();
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   TORCH_CHECK(total_weight.numel() == 1,
               "expected total_weight to be a single element tensor, got: ",

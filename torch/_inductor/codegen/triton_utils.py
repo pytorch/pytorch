@@ -237,9 +237,13 @@ def signature_to_meta(
         # tl.int32 whenever the (deprecated) block-pointer path is actually
         # active. Templates like flex attention/decoding likewise use
         # hand-written block pointers, so they also stay on 32-bit ks indexing.
+        #
+        # assume_32bit_indexing already asserts (and guards) that every ks* symbol
+        # fits in int32.
         if (
             not is_template
             and not use_block_ptr_enabled()
+            and not config.assume_32bit_indexing
             and isinstance(arg, SizeArg)
             and arg.name.startswith("ks")
         ):
@@ -421,7 +425,7 @@ def config_of(
     # can use 32-bit pointer offsets and emit buffer load/store ops.
     if pointer_range_override is not None:
         pointer_range_32 = pointer_range_override
-    elif torch.version.hip is not None:
+    elif torch.version.hip is not None and config.triton.emit_pointer_range_32:
         pointer_range_32 = tuple(
             i
             for i, arg in zip(indices, args)

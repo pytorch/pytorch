@@ -691,6 +691,8 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError(
                 "cannot register a hook on a tensor that doesn't require gradient"
             )
+        # Accessing grad_fn refreshes a stale view before creating its hook dict.
+        _ = self.grad_fn
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
             if self.grad_fn is not None:
@@ -1566,7 +1568,7 @@ class Tensor(torch._C.TensorBase):
             stream (integer or None): An optional Python integer representing a
                 pointer to a CUDA stream. The current stream is synchronized with
                 this stream before the capsule is created, and since the capsule
-                shares its storage with the tensor this make it safe to access from
+                shares its storage with the tensor this makes it safe to access from
                 both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
                 synchronization. This API intentionally slightly deviates from the DLPack

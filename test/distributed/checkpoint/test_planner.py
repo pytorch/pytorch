@@ -165,6 +165,33 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
         self.assertEqual(expected, loaded)
 
 
+class TestTensorPropertiesStrides(TestCase):
+    def test_create_from_tensor_populates_strides(self):
+        tensor = torch.rand(4, 8)  # shape [4, 8], strides (8, 1)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (8, 1))
+
+    def test_create_from_tensor_non_contiguous_strides(self):
+        tensor = torch.rand(5, 10).t()  # shape [10, 5], strides (1, 10)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (1, 10))
+
+    def test_create_from_tensor_transposed_strides(self):
+        tensor = torch.rand(2, 1).t()  # shape [1, 2], strides (1, 1)
+        self.assertEqual(tensor.shape, (1, 2))
+        self.assertEqual(tensor.stride(), (1, 1))
+
+        props = TensorProperties.create_from_tensor(tensor)
+        # Test that even though (2, 1) is a valid stride,
+        # but we still retain the original strides (1, 1)
+        self.assertEqual(props.strides, tensor.stride())
+        self.assertNotEqual(props.strides, (2, 1))
+
+    def test_strides_default_none(self):
+        props = TensorProperties(dtype=torch.float32)
+        self.assertIsNone(props.strides)
+
+
 class TestSavePlan(TestCase):
     @with_fake_comms(rank=1, world_size=4)
     def test_local_plan(self):

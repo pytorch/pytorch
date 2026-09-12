@@ -103,6 +103,28 @@ if(BLAS_FOUND)
     SET(LAPACK_INFO "nvpl")
   ENDIF()
 
+  # ATLAS
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "atlas"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" ATLAS_LAPACK_WORKS)
+    set(CMAKE_REQUIRED_LIBRARIES)
+    if(ATLAS_LAPACK_WORKS)
+      SET(LAPACK_INFO "atlas")
+    else()
+      check_lapack_libraries(
+        LAPACK_LIBRARIES
+        LAPACK
+        cheev
+        ""
+        "lapack"
+        "${BLAS_LIBRARIES}"
+        )
+      if(LAPACK_LIBRARIES)
+        SET(LAPACK_INFO "atlas")
+      endif()
+    endif()
+  endif()
+
   # Accelerate
   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "accelerate"))
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})

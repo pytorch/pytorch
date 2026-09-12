@@ -4,10 +4,10 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Lerp.h>
+#include <ATen/native/Pow.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/operations/BinaryKernel.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -29,38 +29,12 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/BinaryKernel_metallib.h>
 #endif
 
-namespace mps {
-
-void binary_op_kernel(const std::string func_name,
-                      const Tensor& input,
-                      const Tensor& other,
-                      const Tensor& output,
-                      const std::optional<Scalar> alpha) {
-  auto new_size = at::infer_size(input.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-
-  auto iter = TensorIteratorConfig()
-                  .allow_cpu_scalars(true)
-                  .add_output(output)
-                  .add_const_input(input)
-                  .add_const_input(other)
-                  .check_all_same_dtype(false)
-                  .promote_inputs_to_common_dtype(true)
-                  .build();
-
-  lib.exec_binary_kernel(iter, func_name, alpha);
-}
-
-} // namespace mps
-
 static void atan2_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "atan2");
+}
+
+static void pow_tensor_tensor_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "pow");
 }
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
@@ -180,12 +154,28 @@ static void hermite_polynomial_he_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hermite_polynomial_he");
 }
 
+static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
 
 static void complex_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "make_complex");
+}
+
+// `sub_out` routes through `add_stub` with a negated alpha, same as CPU/CUDA/XPU
+static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
+  const auto alpha_val = alpha.toComplexDouble();
+  if (alpha_val == 1.0) {
+    return lib.exec_binary_kernel(iter, "add");
+  }
+  if (alpha_val == -1.0 && iter.common_dtype() != kBool) {
+    return lib.exec_binary_kernel(iter, "sub");
+  }
+  lib.exec_binary_kernel(iter, "add_alpha", alpha);
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
@@ -359,6 +349,19 @@ static void ge_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "ge", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
 }
 
+static void logical_and_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_and", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_or_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_or", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_xor_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_xor", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+REGISTER_DISPATCH(add_stub, &add_mps_kernel)
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
@@ -381,6 +384,7 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
+REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
@@ -396,6 +400,7 @@ REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
 REGISTER_DISPATCH(lcm_stub, &lcm_mps_kernel)
+REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_mps_kernel)
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_mps_kernel)
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)
@@ -407,4 +412,7 @@ REGISTER_DISPATCH(lt_stub, &lt_mps_kernel)
 REGISTER_DISPATCH(le_stub, &le_mps_kernel)
 REGISTER_DISPATCH(gt_stub, &gt_mps_kernel)
 REGISTER_DISPATCH(ge_stub, &ge_mps_kernel)
+REGISTER_DISPATCH(logical_and_stub, &logical_and_mps_kernel)
+REGISTER_DISPATCH(logical_or_stub, &logical_or_mps_kernel)
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_mps_kernel)
 } // namespace at::native

@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.types import IntLikeType
 
 
 """
@@ -280,7 +281,9 @@ class Guard:
     stack: CapturedTraceback | None = None
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
-    _unserializable: bool = False
+    # The local-scope type a TYPE_MATCH or FAKE_SCRIPT_TYPE_MATCH found, if any;
+    # serialize_guards refuses it.
+    _unserializable: type | None = None
     _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
@@ -699,7 +702,7 @@ class GuardsSet:
         return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
-        """Delete all guards that contains a given source"""
+        """Delete all guards that contain a given source"""
         from ._dynamo.source import is_from_source
 
         self.inner = OrderedSet(
@@ -1135,13 +1138,12 @@ class TracingContext:
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
-        # or None if no stride is known.  This is always the HINT, it
-        # is never a SymInt (it would be better if it was a SymInt, but
-        # I can't conveniently get this from Inductor atm.  Also, be
-        # careful not to accidentally induce guards on the SymInt if
-        # you ever do change this in aot_autograd.py; you should check
-        # on permutations preferentially.)
-        self.output_strides: list[tuple[int, ...] | None] | None = None
+        # or None if no stride is known.  An entry may be a SymInt: under
+        # dynamic shapes inductor reports strides symbolically, see
+        # set_tracing_context_output_strides.  Be careful not to induce
+        # guards on those SymInts when consuming this in aot_autograd.py;
+        # you should check on permutations preferentially.
+        self.output_strides: list[tuple[IntLikeType, ...] | None] | None = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -1228,7 +1230,7 @@ class TracingContext:
             except Exception as e:
                 # Prevent real_stack from getting attached
                 #
-                # The invariant is that if an Exception as real_stack, we've
+                # The invariant is that if an Exception has real_stack, we've
                 # appropriately attached a user stack and we no longer need to
                 # attach anything. Because we cannot conveniently interpose
                 # when an exception is thrown, we instead interpose everywhere
@@ -1276,7 +1278,7 @@ class TracingContext:
     @staticmethod
     @contextlib.contextmanager
     def report_output_strides() -> Generator[
-        list[tuple[int, ...] | None] | None, None, None
+        list[tuple[IntLikeType, ...] | None] | None, None, None
     ]:
         tc = TracingContext.try_get()
         if tc is None:

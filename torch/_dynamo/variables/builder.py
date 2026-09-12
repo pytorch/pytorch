@@ -115,7 +115,6 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
 )
-from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
@@ -145,6 +144,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_attr_proxy_source,
     is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
@@ -161,6 +161,7 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    TypeMROSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
@@ -236,6 +237,7 @@ from .functions import (
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
     MethodWrapperVariable,
+    PropertyVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -329,8 +331,11 @@ from .user_defined import (
     FrozenDataClassVariable,
     InspectVariable,
     IntWrapperVariable,
+    is_generic_ctx_manager_cls,
+    is_reconstructable_decorator_ctx_manager_clone,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
+    SimpleNamespaceVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -459,8 +464,10 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
         # ``DictGetItemSource(UnspecializedParamBufferSource(_,
         # '_parameters'), 'weight')``. Collapse that pair into a single
         # attr token.
-        if isinstance(cur, DictGetItemSource) and isinstance(
-            cur.base, UnspecializedParamBufferSource
+        if (
+            isinstance(cur, DictGetItemSource)
+            and isinstance(cur.base, UnspecializedParamBufferSource)
+            and isinstance(cur.index, str)
         ):
             path.append(_AttrToken(cur.index))
             cur = cur.base.base
@@ -692,7 +699,7 @@ class GraphArg:
     # stash a strong reference too.
     example_strong_ref: torch.Tensor | torch.SymInt | None = None
 
-    def __setattr__(self, name: str, value: Any) -> None:
+    def __setattr__(self, name: str, value: object) -> None:
         # Use object.__setattr__ to bypass Dynamo's STORE_ATTR interception.
         # This is needed because when PYTORCH_TEST_WITH_DYNAMO=1, even internal
         # GraphArg creation can be traced, and with replay_side_effects=False,
@@ -790,9 +797,7 @@ def _is_dim_dynamic_from_source_dynamism(
     if not isinstance(source, LocalSource) or source.dynamism is None:
         return False
 
-    source_dynamism: dict[str, tuple[bool, ...]] = dict(
-        typing.cast(Any, source.dynamism)
-    )
+    source_dynamism = dict(source.dynamism)
     dim_dynamism = source_dynamism.get(normalized_source_name)
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
@@ -832,24 +837,8 @@ class VariableBuilder:
 
     def _call_impl(self, value: object) -> VariableTracker:
         self.tx.output.current_tracer.traced_sources.add(self.source)
-        if value in self.tx.output.side_effects:
-            side_effect_result = self.tx.output.side_effects[value]
-            dup_guard = make_dupe_guard(self.source, side_effect_result.source)
-            if dup_guard:
-                self.install_guards(dup_guard)
-
-            if isinstance(value, torch.nn.Module) and isinstance(
-                side_effect_result, UnspecializedNNModuleVariable
-            ):
-                # This means that two nn module instances with different sources
-                # have the same id. NN modules are somewhat special objects,
-                # because we have to track their nn_module_stack for ease of
-                # use. But if we don't do anything, we will just return the
-                # older variable tracker with the older nn_module_stack. So,
-                # lets return the old variable tracker but update its
-                # nn_module_stack
-                side_effect_result.set_nn_module_stack_source(self.source)
-            return side_effect_result
+        if (result := self._reuse_tracked_variable(value)) is not None:
+            return result
 
         cached_vt = self.tx.output.variable_tracker_cache.get(self.source)
         if cached_vt:
@@ -866,7 +855,7 @@ class VariableBuilder:
         if vt.source is None:
             vt.source = self.source
 
-        def _is_deduplicable_sym_variable(value: Any, vt: VariableTracker) -> bool:
+        def _is_deduplicable_sym_variable(value: object, vt: VariableTracker) -> bool:
             # Constants like 0, 1, 2, etc. can be unspecialized as SymNodeVariables sometimes, but we
             # should NOT track them. If we use a single SymNodeVariable instance to track them
             # across multiple uses, then guards created for one usage will incorrectly apply to
@@ -893,6 +882,49 @@ class VariableBuilder:
         if "JVP_NESTING" not in self.source.name:
             self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
+
+    def _reuse_tracked_variable(
+        self,
+        value: object,
+    ) -> VariableTracker | None:
+        if value not in self.tx.output.side_effects:
+            return None
+
+        result = self.tx.output.side_effects[value]
+        if self.source != result.source:
+            dup_guard = make_dupe_guard(self.source, result.source)
+            if dup_guard is not None:
+                self.install_guards(dup_guard)
+            elif is_from_attr_proxy_source(self.source) or (
+                result.source is not None and is_from_attr_proxy_source(result.source)
+            ):
+                if result.source is None:
+                    raise AssertionError("Tracked AttrProxy module must have a source")
+                # make_dupe_guard cannot relate local and global sources. Reusing
+                # the tracker still requires both sources to resolve to the same
+                # base module, so pin each source to its compile-time object.
+                install_guard(
+                    self.source.make_guard(GuardBuilder.ID_MATCH),
+                    result.source.make_guard(GuardBuilder.ID_MATCH),
+                )
+
+        if (
+            isinstance(value, torch.nn.Module)
+            and isinstance(result, UnspecializedNNModuleVariable)
+            # WeakKeyDictionary internals are an implementation detail, not a
+            # useful module path. Keep the existing source until a user-facing
+            # source is observed.
+            and not self.source.is_dict_key()
+        ):
+            # This means that two nn module instances with different sources
+            # have the same id. NN modules are somewhat special objects,
+            # because we have to track their nn_module_stack for ease of
+            # use. But if we don't do anything, we will just return the
+            # older variable tracker with the older nn_module_stack. So,
+            # lets return the old variable tracker but update its
+            # nn_module_stack
+            result.set_nn_module_stack_source(self.source)
+        return result
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:
         return type(vt) in {
@@ -1023,7 +1055,9 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
+        def build_key_value(
+            k: object, v: object
+        ) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -1068,7 +1102,7 @@ class VariableBuilder:
 
         return result
 
-    def _wrap(self, value: Any) -> VariableTracker:
+    def _wrap(self, value: object) -> VariableTracker:
         # import here to avoid circular dependencies
         from torch.utils._triton import (
             has_triton,
@@ -1082,7 +1116,8 @@ class VariableBuilder:
             ErrorOnGraphBreakDecoratorContextManager,
         )
 
-        if has_triton():
+        # Triton runtime types are shared across backends, including CPU.
+        if has_triton(include_cpu=True):
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
@@ -1115,7 +1150,8 @@ class VariableBuilder:
             )
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor
-        if has_triton():
+        # The allocator hook is shared across Triton backends, including CPU.
+        if has_triton(include_cpu=True):
             import triton as triton_mod
 
             if hasattr(triton_mod, "set_allocator"):
@@ -1207,7 +1243,7 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
-                i: Any, k: Any, v: Any
+                i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
@@ -1363,7 +1399,7 @@ class VariableBuilder:
                     VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
                 )
 
-            keywords = {}
+            keywords: dict[str, VariableTracker] = {}
             keywords_source = AttrSource(self.get_source(), "keywords")
             for k, v in value.keywords.items():
                 if not ConstantVariable.is_literal(k):
@@ -1795,14 +1831,22 @@ class VariableBuilder:
             if isinstance(value, torch.amp.autocast_mode._UnmanagedAutocast):
                 return self.wrap_user_defined(value)
             else:
-                self.install_guards(GuardBuilder.ID_MATCH)
+                # Guard the four fields the trace specializes on rather than the
+                # object's address. An ID_MATCH here cannot be serialized, so a
+                # precompile drops it and a sibling instance holding a DIFFERENT
+                # autocast object silently selects this variant; these guards
+                # also catch the object being mutated in place, which id() misses.
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                fields = ("device", "fast_dtype", "_enabled", "_cache_enabled")
+                if not is_constant_source(self.source):
+                    for field in fields:
+                        install_guard(
+                            AttrSource(self.source, field).make_guard(
+                                GuardBuilder.EQUALS_MATCH
+                            )
+                        )
                 return AutocastModeVariable(
-                    target_values=[
-                        value.device,
-                        value.fast_dtype,
-                        value._enabled,
-                        value._cache_enabled,
-                    ],
+                    target_values=[getattr(value, field) for field in fields],
                     source=self.source,
                 )
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
@@ -1930,6 +1974,10 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MemberDescriptorType):
             return MemberDescriptorVariable(value)
+        elif type(value) is property:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = PropertyVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
@@ -2156,7 +2204,7 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
-                i: Any, k: Any, v: Any
+                i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
@@ -2378,6 +2426,8 @@ class VariableBuilder:
             # reconstructed from a source across a graph break, so a `with` on
             # the reconstructed object can still be entered.
             result = GenericContextWrappingVariable(value, source=self.source)
+        elif SimpleNamespaceVariable.is_matching_cls(type(value)):
+            result = SimpleNamespaceVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -2407,10 +2457,31 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
 
+        list_source = self.get_source()
+        first_item_source = None
+        if (
+            config.assume_dunder_attributes_remain_unchanged
+            and isinstance(list_source, TypeMROSource)
+            and isinstance(value, tuple)
+            and value
+        ):
+            first_item = value[0]
+            if (
+                isinstance(first_item, type)
+                and type.__getattribute__(first_item, "__mro__") is value
+            ):
+                first_item_source = list_source.base
         output = [
             LazyVariableTracker.create(
                 item,
-                source=GetItemSource(self.get_source(), i),
+                # Reuse the type source when this really is the type's own
+                # first MRO entry. A custom metaclass may return an MRO whose
+                # first item is a different type.
+                source=(
+                    first_item_source
+                    if i == 0 and first_item_source is not None
+                    else GetItemSource(list_source, i)
+                ),
                 tx=self.tx,
             )
             for i, item in enumerate(value)
@@ -2670,6 +2741,10 @@ class VariableBuilder:
                 # type: ignore[attr-defined]
                 value = value.get_base()
                 self.source = AttrProxySource(self.source)
+                # _call_impl checked the AttrProxy identity, while side effects
+                # track the unwrapped module. Check again after normalization.
+                if (result := self._reuse_tracked_variable(value)) is not None:
+                    return result
 
             freezing = is_parameter_freezing()
 
@@ -3632,9 +3707,18 @@ class VariableBuilder:
         )
 
         # Directly do item to bypass capture_scalar_outputs
+        #
+        # Must use root_tracer, not output.create_proxy (current tracer):
+        # this VariableTracker (and the proxy it wraps) gets reused across
+        # every later reference to the same source, via
+        # output.variable_tracker_cache. If it's first built while tracing a
+        # HOP body (e.g. torch.utils.checkpoint), a sibling HOP subgraph
+        # reusing the same source later gets the cached proxy back verbatim
+        # but can't reach it via its own tracer's parent chain.
+        # See https://github.com/pytorch/pytorch/issues/193194.
         r = wrap_fx_proxy(
             self.tx,
-            self.tx.output.create_proxy(
+            self.tx.output.root_tracer.create_proxy(
                 "call_method",
                 "item",
                 *proxy_args_kwargs([unspec_var], {}),
@@ -4618,6 +4702,8 @@ def _automatic_dynamic(
     outer_only: bool = False,
     tensor_spec: TensorSpec | None = None,
 ) -> SymbolicContext:
+    from ..decorators import _dim_range_to_value_ranges, _get_dim_range
+
     # strided NT not supported
     if e.is_nested and not isinstance(
         e, torch.nested._internal.nested_tensor.NestedTensor
@@ -4688,7 +4774,7 @@ def _automatic_dynamic(
 
     if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
 
-        def _classify_symint(s: Any) -> DimDynamic:
+        def _classify_symint(s: object) -> DimDynamic:
             if not isinstance(s, SymInt):
                 return DimDynamic.STATIC
             if not has_guarding_hint(s):
@@ -4856,6 +4942,50 @@ def _automatic_dynamic(
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
+        # Constraint policy has two independent axes, do not conflate them:
+        #
+        #   kind                        what it requires
+        #   --------------------------  ------------------------------------------------
+        #   None                        nothing, the dim may be narrowed or even fully
+        #                               specialized, silently
+        #   RelaxedUnspecConstraint     weak, the dim must not collapse to a single
+        #                               value, any further narrowing by guards is fine
+        #   StrictMinMaxConstraint(vr)  strong, no guard is allowed unless vr already
+        #                               implies it, so narrowing below vr violates it
+        #
+        #   warn_only                   reaction when the requirement is violated
+        #   --------------------------  ------------------------------------------------
+        #   False                       raise ConstraintViolationError
+        #   True                        log a warning and keep compiling
+        #
+        # The two axes are orthogonal: RelaxedUnspecConstraint(warn_only=False), what
+        # mark_dynamic uses without min/max, is a loose requirement that is strictly
+        # enforced, while StrictMinMaxConstraint(vr, warn_only=True) is a tight
+        # requirement that is only advisory.
+        #
+        # A constraint only controls enforcement. Whether the dim is symbolic at all is
+        # decided further down from marked_dynamic / marked_weak_dynamic, and
+        # constraint_stride is what picks DimDynamic.DYNAMIC for a stride (its own
+        # symbol) over DimDynamic.INFER_STRIDE (stride derived from the sizes).
+        #
+        # TODO: the chain below leans on the automatic dynamic fall-through for dims that
+        # do not match any branch, which is fragile: that branch also decides
+        # constraint_stride and records automatic_dynamic_shapes feature usage for dims
+        # that are dynamic because the user marked them. Refactor to handle every case
+        # explicitly, each with its own constraint_size/constraint_stride, and document
+        # the resulting DimDynamic per case in a table here:
+        #   mark_dynamic, with and without a range
+        #   mark_dynamic under config.allow_ignore_mark_dynamic, which today drops a
+        #     declared range entirely instead of degrading it to warn_only
+        #   maybe_mark_dynamic, with and without a range
+        #   dims that are only _dynamo_propagated_dynamic_indices, which should keep
+        #     plain automatic dynamic behavior and no user constraint
+        #   pure automatic dynamic, and no marking at all
+        # Until then the automatic_dynamic_shapes feature usage recorded below is skewed:
+        # a weakly marked dim with a declared range takes its own branch and records
+        # nothing, while the same dim without a range falls through and records usage,
+        # even though neither is dynamic because of automatic dynamic shapes.
+        #
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension
         # Precedence: export constraints > eager constraints
@@ -4866,27 +4996,47 @@ def _automatic_dynamic(
             if marked_dynamic and not config.allow_ignore_mark_dynamic:
                 # constraint_stride is deliberaly kept None because no easy way to provide value ranges for mark dynamic
                 constraint_stride = None
-                if hasattr(e, "_dynamo_dynamic_range"):
-                    dim_range = [
-                        dr for dr in e._dynamo_dynamic_range if dr.dim == i
-                    ].pop()
-                    if dim_range.min is None and dim_range.max is None:
-                        constraint_size = RelaxedUnspecConstraint(warn_only=False)
-                    else:
-                        from torch.fx.experimental.symbolic_shapes import (
-                            StrictMinMaxConstraint,
-                        )
-
-                        constraint_size = StrictMinMaxConstraint(
-                            vr=ValueRanges(lower=dim_range.min, upper=dim_range.max),
-                            warn_only=False,
-                        )
-                else:
+                dim_range = _get_dim_range(e, i)
+                if dim_range is None:
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
+                else:
+                    from torch.fx.experimental.symbolic_shapes import (
+                        StrictMinMaxConstraint,
+                    )
+
+                    constraint_size = StrictMinMaxConstraint(
+                        vr=_dim_range_to_value_ranges(dim_range),
+                        warn_only=False,
+                    )
+            elif (
+                marked_weak_dynamic and (dim_range := _get_dim_range(e, i)) is not None
+            ):
+                # Only dims with a declared range are handled here. A weakly dynamic dim
+                # without one, which includes every dim that is weakly dynamic only
+                # because of _dynamo_propagated_dynamic_indices, keeps taking the
+                # automatic dynamic branch below as it did before ranges existed.
+                from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
+                constraint_size = StrictMinMaxConstraint(
+                    vr=_dim_range_to_value_ranges(dim_range),
+                    warn_only=True,
+                )
+                # Strides are unrelated to the declared range, so decide them exactly as
+                # they would be for this dim if no range had been declared.
+                # TODO this is hazy, marked_static loses to a weak marking for the size
+                # yet still suppresses the stride constraint here. Maintaining existing
+                # behavior for now, the refactor above should settle it.
+                if not marked_static and automatic_dynamic_stride:
+                    constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
-                set_feature_use("dynamo.automatic_dynamic_shapes", True)
+                if not marked_weak_dynamic:
+                    # A weakly marked dim is dynamic because it was marked, automatic
+                    # dynamic shapes only supplies its constraints, so its usage is not
+                    # recorded. Keeps the reporting independent of whether the marking
+                    # declared a range.
+                    set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:
@@ -5155,10 +5305,10 @@ class SourcelessBuilder:
 
     @overload
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker: ...
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker: ...
 
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker:
         value_type = type(value)
         # type: ignore[attr-defined]
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
@@ -5173,7 +5323,11 @@ class SourcelessBuilder:
             and not isinstance(value, enum.Enum)
             and not is_pybind11_enum_member(value)
         ):
-            return CustomClassObjectVariable.create(value, value, tx=tx)
+            return CustomClassObjectVariable.create(
+                value,  # pyrefly: ignore[bad-argument-type]  # TODO: create() accepts opaque constants as proxies
+                value,
+                tx=tx,
+            )
         elif is_opaque_symbolic_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
@@ -5243,8 +5397,36 @@ class SourcelessBuilder:
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:
-                # Instance method — look up the VT for __self__ via side effects
+                # Instance method - look up the VT for __self__ via side
+                # effects. Build a sourceless receiver only for allowlisted
+                # clone/class pairs whose clone reconstruction does not read
+                # or mutate it. inference_mode.clone is excluded because it
+                # requires a source for self.mode.
                 obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
+                if obj_vt is None and isinstance(
+                    value.__self__, torch.utils._contextlib._DecoratorContextManager
+                ):
+                    if is_reconstructable_decorator_ctx_manager_clone(
+                        value.__func__, type(value.__self__)
+                    ) and (
+                        value.__func__
+                        is not torch.autograd.grad_mode.inference_mode.clone
+                    ):
+                        obj_vt = UserDefinedObjectVariable(value.__self__)
+                    else:
+                        unimplemented(
+                            gb_type="Sourceless _DecoratorContextManager method reconstruction unsupported",
+                            context=f"{type(value.__self__)}.{value.__func__.__name__}",
+                            explanation=(
+                                f"{type(value.__self__)} was reached without a "
+                                "source (e.g. via a closure cell) and "
+                                f"{value.__func__.__name__} cannot be "
+                                "reconstructed safely, so "
+                                "Dynamo cannot safely inline it without risking "
+                                "a mutation on an object it can't track."
+                            ),
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                 if obj_vt is not None:
                     return torch._dynamo.variables.UserMethodVariable(
                         value.__func__, obj_vt
@@ -5310,6 +5492,19 @@ class SourcelessBuilder:
             return SliceVariable(items, tx)  # pyrefly: ignore[bad-argument-type]
         elif isinstance(value, torch.nn.parallel.distributed.DistributedDataParallel):
             return UnspecializedNNModuleVariable(value)
+        # A sourceless context manager cannot safely replay mutations.
+        elif is_generic_ctx_manager_cls(type(value)):
+            unimplemented(
+                gb_type="Sourceless context manager without mutation support",
+                context=f"{value_type.__module__}.{value_type.__qualname__}",
+                explanation=(
+                    f"{value_type} was reached without a source (e.g. via a "
+                    "closure cell) and Dynamo cannot safely enter it or call "
+                    "its methods without a way to replay any resulting "
+                    "mutation on the real object."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         elif istype(value, object):
             return ObjectVariable(value)
         elif (
@@ -5380,6 +5575,7 @@ class SourcelessBuilder:
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)
         )
+        handlers[property] = lambda tx, value: PropertyVariable(value)
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
             value, mutation_type=ValueMutationNew()
         )
@@ -5433,7 +5629,7 @@ class SourcelessUserDefinedObjectBuilder:
         raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker:
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
             return MutableMappingVariable(value, mutation_type=ValueMutationNew())

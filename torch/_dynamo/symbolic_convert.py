@@ -183,9 +183,11 @@ from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
     DequeIteratorVariable,
+    DequeReverseIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
@@ -2280,7 +2282,7 @@ class InstructionTranslatorBase(
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "xpu"):
+        if device is None or device.type not in ("cuda", "mtia", "xpu"):
             return
 
         node = var.proxy.node
@@ -3141,11 +3143,9 @@ class InstructionTranslatorBase(
                 UserDefinedExceptionObjectVariable,
             ),
         ):
-            unimplemented(
-                gb_type="Exception with bad expected type",
-                context=str(expected_exc_types),
-                explanation=f"`except ...` has unsupported type {expected_exc_types}.",
-                hints=[*graph_break_hints.USER_ERROR],
+            exc.raise_type_error(
+                self,
+                "catching classes that do not inherit from BaseException is not allowed",
             )
 
         if sys.version_info >= (3, 11):
@@ -3173,11 +3173,9 @@ class InstructionTranslatorBase(
                     UserDefinedExceptionClassVariable,
                 ),
             ):
-                unimplemented(
-                    gb_type="Exception with non-type expectation",
-                    context=str(expected_type),
-                    explanation=f"`except ...` expects a non-type: {expected_type}.",
-                    hints=[*graph_break_hints.USER_ERROR],
+                exc.raise_type_error(
+                    self,
+                    "catching classes that do not inherit from BaseException is not allowed",
                 )
             if pyexception_instance_check(exc_instance) and issubclass(
                 exc_instance.exc_type,  # type: ignore[union-attr]
@@ -3297,6 +3295,9 @@ class InstructionTranslatorBase(
         # Map to a dictionary of str -> VariableTracker
         # pyrefly: ignore [bad-assignment, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
+        # pyrefly: ignore [not-iterable]
+        if not all(isinstance(k, str) for k in kwargsvars):
+            exc.raise_type_error(self, "keywords must be strings")
         # pyrefly: ignore [bad-argument-type, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
@@ -3401,6 +3402,14 @@ class InstructionTranslatorBase(
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
+
+    def DELETE_DEREF(self, inst: Instruction) -> None:
+        if inst.argval not in self.cell_and_freevars():
+            raise AssertionError(
+                "expected inst.argval in self.cell_and_freevars() to be true"
+            )
+        cell = self._cellvar(inst.argval)
+        self.output.side_effects.store_cell(cell, variables.DeletedVariable())
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
@@ -4422,6 +4431,10 @@ class InstructionTranslatorBase(
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
         if flags is None:
@@ -5071,14 +5084,26 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when converting an f-string value",
+    )
     def CONVERT_VALUE(self, inst: Instruction) -> None:
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
         self.push(self._convert_value(self.pop(), inst.arg))
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
 
@@ -6549,8 +6574,13 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        # tuple iterators subclass ListIteratorVariable; deque is a sibling
-        if not isinstance(tos, (ListIteratorVariable, DequeIteratorVariable)):
+        iter_vts = (
+            ListIteratorVariable,
+            TupleIteratorVariable,
+            DequeIteratorVariable,
+            DequeReverseIteratorVariable,
+        )
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)

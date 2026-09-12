@@ -198,7 +198,7 @@ def do_mma(a, b, accumulator):
 {%- if K_IS_VARYING %}
     k_end_offset = 0
 {%- endif %}
-    iterated_tiles = 0
+    iterated_tiles = tl.zeros([], dtype=INDEX_DTYPE)
     for g in tl.range(G):
 {%- if M_IS_VARYING %}
         # Move across groups
@@ -261,12 +261,13 @@ def do_mma(a, b, accumulator):
                 n_tile_offset = tile_n_idx * BLOCK_N
                 m_offset = (m_start_offset + m_tile_offset).to(tl.int32)
                 n_offset = (n_start_offset + n_tile_offset).to(tl.int32)
+                g_offset = g.to(tl.int32)
 
                 k_block_offset = 0
                 for k in range(k_size // BLOCK_K):
                     k_offset = k_start_offset + k_block_offset
                     a, b = do_tma_loads(
-                        g, a_desc, b_desc, m_offset, n_offset, k_offset,
+                        g_offset, a_desc, b_desc, m_offset, n_offset, k_offset,
                         BLOCK_M, BLOCK_N, BLOCK_K
                     )
                     accumulator = do_mma(a, b, accumulator)
@@ -275,7 +276,7 @@ def do_mma(a, b, accumulator):
                 if k_size % BLOCK_K != 0:
                     k_offset = k_start_offset + k_block_offset
                     a, b = do_tma_loads(
-                        g, a_desc, b_desc, m_offset, n_offset, k_offset,
+                        g_offset, a_desc, b_desc, m_offset, n_offset, k_offset,
                         BLOCK_M, BLOCK_N, BLOCK_K
                     )
 {%- if K_IS_VARYING %}
