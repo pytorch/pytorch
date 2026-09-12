@@ -13,6 +13,7 @@ import types
 import typing
 import weakref
 from collections import defaultdict
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
 from typing_extensions import Self, TypedDict, Unpack
@@ -81,6 +82,11 @@ pytree = torch.utils._pytree
 T = TypeVar("T")
 
 aten = torch._ops.ops.aten
+
+_EMPTY_CACHEABLE_CUSTOM_OPS: frozenset[OpOverload] = frozenset()
+_CACHEABLE_CUSTOM_OPS_BY_MODE: ContextVar[
+    dict[FakeTensorMode, frozenset[OpOverload]] | None
+] = ContextVar("fake_tensor_cacheable_custom_ops_by_mode", default=None)
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -1759,6 +1765,46 @@ class FakeTensorMode(TorchDispatchMode):
     def is_infra_mode(cls) -> bool:
         return True
 
+    def _cacheable_custom_ops(self) -> frozenset[OpOverload]:
+        cacheable_ops_by_mode = _CACHEABLE_CUSTOM_OPS_BY_MODE.get()
+        if cacheable_ops_by_mode is None:
+            return _EMPTY_CACHEABLE_CUSTOM_OPS
+        return cacheable_ops_by_mode.get(self, _EMPTY_CACHEABLE_CUSTOM_OPS)
+
+    @contextlib.contextmanager
+    def cache_custom_ops(
+        self, ops: Iterable[OpOverload]
+    ) -> Generator[None, None, None]:
+        """Temporarily allow exact custom operator overloads in the dispatch cache.
+
+        For every op in ``ops``, the caller asserts that the fake kernel's output
+        metadata is a pure function of the input metadata: no unbacked SymInts
+        from ``ctx.new_dynamic_size()``, no aliasing returns, and no dependence
+        on mutable global state.
+        """
+        validated_ops: set[OpOverload] = set()
+        for op in ops:
+            if not isinstance(op, torch._ops.OpOverload):
+                raise TypeError(
+                    f"cache_custom_ops expects OpOverload values, got {op!r}"
+                )
+            validated_ops.add(op)
+
+        if not validated_ops:
+            yield
+            return
+
+        cacheable_ops_by_mode = _CACHEABLE_CUSTOM_OPS_BY_MODE.get()
+        updated_ops_by_mode = dict(cacheable_ops_by_mode or {})
+        updated_ops_by_mode[self] = (
+            updated_ops_by_mode.get(self, _EMPTY_CACHEABLE_CUSTOM_OPS) | validated_ops
+        )
+        token = _CACHEABLE_CUSTOM_OPS_BY_MODE.set(updated_ops_by_mode)
+        try:
+            yield
+        finally:
+            _CACHEABLE_CUSTOM_OPS_BY_MODE.reset(token)
+
     @classmethod
     def cache_info(cls) -> DispatchCacheInfo:
         """
@@ -1894,6 +1940,8 @@ class FakeTensorMode(TorchDispatchMode):
         is_tracing = torch.fx.experimental.proxy_tensor.get_proxy_mode() is not None
         key_values = [
             func,
+            # Keep opted-in custom-op entries separate from default negative entries.
+            func in self._cacheable_custom_ops(),
             # Capture the default_dtype mode since that can affect the output tensor,
             # e.g., when operating on constant float values.
             torch.get_default_dtype(),
@@ -1997,7 +2045,10 @@ class FakeTensorMode(TorchDispatchMode):
         if func.name() == "inductor::resize_storage_bytes_":
             raise _BypassDispatchCache("inductor::resize_storage_bytes_")
 
-        if not torch._library.utils.is_builtin(func):
+        if (
+            not library_utils.is_builtin(func)
+            and func not in self._cacheable_custom_ops()
+        ):
             raise _BypassDispatchCache("non-builtin")
 
         # In order to handle storage aliasing, we need to establish the alias
@@ -2253,6 +2304,8 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
         if isinstance(output, (int, torch.SymInt, type(None))):
+            if isinstance(output, torch.SymInt) and has_free_unbacked_symbols(output):
+                raise _BypassDispatchCache("unbacked symbol in output")
             output_info = _DispatchCacheEntryOutputInfo(
                 inplace_idx=None, metadata=None, view_idx=None, constant_value=output
             )

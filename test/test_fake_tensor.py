@@ -12,8 +12,10 @@ import itertools
 import pickle
 import subprocess
 import sys
+import threading
 import unittest
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import numpy as np
@@ -3801,6 +3803,235 @@ class FakeTensorDispatchCache(TestCase):
 
             x.unsqueeze_(0)
             self.assertBypasses("inplace view", 1)
+
+    def test_cache_custom_ops_isolates_default_policy(self):
+        with torch.library._scoped_library(
+            "fake_tensor_cache_policy_test", "DEF"
+        ) as lib:
+            lib.define("identity(Tensor x) -> Tensor")
+            fake_kernel_calls = 0
+
+            @torch.library.register_fake(
+                "fake_tensor_cache_policy_test::identity", lib=lib
+            )
+            def identity_fake(x):
+                nonlocal fake_kernel_calls
+                fake_kernel_calls += 1
+                return torch.empty_strided(
+                    x.shape, x.stride(), dtype=x.dtype, device=x.device
+                )
+
+            op = torch.ops.fake_tensor_cache_policy_test.identity.default
+            mode = FakeTensorMode()
+            mode.cache_crosscheck_enabled = False
+            x = mode.from_tensor(torch.randn(3, 4).t())
+            FakeTensorMode.cache_clear()
+
+            try:
+                with mode:
+                    uncached = op(x)
+                    before_policy = FakeTensorMode.cache_info()
+                    self.assertBypasses("non-builtin", 1)
+
+                    with mode.cache_custom_ops((op,)):
+                        self.assertFalse(torch._library.utils.is_builtin(op))
+                        cache_miss = op(x)
+                        after_miss = FakeTensorMode.cache_info()
+                        cache_hit = op(x)
+                        after_hit = FakeTensorMode.cache_info()
+                        self.assertEqual(fake_kernel_calls, 2)
+
+                    default_policy = op(x)
+                    after_default = FakeTensorMode.cache_info()
+
+                expected_metadata = extract_tensor_metadata(uncached)
+                self.assertEqual(extract_tensor_metadata(cache_miss), expected_metadata)
+                self.assertEqual(extract_tensor_metadata(cache_hit), expected_metadata)
+                self.assertEqual(
+                    extract_tensor_metadata(default_policy), expected_metadata
+                )
+                self.assertEqual(after_miss.misses, before_policy.misses + 1)
+                self.assertEqual(after_hit.hits, after_miss.hits + 1)
+                self.assertEqual(after_default.bypasses.get("non-builtin"), 2)
+                self.assertEqual(fake_kernel_calls, 3)
+            finally:
+                FakeTensorMode.cache_clear()
+
+    def test_cache_custom_ops_nested_scope(self):
+        with torch.library._scoped_library(
+            "fake_tensor_nested_cache_policy_test", "DEF"
+        ) as lib:
+            lib.define("first(Tensor x) -> int")
+            lib.define("second(Tensor x) -> int")
+
+            @torch.library.register_fake(
+                "fake_tensor_nested_cache_policy_test::first", lib=lib
+            )
+            def first_fake(_x):
+                return 1
+
+            @torch.library.register_fake(
+                "fake_tensor_nested_cache_policy_test::second", lib=lib
+            )
+            def second_fake(_x):
+                return 2
+
+            first = torch.ops.fake_tensor_nested_cache_policy_test.first.default
+            second = torch.ops.fake_tensor_nested_cache_policy_test.second.default
+            mode = FakeTensorMode()
+            x = mode.from_tensor(torch.randn(4))
+            FakeTensorMode.cache_clear()
+
+            try:
+                with mode, mode.cache_custom_ops((first,)):
+                    first(x)
+                    first(x)
+                    with mode.cache_custom_ops((second,)):
+                        second(x)
+                        second(x)
+
+                    after_inner = FakeTensorMode.cache_info()
+                    second(x)
+                    after_second = FakeTensorMode.cache_info()
+                    first(x)
+                    after_first = FakeTensorMode.cache_info()
+
+                first(x)
+                after_outer = FakeTensorMode.cache_info()
+
+                self.assertEqual(after_inner.hits, 2)
+                self.assertEqual(after_inner.misses, 2)
+                self.assertEqual(after_second.bypasses.get("non-builtin"), 1)
+                self.assertEqual(after_first.hits, after_second.hits + 1)
+                self.assertEqual(after_outer.bypasses.get("non-builtin"), 2)
+            finally:
+                FakeTensorMode.cache_clear()
+
+    def test_cache_custom_ops_isolates_modes(self):
+        with torch.library._scoped_library(
+            "fake_tensor_mode_cache_policy_test", "DEF"
+        ) as lib:
+            lib.define("first(Tensor x) -> int")
+            lib.define("second(Tensor x) -> int")
+
+            @torch.library.register_fake(
+                "fake_tensor_mode_cache_policy_test::first", lib=lib
+            )
+            def first_fake(_x):
+                return 1
+
+            @torch.library.register_fake(
+                "fake_tensor_mode_cache_policy_test::second", lib=lib
+            )
+            def second_fake(_x):
+                return 2
+
+            first = torch.ops.fake_tensor_mode_cache_policy_test.first.default
+            second = torch.ops.fake_tensor_mode_cache_policy_test.second.default
+            first_mode = FakeTensorMode()
+            second_mode = FakeTensorMode()
+            first_x = first_mode.from_tensor(torch.randn(4))
+            second_x = second_mode.from_tensor(torch.randn(4))
+            FakeTensorMode.cache_clear()
+
+            try:
+                with (
+                    first_mode.cache_custom_ops((first,)),
+                    second_mode.cache_custom_ops((second,)),
+                ):
+                    with first_mode:
+                        first(first_x)
+                        first(first_x)
+                        second(first_x)
+                    with second_mode:
+                        first(second_x)
+                        second(second_x)
+                        second(second_x)
+
+                cache_info = FakeTensorMode.cache_info()
+                self.assertEqual(cache_info.hits, 2)
+                self.assertEqual(cache_info.misses, 2)
+                self.assertEqual(cache_info.bypasses.get("non-builtin"), 2)
+            finally:
+                FakeTensorMode.cache_clear()
+
+    def test_cache_custom_ops_isolates_threads(self):
+        with torch.library._scoped_library(
+            "fake_tensor_thread_cache_policy_test", "DEF"
+        ) as lib:
+            lib.define("first(Tensor x) -> int")
+            lib.define("second(Tensor x) -> int")
+            first = torch.ops.fake_tensor_thread_cache_policy_test.first.default
+            second = torch.ops.fake_tensor_thread_cache_policy_test.second.default
+            mode = FakeTensorMode()
+            barrier = threading.Barrier(2)
+
+            def active_ops(op):
+                with mode.cache_custom_ops((op,)):
+                    barrier.wait(timeout=5)
+                    return mode._cacheable_custom_ops()
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                first_future = executor.submit(active_ops, first)
+                second_future = executor.submit(active_ops, second)
+                self.assertEqual(first_future.result(timeout=5), frozenset((first,)))
+                self.assertEqual(second_future.result(timeout=5), frozenset((second,)))
+
+            self.assertEqual(mode._cacheable_custom_ops(), frozenset())
+
+    def test_cache_custom_ops_deepcopy_isolates_policy(self):
+        with torch.library._scoped_library(
+            "fake_tensor_deepcopy_cache_policy_test", "DEF"
+        ) as lib:
+            lib.define("identity(Tensor x) -> int")
+            op = torch.ops.fake_tensor_deepcopy_cache_policy_test.identity.default
+            mode = FakeTensorMode()
+
+            with mode.cache_custom_ops((op,)):
+                copied_mode = copy.deepcopy(mode)
+                self.assertEqual(mode._cacheable_custom_ops(), frozenset((op,)))
+                self.assertEqual(copied_mode._cacheable_custom_ops(), frozenset())
+
+            self.assertEqual(mode._cacheable_custom_ops(), frozenset())
+
+    def test_cache_custom_ops_bypasses_unbacked_symint(self):
+        with torch.library._scoped_library(
+            "fake_tensor_symint_cache_policy_test", "DEF"
+        ) as lib:
+            lib.define("dynamic_size(Tensor x) -> SymInt")
+
+            @torch.library.register_fake(
+                "fake_tensor_symint_cache_policy_test::dynamic_size", lib=lib
+            )
+            def dynamic_size_fake(_x):
+                return torch.library.get_ctx().new_dynamic_size()
+
+            op = torch.ops.fake_tensor_symint_cache_policy_test.dynamic_size.default
+            mode = FakeTensorMode(shape_env=ShapeEnv())
+            x = mode.from_tensor(torch.randn(4), static_shapes=True)
+            FakeTensorMode.cache_clear()
+
+            try:
+                with mode, mode.cache_custom_ops((op,)):
+                    first = op(x)
+                    second = op(x)
+
+                self.assertTrue(free_unbacked_symbols(first))
+                self.assertTrue(free_unbacked_symbols(second))
+                self.assertNotEqual(first.node.expr, second.node.expr)
+                self.assertHitsMisses(0, 0)
+                self.assertBypasses("unbacked symbol in output", 2)
+            finally:
+                FakeTensorMode.cache_clear()
+
+    def test_cache_custom_ops_reports_invalid_value(self):
+        invalid_op = "not an OpOverload"
+
+        with self.assertRaises(TypeError) as error:
+            with FakeTensorMode().cache_custom_ops((invalid_op,)):
+                pass
+
+        self.assertIn(repr(invalid_op), str(error.exception))
 
     def test_cache_default_dtype(self):
         """
