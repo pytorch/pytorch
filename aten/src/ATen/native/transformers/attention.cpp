@@ -59,6 +59,7 @@
 #include <ATen/ops/matmul_native.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/pad.h>
+#include <ATen/ops/scaled_dot_product_attention.h>
 #include <ATen/ops/scaled_dot_product_attention_native.h>
 #include <ATen/ops/softmax.h>
 #include <ATen/ops/split_native.h>
@@ -71,6 +72,7 @@
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+#include <ATen/functorch/DynamicLayer.h>
 namespace at::native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
@@ -783,6 +785,28 @@ Tensor scaled_dot_product_attention(
 
   using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+
+  // Under vmap, promote unbatched (3D) inputs to 4D so fused kernels stay
+  // eligible; direct (non-vmap) 3D calls are left unchanged. The vmap layer
+  // can sit below an outer transform (e.g. vmap(grad(...))), so scan the stack.
+  if (!query_.is_nested() && query_.dim() == 3) {
+    bool under_vmap = false;
+    for (const auto& layer : at::functorch::getDynamicLayerStack()) {
+      if (layer.key() == at::functorch::TransformType::Vmap) {
+        under_vmap = true;
+        break;
+      }
+    }
+    if (under_vmap) {
+      auto mask = attn_mask_.has_value()
+          ? std::optional<Tensor>(attn_mask_->unsqueeze(0))
+          : attn_mask_;
+      return at::scaled_dot_product_attention(
+                 query_.unsqueeze(0), key.unsqueeze(0), value.unsqueeze(0),
+                 mask, dropout_p, is_causal, scale, enable_gqa)
+          .squeeze(0);
+    }
+  }
   // NB: This op is CompositeImplicitAutograd -- autograd traces through the
   // implementation rather than using an explicit backward formula.
   // Return early when the output is truly empty or softmax is undefined.
