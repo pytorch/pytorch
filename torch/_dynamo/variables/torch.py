@@ -3696,22 +3696,50 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
+        # Handle e.g., `torch.ones(10, requires_grad=True)`. The Python
+        # bindings implement the factory kwarg as `factory(...)` followed by
+        # `set_requires_grad(True)`, so trace it as `factory(...)` plus
+        # `requires_grad_()`. The result is then a source-less requires_grad_()
+        # intermediate, and it gets the same leaked-output check as an
+        # explicit `requires_grad_()` call (see method_requires_grad_).
+        requires_grad_kwarg = kwargs.get("requires_grad")
+        trace_requires_grad = (
+            requires_grad_kwarg is not None
+            and requires_grad_kwarg.is_python_constant()
+            and requires_grad_kwarg.as_python_constant() is True
+        )
+        proxy_kwargs = kwargs
+        if trace_requires_grad:
+            proxy_kwargs = {k: v for k, v in kwargs.items() if k != "requires_grad"}
+
         with ctx():
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     fn_,
-                    *proxy_args_kwargs(args, kwargs),
+                    *proxy_args_kwargs(args, proxy_kwargs),
                 ),
             )
 
-        # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
+            trace_requires_grad
+            and tensor_variable.is_tensor()
+            and tensor_variable.dtype is not None
+            and (
+                tensor_variable.dtype.is_floating_point
+                or tensor_variable.dtype.is_complex
+            )
+        ):
+            # pyrefly: ignore [missing-attribute]
+            tensor_variable.method_requires_grad_(tx)
+        elif (
             tensor_variable.is_tensor()
             and "requires_grad" in kwargs
             and kwargs["requires_grad"].as_python_constant()
         ):
+            # Non-differentiable dtypes (eager raises) and non-True truthy
+            # values keep the graph break so eager reports the error.
             unimplemented(
                 gb_type="Attempted to use tensor creation function with requires_grad=True",
                 context=f"fn={self.value}, args={args}, kwargs={kwargs}",
