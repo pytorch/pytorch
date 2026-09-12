@@ -2194,12 +2194,77 @@ def get_tma_workspace_arg(
     )
 
 
+def kpack_supported() -> bool:
+    """Whether to enable default kpack > 1 for the current ROCm arch.
+
+    Enabled on gfx908 (CDNA1), gfx90a (CDNA2) and gfx942 (CDNA3): the archs whose
+    MFMA K-extents are modeled by the dtype_size-keyed _MFMA_KDIM tables, so a
+    kpack > 1 pack can be checked against block_k for underfill. gfx950 (CDNA4)
+    is excluded because the Triton compiler forces kpack to 1 regardless
+    (triton/backends/amd/compiler.py), so a kpack > 1 default is a no-op.
+    """
+    if not torch.version.hip:
+        return False
+    arch = torch.cuda.get_device_properties(0).gcnArchName
+    return "gfx908" in arch or "gfx90a" in arch or "gfx942" in arch
+
+
 def get_default_kpack(block_k: int = 16) -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
-        return 1
-    return 2
+    if kpack_supported() and block_k >= 16:
+        return 2
+    return 1
+
+
+# K-extent (kdim) of the CDNA MFMA instruction Triton selects, keyed by
+# (element_byte_width, matrix_instr_nonkdim).
+_MFMA_KDIM_CDNA3 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 32,  # f8/i8    -> 16x16x32
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 16,  # f8/i8    -> 32x32x16
+}
+
+# CDNA1 (gfx908) and CDNA2 (gfx90a) share this table: every (dtype_size, nonkdim)
+# entry resolves to the same K-extent on both, so they are merged.
+#   - CDNA2 is exact -- its bf16 MFMA (bf16_1k) matches f16 (16x16x16 / 32x32x8)
+#     and int8 is 16x16x16 / 32x32x8.
+#   - CDNA1 is exact for f16/int8/f32, but its bf16 MFMA is smaller (16x16x8 /
+#     32x32x4). dtype_size=2 cannot distinguish bf16 from f16, so it is keyed to
+#     the larger f16 extent: the underfill check stays conservative for CDNA1
+#     bf16 (may over-prune, never under-validate -> no packing garbage).
+# fp8 has no native instruction on either and is emulated with f16, landing on
+# the same K-extent as int8.
+_MFMA_KDIM_CDNA1_CDNA2 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 16,  # f8/i8    -> 16x16x16
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 8,  # f8/i8    -> 32x32x8
+}
+
+
+def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
+    """MFMA K-extent for the current CDNA arch, None for an unknown
+    (dtype_size, nonkdim) pair. Only gfx908/gfx90a/gfx942 are distinguished since
+    kpack > 1 (the sole consumer) is limited to those archs."""
+    if not torch.version.hip:
+        return None
+    arch = torch.cuda.get_device_properties(0).gcnArchName
+    if "gfx908" in arch or "gfx90a" in arch:
+        return _MFMA_KDIM_CDNA1_CDNA2.get((dtype_size, matrix_instr_nonkdim))
+    elif "gfx942" in arch:
+        return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
+    else:
+        return None
 
 
 def _use_template_for_gpu(
