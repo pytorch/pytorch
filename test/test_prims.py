@@ -445,6 +445,19 @@ class TestRefs(TestCase):
     def test_inferred_tags(self):
         self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))
 
+    # From https://github.com/pytorch/pytorch/issues/195705
+    @dtypes(torch.bfloat16, torch.float16, torch.float32, torch.float64)
+    def test_alpha_dropout_dtype(self, device, dtype):
+        # python_ref_db skips the ref-vs-eager comparisons for dropout because
+        # the mask is redrawn per call, and test_python_ref_meta compares the
+        # ref against itself, so nothing else cross-checks the output dtype.
+        a = make_tensor((8,), device=device, dtype=dtype)
+        for p in (0.0, 0.5, 1.0):
+            actual = refs.nn.functional.alpha_dropout(a, p=p, training=True)
+            self.assertEqual(actual.dtype, dtype)
+        actual = refs.nn.functional.alpha_dropout(a, p=0.5, training=False)
+        self.assertEqual(actual.dtype, dtype)
+
 
 
 instantiate_device_type_tests(TestRefs, globals())
