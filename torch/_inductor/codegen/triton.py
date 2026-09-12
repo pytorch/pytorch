@@ -7030,13 +7030,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 accumname2var[name] = self.cse.namedvar(
                     name, dtype=torch.float, shape=("1", "R0_BLOCK")
                 )
+            has_constant_xmask = self._has_constant_xmask()
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
             self.body.writeline(
                 "for _ in tl.range(0, split_size, XBLOCK, num_stages=NUM_STAGES):"
             )
             with self.body.indent(offset=1):
                 # generate xmask if it's not constant
-                if not self._has_constant_xmask():
+                if not has_constant_xmask:
                     entry = self.range_trees[0]
                     if entry.prefix != "x":
                         raise AssertionError(
@@ -7062,6 +7063,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                     var = partial_accum.value
                     name = f"accum{idx}"
+                    if not has_constant_xmask:
+                        default = ir.Reduction.default_accumulator(
+                            partial_accum.reduction_type, torch.float
+                        )
+                        default = self._map_tuple_or_scalar(constant_repr, default)
+                        var = self.cse.generate(
+                            self.body,
+                            TritonKernelOverrides.where("xmask", var, default),
+                            dtype=var.dtype,
+                            shape=var.shape,
+                        )
                     combine_fn = ir.get_reduction_combine_fn(
                         partial_accum.reduction_type, torch.float
                     )
