@@ -9,6 +9,109 @@ index 6787558..8ed8511 100644
 -            os.getenv(f"{PACKAGE_NAME.upper()}_CACHE_DIR", "").strip() or default_cache_dir()
 -        )
 +        self.cache_dir = get_cache_dir() or default_cache_dir()
+diff --git a/quack/blockscaled/quantize.py b/quack/blockscaled/quantize.py
+index ce28300..6db3465 100644
+--- a/quack/blockscaled/quantize.py
++++ b/quack/blockscaled/quantize.py
+@@ -18,0 +19 @@ especially on gradient tensors. The FP4 quantizers remain FLOOR-only.
++import functools
+@@ -471,5 +471,0 @@ else:
+-    _dynamo_cfg = torch._dynamo.config
+-    _limit_name = (
+-        "recompile_limit" if hasattr(_dynamo_cfg, "recompile_limit") else "cache_size_limit"
+-    )
+-    setattr(_dynamo_cfg, _limit_name, max(getattr(_dynamo_cfg, _limit_name), 64))
+@@ -477,5 +473,33 @@ else:
+-to_mx_compiled = torch.compile(to_mx, **_COMPILE_KW)
+-to_mx_e5m2_compiled = torch.compile(to_mx_e5m2, **_COMPILE_KW)
+-to_mx_dim0_compiled = torch.compile(to_mx_dim0, **_COMPILE_KW)
+-to_mxfp4_compiled = torch.compile(to_mxfp4, **_COMPILE_KW)
+-to_nvfp4_compiled = torch.compile(to_nvfp4, **_COMPILE_KW)
++
++def _lazy_compile(fn, **compile_kw):
++    """``torch.compile(fn)`` on first call rather than at import.
++
++    ``torch.compile`` imports Dynamo and Inductor (~1.4 s) even though it
++    traces lazily; deferring keeps ``import quack`` cheap in processes that
++    never quantize (compile workers, eager GEMM users).
++    """
++    compiled = None
++
++    @functools.wraps(fn)
++    def wrapper(*args, **kwargs):
++        nonlocal compiled
++        if compiled is None:
++            if "recompile_limit" not in _COMPILE_KW:
++                _dynamo_cfg = torch._dynamo.config
++                _limit_name = (
++                    "recompile_limit"
++                    if hasattr(_dynamo_cfg, "recompile_limit")
++                    else "cache_size_limit"
++                )
++                setattr(_dynamo_cfg, _limit_name, max(getattr(_dynamo_cfg, _limit_name), 64))
++            compiled = torch.compile(fn, **compile_kw)
++        return compiled(*args, **kwargs)
++
++    return wrapper
++
++
++to_mx_compiled = _lazy_compile(to_mx, **_COMPILE_KW)
++to_mx_e5m2_compiled = _lazy_compile(to_mx_e5m2, **_COMPILE_KW)
++to_mx_dim0_compiled = _lazy_compile(to_mx_dim0, **_COMPILE_KW)
++to_mxfp4_compiled = _lazy_compile(to_mxfp4, **_COMPILE_KW)
++to_nvfp4_compiled = _lazy_compile(to_nvfp4, **_COMPILE_KW)
+@@ -486,5 +510,5 @@ to_nvfp4_compiled = torch.compile(to_nvfp4, **_COMPILE_KW)
+-to_mxfp6_e2m3_compiled = torch.compile(to_mxfp6_e2m3, dynamic=True)
+-to_mxfp6_e3m2_compiled = torch.compile(to_mxfp6_e3m2, dynamic=True)
+-to_mxfp6_e2m3_packed_compiled = torch.compile(to_mxfp6_e2m3_packed, dynamic=True)
+-to_mxfp6_e3m2_packed_compiled = torch.compile(to_mxfp6_e3m2_packed, dynamic=True)
+-to_mxfp4_byte_compiled = torch.compile(to_mxfp4_byte, dynamic=True)
++to_mxfp6_e2m3_compiled = _lazy_compile(to_mxfp6_e2m3, dynamic=True)
++to_mxfp6_e3m2_compiled = _lazy_compile(to_mxfp6_e3m2, dynamic=True)
++to_mxfp6_e2m3_packed_compiled = _lazy_compile(to_mxfp6_e2m3_packed, dynamic=True)
++to_mxfp6_e3m2_packed_compiled = _lazy_compile(to_mxfp6_e3m2_packed, dynamic=True)
++to_mxfp4_byte_compiled = _lazy_compile(to_mxfp4_byte, dynamic=True)
+diff --git a/quack/blockscaled/utils.py b/quack/blockscaled/utils.py
+index 513ce77..e957511 100644
+--- a/quack/blockscaled/utils.py
++++ b/quack/blockscaled/utils.py
+@@ -14,5 +14,5 @@ from cutlass import Int32, Float32
+-from quack.compile_utils import make_fake_tensor as fake_tensor
+-from quack.cute_dsl_utils import get_device_capacity, get_max_active_clusters
+-from quack.gemm_config import SplitKMode
+-from quack.gemm_tvm_ffi_utils import div_for_dtype, make_scheduler_args
+-from quack.blockscaled.operand import (
++from torch._vendor.quack.compile_utils import make_fake_tensor as fake_tensor
++from torch._vendor.quack.cute_dsl_utils import get_device_capacity, get_max_active_clusters
++from torch._vendor.quack.gemm_config import SplitKMode
++from torch._vendor.quack.gemm_tvm_ffi_utils import div_for_dtype, make_scheduler_args
++from torch._vendor.quack.blockscaled.operand import (
+@@ -24 +24 @@ from quack.blockscaled.operand import (
+-from quack.blockscaled.quantize import (  # noqa: F401  (pure-torch helpers re-exported)
++from torch._vendor.quack.blockscaled.quantize import (  # noqa: F401  (pure-torch helpers re-exported)
+@@ -27,0 +28 @@ from quack.blockscaled.quantize import (  # noqa: F401  (pure-torch helpers re-e
++    _lazy_compile,
+@@ -36 +37 @@ from quack.blockscaled.quantize import (  # noqa: F401  (pure-torch helpers re-e
+-from quack.varlen_utils import VarlenArguments
++from torch._vendor.quack.varlen_utils import VarlenArguments
+@@ -259 +260 @@ BLOCKSCALED_FORMATS = {
+-_pack_scale_compiled = torch.compile(pack_scale_2d_to_blocked_contig, **_COMPILE_KW)
++_pack_scale_compiled = _lazy_compile(pack_scale_2d_to_blocked_contig, **_COMPILE_KW)
+@@ -295 +296 @@ def blockscaled_quantize_dim0(
+-    from quack.blockscaled.quantize import to_mx_dim0_compiled
++    from torch._vendor.quack.blockscaled.quantize import to_mx_dim0_compiled
+@@ -342 +343 @@ def _blockscaled_format_of(ab_dtype, sf_dtype, sf_vec_size) -> str:
+-    from quack.blockscaled.operand import BlockScaledFormat
++    from torch._vendor.quack.blockscaled.operand import BlockScaledFormat
+@@ -615 +616 @@ def create_blockscaled_varlen_k_operands(
+-    from quack.blockscaled.quantize import to_mx_compiled
++    from torch._vendor.quack.blockscaled.quantize import to_mx_compiled
+@@ -749 +750 @@ def compile_blockscaled_gemm_tvm_ffi(
+-    from quack.gemm_default_epi import GemmDefaultSm100
++    from torch._vendor.quack.gemm_default_epi import GemmDefaultSm100
+@@ -786 +787 @@ def compile_blockscaled_gemm_tvm_ffi(
+-    from quack.gemm_tvm_ffi_utils import make_fake_varlen_args
++    from torch._vendor.quack.gemm_tvm_ffi_utils import make_fake_varlen_args
 diff --git a/quack/cache/__init__.py b/quack/cache/__init__.py
 index 8c9f655..823ba7e 100644
 --- a/quack/cache/__init__.py
@@ -44,6 +147,72 @@ index 8c9f655..823ba7e 100644
 @@ -70,0 +93,2 @@ __all__ = [
 +    "cache_dir_override",
 +    "get_cache_dir",
+diff --git a/quack/cache/async_compile.py b/quack/cache/async_compile.py
+index 7e2a11b..ae9d500 100644
+--- a/quack/cache/async_compile.py
++++ b/quack/cache/async_compile.py
+@@ -46,0 +47 @@ import pickle
++import threading
+@@ -64 +65 @@ class PoolPayload(NamedTuple):
+-    data: bytes
++    data: object
+@@ -159 +160 @@ def _detect_arch_env() -> tuple[Optional[str], Optional[str]]:
+-        from quack.cute_dsl_utils import _parse_arch_str
++        from torch._vendor.quack.cute_dsl_utils import _parse_arch_str
+@@ -229,5 +230,3 @@ def _pin_dsl_arch(cute_dsl_arch: Optional[str]) -> None:
+-def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
+-    # GPU-blind compilation: hide devices and pin the target arch via the
+-    # same overrides the CPU-only compile workflow uses. Forked workers must
+-    # never initialize CUDA (fork-safety), and spawned workers save the
+-    # ~1-2 s + ~300 MB of a per-worker CUDA context.
++def pin_worker_arch(quack_arch: Optional[str], cute_dsl_arch: Optional[str]) -> None:
++    """Pin this process's dispatch and ptxas arch for GPU-blind compilation
++    (the :func:`_pool_initializer` body, for hosts that own their workers)."""
+@@ -236 +234,0 @@ def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
+-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+@@ -241 +239 @@ def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
+-    import quack.cache  # noqa: F401
++    import torch._vendor.quack.cache  # noqa: F401
+@@ -253,0 +252,10 @@ def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
++def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
++    # GPU-blind compilation: hide devices and pin the target arch via the
++    # same overrides the CPU-only compile workflow uses. Forked workers must
++    # never initialize CUDA (fork-safety), and spawned workers save the
++    # ~1-2 s + ~300 MB of a per-worker CUDA context.
++    if quack_arch is not None:
++        os.environ["CUDA_VISIBLE_DEVICES"] = ""
++    pin_worker_arch(quack_arch, cute_dsl_arch)
++
++
+@@ -265 +273 @@ def _pool_worker(
+-        import quack.cache as _state
++        import torch._vendor.quack.cache as _state
+@@ -308 +316 @@ def _make_executor(jobs: int) -> ProcessPoolExecutor:
+-        ctx.set_forkserver_preload(["quack.cache._pool_preload"])
++        ctx.set_forkserver_preload(["torch._vendor.quack.cache._pool_preload"])
+@@ -498,0 +507 @@ _suppress_depth = 0
++_thread_pool = threading.local()
+@@ -536 +545,19 @@ def get_active_pool() -> Optional[CompilePool]:
+-    return None if _suppress_depth > 0 else _active_pool
++    if _suppress_depth > 0:
++        return None
++    return getattr(_thread_pool, "pool", None) or _active_pool
++
++
++@contextlib.contextmanager
++def pool_active(pool: CompilePool):
++    """Make ``pool`` the active pool for the calling thread only.
++
++    For hosts that drive compilation from several threads (Inductor's
++    autotune precompile): ``CompilePending`` can only escape into this
++    thread's block, never into other threads' cold misses.
++    """
++    previous = getattr(_thread_pool, "pool", None)
++    _thread_pool.pool = pool
++    try:
++        yield pool
++    finally:
++        _thread_pool.pool = previous
 diff --git a/quack/cache/jit.py b/quack/cache/jit.py
 index 7106526..6ce345f 100644
 --- a/quack/cache/jit.py
