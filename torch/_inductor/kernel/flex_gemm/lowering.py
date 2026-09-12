@@ -813,9 +813,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generated epilogues require output metadata"
         )
     logical_output_size = ir.convert_shape_to_inductor(output_meta.shape)
-    aux_metas = validate_flex_gemm_aux_outputs(
-        gemm_op, outputs.aux_outputs, logical_output_size
-    )
+    if output_contraction is not None and outputs.aux_outputs:
+        aux_metas = (gemm_fx_node.meta["val"],)
+    else:
+        aux_metas = validate_flex_gemm_aux_outputs(
+            gemm_op, outputs.aux_outputs, logical_output_size
+        )
     indexed_metas = () if indexed_output is None else (indexed_output.node.meta["val"],)
     if not has_flex_gemm_quack():
         raise NotImplementedError("FlexGEMM QUACK backend requires CuTeDSL")
