@@ -103,6 +103,22 @@ def snapshot_cudagraph_enabled() -> bool:
     return torch._inductor.config.triton.cudagraphs
 
 
+def _is_compiled_autograd_accelerator_device(
+    device: torch.device, privateuse1_name: str
+) -> bool:
+    if device.type == "cuda":
+        return True
+    return privateuse1_name != "privateuseone" and device.type == privateuse1_name
+
+
+def _move_cpu_scalar_to_device(
+    val: torch.Tensor, device: torch.device, *, for_runtime: bool = False
+) -> torch.Tensor:
+    if for_runtime and device.type == "cuda":
+        return val.pin_memory().to(device, non_blocking=True)
+    return val.to(device)
+
+
 def maybe_clone(x: torch.Tensor | None) -> torch.Tensor | None:
     if x is not None:
         return clone_preserve_strides(x)
@@ -1025,10 +1041,13 @@ class AutogradCompilerInstance:
     # Eager autograd backward implements scalars as 0-dim tensors, see DivBackward0::other_.
     # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
     # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
-    # scalar tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
-    def move_graph_nodes_to_cuda(self, graph: torch.fx.Graph) -> list[int]:
+    # scalar tensors to the graph's accelerator (cuda or renamed PrivateUse1). This works because
+    # ATen/prims ops will accept accelerator 0-dim tensors too.
+    def move_graph_nodes_to_cuda(
+        self, graph: torch.fx.Graph
+    ) -> tuple[list[int], torch.device | None]:
         to_move: dict[int, torch.fx.Node] = {}
-        has_cuda_inputs = False
+        non_cpu_meta_devices: set[torch.device] = set()
         nodes = list(graph.nodes)
         if nodes[0].target != "inputs":
             raise AssertionError(
@@ -1043,13 +1062,15 @@ class AutogradCompilerInstance:
         last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
         if nodes[last_getitem_idx] != inputs_users[-1]:
             raise AssertionError("Last getitem node does not match last inputs user")
+        privateuse1_name = torch._C._get_privateuse1_backend_name()
         # getitem nodes on inputs
         for i, node in enumerate(inputs_users):
-            if not has_cuda_inputs and node.meta["val"].device.type == "cuda":
-                has_cuda_inputs = True
+            device = node.meta["val"].device
+            if device.type not in ("cpu", "meta"):
+                non_cpu_meta_devices.add(device)
                 continue
 
-            is_cpu = node.meta["val"].device.type == "cpu"
+            is_cpu = device.type == "cpu"
             is_scalar = len(node.meta["val"].size()) == 0
             if is_cpu and is_scalar:
                 node_users = list(node.users.keys())
@@ -1068,17 +1089,27 @@ class AutogradCompilerInstance:
                     # all users are prims/aten, can move safely
                     to_move[i] = node
 
-        # only move cpu scalars to cuda if there were cuda activations in this graph,
-        # this is to handle the case where cudagraphs is enabled on a cpu-only graph
-        if has_cuda_inputs:
+        # only move cpu scalars when the graph has exactly one non-cpu/meta device
+        # and it is cuda or renamed PrivateUse1; mixed-accelerator graphs skip
+        if len(non_cpu_meta_devices) == 1:
+            target_device = next(iter(non_cpu_meta_devices))
+            if not _is_compiled_autograd_accelerator_device(
+                target_device, privateuse1_name
+            ):
+                return [], None
             for node in to_move.values():
-                verbose_log.debug("Moving node %s from cpu to cuda", node)
-                node.meta["val"] = node.meta["val"].cuda()
+                verbose_log.debug(
+                    "Moving node %s from cpu to %s",
+                    node,
+                    target_device,
+                )
+                node.meta["val"] = _move_cpu_scalar_to_device(
+                    node.meta["val"], target_device
+                )
 
-            # return runtime indices we need to move to cuda
-            return list(to_move.keys())
+            return list(to_move.keys()), target_device
 
-        return []
+        return [], None
 
     def dce(self) -> None:
         # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
@@ -1171,8 +1202,11 @@ class AutogradCompilerInstance:
             {},
         )
         runtime_inputs_to_move: list[int] = []
+        runtime_accelerator_device: torch.device | None = None
         if snapshot_cudagraph_enabled():
-            runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
+            runtime_inputs_to_move, runtime_accelerator_device = (
+                self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
+            )
 
         # We traced using dummy tensors. Delete all the metadata of the dummy tensors.
         # It's probably better to refactor this class to use a different tracer
@@ -1259,8 +1293,13 @@ class AutogradCompilerInstance:
                         else:
                             filtered_sizes.append(integer)
 
-                for i in runtime_inputs_to_move:
-                    inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
+                if runtime_accelerator_device is not None:
+                    for i in runtime_inputs_to_move:
+                        inputs[i] = _move_cpu_scalar_to_device(
+                            inputs[i],
+                            runtime_accelerator_device,
+                            for_runtime=True,
+                        )
 
                 with _disable(), make_compile_context(self.id):
                     out = compiled_fn(
