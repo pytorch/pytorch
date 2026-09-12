@@ -2043,6 +2043,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(in_process, len(states))
         self.assertTrue(all("compiling in-process" in line for line in logs.output))
 
+    @skipIfNoCuteDSL
     def test_quack_pool_active_is_thread_local(self):
         import threading
 
