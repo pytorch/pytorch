@@ -30,14 +30,20 @@ from torch._inductor.fx_utils import (
     get_fake,
 )
 from torch._inductor.utils import (
+    _get_device_dram_gbps,
+    _get_device_tflops,
     _gpu_types,
     _infer_scale_swizzle_impl,
     device_need_guard,
+    get_device_dram_gbps,
     get_device_tflops,
+    get_gpu_dram_gbps,
     get_gpu_type,
     is_gpu,
     load_template,
     python_subprocess_env,
+    register_device_dram_gbps_provider,
+    register_device_tflops_provider,
     sympy_str,
     sympy_subs,
 )
@@ -58,6 +64,160 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
+
+
+class TestDeviceDramBandwidth(TestCase):
+    def test_get_device_dram_gbps_uses_registered_provider(self):
+        _get_device_dram_gbps.cache_clear()
+        try:
+            with mock.patch.dict(
+                "torch._inductor.utils._device_dram_gbps_providers", clear=True
+            ):
+                register_device_dram_gbps_provider("mtia", lambda device: 123.0)
+                self.assertEqual(
+                    get_device_dram_gbps(torch.device("mtia")),
+                    123.0,
+                )
+        finally:
+            _get_device_dram_gbps.cache_clear()
+
+    def test_get_device_dram_gbps_none_tracks_current_accelerator(self):
+        _get_device_dram_gbps.cache_clear()
+        try:
+            with (
+                mock.patch.dict(
+                    "torch._inductor.utils._device_dram_gbps_providers",
+                    clear=True,
+                ),
+                mock.patch(
+                    "torch._inductor.utils._current_accelerator_device",
+                    side_effect=[torch.device("mtia:0"), torch.device("mtia:1")],
+                ),
+            ):
+                register_device_dram_gbps_provider(
+                    "mtia", lambda device: 100.0 + (device.index or 0)
+                )
+                self.assertEqual(get_device_dram_gbps(), 100.0)
+                self.assertEqual(get_device_dram_gbps(), 101.0)
+        finally:
+            _get_device_dram_gbps.cache_clear()
+
+    def test_get_device_dram_gbps_missing_name_skips_datasheet(self):
+        _get_device_dram_gbps.cache_clear()
+        try:
+            with (
+                mock.patch.dict(
+                    "torch._inductor.utils._device_dram_gbps_providers",
+                    clear=True,
+                ),
+                mock.patch(
+                    "torch._inductor.utils._get_device_name",
+                    return_value=None,
+                ),
+                mock.patch(
+                    "torch._inductor.utils.datasheet_dram_bw_gbs"
+                ) as datasheet_dram_bw_gbs,
+                self.assertLogs("torch._inductor.utils", level="WARNING"),
+            ):
+                register_device_dram_gbps_provider("mtia", lambda device: None)
+                bandwidth = get_device_dram_gbps(torch.device("mtia:0"))
+
+            self.assertEqual(bandwidth, float("inf"))
+            datasheet_dram_bw_gbs.assert_not_called()
+        finally:
+            _get_device_dram_gbps.cache_clear()
+
+    def test_get_device_dram_gbps_provider_failure_uses_fallback(self):
+        try:
+            for error_type in (
+                AssertionError,
+                IndexError,
+                RuntimeError,
+                ValueError,
+            ):
+                with self.subTest(error_type=error_type):
+                    provider = mock.Mock(side_effect=error_type("unavailable"))
+                    with (
+                        mock.patch.dict(
+                            "torch._inductor.utils._device_dram_gbps_providers",
+                            clear=True,
+                        ),
+                        mock.patch(
+                            "torch._inductor.utils._get_device_name",
+                            return_value=None,
+                        ),
+                        mock.patch(
+                            "torch._inductor.utils.datasheet_dram_bw_gbs"
+                        ) as datasheet_dram_bw_gbs,
+                        self.assertLogs("torch._inductor.utils", level="WARNING"),
+                    ):
+                        register_device_dram_gbps_provider("mtia", provider)
+                        bandwidth = get_device_dram_gbps(torch.device("mtia:0"))
+
+                    self.assertEqual(bandwidth, float("inf"))
+                    provider.assert_called_once_with(torch.device("mtia:0"))
+                    datasheet_dram_bw_gbs.assert_not_called()
+        finally:
+            _get_device_dram_gbps.cache_clear()
+
+    def test_get_device_dram_gbps_warns_for_unknown_device(self):
+        _get_device_dram_gbps.cache_clear()
+        try:
+            with (
+                mock.patch.dict(
+                    "torch._inductor.utils._device_dram_gbps_providers",
+                    clear=True,
+                ),
+                mock.patch(
+                    "torch._inductor.utils._get_device_name",
+                    return_value="arke",
+                ),
+                self.assertLogs("torch._inductor.utils", level="WARNING") as logs,
+            ):
+                register_device_dram_gbps_provider("mtia", lambda device: None)
+                bandwidth = get_device_dram_gbps(torch.device("mtia"))
+
+            self.assertEqual(bandwidth, float("inf"))
+            self.assertIn("reported name: arke", logs.output[0])
+            self.assertIn("transfer time is estimated as zero", logs.output[0])
+        finally:
+            _get_device_dram_gbps.cache_clear()
+
+    def test_get_gpu_dram_gbps_is_cached(self):
+        get_gpu_dram_gbps.cache_clear()
+        try:
+            with mock.patch(
+                "torch._inductor.utils.datasheet_dram_bw_gbs",
+                return_value=123.0,
+            ) as datasheet_dram_bw_gbs:
+                self.assertEqual(get_gpu_dram_gbps(), 123.0)
+                self.assertEqual(get_gpu_dram_gbps(), 123.0)
+
+            datasheet_dram_bw_gbs.assert_called_once_with()
+        finally:
+            get_gpu_dram_gbps.cache_clear()
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    def test_get_gpu_dram_gbps_preserves_triton_fallback(self):
+        get_gpu_dram_gbps.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.utils.datasheet_dram_bw_gbs",
+                    return_value=None,
+                ),
+                mock.patch(
+                    "triton.testing.get_dram_gbps", return_value=321.0
+                ) as fallback,
+            ):
+                self.assertEqual(get_gpu_dram_gbps(), 321.0)
+
+            fallback.assert_called_once_with()
+        finally:
+            get_gpu_dram_gbps.cache_clear()
 
 
 class TestUtils(TestCase):
@@ -392,6 +552,141 @@ class TestLoadTemplate(TestCase):
 
 
 class TestRuntimeEstimation(TestCase):
+    def test_roofline_estimate_gets_device_from_tuple_metadata(self):
+        from torch._functorch._aot_autograd.streams import get_roofline_estimate
+
+        graph = torch.fx.Graph()
+        input_node = graph.placeholder("x")
+        input_node.meta["value"] = torch.empty(2, device="meta")
+        node = graph.call_function(torch.ops.aten.max.dim, (input_node, 0))
+        node.meta["value"] = (
+            torch.empty(2, device="meta"),
+            torch.empty(2, dtype=torch.int64, device="meta"),
+        )
+
+        with (
+            mock.patch(
+                "torch._functorch._aot_autograd.streams.get_transfer_time",
+                return_value=1.0,
+            ) as get_transfer_time,
+            mock.patch(
+                "torch._functorch._aot_autograd.streams.get_compute_time",
+                return_value=2.0,
+            ),
+        ):
+            self.assertEqual(get_roofline_estimate(node), 2.0 / 1e6)
+
+        self.assertEqual(
+            get_transfer_time.call_args.kwargs["device"], torch.device("meta")
+        )
+
+    def test_get_device_tflops_uses_registered_provider(self):
+        _get_device_tflops.cache_clear()
+        try:
+            with mock.patch.dict(
+                "torch._inductor.utils._device_tflops_providers", clear=True
+            ):
+                register_device_tflops_provider("mtia", lambda device, dtype: 321.0)
+                self.assertEqual(
+                    get_device_tflops(torch.bfloat16, device=torch.device("mtia")),
+                    321.0,
+                )
+        finally:
+            _get_device_tflops.cache_clear()
+
+    def test_get_device_tflops_none_tracks_current_accelerator(self):
+        _get_device_tflops.cache_clear()
+        try:
+            with (
+                mock.patch.dict(
+                    "torch._inductor.utils._device_tflops_providers",
+                    clear=True,
+                ),
+                mock.patch(
+                    "torch._inductor.utils._current_accelerator_device",
+                    side_effect=[torch.device("mtia:0"), torch.device("mtia:1")],
+                ),
+            ):
+                register_device_tflops_provider(
+                    "mtia",
+                    lambda device, dtype: 100.0 + (device.index or 0),
+                )
+                self.assertEqual(get_device_tflops(torch.bfloat16), 100.0)
+                self.assertEqual(get_device_tflops(torch.bfloat16), 101.0)
+        finally:
+            _get_device_tflops.cache_clear()
+
+    def test_get_device_tflops_unknown_device_returns_zero(self):
+        _get_device_tflops.cache_clear()
+        try:
+            with mock.patch("torch._inductor.utils.datasheet_tops") as datasheet_tops:
+                self.assertEqual(
+                    get_device_tflops(torch.float32, device=torch.device("meta")),
+                    0.0,
+                )
+
+            datasheet_tops.assert_not_called()
+        finally:
+            _get_device_tflops.cache_clear()
+
+    def test_get_device_tflops_unavailable_cuda_returns_zero(self):
+        _get_device_tflops.cache_clear()
+        try:
+            with (
+                mock.patch("torch._inductor.utils._get_device_name", return_value=None),
+                mock.patch("torch.cuda.is_available", return_value=False),
+                mock.patch("torch.cuda.get_device_capability") as get_capability,
+            ):
+                self.assertEqual(
+                    get_device_tflops(torch.float32, device=torch.device("cuda")),
+                    0.0,
+                )
+
+            get_capability.assert_not_called()
+        finally:
+            _get_device_tflops.cache_clear()
+
+    def test_flops_to_ns_gpu_type_takes_precedence_over_device(self):
+        from torch.utils._runtime_estimation import flops_to_ns
+
+        with (
+            mock.patch(
+                "torch.utils._runtime_estimation.datasheet_tops",
+                return_value=100.0,
+            ) as datasheet_tops,
+            mock.patch(
+                "torch.utils._runtime_estimation.get_device_tflops"
+            ) as get_tflops,
+        ):
+            result_ns = flops_to_ns(
+                150_000.0,
+                torch.float32,
+                gpu_type="NVIDIA H100",
+                device=torch.device("mtia"),
+            )
+
+        datasheet_tops.assert_called_once_with(
+            torch.float32,
+            is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32",
+            device_name="NVIDIA H100",
+        )
+        get_tflops.assert_not_called()
+        self.assertEqual(result_ns, 1.0)
+
+    def test_get_transfer_time_uses_requested_device(self):
+        from torch.utils._runtime_estimation import get_transfer_time
+
+        device = torch.device("mtia")
+        tensor = torch.ones(2)
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_device_dram_gbps",
+            return_value=4.0,
+        ) as get_bandwidth:
+            result_ns = get_transfer_time([tensor], [], device=device)
+
+        get_bandwidth.assert_called_once_with(device)
+        self.assertEqual(result_ns, 2.0)
+
     def test_get_compute_time_units(self):
         """TFLOPS-to-FLOPS/s conversion must use 1e12, not 1e15."""
         from unittest.mock import patch
@@ -404,14 +699,21 @@ class TestRuntimeEstimation(TestCase):
         b = torch.randn(K, N)
         out = torch.mm(a, b)
 
+        device = torch.device("mtia")
         with patch(
             "torch.utils._runtime_estimation.get_device_tflops",
             return_value=known_tflops,
-        ):
+        ) as get_tflops:
             result_ns = get_compute_time(
-                torch.ops.aten.mm, (a, b), {}, out, {torch.float32}
+                torch.ops.aten.mm,
+                (a, b),
+                {},
+                out,
+                {torch.float32},
+                device=device,
             )
 
+        get_tflops.assert_called_once_with(torch.float32, device=device)
         # mm flops = 2*M*K*N, divided by 2 for MACs, then time = macs / (0.75 * peak) * 1e9
         expected_macs = 2 * M * K * N / 2
         expected_ns = (expected_macs / (0.75 * known_tflops * 1e12)) * 1e9

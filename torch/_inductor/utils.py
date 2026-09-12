@@ -55,7 +55,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import datasheet_tops
+from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -3651,32 +3651,60 @@ def get_backend_num_stages() -> int:
     return options.get("num_stages", 2 if torch.version.hip else 3)
 
 
+_device_tflops_providers: dict[
+    str, Callable[[torch.device, torch.dtype], float | None]
+] = {}
+
+
+def register_device_tflops_provider(
+    device_type: str,
+    provider: Callable[[torch.device, torch.dtype], float | None],
+) -> None:
+    _device_tflops_providers[device_type] = provider
+    _get_device_tflops.cache_clear()
+
+
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
-    if torch.xpu.is_available():
-        is_tf32 = torch.backends.mkldnn.allow_tf32
-    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
+def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
+    provider = _device_tflops_providers.get(device.type)
+    if provider is not None:
+        backend_tflops = provider(device, dtype)
+        if backend_tflops is not None:
+            return backend_tflops
+
+    is_tf32 = False
+    if device.type == "cuda":
+        is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    elif device.type == "xpu":
+        is_tf32 = bool(torch.backends.mkldnn.allow_tf32)
+    device_name = _get_device_name(device)
+    ds_tops = (
+        datasheet_tops(dtype, is_tf32=is_tf32, device_name=device_name)
+        if device_name is not None
+        else None
+    )
     if ds_tops is not None:
         return ds_tops
 
-    if not torch.cuda.is_available():
+    if device.type != "cuda" or not torch.cuda.is_available():
         log.warning(
-            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
-            "Returning 0.0; roofline estimates will use memory bandwidth only."
+            "get_device_tflops: no Triton fallback available for %s. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only.",
+            device,
         )
         return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
-        8,
-        0,
-    )
+    try:
+        SM80OrLater = torch.cuda.get_device_capability(device) >= (8, 0)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to query CUDA capability for %s; returning 0.0 TFLOPS",
+            device,
+            exc_info=True,
+        )
+        return 0.0
 
     if dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise AssertionError(
@@ -3705,14 +3733,113 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32)
 
 
+def get_device_tflops(
+    dtype: torch.dtype, device: torch.device | str | None = None
+) -> float:
+    """
+    Return peak compute throughput without assuming a CUDA device.
+
+    Prefer a registered backend value, then a datasheet entry. CUDA retains the
+    Triton fallback; other unknown accelerators fall back to zero estimated
+    compute time.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for TFLOPS estimation")
+        return 0.0
+    return _get_device_tflops(dtype, resolved_device)
+
+
+def _current_accelerator_device() -> torch.device | None:
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is None:
+        return None
+    return torch.device(accelerator.type, torch.accelerator.current_device_index())
+
+
+def _get_device_name(device: torch.device) -> str | None:
+    try:
+        properties = get_interface_for_device(device).Worker.get_device_properties(
+            device
+        )
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.debug("Unable to query properties for %s", device, exc_info=True)
+        return None
+    if isinstance(properties, Mapping):
+        name = properties.get("name", properties.get("arch"))
+    else:
+        name = getattr(properties, "name", None)
+    return name if isinstance(name, str) else None
+
+
+_device_dram_gbps_providers: dict[str, Callable[[torch.device], float | None]] = {}
+
+
+def register_device_dram_gbps_provider(
+    device_type: str, provider: Callable[[torch.device], float | None]
+) -> None:
+    _device_dram_gbps_providers[device_type] = provider
+    _get_device_dram_gbps.cache_clear()
+
+
+@functools.cache
+def _get_device_dram_gbps(device: torch.device) -> float:
+    provider = _device_dram_gbps_providers.get(device.type)
+    if provider is not None:
+        # Roofline estimation should not fail compilation when device properties
+        # are unavailable, so continue to the normal fallback path.
+        try:
+            backend_bandwidth = provider(device)
+        except (AssertionError, IndexError, RuntimeError, ValueError):
+            log.debug(
+                "Unable to query DRAM bandwidth provider for %s",
+                device,
+                exc_info=True,
+            )
+        else:
+            if backend_bandwidth is not None:
+                return backend_bandwidth
+
+    device_name = _get_device_name(device)
+    ds_bw = datasheet_dram_bw_gbs(device_name) if device_name is not None else None
+    if ds_bw is not None:
+        return ds_bw
+
+    if device.type != "cuda":
+        log.warning(
+            "No DRAM bandwidth estimate available for %s (reported name: %s); "
+            "using infinite bandwidth, so transfer time is estimated as zero",
+            device,
+            device_name or "unknown",
+        )
+        return float("inf")
+
+    from triton.testing import get_dram_gbps
+
+    return get_dram_gbps()
+
+
+def get_device_dram_gbps(device: torch.device | str | None = None) -> float:
+    """
+    Return DRAM bandwidth in GB/s without assuming a CUDA device.
+
+    Prefer a registered backend value, then a datasheet entry. CUDA retains the
+    Triton fallback; other unknown accelerators fall back to zero estimated
+    transfer time.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for DRAM bandwidth estimation")
+        return float("inf")
+    return _get_device_dram_gbps(resolved_device)
+
+
 @functools.cache
 def get_gpu_dram_gbps() -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    from .analysis.device_info import datasheet_dram_bw_gbs
-
     ds_bw = datasheet_dram_bw_gbs()
     if ds_bw is not None:
         return ds_bw
