@@ -16,6 +16,7 @@ from torch.distributed.optim import (
     _apply_optimizer_in_backward,
     _get_in_backward_optimizers,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 # TODO (rohan-varma): Add FSDP & DDP tests once supported
@@ -29,6 +30,8 @@ def _validate_params(params_list, fn):
 
 
 class ApplyOverlappedOptimizerTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_training_loop_and_validate(self, inp, models, optimizers):
         for i in range(6):
             for model in models:
