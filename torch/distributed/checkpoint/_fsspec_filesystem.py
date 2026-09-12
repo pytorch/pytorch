@@ -1,13 +1,18 @@
 # Mypy will not try inferring the types of any 3rd party libraries installed.
 # mypy: ignore-errors
 
+import concurrent.futures
+import inspect
 import io
 import os
+import sys
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from torch.futures import Future
+import fsspec
 from fsspec.core import url_to_fs
 
 from torch.distributed.checkpoint._extension import StreamTransformExtension
@@ -17,6 +22,7 @@ from torch.distributed.checkpoint.filesystem import (
     FileSystemWriter,
     SerializationFormat,
 )
+from torch.distributed.checkpoint.planner import LoadPlan, LoadPlanner
 
 
 if TYPE_CHECKING:
@@ -59,6 +65,8 @@ class FileSystem(FileSystemBase):
         return os.path.join(path, suffix)
 
     def init_path(self, path: str | os.PathLike, **kwargs) -> str | os.PathLike:
+        # Disable fsspec internal caching by default to avoid redundant memory copies and high RAM usage during batched range reads.
+        kwargs.setdefault("cache_type", "none")
         self.fs, _ = url_to_fs(path, **kwargs)
         return path
 
@@ -152,10 +160,123 @@ class FsspecWriter(FileSystemWriter):
 
 
 class FsspecReader(FileSystemReader):
-    def __init__(self, path: str | os.PathLike, **kwargs) -> None:
+    def __init__(
+        self,
+        path: str | os.PathLike,
+        max_batch_size: int = 64,
+        cpu_workers: int | None = None,
+        max_gap: int | str | None = "auto",
+        **kwargs,
+    ) -> None:
         super().__init__(path)
+        self.max_batch_size = max(1, max_batch_size)
+        self.cpu_workers = max(
+            1, cpu_workers if cpu_workers is not None else min(16, os.cpu_count() or 4)
+        )
+        self.max_gap = max_gap
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
+
+    def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        reqs = plan.items
+        if not reqs:
+            fut: Future[None] = Future()
+            fut.set_result(None)
+            return fut
+
+        # If the underlying fsspec filesystem supports cat_ranges, use batched range reading
+        if self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges"):
+            # Check if backend overrides cat_ranges and supports max_gap
+            # (base fsspec.AbstractFileSystem.cat_ranges raises NotImplementedError when max_gap is passed)
+            supports_max_gap = (
+                self.max_gap is not None
+                and type(self.fs.fs).cat_ranges
+                is not fsspec.AbstractFileSystem.cat_ranges
+            )
+            if supports_max_gap:
+                try:
+                    sig = inspect.signature(self.fs.fs.cat_ranges)
+                    if "max_gap" not in sig.parameters and not any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
+                    ):
+                        supports_max_gap = False
+                except Exception:
+                    supports_max_gap = False
+
+            batches = []
+            for i in range(0, len(reqs), self.max_batch_size):
+                batch = reqs[i : i + self.max_batch_size]
+                paths = []
+                starts = []
+                ends = []
+                for req in batch:
+                    item_md = self.storage_data[req.storage_index]
+                    paths.append(self.fs.concat_path(self.path, item_md.relative_path))
+                    starts.append(item_md.offset)
+                    ends.append(item_md.offset + item_md.length)
+                batches.append((paths, starts, ends, batch))
+
+            def fetch_batch(b):
+                nonlocal supports_max_gap
+                bp, bs, be, br = b
+                if supports_max_gap:
+                    try:
+                        chunks = self.fs.fs.cat_ranges(
+                            bp, bs, be, max_gap=self.max_gap, on_error="raise"
+                        )
+                        return chunks, br
+                    except (NotImplementedError, TypeError):
+                        supports_max_gap = False
+                chunks = self.fs.fs.cat_ranges(bp, bs, be, on_error="raise")
+                return chunks, br
+
+            def process_chunk(req, chunk_data):
+                self._load_item(req, io.BytesIO(chunk_data), planner)
+
+            with (
+                concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self.cpu_workers
+                ) as cpu_executor,
+                concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1
+                ) as prefetch_executor,
+            ):
+                try:
+                    next_io = prefetch_executor.submit(fetch_batch, batches[0])
+
+                    for idx, batch in enumerate(batches):
+                        chunks, b_reqs = next_io.result()
+
+                        if idx + 1 < len(batches):
+                            next_io = prefetch_executor.submit(
+                                fetch_batch, batches[idx + 1]
+                            )
+
+                        futures = [
+                            cpu_executor.submit(process_chunk, req, chunk_data)
+                            for req, chunk_data in zip(b_reqs, chunks)
+                        ]
+                        for f in futures:
+                            f.result()
+
+                        del chunks
+                        del b_reqs
+                finally:
+                    if sys.version_info >= (3, 9):
+                        cpu_executor.shutdown(wait=True, cancel_futures=True)
+                        prefetch_executor.shutdown(
+                            wait=True, cancel_futures=True
+                        )
+                    else:
+                        cpu_executor.shutdown(wait=True)
+                        prefetch_executor.shutdown(wait=True)
+
+            fut: Future[None] = Future()
+            fut.set_result(None)
+            return fut
+
+        return super().read_data(plan, planner)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
