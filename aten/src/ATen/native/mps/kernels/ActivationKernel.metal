@@ -275,6 +275,9 @@ struct gelu_functor {
   template <typename T>
   inline T operator()(const T x) {
     const float xf = float(x);
+    if (::metal::isinf(xf)) {
+      return xf > 0.0f ? x : T(0);
+    }
     return static_cast<T>(
         0.5f * xf * (1.0f + ::c10::metal::erf(xf * M_SQRT1_2_F)));
   }
@@ -284,6 +287,9 @@ struct gelu_tanh_functor {
   template <typename T>
   inline T operator()(const T x) {
     const float xf = float(x);
+    if (::metal::isinf(xf)) {
+      return xf > 0.0f ? x : T(0);
+    }
     constexpr float kBeta = M_SQRT2_F * M_2_SQRTPI_F * 0.5f;
     constexpr float kKappa = 0.044715f;
     const float inner = kBeta * (xf + kKappa * xf * xf * xf);
