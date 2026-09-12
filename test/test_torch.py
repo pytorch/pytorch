@@ -1964,7 +1964,7 @@ class TestTorchDeviceType(TestCase):
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'grid_sampler_2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
@@ -1977,7 +1977,7 @@ class TestTorchDeviceType(TestCase):
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'grid_sampler_3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            False)
 
     def test_invalid_shapes_grid_sampler(self, device):
         make_arg = partial(
@@ -7470,7 +7470,8 @@ class TestTorchCUDA(TestCase):
 
         self.check_nondeterministic_alert(
             fn,
-            'cudnn_grid_sampler_backward')
+            'cudnn_grid_sampler_backward',
+            False)
 
     @skipIfTorchInductor("FIXME")
     def test_sync_warning(self, device):

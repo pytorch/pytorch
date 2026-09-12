@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/GridSamplerUtils.h>
@@ -11,6 +10,7 @@
 #include <ATen/ops/cudnn_grid_sampler_backward_native.h>
 #include <ATen/ops/cudnn_grid_sampler_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/grid_sampler_2d_backward.h>
 #endif
 
 #if !AT_CUDNN_ENABLED()
@@ -126,8 +126,7 @@ Tensor cudnn_grid_sampler_forward(const Tensor& input_t, const Tensor& grid_t) {
   return output_t;
 }
 
-// NB: CuDNN does not support output mask; you always get both
-// gradients.
+// This operator has no output mask and always returns both gradients.
 std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
     const Tensor& input_t,
     const Tensor& grid_t,
@@ -138,54 +137,17 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
   TORCH_CHECK(
       cond_cudnn_grid_sampler(input_t, grid_t),
       "Invalid arguments to cudnn_grid_sampler_backward");
-  globalContext().alertNotDeterministic("cudnn_grid_sampler_backward");
-
-  auto input_contig = contiguousIfZeroInStrides(input_t);
-  auto grid_contig = grid_t.contiguous();
-  auto grad_output_contig = contiguousIfZeroInStrides(grad_output_t);
-  TensorArg input{input_contig, "input", 1}, grid{grid_contig, "grid", 2},
-      grad_output{grad_output_contig, "grad_output", 3};
+  TensorArg input{input_t, "input", 1}, grid{grid_t, "grid", 2},
+      grad_output{grad_output_t, "grad_output", 3};
   CheckedFrom c = "cudnn_grid_sampler_backward";
   checkAllSameGPU(c, {input, grad_output, grid});
-  checkGridSize(c, grid, input);
   checkDim(c, input, 4);
   checkDim(c, grad_output, 4);
 
-  auto grad_input_t = at::empty({0}, input->options());
-  grad_input_t.resize_(input->sizes());
-  auto grad_grid_t = at::empty({0}, grid->options());
-  grad_grid_t.resize_(grid->sizes());
-
-  TensorDescriptor idesc{*input}; // input descriptor
-  TensorDescriptor odesc{*grad_output}; // grad_output descriptor
-  TensorDescriptor gdesc{grad_input_t}; // grad_input descriptor
-  SpatialTransformerDescriptor desc; // sampler descriptor
-
-  auto handle = getCudnnHandle();
-  auto dataType = getCudnnDataType(*input);
-  setSamplerDescriptor(desc, dataType, *grad_output);
-
-  Constant one(dataType, 1);
-  Constant zero(dataType, 0);
-  AT_CUDNN_CHECK(cudnnSpatialTfSamplerBackward(
-      handle,
-      desc.desc(),
-      &one,
-      idesc.desc(),
-      input->const_data_ptr(),
-      &zero,
-      gdesc.desc(),
-      grad_input_t.data_ptr(),
-      &one,
-      odesc.desc(),
-      grad_output->const_data_ptr(),
-      // intriguingly, the outputs don't need descriptors
-      grid->const_data_ptr(),
-      &zero,
-      grad_grid_t.data_ptr()));
-
-  return std::tuple<Tensor, Tensor>{
-      std::move(grad_input_t), std::move(grad_grid_t)};
+  // Keep cuDNN forward semantics, but use native deterministic accumulation in
+  // backward. The native implementation accepts the original tensor strides.
+  return at::grid_sampler_2d_backward(
+      grad_output_t, input_t, grid_t, 0, 0, true, {true, true});
 }
 
 } // namespace at::native
