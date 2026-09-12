@@ -6465,8 +6465,41 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self, hint_override: int | None = None
     ) -> dict[ChoiceCaller, float]:
         if hint_override not in self._choice_timings:
-            self._choice_timings[hint_override] = self._choice_timings_fn(hint_override)
+            try:
+                self._choice_timings[hint_override] = self._choice_timings_fn(
+                    hint_override
+                )
+            except torch.OutOfMemoryError:
+                # Deferred autotuning OOMed allocating example tensors at scheduler
+                # time (peak memory). Fall back to the extern/ATen choice without
+                # benchmarking instead of failing compile.
+                self._choice_timings[hint_override] = self._autotune_oom_fallback()
         return self._choice_timings[hint_override]
+
+    def _autotune_oom_fallback(self) -> dict[ChoiceCaller, float]:
+        fallback = next(
+            (
+                choice
+                for choice in self._choices
+                if isinstance(
+                    choice, torch._inductor.select_algorithm.ExternKernelCaller
+                )
+            ),
+            None,
+        )
+        if fallback is None:
+            raise torch.OutOfMemoryError(
+                "Deferred GEMM autotuning ran out of memory and no ATen fallback "
+                "choice was available to skip benchmarking."
+            )
+        log.warning(
+            "CUDA OOM during deferred autotuning; skipping benchmarking and "
+            "falling back to %s.",
+            getattr(fallback, "name", fallback),
+        )
+        timings = {choice: float("inf") for choice in self._choices}
+        timings[fallback] = 0.0
+        return timings
 
     @contextlib.contextmanager
     def swap_as_triton_caller(self, caller: TritonTemplateCallerBase) -> Iterator[None]:
