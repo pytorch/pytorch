@@ -752,7 +752,9 @@ def copy__impl(
 ) -> ComplexTensor | torch.Tensor:
     if not self.dtype.is_complex:
         warnings.warn(
-            "Casting complex values to real discards the imaginary part", UserWarning
+            "Casting complex values to real discards the imaginary part",
+            UserWarning,
+            stacklevel=2,
         )
         src_re, src_im = split_complex_arg(src)
         return self.copy_(src_re)

@@ -92,6 +92,7 @@ except ImportError:
         "to install it with commands from pytorch.org, post-fixed with "
         "`--no-deps` to avoid overwriting the pytorch installation",
         UserWarning,
+        stacklevel=2,
     )
 
 
@@ -156,7 +157,7 @@ class VmapTearDownMixin:
                 "Interpreter stack is not empty. Test should have called "
                 "'torch._C._functorch._vmap_decrement_nesting()'"
             )
-            warnings.warn(msg)
+            warnings.warn(msg, stacklevel=2)
 
 
 @markDynamoStrictTest

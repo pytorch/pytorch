@@ -80,7 +80,7 @@ except ModuleNotFoundError:
     if IS_CI:
         raise ModuleNotFoundError(err_msg) from None
     else:
-        warnings.warn(err_msg)
+        warnings.warn(err_msg, stacklevel=2)
 
 
 try:

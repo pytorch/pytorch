@@ -53,9 +53,11 @@ def main() -> int:
     replacement = FORWARDS.get(command)
     if replacement is None:
         raise SystemExit(f"error: {notice}")
-    warnings.warn(notice, DeprecationWarning)
+    warnings.warn(notice, DeprecationWarning, stacklevel=2)
     if len(sys.argv) > 2:
-        warnings.warn(f"ignoring extra arguments: {shlex.join(sys.argv[2:])}")
+        warnings.warn(
+            f"ignoring extra arguments: {shlex.join(sys.argv[2:])}", stacklevel=2
+        )
     print(f"Forwarding to `{shlex.join(replacement)}`.", file=sys.stderr)
     return subprocess.run(replacement).returncode
 

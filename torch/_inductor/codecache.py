@@ -865,7 +865,8 @@ class FxGraphCachePickler(pickle.Pickler):
         if elapsed > 1.0:
             warnings.warn(
                 f"FX graph cache copying of a large constant took {elapsed:.1}s. "
-                "Please file an issue."
+                "Please file an issue.",
+                stacklevel=2,
             )
 
         return (_ident, (TensorMetadataAndValues(metadata, values),))

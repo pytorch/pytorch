@@ -2417,6 +2417,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
                 UserWarning,
+                stacklevel=2,
             )
             if pred.as_python_constant():
                 return true_fn.call_function(tx, unpack_iterable(tx, operands), {})
@@ -2643,6 +2644,7 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "Index is a Python constant. When used with torch.switch, it specializes on one of the branches."
                 " If you want torch.switch to preserve the branches, please make the index a tensor or SymInt.",
                 UserWarning,
+                stacklevel=2,
             )
             idx = index.as_python_constant()
             branch_fns = branches.unpack_var_sequence(tx)

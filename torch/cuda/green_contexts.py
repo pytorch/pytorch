@@ -41,7 +41,7 @@ def _get_driver_version() -> int:
         # pyrefly: ignore [missing-attribute]
         return _check_cuda_bindings(_drv.cuDriverGetVersion())
     except RuntimeError as e:
-        warnings.warn(f"Error while querying CUDA driver version: {e}")
+        warnings.warn(f"Error while querying CUDA driver version: {e}", stacklevel=2)
         return -1
 
 
@@ -236,14 +236,17 @@ class GreenContext:
             except RuntimeError as e:
                 warnings.warn(
                     f"Error while destroying green context stream at idx {idx} "
-                    f"for green context {green_ctx}: {e}"
+                    f"for green context {green_ctx}: {e}",
+                    stacklevel=2,
                 )
         self._green_ctx = None
         try:
             # pyrefly: ignore [missing-attribute]
             _check_cuda_bindings(_drv.cuGreenCtxDestroy(green_ctx))
         except RuntimeError as e:
-            warnings.warn(f"Error while destroying green context {green_ctx}: {e}")
+            warnings.warn(
+                f"Error while destroying green context {green_ctx}: {e}", stacklevel=2
+            )
 
     def _init_from_cuda_objects(self, device_id: int, green_ctx, context) -> None:
         self._device_id = device_id

@@ -21,7 +21,7 @@ class TestWarn(JitTestCase):
     def test_warn(self):
         @torch.jit.script
         def fn():
-            warnings.warn("I am warning you")
+            warnings.warn("I am warning you", stacklevel=2)
 
         f = io.StringIO()
         with redirect_stderr(f):
@@ -35,7 +35,7 @@ class TestWarn(JitTestCase):
         @torch.jit.script
         def fn():
             for _ in range(10):
-                warnings.warn("I am warning you")
+                warnings.warn("I am warning you", stacklevel=2)
 
         f = io.StringIO()
         with redirect_stderr(f):
@@ -47,7 +47,7 @@ class TestWarn(JitTestCase):
 
     def test_warn_only_once_in_loop_func(self):
         def w():
-            warnings.warn("I am warning you")
+            warnings.warn("I am warning you", stacklevel=2)
 
         @torch.jit.script
         def fn():
@@ -64,10 +64,10 @@ class TestWarn(JitTestCase):
 
     def test_warn_once_per_func(self):
         def w1():
-            warnings.warn("I am warning you")
+            warnings.warn("I am warning you", stacklevel=2)
 
         def w2():
-            warnings.warn("I am warning you")
+            warnings.warn("I am warning you", stacklevel=2)
 
         @torch.jit.script
         def fn():
@@ -84,10 +84,10 @@ class TestWarn(JitTestCase):
 
     def test_warn_once_per_func_in_loop(self):
         def w1():
-            warnings.warn("I am warning you")
+            warnings.warn("I am warning you", stacklevel=2)
 
         def w2():
-            warnings.warn("I am warning you")
+            warnings.warn("I am warning you", stacklevel=2)
 
         @torch.jit.script
         def fn():
@@ -106,7 +106,7 @@ class TestWarn(JitTestCase):
     def test_warn_multiple_calls_multiple_warnings(self):
         @torch.jit.script
         def fn():
-            warnings.warn("I am warning you")
+            warnings.warn("I am warning you", stacklevel=2)
 
         f = io.StringIO()
         with redirect_stderr(f):
@@ -119,7 +119,7 @@ class TestWarn(JitTestCase):
 
     def test_warn_multiple_calls_same_func_diff_stack(self):
         def warn(caller: str):
-            warnings.warn("I am warning you from " + caller)
+            warnings.warn("I am warning you from " + caller, stacklevel=2)
 
         @torch.jit.script
         def foo():
