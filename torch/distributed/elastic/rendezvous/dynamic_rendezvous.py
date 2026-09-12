@@ -35,7 +35,7 @@ from .api import (
     RendezvousStoreInfo,
     RendezvousTimeoutError,
 )
-from .utils import _delay, _PeriodicTimer, should_use_libuv
+from .utils import _delay, _PeriodicTimer, _should_use_libuv
 
 
 __all__ = [
@@ -1124,7 +1124,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         )
 
     def _create_tcp_store_server(self, master_addr, master_port) -> dist.TCPStore:
-        use_libuv = should_use_libuv()
+        use_libuv = _should_use_libuv()
 
         return dist.TCPStore(
             host_name=master_addr,

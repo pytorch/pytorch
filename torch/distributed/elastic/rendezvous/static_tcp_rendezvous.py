@@ -19,8 +19,8 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousStoreInfo,
 )
 from torch.distributed.elastic.rendezvous.utils import (
+    _should_use_libuv,
     parse_rendezvous_endpoint,
-    should_use_libuv,
 )
 
 
@@ -67,7 +67,7 @@ class StaticTCPRendezvous(RendezvousHandler):
         logger.info("Creating TCPStore as the c10d::Store implementation")
         is_master = self.rank == 0
         if not self._store:
-            use_libuv = should_use_libuv()
+            use_libuv = _should_use_libuv()
 
             self._store = TCPStore(  # type: ignore[call-arg]
                 self.master_addr,

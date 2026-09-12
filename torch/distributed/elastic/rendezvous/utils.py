@@ -19,7 +19,7 @@ from threading import Event, Thread
 from typing import Any
 
 
-__all__ = ["parse_rendezvous_endpoint", "should_use_libuv"]
+__all__ = ["parse_rendezvous_endpoint"]
 
 
 def _parse_rendezvous_config(config_str: str) -> dict[str, str]:
@@ -287,7 +287,7 @@ class _PeriodicTimer:
         thread.join()
 
 
-def should_use_libuv() -> bool:
+def _should_use_libuv() -> bool:
     """
     Determine whether or not should use the libuv-based TCPStore backend.
 

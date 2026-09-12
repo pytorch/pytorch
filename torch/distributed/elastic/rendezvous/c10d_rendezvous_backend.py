@@ -25,8 +25,8 @@ from .api import (
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import (
     _matches_machine_hostname,
+    _should_use_libuv,
     parse_rendezvous_endpoint,
-    should_use_libuv,
 )
 
 
@@ -153,7 +153,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     if read_timeout <= 0:
         raise ValueError("The read timeout must be a positive integer.")
 
-    use_libuv = should_use_libuv()
+    use_libuv = _should_use_libuv()
 
     # In specific cases we attempt to instantiate the store twice. For details
     # see the explanation in the except clause below.
