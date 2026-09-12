@@ -462,26 +462,24 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   } else {
     if (at::isReducedFloatingType(it.common_dtype())) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(it.common_dtype(), "GeluBackwardKernelImpl", [&]() {
-      auto kAlphaVec = Vectorized<float>((float)(M_SQRT1_2));
       auto kBetaVec = Vectorized<float>((float)(M_2_SQRTPI * M_SQRT1_2 * 0.5));
-      auto kOneVec = Vectorized<float>((float)(1));
-      auto kPointFiveVec = Vectorized<float>((float)(0.5));
       auto kMinusPointFiveVec = Vectorized<float>((float)(-0.5));
       cpu_kernel_vec(
           it,
           [](scalar_t dy, scalar_t x) -> scalar_t {
               const float kAlpha = float(M_SQRT1_2);
               const float kBeta = float(M_2_SQRTPI) * float(M_SQRT1_2) * float(0.5);
+              // 1 + erf(x) = erfc(-x)
               const float cdf =
-                  float(0.5) * (float(1) + std::erf(float(x) * kAlpha));
+                  float(0.5) * std::erfc(-float(x) * kAlpha);
               const float pdf = kBeta * std::exp(float(x) * float(x) * float(-0.5));
               return float(dy) * (cdf + float(x) * pdf);
           },
           [&](Vectorized<scalar_t> dy, Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
               auto [x0, x1] = convert_to_float<scalar_t>(x);
               auto [dy0, dy1] = convert_to_float<scalar_t>(dy);
-              auto cdf_vec0 = kPointFiveVec * (kOneVec + (x0 * kAlphaVec).erf());
-              auto cdf_vec1 = kPointFiveVec * (kOneVec + (x1 * kAlphaVec).erf());
+              auto cdf_vec0 = vectorized_normal_cdf(x0);
+              auto cdf_vec1 = vectorized_normal_cdf(x1);
               auto pdf_vec0 = kBetaVec * (x0 * x0 * kMinusPointFiveVec).exp();
               auto pdf_vec1 = kBetaVec * (x1 * x1 * kMinusPointFiveVec).exp();
               auto res0 = dy0 * (cdf_vec0 + x0 * pdf_vec0);
@@ -493,24 +491,21 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
       AT_DISPATCH_FLOATING_TYPES(
           it.dtype(), "GeluBackwardKernelImpl", [&]() {
         using Vec = vec::Vectorized<scalar_t>;
-        const Vec kAlphaVec(scalar_t(M_SQRT1_2));
         const Vec kBetaVec(scalar_t(M_2_SQRTPI * M_SQRT1_2 * 0.5));
-        const Vec kOneVec(scalar_t(1));
-        const Vec kPointFiveVec(scalar_t(0.5));
         const Vec kMinusPointFiveVec(scalar_t(-0.5));
         cpu_kernel_vec(
             it,
             [](scalar_t dy, scalar_t x) {
               const scalar_t kAlpha = scalar_t(M_SQRT1_2);
               const scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * scalar_t(0.5);
+              // 1 + erf(x) = erfc(-x)
               const scalar_t cdf =
-                  scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
+                  scalar_t(0.5) * std::erfc(-x * kAlpha);
               const scalar_t pdf = kBeta * std::exp(x * x * scalar_t(-0.5));
               return dy * (cdf + x * pdf);
             },
             [&](Vec dy_vec, Vec x_vec) {
-              const Vec cdf_vec =
-                  kPointFiveVec * (kOneVec + (x_vec * kAlphaVec).erf());
+              const Vec cdf_vec = vectorized_normal_cdf(x_vec);
               const Vec pdf_vec =
                   kBetaVec * (x_vec * x_vec * kMinusPointFiveVec).exp();
               return dy_vec * (cdf_vec + x_vec * pdf_vec);
