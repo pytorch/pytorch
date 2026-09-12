@@ -89,10 +89,13 @@ mp_only_param_and_buf = MixedPrecision(
 # Nothing is cast (thus param, comm, grad, and buffer should be in the full precision)
 mp_no_mixed_precision = MixedPrecision()
 
-nccl_supports_bf16 = dist.is_nccl_available() and nccl.version() >= (2, 10)
+# XCCL supports bfloat16 collectives unconditionally; NCCL needs 2.10+.
+backend_supports_bf16 = dist.is_xccl_available() or (
+    dist.is_nccl_available() and nccl.version() >= (2, 10)
+)
 
 mp_configs = [default_mp, mp_only_reduce, mp_only_param_and_buf, mp_no_mixed_precision]
-if nccl_supports_bf16:
+if backend_supports_bf16:
     mp_diff_buffer_and_reduce = MixedPrecision(
         param_dtype=torch.float16,
         buffer_dtype=torch.bfloat16,
@@ -129,7 +132,7 @@ test_name_mapping = {
     "enable_sharded_grad_scaler": "enable_sharded_grad_scaler",
 }
 
-if nccl_supports_bf16:
+if backend_supports_bf16:
     test_name_mapping.update(
         {
             str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
@@ -540,7 +543,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to
         # not increase test TTS too much.
-        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
+        mp = default_mp if not backend_supports_bf16 else mp_diff_buffer_and_reduce
         self._run_test_mixed_precision_e2e(
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
@@ -1065,7 +1068,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to
         # not increase test TTS too much.
-        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
+        mp = default_mp if not backend_supports_bf16 else mp_diff_buffer_and_reduce
         self._run_test_mixed_precision_e2e(
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
@@ -1078,7 +1081,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_e2e_full_shard(self):
-        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
+        mp = default_mp if not backend_supports_bf16 else mp_diff_buffer_and_reduce
         self._run_test_mixed_precision_e2e(
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
