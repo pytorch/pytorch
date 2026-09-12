@@ -42,7 +42,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, IS_SM100, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -8243,6 +8243,55 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_matrix_exp_small_rotation(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196592
+        single = dtype in (torch.float, torch.cfloat)
+        theta, scale = (0.5, 0.01) if single else (0.04, 0.001)
+        forward_atol = 3e-7 if single else 2e-15
+        backward_atol = 3e-9 if single else 2e-17
+
+        a = torch.tensor([[0, -theta], [theta, 0]], device=device, dtype=dtype)
+        c, s = math.cos(theta), math.sin(theta)
+
+        expected = torch.tensor(
+            [[c, -s], [s, c]],
+            device=device,
+            dtype=dtype,
+        )
+
+        # For G = scale I, L_exp(A^H, G) = scale exp(A^H).
+        g = scale * torch.eye(2, device=device, dtype=dtype)
+        expected_grad = scale * torch.tensor(
+            [[c, s], [-s, c]],
+            device=device,
+            dtype=dtype,
+        )
+
+        for batch_shape in ((), (1,), (2,), (1, 2)):
+            x = a.expand(*batch_shape, 2, 2)
+            self.assertEqual(
+                torch.linalg.matrix_exp(x),
+                expected.expand_as(x),
+                atol=forward_atol,
+                rtol=0,
+            )
+
+            x = x.requires_grad_()
+            (actual_grad,) = torch.autograd.grad(
+                torch.linalg.matrix_exp(x),
+                x,
+                g.expand_as(x),
+            )
+            self.assertEqual(
+                actual_grad,
+                expected_grad.expand_as(x),
+                atol=backward_atol,
+                rtol=0,
+            )
+
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
+    @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
     def test_linalg_matrix_exp_batch(self, device, dtype):
 
@@ -11701,6 +11750,10 @@ class TestGroupedMM(TestCase):
 
     @onlyOn(["cuda", "mps"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(
+        IS_SM100 and _get_torch_cuda_version() == (13, 0),
+        "CUDA 13.0 grouped_mm can cause an illegal memory access on SM100",
+    )
     @serialTest()
     @largeTensorTest("6GB")
     @largeMPSBufferTest((2**31 + 8) * torch.float16.itemsize)
