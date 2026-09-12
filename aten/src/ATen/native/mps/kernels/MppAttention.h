@@ -5,7 +5,8 @@
 
 #include <ATen/native/mps/kernels/PrefillAttention.h>
 
-#if __METAL_VERSION__ >= 400
+#if __METAL_VERSION__ >= 400 && \
+    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
 
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
 
@@ -1057,4 +1058,4 @@ prefill_attention_mpp(
 instantiate_mpp_attn_mask(float16, half);
 instantiate_mpp_attn_mask(bfloat16, bfloat);
 
-#endif // __METAL_VERSION__ >= 400
+#endif // __METAL_VERSION__ >= 400 && __has_include(MetalPerformancePrimitives)
