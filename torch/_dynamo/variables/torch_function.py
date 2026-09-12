@@ -777,12 +777,26 @@ class TensorWithTFOverrideVariable(TensorVariable):
             # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
             # We've established with the above check that the method is not overridden, so we guard that the method is the same
             # as the impl defined on tensor and retrieve it
-            if self.source:
-                source = AttrSource(AttrSource(self.source, "__class__"), name)
-                value = inspect.getattr_static(self.python_type(), name)
-            else:
-                source = None
-                value = getattr(torch.Tensor, name)
+            try:
+                if self.source:
+                    source = AttrSource(AttrSource(self.source, "__class__"), name)
+                    value = inspect.getattr_static(self.python_type(), name)
+                else:
+                    source = None
+                    value = getattr(torch.Tensor, name)
+            except AttributeError:
+                unimplemented(
+                    gb_type="Tensor subclass method not defined on Tensor",
+                    context=f"{self.class_type.__name__}.{name}",
+                    explanation=(
+                        f"`torch.compile` cannot trace `{self.class_type.__name__}.{name}` "
+                        "because it is not a torch.Tensor method."
+                    ),
+                    hints=[
+                        f"Avoid calling `{name}` on this tensor subclass inside torch.compile.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
             func_var = VariableTracker.build(tx, value, source)
             return dispatch_torch_function(tx, func_var, tf_args, kwargs)
         else:
