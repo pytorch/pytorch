@@ -83,7 +83,7 @@ class C10dErrorLoggerTest(DistributedTestBase):
 
     @with_comms
     def test_exception_logger(self) -> None:
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValueError):
             self._failed_broadcast_raise_exception()
 
         with self.assertLogs(_c10d_logger, level="DEBUG") as captured:

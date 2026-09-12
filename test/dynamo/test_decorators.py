@@ -2574,11 +2574,11 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             with torch._dynamo.error_on_graph_break("foo"):
                 pass
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017 - error_on_graph_break exception type varies by compiler
             f1()
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             f2()
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             f3()
 
     def test_nested_compile_error_on_graph_break(self):

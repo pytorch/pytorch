@@ -1417,7 +1417,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             ng_cuda = ng._get_backend(torch.device("cuda"))
             self.assertEqual(cuda_backend.options._timeout, ng_cuda.options._timeout)
             # cpu backend should not be present in the child.
-            with self.assertRaises(Exception):
+            with self.assertRaises(RuntimeError):
                 ng._get_backend(torch.device("cpu"))
             self.assertEqual(
                 c10d.distributed_c10d._world.pg_backend_config[ng], "cuda:nccl-legacy"

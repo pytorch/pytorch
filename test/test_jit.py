@@ -7682,7 +7682,7 @@ dedent """
             assert isinstance(x, Dict[str, torch.Tensor])  # noqa: S101
 
         foo({"1": torch.tensor(3)})
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             foo(2)
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
