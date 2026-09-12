@@ -280,6 +280,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
+    if config.reassociate_matmul:
+        from .reassociate_matmul import reassociate_matmul
+
+        GraphTransformObserver(gm, "reassociate_matmul").apply_graph_pass(
+            reassociate_matmul
+        )
+
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)
 
