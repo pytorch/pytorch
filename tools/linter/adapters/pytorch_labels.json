@@ -113,6 +113,7 @@
   "ciflow/rocm-navi31",
   "ciflow/rocm-nightly",
   "ciflow/rocm-preview",
+  "ciflow/rocm-rx7900",
   "ciflow/s390",
   "ciflow/slow",
   "ciflow/split-build",

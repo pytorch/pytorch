@@ -1,9 +1,10 @@
 # Owner(s): ["module: rocm"]
-name: rocm-navi31
+name: rocm-rx7900
 
 on:
   push:
     tags:
+      - ciflow/rocm-rx7900/*
       - ciflow/rocm-navi31/*
   workflow_dispatch:
   schedule:
@@ -39,24 +40,24 @@ jobs:
 
   linux-jammy-rocm-py3_10-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    name: linux-jammy-rocm-py3.10-navi31
+    name: linux-jammy-rocm-py3.10-rx7900
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-jammy-rocm-py3.10-navi31
+      build-environment: linux-jammy-rocm-py3.10-rx7900
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.rx7900.1" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.rx7900.1" },
         ]}
     secrets: inherit
 
   linux-jammy-rocm-py3_10-test:
-    name: linux-jammy-rocm-py3.10-navi31
+    name: linux-jammy-rocm-py3.10-rx7900
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-jammy-rocm-py3_10-build
