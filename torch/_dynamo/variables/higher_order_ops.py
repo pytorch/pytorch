@@ -57,6 +57,7 @@ from .. import graph_break_hints, variables
 from ..exc import (
     FakeTensorObservedException,
     ObservedException,
+    TorchRuntimeError,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
@@ -804,6 +805,19 @@ def _call_while_loop(
         )
     additional_inputs_seq = unpack_iterable(tx, additional_inputs)
 
+    num_carried_inputs = len(operands_seq)
+
+    def check_carried_input_mutation(
+        fn_name: str, graph: torch.fx.Graph
+    ) -> set[StorageWeakRef]:
+        mutated_inputs = set(getattr(graph, "_dynamo_mutated_input_indices", ()))
+        mutated_storages = subgraph_mutated_input_storages(graph, mutated_inputs)
+        if any(
+            idx < num_carried_inputs for idx in mutated_inputs
+        ) or parent_mutated_input_indices(operands_seq, mutated_storages):
+            raise TorchRuntimeError(f"{fn_name} might be modifying a carried input!")
+        return mutated_storages
+
     with discard_graph_changes(tx):
         # Note: this must be run under discard graph changes.
         def unspecialize_carried_inputs(
@@ -899,6 +913,7 @@ def _call_while_loop(
     )
     cond_nn_modules = dict(tx.output.nn_modules)
     validate_subgraph_output_types(cond_r)
+    cond_mutated_input_storages = check_carried_input_mutation("cond_fn", cond_graph)
     if cond_r.is_tensor():
         cond_r_meta = _extract_tensor_metadata(
             # type: ignore[attr-defined]
@@ -948,12 +963,9 @@ def _call_while_loop(
         remove_consts_from_outputs=False,
     )
     validate_subgraph_output_types(body_r)
-    cond_mutated_inputs = set(getattr(cond_graph, "_dynamo_mutated_input_indices", ()))
-    body_mutated_inputs = set(getattr(body_graph, "_dynamo_mutated_input_indices", ()))
+    body_mutated_input_storages = check_carried_input_mutation("body_fn", body_graph)
 
-    mutated_input_storages = subgraph_mutated_input_storages(
-        cond_graph, cond_mutated_inputs
-    ) | subgraph_mutated_input_storages(body_graph, body_mutated_inputs)
+    mutated_input_storages = cond_mutated_input_storages | body_mutated_input_storages
 
     # We set include contiguity=False because we have vmap x HOP tests, where if
     # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
