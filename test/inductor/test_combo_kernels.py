@@ -3179,7 +3179,11 @@ class ComboKernelMetadataTests(TestCase):
             return torch.relu(a), torch.sigmoid(b)
 
         inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-        code = self._combo_code(fn, inps)
+        from torch._inductor.scheduler import Scheduler
+
+        with patch.object(Scheduler, "speedup_by_combo_kernel", return_value=True):
+            code = self._combo_code(fn, inps)
+
         self.assertRegex(code, r"num_gb = \d*\.\d+")
         self.assertIn(f"device='{GPU_TYPE}'", code)
         self.assertNotIn(f"device={GPU_TYPE}", code)
