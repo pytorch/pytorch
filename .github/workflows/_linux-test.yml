@@ -353,6 +353,7 @@ jobs:
             TRITON_WHEEL_DIR="${RUNNER_TEMP}/a10g-bisect-triton"
             mkdir -p "${TRITON_WHEEL_DIR}"
             TRITON_SHORT_SHA="${A10G_BISECT_TRITON_SHA:0:8}"
+            python3 -m pip install pybind11==3.0.1 nanobind==2.10.2
             (
               cd "${TRITON_WHEEL_DIR}"
               python "${GITHUB_WORKSPACE}/.github/scripts/build_triton_wheel.py" \
