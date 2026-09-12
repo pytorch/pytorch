@@ -207,6 +207,24 @@ class TpStrUserDefinedTests(TestCase):
         self.assertEqual(out, repr(obj))
         self.assertNotEqual(out, str(obj))
 
+    def test_object_dunder_str_self_ref_list(self):
+        def fn():
+            l = [1, 2, 3]
+            l[0] = l
+            return object.__str__(l)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(compiled(), fn())
+
+    def test_object_dunder_str_self_ref_dict(self):
+        def fn():
+            d = {}
+            d["k"] = d
+            return object.__str__(d)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(compiled(), fn())
+
     def test_str_returning_non_string_raises(self):
         class BadStr:
             def __str__(self):

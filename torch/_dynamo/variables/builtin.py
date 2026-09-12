@@ -486,6 +486,15 @@ class BaseBuiltinVariable(VariableTracker):
     ) -> VariableTracker:
         return python_constant_richcompare_impl(self, tx, other, op)
 
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return VariableTracker.build(tx, str(self.as_python_constant()))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return VariableTracker.build(tx, repr(self.as_python_constant()))
+
+    # Unbound Type.__str__/__repr__(x) is not this type object's 0-arg slot.
+    # object.__str__ is PyObject_Repr (generic_repr, with Py_ReprEnter).
+    # object.__repr__/type.__repr__ C-slot bypasses live on BuiltinVariable.
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -494,35 +503,12 @@ class BaseBuiltinVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__str__" and len(args) == 1 and not kwargs:
-            arg = args[0]
-            if self.as_python_constant() is object:
-                return generic_repr(tx, arg)
-            if self.as_python_constant() is type:
-                if isinstance(arg, variables.UserDefinedClassVariable):
-                    return VariableTracker.build(tx, type.__str__(arg.value))
-                if arg.is_python_constant() and isinstance(
-                    arg.as_python_constant(), type
-                ):
-                    return VariableTracker.build(
-                        tx, type.__str__(arg.as_python_constant())
-                    )
-            return generic_str(tx, arg)
+            fn = self.as_python_constant()
+            if isinstance(fn, type) and fn.__str__ is object.__str__:
+                return generic_repr(tx, args[0])
+            return args[0].tp_str_impl(tx)
         if name == "__repr__" and len(args) == 1 and not kwargs:
-            arg = args[0]
-            if self.as_python_constant() is object and isinstance(
-                arg, variables.UserDefinedObjectVariable
-            ):
-                return VariableTracker.build(tx, object.__repr__(arg.value))
-            if self.as_python_constant() is type:
-                if isinstance(arg, variables.UserDefinedClassVariable):
-                    return VariableTracker.build(tx, type.__repr__(arg.value))
-                if arg.is_python_constant() and isinstance(
-                    arg.as_python_constant(), type
-                ):
-                    return VariableTracker.build(
-                        tx, type.__repr__(arg.as_python_constant())
-                    )
-            return generic_repr(tx, arg)
+            return generic_repr(tx, args[0])
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1843,6 +1829,24 @@ class BuiltinVariable(BaseBuiltinVariable):
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
 
+        # object.tp_repr / type.tp_repr C slots: do not follow the operand's
+        # tp_repr_impl (subclass __repr__ or metaclass __repr__).
+        if name == "__repr__" and len(args) == 1 and not kwargs:
+            arg = args[0].realize()
+            if self.fn is object:
+                if isinstance(arg, variables.UserDefinedObjectVariable):
+                    return VariableTracker.build(tx, object.__repr__(arg.value))
+                if arg.is_python_constant():
+                    return VariableTracker.build(
+                        tx, object.__repr__(arg.as_python_constant())
+                    )
+            if self.fn is type:
+                if isinstance(arg, variables.UserDefinedClassVariable):
+                    return VariableTracker.build(tx, type.__repr__(arg.value))
+                const = arg.as_python_constant() if arg.is_python_constant() else None
+                if isinstance(const, type):
+                    return VariableTracker.build(tx, type.__repr__(const))
+
         if name == "__new__":
             # Supported __new__ methods
             if self.fn is object and len(args) == 1:
@@ -1939,12 +1943,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             # type.__len__(instance) → len(instance)
             # e.g. list.__len__(my_list) → len(my_list)
             return generic_size(tx, args[0])
-
-        if name == "__str__" and len(args) == 1 and not kwargs:
-            return super().call_method(tx, name, args, kwargs)
-
-        if name == "__repr__" and len(args) == 1 and not kwargs:
-            return super().call_method(tx, name, args, kwargs)
 
         if name == "__iter__" and len(args) == 1 and not kwargs:
             # type.__iter__(instance) → iter(instance)
