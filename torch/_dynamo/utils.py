@@ -6005,7 +6005,7 @@ def _set_error_on_graph_break(value: bool) -> None:
 def _is_tensorify_enabled() -> bool:
     if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
         return env not in ("0", "FALSE")
-    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
+    return True
 
 
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
