@@ -27,6 +27,7 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
+from torch._library.autograd import autograd_fallback_mode
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
 from torch._subclasses import FakeTensorMode
@@ -550,6 +551,9 @@ def create_aot_state(
     stack.enter_context(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
+    # Make it an error to backprop through PT2 compliant ops that silently
+    # detach autograd
+    stack.enter_context(autograd_fallback_mode("error"))
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
     from torch._library.opaque_object import is_custom_class
