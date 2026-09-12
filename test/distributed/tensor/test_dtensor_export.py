@@ -24,13 +24,17 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
     run_tests,
     TestCase,
 )
-from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DEVICE_TYPE,
+    MLPModule,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._pytree import register_pytree_node
 
@@ -175,8 +179,9 @@ register_pytree_node(
 )
 
 
-@requires_cuda
 class DTensorExportTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
@@ -188,7 +193,7 @@ class DTensorExportTest(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
+        self.device_type = DEVICE_TYPE
 
     def _run_test(self, export_fn, test_annotation=False):
         dp_degree = 2
@@ -443,61 +448,6 @@ class DTensorExportTest(TestCase):
         output_gm = gm(*inputs)
         self.assertEqual(output, output_gm)
 
-    @parametrize(
-        "export_fn",
-        [
-            graph_capture_and_aot_export_joint_with_descriptors_v2,
-        ],
-    )
-    def test_flex_attention_dtensor_export(self, export_fn):
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
-        model = FlexAttentionModel(self.device_type)
-
-        # Parallelize the model: shard on head dimension
-        # proj_q, proj_k, proj_v are colwise parallel (output is sharded on head dimension)
-        # proj_out is rowwise parallel (input is sharded, output needs reduction)
-        parallelize_plan = {
-            "proj_q": ColwiseParallel(),
-            "proj_k": ColwiseParallel(),
-            "proj_v": ColwiseParallel(),
-            "proj_out": RowwiseParallel(),
-        }
-        tp_model = parallelize_module(model, device_mesh, parallelize_plan)
-        batch_size = 4
-        seq_len = 64
-        embed_dim = 16
-        num_heads = 8
-
-        # Input tensor replicated across all devices
-        inp = torch.randn(batch_size, seq_len, embed_dim, device=self.device_type)
-        inputs = (distribute_tensor(inp, device_mesh, placements=[Replicate()]),)
-
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        block_mask = create_block_mask(
-            causal_mask,
-            batch_size,
-            num_heads,
-            seq_len,
-            seq_len,
-            device=self.device_type,
-        )
-
-        flex_kwargs = {"block_mask": block_mask}
-
-        joint_gm = export_fn(tp_model, inputs, flex_kwargs)
-
-        self.assertTrue(
-            _count_op(joint_gm, torch.ops.higher_order.flex_attention),
-            1,
-        )
-
-        self.assertTrue(
-            _count_op(joint_gm, torch.ops.higher_order.flex_attention_backward),
-            2,
-        )
-
     def test_union_typed_annotation(self):
         def fn(leaf: torch.Tensor | DTensor):
             def nest_fn(leaf: torch.Tensor | DTensor):
@@ -582,6 +532,80 @@ graph():
         self.assertEqual(gm(z_dt, z_dt).shape, (0, 0))
 
 
+@requires_cuda
+class DTensorExportCUDATest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def setUp(self):
+        super().setUp()
+        self.world_size = 8
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+        self.device_type = "cuda"
+
+    @parametrize(
+        "export_fn",
+        [
+            graph_capture_and_aot_export_joint_with_descriptors_v2,
+        ],
+    )
+    def test_flex_attention_dtensor_export(self, export_fn):
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+        model = FlexAttentionModel(self.device_type)
+
+        # Parallelize the model: shard on head dimension
+        # proj_q, proj_k, proj_v are colwise parallel (output is sharded on head dimension)
+        # proj_out is rowwise parallel (input is sharded, output needs reduction)
+        parallelize_plan = {
+            "proj_q": ColwiseParallel(),
+            "proj_k": ColwiseParallel(),
+            "proj_v": ColwiseParallel(),
+            "proj_out": RowwiseParallel(),
+        }
+        tp_model = parallelize_module(model, device_mesh, parallelize_plan)
+        batch_size = 4
+        seq_len = 64
+        embed_dim = 16
+        num_heads = 8
+
+        # Input tensor replicated across all devices
+        inp = torch.randn(batch_size, seq_len, embed_dim, device=self.device_type)
+        inputs = (distribute_tensor(inp, device_mesh, placements=[Replicate()]),)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask,
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=self.device_type,
+        )
+
+        flex_kwargs = {"block_mask": block_mask}
+
+        joint_gm = export_fn(tp_model, inputs, flex_kwargs)
+
+        self.assertTrue(
+            _count_op(joint_gm, torch.ops.higher_order.flex_attention),
+            1,
+        )
+
+        self.assertTrue(
+            _count_op(joint_gm, torch.ops.higher_order.flex_attention_backward),
+            2,
+        )
+
+
+instantiate_parametrized_tests(DTensorExportCUDATest)
 instantiate_parametrized_tests(DTensorExportTest)
 
 
