@@ -304,6 +304,7 @@ jobs:
           TRITON_ALWAYS_COMPILE: ${{ matrix.triton_kernel_dump || '' }}
           TRITON_DUMP_DIR: ${{ github.workspace }}/test/test-reports/triton-kernel-dumps
           A10G_BISECT_TRITON_SHA: ${{ matrix.triton_sha || '' }}
+          A10G_BISECT_LIBDEVICE_VARIANT: ${{ matrix.libdevice_variant || 'current' }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -363,6 +364,28 @@ jobs:
             )
             python3 -m pip install --force-reinstall --no-deps "${TRITON_WHEEL_DIR}"/triton-*.whl
           fi
+          if [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" != "current" ]]; then
+            LIBDEVICE_CONTROL_DIR="${RUNNER_TEMP}/a10g-bisect-libdevice"
+            mkdir -p "${LIBDEVICE_CONTROL_DIR}"
+            curl --fail --location --retry 3 \
+              "https://raw.githubusercontent.com/triton-lang/triton/b24d7e3a01586070e26d890f5de114065262dc5d/third_party/nvidia/backend/lib/libdevice.10.bc" \
+              --output "${LIBDEVICE_CONTROL_DIR}/old-libdevice.10.bc"
+            if [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "old" ]]; then
+              export TRITON_LIBDEVICE_PATH="${LIBDEVICE_CONTROL_DIR}/old-libdevice.10.bc"
+            elif [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "old_erff" ]]; then
+              INSTALLED_LIBDEVICE_PATH="$(python3 -c 'from pathlib import Path; import triton; path = Path(triton.__file__).resolve().parent / "backends/nvidia/lib/libdevice.10.bc"; assert path.is_file(), path; print(path)')"
+              /opt/llvm/bin/llvm-dis "${INSTALLED_LIBDEVICE_PATH}" \
+                -o "${LIBDEVICE_CONTROL_DIR}/current-libdevice.ll"
+              LIBDEVICE_CONTROL_DIR="${LIBDEVICE_CONTROL_DIR}" python3 -c 'import os; from functools import reduce; from pathlib import Path; path = Path(os.environ["LIBDEVICE_CONTROL_DIR"]) / "current-libdevice.ll"; text = path.read_text(); replacements = {"f0x38EB4C3A": "f0x3789CA3C", "f0xBAAE005B": "f0xB9F560B9", "f0x3C09919F": "f0x3BAC840B", "f0xBD24D99A": "f0xBD0C8162", "f0x3E235519": "f0x3E1CF906", "f0x3F69B4F9": "f0x3F6A937E", "f0x3F210A14": "f0x3F20D842"}; assert all(text.count(new) == 1 for new in replacements), {new: text.count(new) for new in replacements}; path.write_text(reduce(lambda value, pair: value.replace(*pair), replacements.items(), text))'
+              /opt/llvm/bin/llvm-as "${LIBDEVICE_CONTROL_DIR}/current-libdevice.ll" \
+                -o "${LIBDEVICE_CONTROL_DIR}/old-erff-libdevice.10.bc"
+              export TRITON_LIBDEVICE_PATH="${LIBDEVICE_CONTROL_DIR}/old-erff-libdevice.10.bc"
+            else
+              echo "Unknown libdevice control: ${A10G_BISECT_LIBDEVICE_VARIANT}" >&2
+              exit 1
+            fi
+            echo "A10G bisect libdevice: ${A10G_BISECT_LIBDEVICE_VARIANT} ${TRITON_LIBDEVICE_PATH}"
+          fi
           python3 -c 'import triton; print("A10G bisect Triton:", triton.__version__, triton.__file__)'
           ${TEST_COMMAND}
 
@@ -373,6 +396,7 @@ jobs:
           mkdir -p test/test-reports/a10g-bisect
           cp .ci/docker/ci_commit_pins/triton.txt test/test-reports/a10g-bisect/pinned-triton-sha.txt
           printf '%s\n' '${{ matrix.triton_sha }}' > test/test-reports/a10g-bisect/tested-triton-sha.txt
+          printf '%s\n' '${{ matrix.libdevice_variant }}' > test/test-reports/a10g-bisect/libdevice-variant.txt
           git rev-parse HEAD > test/test-reports/a10g-bisect/pytorch-sha.txt
           nvidia-smi -q > test/test-reports/a10g-bisect/nvidia-smi.txt
 
