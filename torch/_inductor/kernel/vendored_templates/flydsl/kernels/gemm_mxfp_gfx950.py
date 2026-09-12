@@ -350,6 +350,7 @@ def make_mxfp_gemm_kernel_name(param: MXFPGemmParams) -> str:
         f"_g{param.group_m}"
         f"_ls{param.lds_scale}"
         f"_kt{int(param.has_k_tail)}"
+        f"_cs{int(param.use_cshuffle)}"
         f"_l{'t' if param.a_is_transposed else 'n'}"
         f"{'t' if param.b_is_transposed else 'n'}"
     )
