@@ -8,7 +8,6 @@ import os
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
@@ -26,6 +25,8 @@ from torch._prims_common import is_expandable_to
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
 
 
 log = logging.getLogger(__name__)
