@@ -147,7 +147,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         with FSDP.state_dict_type(fsdp1_model, state_dict_type):
             fsdp1_state_dict = {
                 "model": fsdp1_model.state_dict(),
-                "optim": FSDP.sharded_optim_state_dict(fsdp1_model, fsdp1_optim),
+                "optim": FSDP.optim_state_dict(fsdp1_model, fsdp1_optim),
             }
             dcp.save(
                 fsdp1_state_dict,
