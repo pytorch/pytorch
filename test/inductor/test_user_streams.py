@@ -323,6 +323,44 @@ with torch.xpu._DeviceGuard(0):
 class TestUserStreamCompile(InductorTestCase):
     """End-to-end tests for torch.compile with user stream contexts."""
 
+    def test_backward_streams_with_peak_memory_reordering(self):
+        device = torch.device("cuda")
+
+        def model(x, y):
+            stream_1 = torch.Stream(device=device)
+            stream_2 = torch.Stream(device=device)
+            with stream_1:
+                output_1 = 2 * x + y
+            with stream_2:
+                output_2 = 2 * x + y
+            return output_1, output_2
+
+        graph_x = torch.ones((2, 2), device=device, requires_grad=True)
+        graph_y = torch.ones((2, 2), device=device, requires_grad=True)
+        actual, _, _, backward_graphs = extract_graph(model, graph_x, graph_y)
+        actual[1].sum().backward()
+        torch.cuda.synchronize()
+
+        backward_targets = {
+            node.target
+            for module in backward_graphs[0].modules()
+            if isinstance(module, torch.fx.GraphModule)
+            for node in module.graph.nodes
+            if node.op == "call_function"
+        }
+        self.assertIn(torch.ops.streams.sync_dealloc.default, backward_targets)
+
+        torch._dynamo.reset()
+        compiled_model = torch.compile(model, backend="inductor", fullgraph=True)
+        x = torch.ones((2, 2), device=device, requires_grad=True)
+        y = torch.ones((2, 2), device=device, requires_grad=True)
+        _, output = compiled_model(x, y)
+        output.sum().backward()
+        torch.cuda.synchronize()
+
+        torch.testing.assert_close(x.grad, torch.full((2, 2), 2.0, device=device))
+        torch.testing.assert_close(y.grad, torch.ones((2, 2), device=device))
+
     def test_compile_with_user_stream_context(self):
         """Test that user code with stream context compiles and runs correctly."""
         from torch._inductor.utils import run_and_get_code
