@@ -27,9 +27,10 @@ softmax denominator). This module provides three EpiOps for that contract:
 * :class:`GroupedLocalReduceWithFinalizeArg` - sink port for a grouped sum whose
   finalizer also consumes a prepass value, used by stable grouped LSE.
 
-Callable ``combine``/``finalize`` hooks are generated TensorSSA functions: the
-finalizer runs once per register fragment (plus the ``finalize_operands`` it
-declares), so generated FlexGEMM code needs no per-element scalar emitter.
+Callable ``combine``/``finalize`` hooks are generated TensorSSA functions: they
+run once per register fragment on whole state planes (the finalizer also gets
+the ``finalize_operands`` it declares), so generated FlexGEMM code needs no
+per-element scalar emitter. Built-in string combines fold per element.
 
 Reduction geometry (all static, derived from the epilogue tiled_copy)
 ---------------------------------------------------------------------
@@ -142,7 +143,6 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 
 # FlexGEMM's host-side gate width (``constraints.LOCAL_REDUCE_FRAGMENT_WIDTH``):
 # the M-lane count of the SM100 epilogue partition, and the largest group that
@@ -525,7 +525,12 @@ class GroupedReduceBase(EpiOp):
     ``group``), or a callable applied once to the whole reduced fragment as a
     Float32 TensorSSA (the generated FlexGEMM finalizer). ``finalize_operands``
     names epilogue ``Scalar`` operands the callable also receives, as keyword
-    TensorSSAs broadcast to the fragment shape.
+    TensorSSAs broadcast to the fragment shape. ``reduce_planes`` is the fixed
+    number of Float32 state components. For more than one plane, the sink
+    returns a tuple and callable combine/finalize receive the complete tuple of
+    fragment planes. ``fragment_reduced`` means each returned plane is already
+    reduced and broadcast within its register fragment; the op skips only that
+    local fold and still combines subtiles, lanes, and warps.
     """
 
     supports_swap_ab = False
@@ -539,6 +544,8 @@ class GroupedReduceBase(EpiOp):
         combine="add",
         finalize=None,
         finalize_operands=(),
+        reduce_planes=1,
+        fragment_reduced=False,
         output_layout: GroupedLocalReduceOutputLayout | None = None,
     ):
         super().__init__(name)
@@ -563,19 +570,32 @@ class GroupedReduceBase(EpiOp):
             raise TypeError("finalize_operands must name Scalar epilogue operands")
         if finalize_operands and not callable(finalize):
             raise TypeError("finalize_operands require a callable finalize")
+        if not isinstance(reduce_planes, int) or reduce_planes < 1:
+            raise ValueError("reduce_planes must be a positive integer")
+        if reduce_planes > 1 and (not callable(combine) or not callable(finalize)):
+            raise TypeError(
+                "multi-plane grouped reductions require callable combine and finalize"
+            )
+        if not isinstance(fragment_reduced, bool):
+            raise TypeError("fragment_reduced must be bool")
+        if fragment_reduced and combine is None:
+            raise ValueError("fragment_reduced requires a cross-fragment combine")
         self.axis = axis
         self.group = group
         self.combine = combine
         self.finalize: Any = finalize
         self.finalize_operands = finalize_operands
+        self.reduce_planes = reduce_planes
+        self.fragment_reduced = fragment_reduced
         self.output_layout = output_layout
 
     def config_key(self):
-        """Fail-closed static identity: callables fingerprint by source digest
-        (``_callable_config_key``), so two epilogues with different generated
-        combine/finalize code can never share a cached kernel. A subclass that
-        adds configuration must extend this key, exactly like
-        :meth:`EpiOp.config_key` demands of stateful ops."""
+        """Fail-closed identity for geometry, state algebra, and output layout.
+
+        Callable identity includes source, defaults, closures, and referenced
+        globals, so distinct generated state algebra cannot share a kernel.
+        A subclass that adds configuration must extend this key.
+        """
         extra = tuple(
             sorted(
                 OrderedSet(vars(self))
@@ -587,6 +607,8 @@ class GroupedReduceBase(EpiOp):
                         "combine",
                         "finalize",
                         "finalize_operands",
+                        "reduce_planes",
+                        "fragment_reduced",
                         "output_layout",
                     ]
                 )
@@ -606,6 +628,8 @@ class GroupedReduceBase(EpiOp):
             if self.finalize is None or isinstance(self.finalize, str)
             else _callable_config_key(self.finalize),
             self.finalize_operands,
+            self.reduce_planes,
+            self.fragment_reduced,
             None if self.output_layout is None else self.output_layout.cache_key(),
         )
 
@@ -637,6 +661,12 @@ class GroupedReduceBase(EpiOp):
         return f"requested group={self.group}, max supported group={max_group} for axis={self.axis}"
 
     @property
+    # pyrefly: ignore [bad-override]
+    def sink_arity(self):
+        """Number of state planes returned to this sink by the epilogue fn."""
+        return self.reduce_planes
+
+    @property
     def sink_operands(self):
         """Epilogue operands the fragment EpiMod hands to ``fn_sink_flush``."""
         return self.finalize_operands
@@ -649,6 +679,76 @@ class GroupedReduceBase(EpiOp):
             if isinstance(self.combine, str)
             else self.combine
         )
+
+    def _state_planes(self, value):
+        """Return a tuple view of scalar or multi-plane reduction state."""
+        return (value,) if self.reduce_planes == 1 else value
+
+    @cute.jit
+    def _combine_planes(self, planes, others):
+        """Fold ``others`` into ``planes`` in place, slot by slot.
+
+        Built-in combines run per element; a callable combine receives whole
+        fragments (one TensorSSA per state plane) and returns the same planes.
+        """
+        if const_expr(isinstance(self.combine, str)):
+            combine_fn = const_expr(self.combine_fn)
+            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
+                for plane, other in zip(planes, others):
+                    plane[i] = combine_fn(plane[i], other[i])
+            return
+        lhs = tuple(plane.load() for plane in planes)
+        rhs = tuple(other.load() for other in others)
+        if const_expr(self.reduce_planes == 1):
+            result = (self.combine(lhs[0], rhs[0]),)
+        else:
+            result = self.combine(lhs, rhs)
+            if const_expr(
+                not isinstance(result, tuple) or len(result) != self.reduce_planes
+            ):
+                raise AssertionError(
+                    f"combine must return {self.reduce_planes} state planes"
+                )
+        for plane, value in zip(planes, result):
+            plane.store(value)
+
+    @cute.jit
+    def _finalize_operand_values(self, value, operands):
+        """Broadcast the captured scalar operands to the finalizer's fragment."""
+        if const_expr(len(self.finalize_operands) == 0):
+            return {}
+        if const_expr(operands is None):
+            raise AssertionError(f"{self.name}: finalize operands were not collected")
+        return {
+            name: cute.full_like(value, operands[index])
+            for index, name in enumerate(self.finalize_operands)
+        }
+
+    @cute.jit
+    def finalize_fragment(self, frag, operands):
+        """Finalize one reduced register fragment (or tuple of state planes) at
+        once; the result keeps the finalizer's element type until the compressed
+        store converts it."""
+        planes = self._state_planes(frag)
+        if const_expr(self.finalize is None and self.reduce_planes == 1):
+            return frag
+        values = tuple(plane.load() for plane in planes)
+        if const_expr(self.reduce_planes == 1):
+            result = self.finalize_value(values[0], operands)
+        else:
+            result = self.finalize(
+                values, **self._finalize_operand_values(values[0], operands)
+            )
+        out = cute.make_rmem_tensor_like(planes[0], result.element_type)
+        out.store(result)
+        return out
+
+    @cute.jit
+    def _collect_operands(self, state, operands):
+        """Record this flush's scalar operands for the finalizer in ``end_loop``."""
+        if const_expr(state.operands is not None):
+            for index, name in enumerate(self.finalize_operands):
+                state.operands[index] = Float32(operands[name])
 
     def _is_temporal(self, geom):
         """Whether one group spans several physical-N subtiles."""
@@ -673,36 +773,6 @@ class GroupedReduceBase(EpiOp):
                 value, **self._finalize_operand_values(value, operands)
             )
         return value
-
-    @cute.jit
-    def _finalize_operand_values(self, value, operands):
-        """Broadcast the captured scalar operands to the finalizer's fragment."""
-        if const_expr(len(self.finalize_operands) == 0):
-            return {}
-        if const_expr(operands is None):
-            raise AssertionError(f"{self.name}: finalize operands were not collected")
-        return {
-            name: cute.full_like(value, operands[index])
-            for index, name in enumerate(self.finalize_operands)
-        }
-
-    @cute.jit
-    def finalize_fragment(self, frag, operands):
-        """Finalize one reduced register fragment at once; the result keeps the
-        finalizer's element type until the compressed store converts it."""
-        if const_expr(self.finalize is None):
-            return frag
-        result = self.finalize_value(frag.load(), operands)
-        out = cute.make_rmem_tensor_like(frag, result.element_type)
-        out.store(result)
-        return out
-
-    @cute.jit
-    def _collect_operands(self, state, operands):
-        """Record this flush's scalar operands for the finalizer in ``end_loop``."""
-        if const_expr(state.operands is not None):
-            for index, name in enumerate(self.finalize_operands):
-                state.operands[index] = Float32(operands[name])
 
     # --- Host schema -------------------------------------------------------
     def host_arg_key(self, value):
@@ -868,18 +938,24 @@ class GroupedReduceBase(EpiOp):
         warps_m = warp_shape_mnk[0] if warp_shape_mnk is not None else 1
         planes = self._smem_warps(warps_m)
         return EpiSmemBytes(
-            unstaged=cta_tile_shape_mnk[1] * planes * (Float32.width // 8)
+            unstaged=cta_tile_shape_mnk[1]
+            * planes
+            * self.reduce_planes
+            * (Float32.width // 8)
         )
 
     def _smem_shape(self, gemm):
         planes = self._smem_warps(gemm.epi_smem_warp_shape_mnk()[0])
-        return (gemm.cta_tile_shape_mnk[1], planes) if planes else None
+        if not planes:
+            return None
+        shape = (gemm.cta_tile_shape_mnk[1], planes)
+        return shape if self.reduce_planes == 1 else (*shape, self.reduce_planes)
 
     def smem_struct_field(self, gemm, params):
         shape = self._smem_shape(gemm) if self._uses_smem(gemm) else None
         if shape is None:
             return None
-        size = shape[0] * shape[1]
+        size = math.prod(shape)
         return (
             f"s_{self.name}",
             cute.struct.Align[cute.struct.MemRange[Float32, size], 16],
@@ -922,7 +998,15 @@ class GroupedReduceBase(EpiOp):
                 )
             ).shape
             keep_subtiles = const_expr(geom.fragments_per_group > 1)
-            frag = cute.make_rmem_tensor(shape if keep_subtiles else shape[:3], Float32)
+            frag_shape = shape if keep_subtiles else shape[:3]
+            frag = (
+                cute.make_rmem_tensor(frag_shape, Float32)
+                if const_expr(self.reduce_planes == 1)
+                else tuple(
+                    cute.make_rmem_tensor(frag_shape, Float32)
+                    for _ in range(self.reduce_planes)
+                )
+            )
             coord = ctx.partition_for_epilogue_fn(
                 cute.make_identity_tensor((ctx.tile_M, ctx.tile_N))
             )
@@ -938,12 +1022,18 @@ class GroupedReduceBase(EpiOp):
 
     @cute.jit
     def _frag_slice(self, state, epi_coord):
-        """This subtile's slice of the register accumulator."""
+        """This subtile's slice of each register-state plane."""
         if const_expr(state.frag is None):
             return None
-        if const_expr(cute.rank(state.frag) == 3):
+        if const_expr(self.reduce_planes == 1):
+            if const_expr(cute.rank(state.frag) == 3):
+                return state.frag
+            return state.frag[None, None, None, epi_coord[0], epi_coord[1]]
+        if const_expr(cute.rank(state.frag[0]) == 3):
             return state.frag
-        return state.frag[None, None, None, epi_coord[0], epi_coord[1]]
+        return tuple(
+            plane[None, None, None, epi_coord[0], epi_coord[1]] for plane in state.frag
+        )
 
     def begin_loop(self, gemm, state, epi_coord):
         return _GroupedSlice(
@@ -1095,81 +1185,95 @@ class GroupedLocalReduce(GroupedReduceBase):
     The fn returns the per-element value under this op's name; the op folds each
     group physically (see the module docstring for the four geometries) and
     stores one element per ``(row, group)`` into the compressed aux tensor.
-    ``combine=None`` skips the fold: the values are expected to be group-reduced
-    and broadcast already (what FlexGEMM's generated TensorSSA does for N groups
-    inside one fragment, and what :class:`GroupedLocalReduceFeed` produces).
+    ``combine=None`` skips every fold because values are fully group-reduced.
+    ``fragment_reduced=True`` skips only the in-fragment fold because TensorSSA
+    or another producer already reduced and broadcast each fragment partial.
     """
 
     fn_port = "sink"
     supports_swap_ab = True
 
     @cute.jit
-    def fn_sink_flush(self, gemm, state, frag, **operands):
-        """Collect the fn's values for this subtile; the fold runs in end_loop
-        (one reduction site, with the coordinates the store needs)."""
-        cute.autovec_copy(frag, state.frag)
+    def fn_sink_flush(self, gemm, state, *fragments, **operands):
+        """Collect each state plane; the physical fold runs in end_loop."""
+        if const_expr(len(fragments) != self.reduce_planes):
+            raise AssertionError(f"sink must return {self.reduce_planes} state planes")
+        destinations = self._state_planes(state.frag)
+        for source, destination in zip(fragments, destinations):
+            cute.autovec_copy(source, destination)
         self._collect_operands(state, operands)
 
     @cute.jit
-    def _fold_fragment(self, frag, geom):
-        """Fold each aligned column run in place, broadcast within the run.
-        Left-to-right so the tree is fixed and reproducible."""
-        combine_fn = const_expr(self.combine_fn)
-        for chunk in cutlass.range_constexpr(len(geom.chunks)):
-            slots = const_expr(geom.chunks[chunk])
-            value = frag[slots[0]]
-            for j in cutlass.range_constexpr(1, len(slots)):
-                value = combine_fn(value, frag[slots[j]])
-            for j in cutlass.range_constexpr(len(slots)):
-                frag[slots[j]] = value
+    def _fold_chunks(self, frag, chunks):
+        """Fold each static state chunk in place and broadcast its result.
 
-    @cute.jit
-    def _fold_rows(self, frag, geom):
-        """Combine rows one thread owns inside each logical M group."""
-        combine_fn = const_expr(self.combine_fn)
-        for chunk in cutlass.range_constexpr(len(geom.row_chunks)):
-            slots = const_expr(geom.row_chunks[chunk])
-            value = frag[slots[0]]
-            for j in cutlass.range_constexpr(1, len(slots)):
-                value = combine_fn(value, frag[slots[j]])
-            for j in cutlass.range_constexpr(len(slots)):
-                frag[slots[j]] = value
+        Slot ``j`` of every chunk is gathered into one fragment so the fixed
+        left-to-right fold runs once per slot position over all chunks.
+        """
+        planes = self._state_planes(frag)
+        width = const_expr(len(chunks[0]))
+        if const_expr(any(len(chunk) != width for chunk in chunks)):
+            raise AssertionError("grouped fold chunks must have one static width")
+        gathered = tuple(
+            tuple(cute.make_rmem_tensor((len(chunks),), Float32) for _ in range(width))
+            for _ in planes
+        )
+        for chunk in cutlass.range_constexpr(len(chunks)):
+            slots = const_expr(chunks[chunk])
+            for j in cutlass.range_constexpr(width):
+                for plane, slot_planes in zip(planes, gathered):
+                    slot_planes[j][chunk] = plane[slots[j]]
+        for j in cutlass.range_constexpr(1, width):
+            self._combine_planes(
+                tuple(slot_planes[0] for slot_planes in gathered),
+                tuple(slot_planes[j] for slot_planes in gathered),
+            )
+        for chunk in cutlass.range_constexpr(len(chunks)):
+            slots = const_expr(chunks[chunk])
+            for j in cutlass.range_constexpr(width):
+                for plane, slot_planes in zip(planes, gathered):
+                    plane[slots[j]] = slot_planes[0][chunk]
 
     @cute.jit
     def _butterfly_rows(self, frag, geom):
-        """Reduce across the group's row lanes (halving butterfly), leaving the
-        group value in every participating lane."""
-        combine_fn = const_expr(self.combine_fn)
+        """Reduce across the group's row lanes and broadcast each state plane."""
+        planes = self._state_planes(frag)
         reduce_lanes = const_expr(min(self.group, geom.lanes_m))
-        for i in cutlass.range(cute.size(frag), unroll_full=True):
-            rows = reduce_lanes // 2
-            while rows > 0:
-                frag[i] = combine_fn(
-                    frag[i],
-                    cute.arch.shuffle_sync_bfly(
-                        frag[i], offset=cute.crd2idx((rows, 0), geom.lane_layout_MN)
-                    ),
-                )
-                rows = rows // 2
+        rows = reduce_lanes // 2
+        while rows > 0:
+            offset = cute.crd2idx((rows, 0), geom.lane_layout_MN)
+            shuffled = tuple(
+                cute.make_rmem_tensor_like(plane, Float32) for plane in planes
+            )
+            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
+                for plane, other in zip(planes, shuffled):
+                    other[i] = cute.arch.shuffle_sync_bfly(plane[i], offset=offset)
+            self._combine_planes(planes, shuffled)
+            rows = rows // 2
 
     @cute.jit
     def _combine_subtiles(self, state, epi_coord, geom):
-        """Combine the ``fragments_per_group`` epi-N subtiles of one group in
-        ascending order (called at the group's last subtile)."""
-        combine_fn = const_expr(self.combine_fn)
+        """Combine consecutive epi-N subtiles into one grouped state."""
         first = const_expr(epi_coord[1] + 1 - geom.fragments_per_group)
-        merged = cute.make_rmem_tensor_like(
-            state.frag[None, None, None, epi_coord[0], first], Float32
-        )
-        cute.autovec_copy(state.frag[None, None, None, epi_coord[0], first], merged)
-        merged_flt = cute.filter_zeros(merged)
-        for offset in cutlass.range_constexpr(1, geom.fragments_per_group):
-            other = cute.filter_zeros(
-                state.frag[None, None, None, epi_coord[0], first + offset]
+        state_planes = self._state_planes(state.frag)
+        merged_planes = tuple(
+            cute.make_rmem_tensor_like(
+                plane[None, None, None, epi_coord[0], first], Float32
             )
-            for i in cutlass.range(cute.size(merged_flt), unroll_full=True):
-                merged_flt[i] = combine_fn(merged_flt[i], other[i])
-        return merged_flt
+            for plane in state_planes
+        )
+        for source, merged in zip(state_planes, merged_planes):
+            cute.autovec_copy(source[None, None, None, epi_coord[0], first], merged)
+        merged_planes = tuple(cute.filter_zeros(plane) for plane in merged_planes)
+        for offset in cutlass.range_constexpr(1, geom.fragments_per_group):
+            other_planes = tuple(
+                cute.filter_zeros(plane[None, None, None, epi_coord[0], first + offset])
+                for plane in state_planes
+            )
+            self._combine_planes(merged_planes, other_planes)
+        return (
+            merged_planes[0] if const_expr(self.reduce_planes == 1) else merged_planes
+        )
 
     @cute.jit
     def _stitch_warps(self, gemm, state, frag, epi_coord, geom):
@@ -1184,7 +1288,7 @@ class GroupedLocalReduce(GroupedReduceBase):
         sReduce = state.smem
         if const_expr(sReduce is None):
             raise AssertionError("grouped M reduce across warps needs its smem buffer")
-        combine_fn = const_expr(self.combine_fn)
+        planes = self._state_planes(frag)
         coord = cute.filter_zeros(
             state.coord[None, None, None, epi_coord[0], epi_coord[1]]
         )
@@ -1193,14 +1297,30 @@ class GroupedLocalReduce(GroupedReduceBase):
         smem_base = group_idx * (geom.group_warps - 1) - 1
         if warp_in_group > 0:
             smem_warp = smem_base + warp_in_group
-            for i in cutlass.range(cute.size(frag), unroll_full=True):
-                sReduce[coord[i][1], smem_warp] = frag[i]
+            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
+                n_idx = coord[i][1]
+                for plane_idx, plane in enumerate(planes):
+                    if const_expr(self.reduce_planes == 1):
+                        sReduce[n_idx, smem_warp] = plane[i]
+                    else:
+                        sReduce[n_idx, smem_warp, plane_idx] = plane[i]
         gemm.epilogue_barrier.arrive_and_wait()
         if warp_in_group == 0:
-            for i in cutlass.range(cute.size(frag), unroll_full=True):
-                n_idx = coord[i][1]
-                for offset in cutlass.range_constexpr(1, geom.group_warps):
-                    frag[i] = combine_fn(frag[i], sReduce[n_idx, smem_base + offset])
+            for offset in cutlass.range_constexpr(1, geom.group_warps):
+                smem_warp = smem_base + offset
+                # Stage the published warp's planes through registers so the
+                # combine sees whole fragments.
+                others = tuple(
+                    cute.make_rmem_tensor_like(plane, Float32) for plane in planes
+                )
+                for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
+                    n_idx = coord[i][1]
+                    for plane_idx, other in enumerate(others):
+                        if const_expr(self.reduce_planes == 1):
+                            other[i] = sReduce[n_idx, smem_warp]
+                        else:
+                            other[i] = sReduce[n_idx, smem_warp, plane_idx]
+                self._combine_planes(planes, others)
 
     @cute.jit
     def end_loop(
@@ -1220,19 +1340,27 @@ class GroupedLocalReduce(GroupedReduceBase):
         if const_expr(param is None):
             return
         geom = state.geom
-        frag = cute.filter_zeros(self._frag_slice(state, epi_coord))
+        frag = self._frag_slice(state, epi_coord)
+        frag = (
+            cute.filter_zeros(frag)
+            if const_expr(self.reduce_planes == 1)
+            else tuple(cute.filter_zeros(plane) for plane in frag)
+        )
         if const_expr(self.combine_fn is not None):
             if const_expr(geom.axis == 1):
-                if const_expr(geom.chunk > 1):
-                    self._fold_fragment(frag, geom)
+                if const_expr(not self.fragment_reduced and geom.chunk > 1):
+                    self._fold_chunks(frag, geom.chunks)
                 if const_expr(self._is_temporal(geom)):
                     # Only the group's last subtile completes a group value.
                     if const_expr((epi_coord[1] + 1) % geom.fragments_per_group != 0):
                         return
                     frag = self._combine_subtiles(state, epi_coord, geom)
             else:
-                if const_expr(any(len(chunk) > 1 for chunk in geom.row_chunks)):
-                    self._fold_rows(frag, geom)
+                if const_expr(
+                    not self.fragment_reduced
+                    and any(len(chunk) > 1 for chunk in geom.row_chunks)
+                ):
+                    self._fold_chunks(frag, geom.row_chunks)
                 if const_expr(min(self.group, geom.lanes_m) > 1):
                     self._butterfly_rows(frag, geom)
                 if const_expr(geom.group_warps > 1):
@@ -1363,7 +1491,7 @@ class _GroupedFinalizeSlice(NamedTuple):
 class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
     """Axis-1 sum sink whose finalizer also receives a per-element prepass value."""
 
-    scaled = True
+    sink_arity = 2
     supports_swap_ab = False
 
     def __init__(
@@ -1417,14 +1545,14 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
         )
 
     @cute.jit
-    def fn_sink_flush(self, gemm, state, frag, scale=None, **operands):
-        """Capture the sum source and prepass value emitted as a sink pair."""
-        if const_expr(scale is None):
+    def fn_sink_flush(self, gemm, state, *fragments, **operands):
+        """Capture one reduction plane and one independent finalizer argument."""
+        if const_expr(len(fragments) != 2):
             raise AssertionError(
                 "binary grouped finalizers require a (value, scale) sink"
             )
-        cute.autovec_copy(frag, state.frag)
-        cute.autovec_copy(scale, state.finalize_arg)
+        cute.autovec_copy(fragments[0], state.frag)
+        cute.autovec_copy(fragments[1], state.finalize_arg)
         self._collect_operands(state, operands)
 
     @cute.jit
@@ -1456,7 +1584,7 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
             else state.finalize_arg[None, None, None, epi_coord[0], epi_coord[1]]
         )
         if const_expr(geom.chunk > 1):
-            self._fold_fragment(frag, geom)
+            self._fold_chunks(frag, geom.chunks)
         value = frag.load()
         result = self.finalize(
             value,

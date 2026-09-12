@@ -457,10 +457,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 f"unknown GemmConfig constraint {sorted(unknown_fields)}; "
                 f"choose one of {', '.join(config_fields)}"
             )
+    explicit_swap_ab = config_constraints.get("swap_ab") is True
 
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
-        expand_epimod_prepare_softmax_online,
         flex_gemm_indexed_output_plan,
         flex_gemm_output_values,
         gemm_node as flex_gemm_node,
@@ -558,8 +558,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         lowering_name=subgraph.name,
     )
-    # Normalize supported online-softmax forms before shared analysis.
-    expand_epimod_prepare_softmax_online(subgraph.graph_module)
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
     log_flex_gemm_artifact(
         "analysis",
@@ -721,6 +719,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         float(beta),
         epilogue_arg_kinds,
         fast_math=fast_math,
+        swap_ab=explicit_swap_ab,
         mainloop_scale_count=mainloop_scale_count,
     )
     log_flex_gemm_artifact(
@@ -759,6 +758,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_plan(
         outputs.local_reduce, local_reduce_out_index, epimod_source
     )
+    if epimod_source.local_reduce_fragment_reduced:
+        # Fragment partials are lowered for the unswapped accumulator geometry.
+        config_constraints["swap_ab"] = False
     template_config = FlexGemmEpilogueConfig(
         epilogue_name=epimod_source.name,
         epilogue_source=epimod_source.source,
