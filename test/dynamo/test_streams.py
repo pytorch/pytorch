@@ -1051,6 +1051,94 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_stream_event_subclass_preserved_across_graph_break(self):
+        """A graph-created torch.Stream/torch.Event subclass must be
+        reconstructed with its actual subclass type, not the base class,
+        after a graph break. Backend extensions rely on receiving their
+        own subclass (e.g. a C++ reinterpret_cast to the backend stream
+        struct); reconstructing the base class drops the type and breaks
+        them. Runs on CPU only."""
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        class MyStream(torch.Stream):
+            pass
+
+        class MyEvent(torch.Event):
+            def wait(self, stream=None):
+                if stream is None:
+                    stream = torch.accelerator.current_stream()
+                if not isinstance(stream, MyStream):
+                    raise AssertionError(
+                        f"Expected MyStream, got {type(stream).__name__} "
+                        f"(subclass type lost during reconstruction)"
+                    )
+                return None
+
+        def fn(x):
+            s = MyStream()
+            e = MyEvent()
+            torch._dynamo.graph_break()
+            e.wait(s)
+            return x
+
+        in_graph_classes = UserDefinedClassVariable._in_graph_classes
+        with patch.object(
+            UserDefinedClassVariable,
+            "_in_graph_classes",
+            staticmethod(lambda: in_graph_classes() | {MyStream, MyEvent}),
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=False)
+            out = compiled(torch.ones(2, 2))
+        self.assertEqual(out, torch.ones(2, 2))
+
+    def test_stream_subclass_change_recompiles(self):
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        class FirstStream(torch.Stream):
+            pass
+
+        class SecondStream(torch.Stream):
+            pass
+
+        stream_cls = FirstStream
+
+        class MyEvent(torch.Event):
+            def wait(self, stream=None):
+                if not isinstance(stream, stream_cls):
+                    raise AssertionError(
+                        f"Expected {stream_cls.__name__}, got {type(stream).__name__}"
+                    )
+                return None
+
+        def fn(x):
+            stream = stream_cls()
+            event = MyEvent()
+            x = x + 1
+            torch._dynamo.graph_break()
+            event.wait(stream)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        in_graph_classes = UserDefinedClassVariable._in_graph_classes
+        with patch.object(
+            UserDefinedClassVariable,
+            "_in_graph_classes",
+            staticmethod(
+                lambda: in_graph_classes() | {FirstStream, SecondStream, MyEvent}
+            ),
+        ):
+            compiled = torch.compile(fn, backend=counter, fullgraph=False)
+            x = torch.ones(2, 2)
+            self.assertEqual(compiled(x), x + 2)
+            frame_count = counter.frame_count
+            self.assertEqual(compiled(x), x + 2)
+            self.assertEqual(counter.frame_count, frame_count)
+
+            stream_cls = SecondStream
+            self.assertEqual(compiled(x), x + 2)
+            self.assertGreater(counter.frame_count, frame_count)
+
+    @requires_cuda
     def test_event_tracing(self, device):
         def fn(x) -> None:
             e = torch.Event(device=device)
