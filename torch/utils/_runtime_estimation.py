@@ -1,6 +1,6 @@
 import torch
 from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
-from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
+from torch._inductor.utils import get_device_dram_gbps, get_device_tflops
 from torch.fx.experimental.symbolic_shapes import (
     optimization_hint,
     statically_known_true,
@@ -157,7 +157,7 @@ def get_num_bytes(t: torch.Tensor) -> int:
     return real_numel * t.element_size()
 
 
-def get_transfer_time(flat_args_kwargs, flat_outs, gpu_type=None) -> float:  # type: ignore[no-untyped-def]
+def get_transfer_time(flat_args_kwargs, flat_outs, gpu_type=None, device=None) -> float:  # type: ignore[no-untyped-def]
     """
     Estimates the memory transfer time of input and output tensors.
 
@@ -166,6 +166,7 @@ def get_transfer_time(flat_args_kwargs, flat_outs, gpu_type=None) -> float:  # t
         flat_outs (List[torch.Tensor]): The flat list of outputs.
         gpu_type: Optional datasheet device name to pin the DRAM bandwidth to
             instead of querying the current device.
+        device: Optional device whose DRAM bandwidth should be queried.
 
     Returns:
         float: The estimated memory transfer time in nanoseconds.
@@ -175,7 +176,7 @@ def get_transfer_time(flat_args_kwargs, flat_outs, gpu_type=None) -> float:  # t
         if gpu_memory_bandwidth is None:
             raise ValueError(f"gpu_type {gpu_type!r} not found in datasheet")
     else:
-        gpu_memory_bandwidth = get_gpu_dram_gbps()
+        gpu_memory_bandwidth = get_device_dram_gbps(device)
     read_bytes = sum(
         get_num_bytes(t) for t in flat_args_kwargs if isinstance(t, torch.Tensor)
     )
