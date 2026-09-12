@@ -8,7 +8,6 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/operations/BinaryKernel.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -29,36 +28,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/BinaryKernel_metallib.h>
 #endif
-
-namespace mps {
-
-void binary_op_kernel(const std::string func_name,
-                      const Tensor& input,
-                      const Tensor& other,
-                      const Tensor& output,
-                      const std::optional<Scalar> alpha) {
-  auto new_size = at::infer_size(input.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-
-  auto iter = TensorIteratorConfig()
-                  .allow_cpu_scalars(true)
-                  .add_output(output)
-                  .add_const_input(input)
-                  .add_const_input(other)
-                  .check_all_same_dtype(false)
-                  .promote_inputs_to_common_dtype(true)
-                  .build();
-
-  lib.exec_binary_kernel(iter, func_name, alpha);
-}
-
-} // namespace mps
 
 static void atan2_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "atan2");
@@ -195,6 +164,18 @@ static void polar_mps_kernel(TensorIterator& iter) {
 
 static void complex_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "make_complex");
+}
+
+// `sub_out` routes through `add_stub` with a negated alpha, same as CPU/CUDA/XPU
+static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
+  const auto alpha_val = alpha.toComplexDouble();
+  if (alpha_val == 1.0) {
+    return lib.exec_binary_kernel(iter, "add");
+  }
+  if (alpha_val == -1.0 && iter.common_dtype() != kBool) {
+    return lib.exec_binary_kernel(iter, "sub");
+  }
+  lib.exec_binary_kernel(iter, "add_alpha", alpha);
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
@@ -380,6 +361,7 @@ static void logical_xor_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "logical_xor", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
 }
 
+REGISTER_DISPATCH(add_stub, &add_mps_kernel)
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)

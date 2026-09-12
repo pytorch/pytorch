@@ -512,7 +512,7 @@ def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
     x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
     return x_f32.to(torch.bfloat16)
 
-def to_blocked(input_matrix) -> torch.Tensor:
+def to_blocked(input_matrix, swizzle_32_8: bool = False) -> torch.Tensor:
     """
     Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
 
@@ -521,11 +521,29 @@ def to_blocked(input_matrix) -> torch.Tensor:
 
     Args:
         input_matrix: Input tensor of shape (H, W)
+        swizzle_32_8: build the gfx950 32x8-tiled layout that hipBLASLt calls
+            BLK32_UE8M0_32_8 instead of the default one. Pass
+            `rocm_mx_swizzle(mat_dtype)` to follow whichever layout the current
+            device takes for the data these scales belong to.
 
     Returns:
-        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
+        Flattened tensor of 32*ceil_div(H,128) * 16*ceil_div(W,4) elements, or
+        32*ceil_div(H,32) * 8*ceil_div(W,8) when `swizzle_32_8` is set.
     """
     rows, cols = input_matrix.shape
+
+    if swizzle_32_8:
+        padded_rows = ceil_div(rows, 32) * 32
+        padded_cols = ceil_div(cols, 8) * 8
+
+        padded = input_matrix
+        if (rows, cols) != (padded_rows, padded_cols):
+            padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
+            padded[:rows, :cols] = input_matrix
+
+        blocks = padded.view(padded_rows // 32, 2, 16, padded_cols // 8, 2, 4)
+        return blocks.permute(0, 3, 5, 2, 4, 1).flatten()
+
     n_row_blocks = ceil_div(rows, 128)
     n_col_blocks = ceil_div(cols, 4)
 
