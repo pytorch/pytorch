@@ -13,6 +13,7 @@ from ...kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     decompose_k_subgraph_template,
     get_blackwell_decompose_k_splits,
+    get_cat2_fp32_prologue_sources,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
@@ -116,7 +117,9 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # 1CTA BK128, while wider outputs with at least two M tiles use 2CTA
         # BN256. The whole-plan autotuner retains direct and exact ATen fallbacks.
         has_b_producer = mat2.get_name() not in V.graph.graph_inputs
-        if m_hint == 128 and n_hint == 256 and has_b_producer:
+        if get_cat2_fp32_prologue_sources(mat2) is not None:
+            config_index = 7
+        elif m_hint == 128 and n_hint == 256 and has_b_producer:
             config_index = 6
         else:
             config_index = 2 if m_hint > 128 and n_hint > 128 else 0

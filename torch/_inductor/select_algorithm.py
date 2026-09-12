@@ -1339,6 +1339,7 @@ class TritonTemplateKernel(TritonKernel):
         unfused_load: str | None = None,
         prologue_descriptor_offsets: tuple[str, ...] | None = None,
         prologue_descriptor_block_shape: tuple[str, ...] | None = None,
+        prologue_descriptor_cat2: bool = False,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1353,6 +1354,8 @@ class TritonTemplateKernel(TritonKernel):
                 a fused prologue. Must be paired with prologue_descriptor_block_shape.
             prologue_descriptor_block_shape: Descriptor block shape for source
                 loads in a fused prologue.
+            prologue_descriptor_cat2: Generate two half-width descriptor loads
+                for an exact contiguous cat/cast producer when possible.
         """
 
         if (prologue_descriptor_offsets is None) != (
@@ -1363,6 +1366,18 @@ class TritonTemplateKernel(TritonKernel):
             )
 
         input_node = self.named_input_nodes[input_name]
+        cat2_code = None
+        if (
+            prologue_descriptor_cat2
+            and prologue_descriptor_offsets is not None
+            and prologue_descriptor_block_shape is not None
+        ):
+            cat2_code = self.codegen_cat2_prologue_descriptors(
+                input_node,
+                output_name,
+                prologue_descriptor_offsets,
+                prologue_descriptor_block_shape,
+            )
         if not self.prologue_loads_all_inputs:
             self.prologue_supported_inputs.add(input_node.get_name())
 
@@ -1522,7 +1537,13 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             with self.set_subgraph_body(hook_key):
                 self.cse.invalidate(OrderedSet())
-                self.codegen_body()
+                if (
+                    cat2_code is not None
+                    and input_node.get_name() in self.prologue_fused_inputs
+                ):
+                    self.body.writeline(cat2_code)
+                else:
+                    self.codegen_body()
                 self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
                     if unfused_load is not None:
@@ -1538,6 +1559,50 @@ class TritonTemplateKernel(TritonKernel):
                 return result.strip()
 
         return self._register_hook(hook_key, hook)
+
+    def codegen_cat2_prologue_descriptors(
+        self,
+        input_node: Any,
+        output_name: str,
+        offsets: tuple[str, ...],
+        block_shape: tuple[str, ...],
+    ) -> str | None:
+        """Codegen an exact ``cat([KxW, KxW], 1).to(BF16)`` via TMA."""
+        from .kernel.decompose_k import get_cat2_fp32_prologue_sources
+
+        source_names = get_cat2_fp32_prologue_sources(input_node)
+        if (
+            source_names is None
+            or len(offsets) != 2
+            or len(block_shape) != 2
+            or block_shape[1] != "BLOCK_N"
+        ):
+            return None
+
+        descriptor_names: list[str] = []
+        for source_name in source_names:
+            source = V.graph.get_buffer(source_name)
+            source_size = tuple(V.graph.sizevars.simplify(s) for s in source.get_size())
+
+            descriptor = self.prologue_descriptor_vars.get(source_name)
+            if descriptor is None:
+                descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
+                self.prologue_descriptor_vars[source_name] = descriptor
+                source_var = self.args.input(source_name)
+                source_k = texpr(self.rename_indexing(source_size[0]))
+                self.prologue.writeline(
+                    f"{descriptor} = tl.make_tensor_descriptor("
+                    f"{source_var}, shape=[{source_k}, 64], strides=[64, 1], "
+                    f"block_shape=[{block_shape[0]}, 64])"
+                )
+            descriptor_names.append(descriptor)
+
+        return (
+            f"{output_name}_left = {descriptor_names[0]}.load([{offsets[0]}, 0])\n"
+            f"{output_name}_right = {descriptor_names[1]}.load([{offsets[0]}, 0])\n"
+            f"{output_name} = tl.cat({output_name}_left, {output_name}_right, "
+            "dim=1).to(tl.bfloat16)"
+        )
 
     def load_prologue_descriptor(
         self,
@@ -4406,6 +4471,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
 
                     return results
+
             else:
 
                 def get_timings(hint_override: int | None = None):

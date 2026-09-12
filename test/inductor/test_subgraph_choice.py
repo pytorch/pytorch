@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import torch
 from torch._inductor import config
+from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
 from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
@@ -365,6 +366,128 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
         self.assertIn("num_stages=4", source)
         self.assertNotIn("arg_B", source)
         self.assertIn("triton_red_fused", source)
+
+    def test_1cta_fused_cat_cast_uses_descriptor_loads(self):
+        m, k, half_n = 128, 262_145, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            b = torch.cat((left, right), dim=1).to(torch.bfloat16)
+            return a @ b
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="TRITON",
+            benchmark_epilogue_fusion=True,
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.num_decompose_k_splits": 2,
+                "triton.decompose_k_bmm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": "_triton_",
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right), atol=16.0, rtol=1e-1)
+        source = codes[-1]
+        self.assertEqual(source.count("shape=[262145, 64], strides=[64, 1]"), 2)
+        self.assertIn("prologue_descriptor0.load([offs_k, 0])", source)
+        self.assertIn("prologue_descriptor1.load([offs_k, 0])", source)
+        self.assertIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertIn("BLOCK_K : tl.constexpr = 64", source)
+        self.assertIn("TWO_CTAS : tl.constexpr = False", source)
+        self.assertIn("num_stages=3", source)
+        self.assertNotIn("arg_B", source)
+        self.assertNotIn(f"empty_strided_cuda(({k}, 128)", source)
+        self.assertIn("triton_red_fused", source)
+
+    def test_cat_cast_whole_plan_selects_fused_triton(self):
+        m, k, half_n = 128, 262_145, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            return a @ torch.cat((left, right), dim=1).to(torch.bfloat16)
+
+        def benchmark(choice, *args, **kwargs):
+            del args, kwargs
+            return 0.1 if "fused_triton" in choice.name else 1.0
+
+        with (
+            mock.patch.object(SubgraphChoiceCaller, "benchmark", benchmark),
+            config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="ATEN,TRITON",
+                compile_threads=1,
+                assume_aligned_inputs=True,
+                **{
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_blackwell_decompose_k": True,
+                    "triton.enable_blackwell_decompose_k_cat2_fusion": True,
+                    "triton.num_decompose_k_splits": 2,
+                    "triton.decompose_k_bmm_backends": "ATEN,TRITON",
+                },
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right), atol=16.0, rtol=1e-1)
+        source = codes[-1]
+        self.assertIn("subgraph: decompose_k_cat2_fused_triton_split_", source)
+        self.assertIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertNotIn(f"empty_strided_cuda(({k}, 128)", source)
+
+    def test_cat_cast_whole_plan_retains_materialized_aten_fallback(self):
+        m, k, half_n = 128, 262_145, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            return a @ torch.cat((left, right), dim=1).to(torch.bfloat16)
+
+        def benchmark(choice, *args, **kwargs):
+            del args, kwargs
+            return 0.1 if "materialized_aten" in choice.name else 1.0
+
+        with (
+            mock.patch.object(SubgraphChoiceCaller, "benchmark", benchmark),
+            config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="ATEN,TRITON",
+                compile_threads=1,
+                assume_aligned_inputs=True,
+                **{
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_blackwell_decompose_k": True,
+                    "triton.enable_blackwell_decompose_k_cat2_fusion": True,
+                    "triton.num_decompose_k_splits": 2,
+                    "triton.decompose_k_bmm_backends": "ATEN,TRITON",
+                },
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right))
+        source = codes[-1]
+        self.assertIn("subgraph: decompose_k_cat2_materialized_aten", source)
+        self.assertIn(f"empty_strided_cuda(({k}, 128)", source)
+        self.assertIn("extern_kernels.mm", source)
 
     def test_fused_producer_aten_plan_fallback(self):
         m, k, n = 128, 65_536, 256
