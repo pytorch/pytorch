@@ -60,9 +60,11 @@ from torch._inductor.custom_graph_pass import (
 )
 from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
+from torch._inductor.output_code import CompiledFxGraphConstants
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import clear_caches, fresh_cache
+from torch._inductor.triton_bundler import TritonBundler
+from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import (
@@ -982,6 +984,66 @@ class TestFxGraphCache(TestCase):
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
                         grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
+
+    @requires_cuda_and_triton
+    @parametrize("keep_static_cubin_raw", (False, True))
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_missing_bundled_cubin_falls_back_to_jit(self, keep_static_cubin_raw):
+        with config.patch(keep_static_cubin_raw=keep_static_cubin_raw):
+
+            def fn(x):
+                return x.sin()
+
+            x = torch.randn(32, device="cuda")
+            expected = fn(x)
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+
+            graph_paths = []
+            for directory, _, filenames in os.walk(FxGraphCache._get_tmp_dir()):
+                graph_paths.extend(os.path.join(directory, name) for name in filenames)
+            self.assertEqual(len(graph_paths), 1)
+            with open(graph_paths[0], "rb") as file:
+                graph = pickle.load(file)
+            bundle = graph._triton_bundle
+            self.assertIsNotNone(bundle)
+            self.assertGreater(len(bundle.static_autotuners), 0)
+
+            self.reset()
+            triton_dir = os.path.join(cache_dir(), "triton")
+            shutil.rmtree(triton_dir)
+            TritonBundler.read_and_emit(bundle)
+            self.assertTrue(os.path.isdir(triton_dir))
+            shutil.rmtree(triton_dir)
+
+            graph.after_deserialization(CompiledFxGraphConstants())
+            self.assertIsNotNone(graph.current_callable)
+            static_autotuner = bundle.static_autotuners[0]
+            loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+                static_autotuner.kernel_name
+            ]
+            if keep_static_cubin_raw:
+                self.assertIs(loaded_autotuner, static_autotuner.kernel)
+            else:
+                self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
+            device_type = "hip" if torch.version.hip else "cuda"
+            binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
+            self.assertTrue(
+                any(
+                    name.endswith(binary_ext)
+                    for _, _, filenames in os.walk(triton_dir)
+                    for name in filenames
+                )
+            )
+            actual = graph.current_callable([x.clone()])
+            self.assertEqual(actual[0], expected)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})

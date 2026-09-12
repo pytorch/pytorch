@@ -5683,22 +5683,32 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # We don't store the source code on the CachingAutotuner itself
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
+        self.compile_kernel_from_src: Callable[[], CachingAutotuner] | None = None
 
     def result(self, timeout: float | None = None) -> CachingAutotuner:
         # timeout is accepted for interface parity with other CodeCacheFuture
         # subclasses; this work is synchronous in-process and has no pending
         # future to wait on.
-        if self.reload_kernel_from_src is None:
+        from .runtime.static_triton_launcher import MissingTritonKernelError
+
+        if self.reload_kernel_from_src is None or self.compile_kernel_from_src is None:
             raise AssertionError(
-                "reload_kernel_from_src must be set before calling result()"
+                "source reload callbacks must be set before calling result()"
             )
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
-            self.static_autotuner.recheck_autotune_cache(
-                reload_kernel_from_src=self.reload_kernel_from_src
-            )
-            self.static_autotuner.precompile(  # type: ignore[union-attr]
-                warm_cache_only=False,
-                reload_kernel=self.reload_kernel_from_src,
-                static_triton_bundle_key=None,  # no need to save again
-            )
-            return self.static_autotuner
+            try:
+                self.static_autotuner.recheck_autotune_cache(
+                    reload_kernel_from_src=self.reload_kernel_from_src
+                )
+                self.static_autotuner.precompile(  # type: ignore[union-attr]
+                    warm_cache_only=False,
+                    reload_kernel=self.reload_kernel_from_src,
+                    static_triton_bundle_key=None,  # no need to save again
+                )
+                return self.static_autotuner
+            except MissingTritonKernelError:
+                log.warning(
+                    "Bundled Triton kernel disappeared before loading; "
+                    "falling back to JIT compilation"
+                )
+                return self.compile_kernel_from_src()

@@ -486,6 +486,34 @@ class AsyncCompile:
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
 
+        def compile_kernel_in_parent() -> CachingAutotuner:
+            with dynamo_timed(
+                "async_compile.precompile",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="triton_compile_time_us",
+                log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
+            ):
+                fail = None
+                try:
+                    start_ns = time_ns()
+                    _set_triton_ptxas_path()
+                    _set_triton_libdevice_path()
+                    kernel = load_kernel()
+                    kernel.set_compile_info(compile_id, is_backward)
+                    kernel.precompile(
+                        warm_cache_only=False,
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                    )
+                    elapsed_us = (time_ns() - start_ns) // 1000
+                    _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
+                    return kernel
+                except Exception as e:
+                    fail = str(e)
+                    raise
+                finally:
+                    log_triton_builds(fail=fail)
+
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # Set reload_kernel_from_src properly based on source_code
@@ -493,6 +521,7 @@ class AsyncCompile:
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                future.compile_kernel_from_src = compile_kernel_in_parent
             if is_parallel:
                 return future
             else:
@@ -567,32 +596,7 @@ class AsyncCompile:
             CompiledTritonKernels.save(source_code, future)
             return future
         else:
-            with dynamo_timed(
-                "async_compile.precompile",
-                log_pt2_compile_event=True,
-                dynamo_compile_column_us="triton_compile_time_us",
-                log_waitcounter=True,
-                waitcounter_name_override="compile_triton",
-            ):
-                fail = None
-                try:
-                    start_ns = time_ns()
-                    _set_triton_ptxas_path()
-                    _set_triton_libdevice_path()
-                    kernel = load_kernel()
-                    kernel.set_compile_info(compile_id, is_backward)
-                    kernel.precompile(
-                        warm_cache_only=False,
-                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
-                    )
-                    elapsed_us = (time_ns() - start_ns) // 1000
-                    _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
-                    return kernel
-                except Exception as e:
-                    fail = str(e)
-                    raise
-                finally:
-                    log_triton_builds(fail=fail)
+            return compile_kernel_in_parent()
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall

@@ -10,6 +10,10 @@ from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
 
 
+class MissingTritonKernelError(RuntimeError):
+    pass
+
+
 @functools.lru_cache(None)
 def _tma_arg_helpers():
     """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
@@ -212,13 +216,15 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        if self.cubin_path is None:
+        if not os.path.exists(filepath):
             if self.cubin_raw is None:
-                raise AssertionError("cubin_raw must be set when cubin_path is None")
+                raise MissingTritonKernelError(
+                    f"Triton kernel binary not found at {filepath}"
+                )
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath  # pyre-ignore
+        self.cubin_path = filepath
         return self.cubin_path
 
     def _agnostic_cubin_path(self) -> str:
@@ -227,9 +233,13 @@ class StaticallyLaunchedTritonKernel:
         # from the retained raw bytes if the file was removed under us.
         if self.cubin_path is not None and os.path.exists(self.cubin_path):
             return self.cubin_path
-        if self.cubin_raw is None or self.cubin_path is None:
+        if self.cubin_path is None:
             raise AssertionError(
                 "device-agnostic kernel cannot reload its cubin for a new device"
+            )
+        if self.cubin_raw is None:
+            raise MissingTritonKernelError(
+                f"Triton kernel binary not found at {self.cubin_path}"
             )
         os.makedirs(os.path.dirname(self.cubin_path), exist_ok=True)
         with open(self.cubin_path, "wb") as f:
