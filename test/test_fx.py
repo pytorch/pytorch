@@ -1518,6 +1518,29 @@ class TestFX(JitTestCase):
                 )
                 self.assertIn("x", text)
 
+    def test_print_sparse_tensor_metadata(self):
+        crow = torch.tensor([0, 1, 2])
+        col = torch.tensor([0, 1])
+        vals = [
+            torch.sparse_coo_tensor(torch.tensor([[0, 1], [0, 1]]), torch.randn(2), (2, 2)),
+            torch.sparse_csr_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_csc_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_bsr_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+            torch.sparse_bsc_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+        ]
+
+        for val in vals:
+            graph: torch.fx.Graph = torch.fx.Graph()
+            x: torch.fx.Node = graph.create_node("placeholder", "x")
+            node: torch.fx.Node = graph.create_node("call_function", torch.relu, args=(x,))
+            node.meta["val"] = val
+            graph.output(node)
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+            text = gm.print_readable(print_output=False, include_stride=True, include_device=True)
+            if val.layout is not torch.sparse_coo:
+                self.assertIn(f'"f32{list(val.shape)}cpu"', text)
+                self.assertIn(f'"f32{list(val.shape)}cpu"', node.format_node(include_tensor_metadata=True))
+
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
         # print_readable() should not produce lines with trailing whitespace.
