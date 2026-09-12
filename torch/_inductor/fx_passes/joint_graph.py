@@ -1177,6 +1177,13 @@ def _other_is_broadcasted_in_dim(match):
     return all(statically_known_true(other_shape[d] == 1) for d in dim)
 
 
+def _mul_softmax_is_eligible(match):
+    if not _other_is_broadcasted_in_dim(match):
+        return False
+    dtype = match.kwargs.get("dtype") or match.kwargs["inp"].meta["val"].dtype
+    return dtype != torch.bool
+
+
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
         scaled = inp * other
@@ -1208,7 +1215,7 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
         _partial_softmax_pattern(aten.mul.Tensor, reverse=reverse, to_dtype=to_dtype),
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[1],
-        extra_check=_other_is_broadcasted_in_dim,
+        extra_check=_mul_softmax_is_eligible,
     )(mul_softmax_pattern)
 
 

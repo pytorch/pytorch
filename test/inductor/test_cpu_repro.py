@@ -18,7 +18,7 @@ import torch
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import (
     CppKernelProxy,
@@ -4140,6 +4140,32 @@ class CPUReproTests(TestCase):
         x = torch.randn(8, 8, 2)
         metrics.reset()
         self.common(fn, (x,))
+
+    @config.patch(fx_graph_cache=False)
+    @parametrize("input_dtype", (torch.bool, torch.float32))
+    @parametrize("scale_dtype", (torch.float32, torch.float64))
+    @parametrize("scale", (2.0, -2.0))
+    @parametrize("broadcast", (False, True))
+    @parametrize("reverse", (False, True))
+    def test_scaled_softmax_bool_input(
+        self, input_dtype, scale_dtype, scale, broadcast, reverse
+    ):
+        def fn(x, scale):
+            return torch.softmax(scale * x if reverse else x * scale, dim=-1)
+
+        x = torch.tensor([[False, True, False], [True, False, True]], dtype=input_dtype)
+        scale = torch.tensor(
+            [[scale], [-scale]] if broadcast else scale, dtype=scale_dtype
+        )
+        expected = fn(x, scale)
+        counters.clear()
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, scale)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(
+            counters["inductor"]["pattern_matcher_count"],
+            0 if input_dtype == torch.bool else 1,
+        )
 
     def test_softmax_with_zero_dim(self):
         def fn(x):
