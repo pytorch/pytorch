@@ -7,9 +7,12 @@ from typing import Any
 _EXPORT_MODULES = {
     "GEMM_DTYPE_BF16": "gemm_gfx950",
     "GEMM_DTYPE_FP16": "gemm_gfx950",
+    "gemm_mxfp_gfx950": "gemm_mxfp_gfx950",
     "infer_has_k_tail": "gemm_gfx950",
     "make_gemm_gfx950_param": "gemm_gfx950",
     "make_gemm_param_and_validate": "gemm_gfx950",
+    "make_mxfp_param_and_validate": "gemm_mxfp_gfx950",
+    "mxfp_gemm_derived": "gemm_mxfp_gfx950",
     "get_grouped_gemm_persistent_grid_size": "grouped_gemm_gfx950_config",
     "is_grouped_gemm_gfx950_layout_valid": "grouped_gemm_gfx950_config",
     "launch_gemm_gfx950_grouped": "grouped_gemm_gfx950",

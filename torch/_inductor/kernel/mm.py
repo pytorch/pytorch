@@ -2,7 +2,7 @@
 import functools
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch._dynamo.utils import counters
@@ -17,7 +17,7 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+from torch.nn.functional import ScalingType, SwizzleType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
@@ -89,6 +89,7 @@ except ImportError:
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
+MXFPFormat = Literal["mxfp4", "mxfp8"]
 
 # We define each template kernel in a separate file which is the name of the input to load_kernel_template
 # (e.g. triton_mm for templates/triton_mm.py.jinja).
@@ -188,6 +189,40 @@ aten__fp8_mm = ExternKernelChoice(
 )
 
 
+def _scaled_mm_v2_mxfp(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    *,
+    out_dtype,
+):
+    recipe = [ScalingType.BlockWise1x32.value]
+    swizzle = [SwizzleType.NO_SWIZZLE.value]
+    return aten._scaled_mm_v2.default(
+        mat_a,
+        mat_b,
+        [scale_a],
+        recipe,
+        swizzle,
+        [scale_b],
+        recipe,
+        swizzle,
+        None,
+        out_dtype,
+        [],
+        False,
+    )
+
+
+aten__scaled_mm_v2_mxfp = ExternKernelChoice(
+    _scaled_mm_v2_mxfp,
+    None,
+    name="_scaled_mm_v2_mxfp",
+    has_out_variant=False,
+)
+
+
 def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
 
@@ -229,6 +264,104 @@ def check_supported_striding(mat_a, mat_b) -> None:
     )
 
 
+def _get_flydsl_2d_layout_metadata(
+    layout, mat1, mat2, operand_itemsize, output_itemsize
+):
+    if len(mat1.get_size()) != 2 or len(mat2.get_size()) != 2:
+        return None
+
+    static_ints = PythonWrapperCodegen.statically_known_list_of_ints_or_none
+    mat1_shape = static_ints(mat1.get_size())
+    mat2_shape = static_ints(mat2.get_size())
+    out_shape = static_ints(layout.size)
+    mat1_stride = static_ints(mat1.get_stride())
+    mat2_stride = static_ints(mat2.get_stride())
+    out_stride = static_ints(layout.stride)
+    if any(
+        value is None
+        for value in (
+            mat1_shape,
+            mat2_shape,
+            out_shape,
+            mat1_stride,
+            mat2_stride,
+            out_stride,
+        )
+    ):
+        return None
+
+    if mat1_stride[1] == 1:
+        mat1_is_transposed = False
+    elif mat1_stride[0] == 1:
+        mat1_is_transposed = True
+    else:
+        return None
+
+    if mat2_stride[0] == 1:
+        mat2_is_transposed = True
+    elif mat2_stride[1] == 1:
+        mat2_is_transposed = False
+    else:
+        return None
+
+    if out_stride[1] != 1:
+        return None
+
+    mat1_leading_stride = (
+        mat1_stride[1] if mat1_is_transposed else mat1_stride[0]
+    )
+    mat2_leading_stride = (
+        mat2_stride[1] if mat2_is_transposed else mat2_stride[0]
+    )
+    sizevars = V.graph.sizevars
+    aligned_byte_expressions = (
+        mat1.get_layout().offset * operand_itemsize,
+        mat1_leading_stride * operand_itemsize,
+        mat2.get_layout().offset * operand_itemsize,
+        mat2_leading_stride * operand_itemsize,
+    )
+    if (
+        is_unaligned(mat1)
+        or is_unaligned(mat2)
+        or any(
+            not sizevars.statically_known_multiple_of(expr, GPU_ALIGN_BYTES)
+            for expr in aligned_byte_expressions
+        )
+    ):
+        return None
+
+    mat1_rows, mat1_cols = mat1_shape
+    mat2_rows, mat2_cols = mat2_shape
+    tensor_spans = (
+        (
+            mat1_cols if mat1_is_transposed else mat1_rows,
+            mat1_leading_stride,
+            mat1_rows if mat1_is_transposed else mat1_cols,
+            operand_itemsize,
+        ),
+        (
+            mat2_cols if mat2_is_transposed else mat2_rows,
+            mat2_leading_stride,
+            mat2_rows if mat2_is_transposed else mat2_cols,
+            operand_itemsize,
+        ),
+        (out_shape[0], out_stride[0], out_shape[1], output_itemsize),
+    )
+    if not all(
+        _fits_int32_buffer_span(rows, stride, cols, itemsize)
+        for rows, stride, cols, itemsize in tensor_spans
+    ):
+        return None
+    return (
+        mat1_shape,
+        mat2_shape,
+        out_shape,
+        out_stride,
+        mat1_is_transposed,
+        mat2_is_transposed,
+    )
+
+
 def get_flydsl_mm_template_kwargs(
     layout, mat1, mat2, static_shape, is_nonzero
 ) -> list[dict[str, Any]]:
@@ -241,32 +374,6 @@ def get_flydsl_mm_template_kwargs(
     if not (static_shape and is_nonzero and use_flydsl_gemm_template(layout)):
         return []
 
-    if len(mat1.get_size()) != 2 or len(mat2.get_size()) != 2:
-        return []
-
-    sizevars = V.graph.sizevars
-    mat1_stride = mat1.get_stride()
-    mat2_stride = mat2.get_stride()
-    out_stride = layout.stride
-
-    if sizevars.statically_known_equals(mat1_stride[1], 1):
-        a_is_transposed = False
-    elif sizevars.statically_known_equals(mat1_stride[0], 1):
-        a_is_transposed = True
-    else:
-        return []
-
-    # FlyDSL consumes aten.mm's logical [K, N] RHS view directly.
-    if sizevars.statically_known_equals(mat2_stride[0], 1):
-        b_is_transposed = True
-    elif sizevars.statically_known_equals(mat2_stride[1], 1):
-        b_is_transposed = False
-    else:
-        return []
-
-    if not sizevars.statically_known_equals(out_stride[1], 1):
-        return []
-
     dtype = mat1.get_dtype()
     if mat2.get_dtype() != dtype or layout.dtype != dtype:
         return []
@@ -274,60 +381,25 @@ def get_flydsl_mm_template_kwargs(
     if dtype not in (torch.float16, torch.bfloat16):
         return []
 
-    a_leading_stride = mat1_stride[1] if a_is_transposed else mat1_stride[0]
-    b_leading_stride = mat2_stride[1] if b_is_transposed else mat2_stride[0]
-
-    # Require vectorized tensor origins and row increments to stay GPU-aligned.
     itemsize = dtype.itemsize
-    aligned_byte_expressions = (
-        mat1.get_layout().offset * itemsize,
-        a_leading_stride * itemsize,
-        mat2.get_layout().offset * itemsize,
-        b_leading_stride * itemsize,
+    metadata = _get_flydsl_2d_layout_metadata(
+        layout, mat1, mat2, itemsize, itemsize
     )
-    if (
-        is_unaligned(mat1)
-        or is_unaligned(mat2)
-        or any(
-            not sizevars.statically_known_multiple_of(expr, GPU_ALIGN_BYTES)
-            for expr in aligned_byte_expressions
-        )
-    ):
+    if metadata is None:
         return []
 
-    m = mat1.get_size()[0]
-    _, n = mat2.get_size()
-    k = mat1.get_size()[1]
-    m_static = PythonWrapperCodegen.statically_known_int_or_none(m)
-    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
-    k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
-    if m_static is None or n_static is None or k_static is None:
-        return []
+    (
+        mat1_shape,
+        mat2_shape,
+        _,
+        _,
+        a_is_transposed,
+        b_is_transposed,
+    ) = metadata
+
+    m_static, k_static = mat1_shape
+    _, n_static = mat2_shape
     if k_static % 32 != 0:
-        return []
-
-    tensor_spans = (
-        (
-            k_static if a_is_transposed else m_static,
-            a_leading_stride,
-            m_static if a_is_transposed else k_static,
-        ),
-        (
-            n_static if b_is_transposed else k_static,
-            b_leading_stride,
-            k_static if b_is_transposed else n_static,
-        ),
-        (m_static, out_stride[0], n_static),
-    )
-    if any(
-        not _fits_int32_buffer_span(
-            rows,
-            PythonWrapperCodegen.statically_known_int_or_none(stride),
-            cols,
-            itemsize,
-        )
-        for rows, stride, cols in tensor_spans
-    ):
         return []
 
     from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
@@ -337,6 +409,7 @@ def get_flydsl_mm_template_kwargs(
     return [
         {
             **gemm_config,
+            "IS_MXFP": False,
             "GEMM_DTYPE_ID": gemm_dtype_id,
             "GEMM_M": m_static,
             "GEMM_N": n_static,
@@ -1148,6 +1221,187 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
+def _get_rocm_mxfp_v2_format(
+    mat_a: Any,
+    mat_b: Any,
+    scale_a: list[Any],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[Any],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    bias: Any,
+    out_dtype: torch.dtype | None,
+    contraction_dim: list[int] | None,
+    use_fast_accum: bool,
+) -> MXFPFormat | None:
+    common_contract = (
+        torch.version.hip is not None
+        and len(scale_a) == 1
+        and len(scale_b) == 1
+        and recipe_a == [ScalingType.BlockWise1x32.value]
+        and recipe_b == [ScalingType.BlockWise1x32.value]
+        and swizzle_a == [SwizzleType.NO_SWIZZLE.value]
+        and swizzle_b == [SwizzleType.NO_SWIZZLE.value]
+        and scale_a[0].get_dtype() == torch.float8_e8m0fnu
+        and scale_b[0].get_dtype() == torch.float8_e8m0fnu
+        and bias is None
+        and out_dtype in (torch.bfloat16, torch.float16)
+        and not contraction_dim
+        and use_fast_accum is False
+    )
+    if not common_contract:
+        return None
+    operand_dtypes = (mat_a.get_dtype(), mat_b.get_dtype())
+    if operand_dtypes == (torch.float8_e4m3fn, torch.float8_e4m3fn):
+        return "mxfp8"
+    if operand_dtypes == (torch.float4_e2m1fn_x2, torch.float4_e2m1fn_x2):
+        return "mxfp4"
+    return None
+
+
+def get_flydsl_mxfp_template_kwargs(
+    mxfp_format: MXFPFormat,
+    layout: Layout,
+    mat_a: Any,
+    mat_b: Any,
+    scale_a: Any,
+    scale_b: Any,
+) -> list[dict[str, Any]]:
+    """Return shape-compatible configs for one gfx950 MXFP operand format."""
+    from ..heuristics.template.flydsl import get_mxfp_gemm_configs_for_shape
+
+    if not use_flydsl_gemm_template(layout):
+        return []
+
+    nodes = (mat_a, mat_b, scale_a, scale_b)
+    if any(node.get_device() != layout.device for node in nodes):
+        return []
+
+    if any(len(node.get_size()) != 2 for node in nodes):
+        return []
+
+    if mxfp_format == "mxfp4":
+        elements_per_byte = 2
+        expected_dtype = torch.float4_e2m1fn_x2
+    elif mxfp_format == "mxfp8":
+        elements_per_byte = 1
+        expected_dtype = torch.float8_e4m3fn
+    else:
+        raise AssertionError(f"unsupported MXFP format: {mxfp_format}")
+
+    static_ints = PythonWrapperCodegen.statically_known_list_of_ints_or_none
+    scale_a_shape = static_ints(scale_a.get_size())
+    scale_b_shape = static_ints(scale_b.get_size())
+    metadata = _get_flydsl_2d_layout_metadata(
+        layout,
+        mat_a,
+        mat_b,
+        expected_dtype.itemsize,
+        layout.dtype.itemsize,
+    )
+    if scale_a_shape is None or scale_b_shape is None or metadata is None:
+        return []
+
+    (
+        a_shape,
+        b_shape,
+        out_shape,
+        out_stride,
+        a_is_transposed,
+        b_is_transposed,
+    ) = metadata
+
+    m, k_storage = a_shape
+    b_k_storage, n = b_shape
+    k = k_storage * elements_per_byte
+    if (
+        m <= 0
+        or n <= 0
+        or k_storage <= 0
+        or b_k_storage != k_storage
+        or k % 128 != 0
+        or k > 2**31 - 1
+        or scale_a_shape != [m, k // 32]
+        or scale_b_shape != [n, k // 32]
+        or out_shape != [m, n]
+    ):
+        return []
+
+    if (a_is_transposed and m % GPU_ALIGN_BYTES != 0) or (
+        not b_is_transposed and n % GPU_ALIGN_BYTES != 0
+    ):
+        return []
+
+    scale_a_stride = static_ints(scale_a.get_stride())
+    scale_b_stride = static_ints(scale_b.get_stride())
+    if scale_a_stride is None or scale_b_stride is None:
+        return []
+
+    if (
+        scale_a_stride != [k // 32, 1]
+        or scale_b_stride != [k // 32, 1]
+        or out_stride != [n, 1]
+    ):
+        return []
+
+    auxiliary_tensor_spans = (
+        (m, scale_a_stride[0], k // 32, scale_a.get_dtype().itemsize),
+        (n, scale_b_stride[0], k // 32, scale_b.get_dtype().itemsize),
+    )
+    if any(
+        not _fits_int32_buffer_span(rows, stride, cols, itemsize)
+        for rows, stride, cols, itemsize in auxiliary_tensor_spans
+    ):
+        return []
+
+    static_int = PythonWrapperCodegen.statically_known_int_or_none
+    offsets = [
+        mat_a.get_layout().offset,
+        mat_b.get_layout().offset,
+        scale_a.get_layout().offset,
+        scale_b.get_layout().offset,
+        layout.offset,
+    ]
+    if any(static_int(offset) != 0 for offset in offsets):
+        return []
+
+    if (
+        mat_a.get_dtype() != expected_dtype
+        or mat_b.get_dtype() != expected_dtype
+        or scale_a.get_dtype() != torch.float8_e8m0fnu
+        or scale_b.get_dtype() != torch.float8_e8m0fnu
+        or layout.dtype not in (torch.bfloat16, torch.float16)
+    ):
+        return []
+
+    out_dtype_name = "bfloat16" if layout.dtype == torch.bfloat16 else "float16"
+    # Config generation validates tile construction without a concrete shape;
+    # the selector drops the ones this shape cannot use before autotuning.
+    return [
+        {
+            **gemm_config,
+            "IS_MXFP": True,
+            "MXFP_FORMAT": mxfp_format,
+            "GEMM_M": m,
+            "GEMM_N": n,
+            "GEMM_K": k,
+            "OUT_DTYPE": out_dtype_name,
+            "A_IS_TRANSPOSED": a_is_transposed,
+            "B_IS_TRANSPOSED": b_is_transposed,
+        }
+        for gemm_config in get_mxfp_gemm_configs_for_shape(
+            mxfp_format,
+            m,
+            n,
+            k,
+            out_dtype_name,
+            a_is_transposed=a_is_transposed,
+            b_is_transposed=b_is_transposed,
+        )
+    ]
+
+
 # Inductor has no template or extern choice that understands swizzled scale
 # layouts for _scaled_mm_v2 yet; defer those to the eager op. add_to_fallback_set
 # is False because this handler is invoked manually from the lowering below, not
@@ -1181,6 +1435,64 @@ def tuned_scaled_mm_v2(
     swizzle patterns alongside the scale tensors, and supports multi-level
     scaling via lists.
     """
+
+    mxfp_format = _get_rocm_mxfp_v2_format(
+        mat_a,
+        mat_b,
+        scale_a,
+        recipe_a,
+        swizzle_a,
+        scale_b,
+        recipe_b,
+        swizzle_b,
+        bias,
+        out_dtype,
+        contraction_dim,
+        use_fast_accum,
+    )
+    if mxfp_format is not None:
+        m, n, k, mxfp_layout, mxfp_a, mxfp_b = mm_args(
+            mat_a, mat_b, layout=layout, out_dtype=out_dtype
+        )
+        mxfp_scale_a, mxfp_scale_b = realize_inputs(scale_a[0], scale_b[0])
+        mxfp_input_nodes = [mxfp_a, mxfp_b, mxfp_scale_a, mxfp_scale_b]
+        mxfp_kernel_inputs = MMKernelInputs(
+            mxfp_input_nodes,
+            mat1_idx=0,
+            mat2_idx=1,
+            out_dtype=out_dtype,
+        )
+        mxfp_configs = get_flydsl_mxfp_template_kwargs(
+            mxfp_format,
+            mxfp_layout,
+            mxfp_a,
+            mxfp_b,
+            mxfp_scale_a,
+            mxfp_scale_b,
+        )
+        mxfp_choices: list[ChoiceCaller] = [
+            aten__scaled_mm_v2_mxfp.bind(
+                mxfp_kernel_inputs.nodes(),
+                mxfp_layout,
+                out_dtype=out_dtype,
+            )
+        ]
+        for mxfp_kwargs in mxfp_configs:
+            flydsl_mm_template.maybe_append_choice(
+                mxfp_choices,
+                input_nodes=list(mxfp_kernel_inputs.nodes()),
+                layout=mxfp_layout,
+                **mxfp_kwargs,
+            )
+        if len(mxfp_choices) > 1:
+            counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
+            node, _ = autotune_select_algorithm(
+                "scaled_mm",
+                mxfp_choices,
+                mxfp_kernel_inputs.nodes(),
+                mxfp_layout,
+            )
+            return node
 
     # Inductor only has Triton/extern lowerings for single-level, fp32-scaled,
     # non-swizzled _scaled_mm_v2 with the "supported" recipes (TensorWise,
