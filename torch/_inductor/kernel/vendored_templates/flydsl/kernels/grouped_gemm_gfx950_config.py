@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from .grouped_config import grouped_row_tiles_upper_bound
+
 
 GFX950_DMA_BYTES = 16
 GFX950_WAVE_SIZE = 64
@@ -74,6 +76,5 @@ def get_grouped_gemm_persistent_grid_size(
     n_tiles = (n - 1) // param.block_n + 1
     light_blocks = min(1 << (resource_blocks_per_cu.bit_length() - 1), 8)
     blocks_per_cu = light_blocks if light_tile else min(resource_blocks_per_cu, 2)
-    nonempty = min(group_count, total_m)
-    m_tiles_upper = nonempty + (total_m - nonempty) // param.block_m
+    m_tiles_upper = grouped_row_tiles_upper_bound(total_m, group_count, param.block_m)
     return max(1, min(num_cus * blocks_per_cu, m_tiles_upper * n_tiles))
