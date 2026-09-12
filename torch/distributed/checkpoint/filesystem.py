@@ -596,7 +596,7 @@ class _FileSystemWriter(StorageWriter):
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
-        overwrite: bool = True,
+        overwrite: bool = False,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
         *args: Any,
@@ -611,7 +611,7 @@ class _FileSystemWriter(StorageWriter):
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
-            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to False.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
@@ -655,14 +655,7 @@ class _FileSystemWriter(StorageWriter):
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         self.fs.mkdir(self.path)
         if self._metadata_exists():
-            if self.overwrite:
-                warnings.warn(
-                    f"Detected an existing checkpoint in {self.path}, overwriting since {self.overwrite=}."
-                    " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
-                    " maintain this functionality or False to raise when an existing checkpoint is found.",
-                    stacklevel=2,
-                )
-            else:
+            if not self.overwrite:
                 raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
 
         if self.rank is not None and not self.use_collectives:
@@ -993,7 +986,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
         cache_staged_state_dict: bool = False,
-        overwrite: bool = True,
+        overwrite: bool = False,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
     ) -> None:
@@ -1009,7 +1002,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
-            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to False.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
