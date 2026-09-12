@@ -336,6 +336,7 @@ class TransformerEncoder(Module):
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
         num_layers: the number of sub-encoder-layers in the encoder (required).
+            Must be a positive integer.
         norm: the layer normalization component (optional).
         enable_nested_tensor: if True, input will automatically convert to nested tensor
             (and convert back on output). This will improve the overall performance of
@@ -362,6 +363,11 @@ class TransformerEncoder(Module):
     ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
+        if num_layers < 1:
+            raise ValueError(
+                f"num_layers must be a positive integer, but got {num_layers}. "
+                "TransformerEncoder requires at least one layer."
+            )
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
@@ -574,6 +580,7 @@ class TransformerDecoder(Module):
     Args:
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).
         num_layers: the number of sub-decoder-layers in the decoder (required).
+            Must be a positive integer.
         norm: the layer normalization component (optional).
 
     Examples:
@@ -594,6 +601,11 @@ class TransformerDecoder(Module):
     ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
+        if num_layers < 1:
+            raise ValueError(
+                f"num_layers must be a positive integer, but got {num_layers}. "
+                "TransformerDecoder requires at least one layer."
+            )
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
