@@ -58,7 +58,11 @@ from ..create_parameter_op import (
     new_parameter_placeholder,
     tracable_create_parameter,
 )
-from ..device_interface import get_registered_device_interfaces
+from ..device_interface import (
+    DeviceInterface,
+    get_registered_device_interfaces,
+    MtiaInterface,
+)
 from ..exc import (
     raise_observed_exception,
     raise_type_error,
@@ -2768,6 +2772,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[*graph_break_hints.USER_ERROR],
                     from_exc=e,
                 )
+
+        # Dynamically register current_stream for third-party PrivateUse1 backends
+        # (e.g., torch_npu) that register a DeviceInterface at import time.
+        #
+        # NOTE: _get_handlers is decorated with @functools.cache, so the handler
+        # table is computed only once on the first call. PrivateUse1 backends MUST
+        # register their DeviceInterface BEFORE the first torch.compile() call.
+        for _, _interface in get_registered_device_interfaces():
+            _cs = getattr(_interface, "current_stream", None)
+            # Skip:
+            # - None: the interface does not define current_stream.
+            # - DeviceInterface.current_stream: the abstract base stub.
+            # - MtiaInterface: MTIA is an internal accelerator and should not be
+            #   implicitly captured by this third-party discovery loop.
+            # - Already in handlers: backends handled by explicit @register above.
+            if (
+                _cs is not None
+                and _cs is not DeviceInterface.current_stream
+                and _interface is not MtiaInterface
+                and _cs not in handlers
+            ):
+                handlers[_cs] = handle_current_stream
 
         _synchronize_fn_to_device_type = {
             torch.cuda.synchronize: "cuda",
