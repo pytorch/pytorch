@@ -2845,24 +2845,25 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
-    # Enable origami GEMM autotuning on Triton templates (ROCm only).
+    # Enable Origami analytical config selection for Triton templates (ROCm only).
     #
-    # When True, the rocm-origami pip package is consulted at GEMM compile time
-    # to pre-select a top-K of Triton configs from the DEFAULT search space,
-    # reducing autotuning cost while keeping runtime within ~5% of full
-    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
+    # When True, the rocm-origami pip package is consulted at compile time to
+    # pre-select Triton configs from the DEFAULT GEMM and FlexAttention search
+    # spaces, reducing autotuning cost while retaining near-exhaustive runtime.
+    # Read once at config import from TORCHINDUCTOR_ORIGAMI;
     # toggling at runtime via config.patch has no effect because the rocm-origami
     # module import is cached at heuristics/template/triton.py load time.
     #
-    # Active only when all of these hold:
+    # The package is loaded only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
     #   - config.max_autotune
     #   - config.rocm.origami (this knob)
-    #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
     #   - ROCm version < 10.0 (origami not supported on 10.0+)
-    # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
-    # one-time warning; the regular config generator runs instead.
+    # Each consumer has additional gates. GEMM requires its DEFAULT search space.
+    # FlexAttention currently requires its DEFAULT search space plus a static,
+    # dense, contiguous fp16/bf16 gfx950 forward problem in the measured shape
+    # domain; every other case retains the regular config generator.
     #
     # Side-effect: when this is True, choices._need_to_fix_layout() returns True
     # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
