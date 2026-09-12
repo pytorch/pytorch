@@ -193,12 +193,41 @@ function install_torchvision() {
     # Not sure if both are needed, but why not
     export FORCE_CUDA=1
     export WITH_CUDA=1
+  elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    # Build jobs run on headless CPU runners, so torch.cuda.is_available() is
+    # false even with a ROCm PyTorch wheel. Without FORCE_CUDA, torchvision
+    # picks CppExtension while hipify still emits *_hip.cpp beside the
+    # originals, and both vision.cpp and vision_hip.cpp define
+    # vision::cuda_version() -> link failure. FORCE_CUDA selects
+    # CUDAExtension, which deduplicates hip sources. See pytorch/vision#9298.
+    export FORCE_CUDA=1
+    local target_arch
+    target_arch=$(rocm_target_arch)
+    if [[ -n "${target_arch}" ]]; then
+      export PYTORCH_ROCM_ARCH="${target_arch}"
+    fi
   fi
   retry pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
 
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}
   fi
+}
+
+# Each ROCm CI build environment runs its tests on a single GPU family, so
+# companion wheels only need that one gfx target rather than the multi-arch
+# PYTORCH_ROCM_ARCH baked into the image. Prints nothing when the build
+# environment does not identify a target, in which case callers must keep the
+# image default -- a wheel missing the arch under test fails at kernel launch,
+# not at build time.
+function rocm_target_arch() {
+  case "${BUILD_ENVIRONMENT}" in
+    *mi200*|*mi210*) echo "gfx90a" ;;
+    *mi300*) echo "gfx942" ;;
+    *mi35*) echo "gfx950" ;;  # whole MI350 series, MI350X and MI355X alike
+    *navi31*) echo "gfx1100" ;;
+    *) echo "" ;;
+  esac
 }
 
 function install_fbgemm() {
@@ -240,11 +269,12 @@ function install_fbgemm() {
     # the CUID hash, giving each object a distinct __hip_cuid. Inline (not exported) and
     # scoped to the ROCm build so it does not affect the PyTorch build (already built).
     if [[ "${build_variant}" == "rocm" ]]; then
-      # The inductor-periodic ROCm benchmark job runs its tests only on MI350
-      # (gfx950), so build fbgemm for that single arch instead of the image's
-      # multi-arch default to cut build time.
-      if [[ "${GITHUB_WORKFLOW}" == "inductor-periodic" ]]; then
-        SCCACHE_RECACHE=1 PYTORCH_ROCM_ARCH="gfx950" python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+      # Build for just the arch this job tests on instead of the image's
+      # multi-arch default, to cut build time.
+      local target_arch
+      target_arch=$(rocm_target_arch)
+      if [[ -n "${target_arch}" ]]; then
+        SCCACHE_RECACHE=1 PYTORCH_ROCM_ARCH="${target_arch}" python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
       else
         SCCACHE_RECACHE=1 python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
       fi

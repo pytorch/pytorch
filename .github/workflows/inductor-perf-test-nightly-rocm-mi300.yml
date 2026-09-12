@@ -115,6 +115,8 @@ jobs:
           { config: "inductor_torchbench_perf_rocm_mi300", shard: 8, num_shards: 9, runner: "linux.rocm.gpu.mi300.1" },
           { config: "inductor_torchbench_perf_rocm_mi300", shard: 9, num_shards: 9, runner: "linux.rocm.gpu.mi300.1" },
         ]}
+      selected-test-configs: ${{ inputs.benchmark_configs }}
+      build-additional-packages: "vision audio fbgemm"
     secrets: inherit
 
   test-periodically:
@@ -132,6 +134,8 @@ jobs:
       disable-monitor: true
       monitor-log-interval: 10
       monitor-data-collect-interval: 2
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test:
@@ -149,4 +153,6 @@ jobs:
       disable-monitor: true
       monitor-log-interval: 10
       monitor-data-collect-interval: 2
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
