@@ -33,14 +33,12 @@ CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "13.0": "13.0.3",
     "13.2": "13.2.1",
-    "13.4": "13.4.0",
+    "13.4": "13.4.1",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
-# apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo, which carries
-# 13-0 through 13-3 only: 13.4 is still a release candidate (13.4.0rc1). The
-# runtime image just pip-installs the published cu134 nightly, so it builds.
+# apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
 # Drop an entry once its toolkit ships in the apt repo.
-CUDA_ARCHES_RUNTIME_IMAGE_ONLY = ["13.4"]
+CUDA_ARCHES_RUNTIME_IMAGE_ONLY = []
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
     "13.0": "9",
@@ -83,7 +81,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.4": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
