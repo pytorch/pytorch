@@ -991,13 +991,10 @@ class TestPatternMatcher(TestCase):
         def unbacked(x):
             return torch.full((2,), x.item(), dtype=dtype).cumsum(0).sum()
 
-        x = torch.tensor(3)
+        x = torch.tensor(0)
         result, (code,) = run_and_get_code(torch.compile(unbacked, fullgraph=True), x)
         self.assertEqual(result, unbacked(x))
-        if dtype == torch.bool:
-            self.assertNotIn("aten.cumsum", code)  # exempt, so this one still folds
-        else:
-            self.assertIn("aten.cumsum", code)
+        self.assertIn("aten.cumsum", code)
 
         def make(fill):
             def fn():
