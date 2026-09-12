@@ -1350,6 +1350,37 @@ class TestFlopCounter(TestCase):
         self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
 
+    def test_varlen_attn_flops_with_unequal_qk_value_dims(self):
+        """Varlen backward uses the value dimension for output gradients."""
+        from torch.utils.flop_counter import _varlen_attn_backward_flop
+
+        total_tokens = 16
+        query = torch.empty(total_tokens, 4, 192, device="meta")
+        key = torch.empty(total_tokens, 2, 192, device="meta")
+        value = torch.empty(total_tokens, 2, 128, device="meta")
+        grad_out = torch.empty(total_tokens, 4, 128, device="meta")
+        offsets = torch.empty(3, dtype=torch.int32, device="meta")
+
+        actual = _varlen_attn_backward_flop(
+            grad_out,
+            query,
+            key,
+            value,
+            None,
+            None,
+            offsets,
+            offsets,
+            8,
+            8,
+        )
+        expected = 2 * sdpa_backward_flop_count(
+            (1, 4, 8, 128),
+            (1, 4, 8, 192),
+            (1, 2, 8, 192),
+            (1, 2, 8, 128),
+        )
+        self.assertEqual(actual, expected)
+
 
 class TestFlexAttentionEstimation(TestCase):
     def test_flex_attention_flop_registration(self):

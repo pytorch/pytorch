@@ -3,12 +3,13 @@
 
 import copy
 import csv
+import heapq
 import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
@@ -87,6 +88,8 @@ RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
+
+_UnshardLookahead = Literal["default", "auto"] | tuple[int, ...]
 
 
 # Targets (e.g. labels) are always split along the batch dim (0). Use
@@ -192,6 +195,182 @@ class _Action(NamedTuple):
         raise RuntimeError(
             f"Invalid action string: {action_string}, should be formatted as [stage][action type][(microbatch)] e.g. 2F0"
         )
+
+
+_PipelineResourceGranularity = Literal["microbatch", "stage_microbatch"]
+_PipelineResourceKey = int | tuple[int, int]
+
+
+@dataclass(frozen=True)
+class _PipelineResourceLifetime:
+    """One schedule-derived resource lifetime and its assigned slot."""
+
+    stage_index: int | None
+    microbatch_index: int
+    start_position: int
+    release_position: int
+    slot: int
+
+
+@dataclass(frozen=True)
+class _PipelineResourceLiveness:
+    """Immutable resource-slot plan derived from an executable schedule."""
+
+    physical_rank: int
+    granularity: _PipelineResourceGranularity
+    stage_indices: tuple[int, ...]
+    num_microbatches: int
+    local_compute_actions: tuple[tuple[int, _Action], ...]
+    lifetimes: tuple[_PipelineResourceLifetime, ...]
+    num_slots: int
+
+    @property
+    def peak_live_count(self) -> int:
+        """Return the maximum number of simultaneously live resources."""
+        return self.num_slots
+
+    def slot_for(self, stage_index: int, microbatch_index: int) -> int:
+        """Return the assigned slot for one stage and microbatch.
+
+        Args:
+            stage_index: Global logical pipeline-stage index.
+            microbatch_index: Raw schedule microbatch index.
+
+        Returns:
+            The deterministic resource-slot index.
+
+        Raises:
+            ValueError: If either identifier is outside this plan.
+        """
+        if stage_index not in self.stage_indices:
+            raise ValueError(f"Stage {stage_index} is not tracked by this plan")
+        if not 0 <= microbatch_index < self.num_microbatches:
+            raise ValueError(
+                f"Microbatch {microbatch_index} is outside [0, {self.num_microbatches})"
+            )
+
+        lifetime_stage = None if self.granularity == "microbatch" else stage_index
+        for lifetime in self.lifetimes:
+            if (
+                lifetime.stage_index == lifetime_stage
+                and lifetime.microbatch_index == microbatch_index
+            ):
+                return lifetime.slot
+        raise ValueError(
+            f"No slot exists for stage {stage_index}, microbatch {microbatch_index}"
+        )
+
+
+@dataclass(frozen=True)
+class _PipelineRecvBufferSlots:
+    """Static forward and backward receive-slot assignments for one stage."""
+
+    forward: dict[int, int]
+    backward: dict[int, int]
+
+
+def _assign_pipeline_resource_slots(
+    intervals: Sequence[tuple[_PipelineResourceKey, int, int]],
+) -> tuple[dict[_PipelineResourceKey, int], int]:
+    """Assign the lowest free slot to each inclusive schedule interval."""
+    active: list[tuple[int, int]] = []
+    free_slots: list[int] = []
+    assignments: dict[_PipelineResourceKey, int] = {}
+    next_slot = 0
+
+    for key, start, release in sorted(intervals, key=lambda item: (item[1], item[2])):
+        while active and active[0][0] < start:
+            _, slot = heapq.heappop(active)
+            heapq.heappush(free_slots, slot)
+        slot = heapq.heappop(free_slots) if free_slots else next_slot
+        if slot == next_slot:
+            next_slot += 1
+        assignments[key] = slot
+        heapq.heappush(active, (release, slot))
+
+    return assignments, next_slot
+
+
+def _assign_pipeline_recv_buffer_slots(
+    actions: Sequence[_Action],
+    *,
+    has_backward: bool,
+) -> dict[int, _PipelineRecvBufferSlots]:
+    """Derive receive-buffer lifetimes from a finalized local schedule."""
+    starts: dict[tuple[int, _ComputationType, int], int] = {}
+    releases: dict[tuple[int, _ComputationType, int], int] = {}
+
+    def process(action: _Action, position: int) -> None:
+        if action.sub_actions is not None:
+            for sub_action in action.sub_actions:
+                process(sub_action, position)
+            return
+        microbatch_index = action.microbatch_index
+        if microbatch_index is None:
+            return
+
+        computation_type = action.computation_type
+        if computation_type in (RECV_F, RECV_B):
+            if computation_type == RECV_B and not has_backward:
+                return
+            key = (action.stage_index, computation_type, microbatch_index)
+            if key in starts:
+                raise ValueError(f"Receive {key} appears more than once")
+            starts[key] = position
+            return
+
+        release_directions: tuple[_ComputationType, ...] = ()
+        if has_backward and computation_type in (FULL_BACKWARD, BACKWARD_WEIGHT):
+            release_directions = (RECV_F, RECV_B)
+        for direction in release_directions:
+            key = (action.stage_index, direction, microbatch_index)
+            if key in starts:
+                if key in releases:
+                    raise ValueError(f"Receive {key} is released more than once")
+                releases[key] = position
+
+    for position, action in enumerate(actions):
+        process(action, position)
+
+    if not has_backward:
+        # An inference output may alias its received input. Keep each input
+        # alive until the runtime has waited for every send at step completion.
+        final_position = len(actions)
+        releases.update(dict.fromkeys(starts, final_position))
+
+    missing_releases = sorted(starts.keys() - releases.keys(), key=str)
+    if missing_releases:
+        raise ValueError(
+            f"Receive-buffer lifetimes have no release action: {missing_releases}"
+        )
+
+    intervals: dict[
+        tuple[int, _ComputationType], list[tuple[_PipelineResourceKey, int, int]]
+    ] = defaultdict(list)
+    for (stage_index, direction, microbatch_index), start in starts.items():
+        intervals[(stage_index, direction)].append(
+            (
+                microbatch_index,
+                start,
+                releases[(stage_index, direction, microbatch_index)],
+            )
+        )
+
+    mutable_slots: dict[int, dict[_ComputationType, dict[int, int]]] = defaultdict(dict)
+    for (stage_index, direction), direction_intervals in intervals.items():
+        assignments, _ = _assign_pipeline_resource_slots(direction_intervals)
+        mutable_slots[stage_index][direction] = {
+            cast(int, microbatch_index): slot
+            for microbatch_index, slot in assignments.items()
+        }
+
+    return {
+        stage_index: _PipelineRecvBufferSlots(
+            forward=by_direction.get(RECV_F, {}),
+            backward=by_direction.get(RECV_B, {}),
+        )
+        for stage_index, by_direction in mutable_slots.items()
+    }
 
 
 @lru_cache
@@ -347,10 +526,10 @@ class _PipelineSchedule(ABC):
     ) -> None:
         """Run the P2P warm-up protocol for the given stages.
 
-        For ``PipelineStage`` instances this executes the forward/backward vote
-        protocol (which warms up 2-rank sub-communicators) and sets each
-        stage's ``_inference_mode``.  For other stage types it falls back to
-        the legacy ``_get_init_p2p_neighbors_ops`` + ``_batch_p2p`` path.
+        For ``PipelineStage`` instances this determines the metadata mode. When
+        directed-edge communicators are enabled, it also initializes the PP
+        parent, creates the children from the final schedule topology, and
+        warms every child before CUDA graph capture.
 
         Args:
             stages: The pipeline stages owned by this rank.
@@ -358,6 +537,101 @@ class _PipelineSchedule(ABC):
             p2p_done: ``True`` if P2P neighbours have already been initialised
                 (avoids redundant init on eval↔train mode switches).
         """
+        per_direction = {stage.p2p_per_direction for stage in stages}
+        if len(per_direction) != 1:
+            raise RuntimeError(
+                "All local pipeline stages must use the same P2P communicator mode"
+            )
+
+        if next(iter(per_direction)):
+            parent = (
+                stages[0].group
+                if stages[0].group is not None
+                else dist.distributed_c10d._get_default_group()
+            )
+            if any(
+                (
+                    stage.group
+                    if stage.group is not None
+                    else dist.distributed_c10d._get_default_group()
+                )
+                is not parent
+                for stage in stages
+            ):
+                raise RuntimeError("All local pipeline stages must share one PP group")
+
+            pipeline_stages = [
+                stage for stage in stages if isinstance(stage, PipelineStage)
+            ]
+            all_manual = len(pipeline_stages) == len(stages)
+            if pipeline_stages and not all_manual:
+                raise RuntimeError(
+                    "A pipeline schedule cannot mix manual and traced stages"
+                )
+            backend = dist.get_backend(parent)
+            if backend == "fake":
+                if all_manual:
+                    inference_mode = (
+                        InferenceMode.DYNAMIC
+                        if any(
+                            InferenceMode.needs_dynamic(stage._user_meta, has_backward)
+                            for stage in pipeline_stages
+                        )
+                        else InferenceMode.STATIC
+                    )
+                    has_cross_rank = any(
+                        (
+                            not stage.is_first
+                            and not stage._is_same_rank(stage.stage_index - 1)
+                        )
+                        or (
+                            not stage.is_last
+                            and not stage._is_same_rank(stage.stage_index + 1)
+                        )
+                        for stage in pipeline_stages
+                    )
+                    if has_cross_rank and inference_mode == InferenceMode.DYNAMIC:
+                        raise RuntimeError(
+                            "Dynamic shape inference is not supported with a fake "
+                            "process group. Provide complete static metadata to "
+                            "PipelineStage."
+                        )
+                    for stage in pipeline_stages:
+                        stage._inference_mode = inference_mode
+            else:
+                vote = torch.tensor(
+                    [
+                        int(
+                            not all_manual
+                            or all(
+                                not InferenceMode.needs_dynamic(
+                                    stage._user_meta, has_backward
+                                )
+                                for stage in pipeline_stages
+                            )
+                        )
+                    ],
+                    dtype=torch.int32,
+                    device=stages[0].device,
+                )
+                dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=parent)
+                vote_result = vote.item()
+                if all_manual:
+                    inference_mode = (
+                        InferenceMode.STATIC
+                        if vote_result == 1
+                        else InferenceMode.DYNAMIC
+                    )
+                    for stage in pipeline_stages:
+                        stage._inference_mode = inference_mode
+
+            if not p2p_done:
+                for stage in stages:
+                    stage._configure_p2p_direction_groups()
+                if backend != "fake":
+                    self._warmup_p2p_direction_groups(stages, parent)
+            return
+
         if all(isinstance(stage, PipelineStage) for stage in stages):
             # A fake process group cannot exchange real data: a cross-rank
             # vote recv reads zeros and selects DYNAMIC, which then fails in
@@ -419,17 +693,43 @@ class _PipelineSchedule(ABC):
                 all_ops.extend(stage._get_init_p2p_neighbors_ops())
             _wait_batch_p2p(_batch_p2p(all_ops))
 
-        # TODO: STATIC mode group communicator warm-up gap
-        # The vote protocol above warms up 2-rank sub-communicators
-        # (used by `_batch_p2p` homogeneous fast-path).  In DYNAMIC mode,
-        # `_send_meta`/`_recv_meta` (called during `_prepare_forward_infra` →
-        # `_forward_metadata_inference`) also warm up the *group* communicator
-        # (used by `_batch_p2p` mixed-op path).  In STATIC mode, metadata
-        # inference is skipped, so the group communicator is NOT warmed up —
-        # it will be lazily created on the first mixed `_batch_p2p` call
-        # (e.g., 1F1B steady-state with both sends and recvs).
-        # Fix: run `_get_init_p2p_neighbors_ops` + `_batch_p2p` after the
-        # vote, gated by `not p2p_done`.
+    @staticmethod
+    def _warmup_p2p_direction_groups(
+        stages: list[_PipelineStageBase], parent: dist.ProcessGroup
+    ) -> None:
+        """Exercise every directed child communicator once before capture."""
+        topology = stages[0]._p2p_direction_topology
+        if any(stage._p2p_direction_topology != topology for stage in stages):
+            raise RuntimeError("Local stages disagree on P2P communicator topology")
+        rounds = stages[0]._p2p_direction_warmup_rounds
+        if any(stage._p2p_direction_warmup_rounds != rounds for stage in stages):
+            raise RuntimeError("Local stages disagree on P2P warm-up topology")
+
+        group_rank = dist.get_rank(parent)
+        tensor = torch.zeros(1, dtype=torch.int32, device=stages[0].device)
+        for round_edges in rounds:
+            local_edges = [edge for edge in round_edges if group_rank in edge]
+            if not local_edges:
+                continue
+            if len(local_edges) != 1:
+                raise AssertionError("P2P warm-up round is not a matching")
+            source, destination = local_edges[0]
+            child = stages[0]._p2p_direction_groups[(source, destination)]
+            if group_rank == source:
+                op = dist.P2POp(
+                    dist.isend,
+                    tensor,
+                    dist.get_global_rank(parent, destination),
+                    child,
+                )
+            else:
+                op = dist.P2POp(
+                    dist.irecv,
+                    tensor,
+                    dist.get_global_rank(parent, source),
+                    child,
+                )
+            _wait_batch_p2p(dist.batch_isend_irecv([op]))
 
     def _initialize_pp_stages(
         self,
@@ -1497,6 +1797,8 @@ def _add_reduce_grad(
 def _add_unshard_reshard(
     compute_actions: list[_Action | None],
     max_active_stages: int = 3,
+    *,
+    unshard_lookahead: int,
 ) -> list[_Action]:
     """Given a basic schedule involving only compute actions (F,B,W,OVERLAP_F_B), add UNSHARD/RESHARD actions for FSDP.
 
@@ -1505,10 +1807,21 @@ def _add_unshard_reshard(
 
     We abandon the "timestep lock"  during lowering
 
-    max_active_stages controls how many prefetches we allow. It should be measured in mb and tuneable but in practice
-    3 stages is probably the thing we want?
-    (to account for having one f and one b active, and something else prefetching?)
+    ``max_active_stages`` controls residency and eviction. The separately
+    resolved ``unshard_lookahead`` controls how many upcoming distinct stages
+    may issue asynchronous all-gathers. Keeping these windows independent lets
+    callers stagger prefetch without introducing extra reshard/unshard cycles.
     """
+    if (
+        isinstance(unshard_lookahead, bool)
+        or not isinstance(unshard_lookahead, int)
+        or not 1 <= unshard_lookahead <= max_active_stages
+    ):
+        raise ValueError(
+            "unshard_lookahead must be an integer within "
+            f"[1, max_active_stages={max_active_stages}], got "
+            f"{unshard_lookahead!r}"
+        )
 
     def next_stage_indices(count: int, next_actions: list[_Action | None]) -> list[int]:
         """Remove duplicates (same stage, different microbatch), find next 'count' stages that will do compute."""
@@ -1549,12 +1862,12 @@ def _add_unshard_reshard(
         if action is None:
             continue
 
-        # We prefetch the next N stages we'll see, dropping existing stages to make room
-        next_n = next_stage_indices(max_active_stages, compute_actions[i:])
+        resident = next_stage_indices(max_active_stages, compute_actions[i:])
+        prefetch = next_stage_indices(unshard_lookahead, compute_actions[i:])
         # Fetch needs to be ordered correctly, so don't use a set
-        fetch = list(filter(lambda s: s not in active_stages, next_n))
-        # Unclear what the best policy is for eviction, but we can maintain order so we do
-        evict = list(filter(lambda s: s not in next_n, active_stages))
+        fetch = list(filter(lambda s: s not in active_stages, prefetch))
+        # Lookahead does not evict stages that remain inside the residency window.
+        evict = list(filter(lambda s: s not in resident, active_stages))
 
         # logger.debug(
         #     "_add_unshard_reshard Step %d active: %s fetch %s, evict %s",
@@ -1575,6 +1888,39 @@ def _add_unshard_reshard(
         _reshard(stage)
 
     return fsdp_aware_actions
+
+
+def _resolve_unshard_lookahead(
+    unshard_lookahead: _UnshardLookahead,
+    num_pp_ranks: int,
+    max_active_stages: int,
+) -> tuple[int, ...]:
+    """Resolve one all-gather prefetch distance per pipeline rank."""
+    if unshard_lookahead == "default":
+        return (max_active_stages,) * num_pp_ranks
+    if unshard_lookahead == "auto":
+        return tuple(min(rank + 2, max_active_stages) for rank in range(num_pp_ranks))
+    if not isinstance(unshard_lookahead, tuple):
+        raise ValueError(
+            "unshard_lookahead must be 'default', 'auto', or a tuple of "
+            f"{num_pp_ranks} integers, got {unshard_lookahead!r}"
+        )
+    if len(unshard_lookahead) != num_pp_ranks:
+        raise ValueError(
+            "unshard_lookahead tuple length must equal the pipeline degree "
+            f"({num_pp_ranks}), got {len(unshard_lookahead)}"
+        )
+    for rank, lookahead in enumerate(unshard_lookahead):
+        if (
+            isinstance(lookahead, bool)
+            or not isinstance(lookahead, int)
+            or not (1 <= lookahead <= max_active_stages)
+        ):
+            raise ValueError(
+                f"unshard_lookahead[{rank}] must be an integer within "
+                f"[1, max_active_stages={max_active_stages}], got {lookahead!r}"
+            )
+    return unshard_lookahead
 
 
 def _merge_bw(
@@ -2483,6 +2829,10 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     def __init__(self, *args, **kwargs):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
         self._max_active_stages: int = kwargs.pop("max_active_stages", 3)
+        self._unshard_lookahead: _UnshardLookahead = kwargs.pop(
+            "unshard_lookahead", "default"
+        )
+        self._reuse_recv_buffers: bool = kwargs.pop("reuse_recv_buffers", False)
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2492,6 +2842,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
         self.bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
         self.fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+        self._recv_buffer_slots_by_mode: dict[
+            bool, dict[int, _PipelineRecvBufferSlots]
+        ] = {}
 
         # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
         self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
@@ -2545,11 +2898,17 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         Given an in-memory representation for a simple compute-only schedule, lower it to a complex schedule including
         communication actions.  Stores the schedule in self, and must be called before running step_mo()
         """
+        self._recv_buffer_slots_by_mode.clear()
         # validate the provided actions are valid and overrides the default stage_index_to_group_rank
         super()._validate_and_set_stage_mapping(actions)
 
         self.pipeline_order_with_comms: dict[int, list[_Action]] = {}
         if format == "compute_comms":
+            if self._unshard_lookahead != "default":
+                raise ValueError(
+                    "unshard_lookahead cannot be applied to an already-lowered "
+                    "compute_comms schedule"
+                )
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = []
                 for action in actions[rank]:
@@ -2573,9 +2932,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             )
 
             # Perform schedule lowering
+            unshard_lookahead = _resolve_unshard_lookahead(
+                self._unshard_lookahead,
+                num_pp_ranks=len(actions),
+                max_active_stages=self._max_active_stages,
+            )
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
-                    actions[rank], max_active_stages=self._max_active_stages
+                    actions[rank],
+                    max_active_stages=self._max_active_stages,
+                    unshard_lookahead=unshard_lookahead[rank],
                 )
                 self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
                     self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
@@ -2664,6 +3030,22 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             if stage_idx not in self.unsharded_stages:
                 raise AssertionError(f"Attempted to compute on sharded {stage_idx=}")
 
+    def _prepare_recv_buffer_pools(self) -> None:
+        """Prepare deterministic receive pools for the current execution mode."""
+        if not self._reuse_recv_buffers:
+            return
+        slots_by_stage = self._recv_buffer_slots_by_mode.get(self._has_backward)
+        if slots_by_stage is None:
+            slots_by_stage = _assign_pipeline_recv_buffer_slots(
+                self.pipeline_order_with_comms[self.rank],
+                has_backward=self._has_backward,
+            )
+            self._recv_buffer_slots_by_mode[self._has_backward] = slots_by_stage
+        empty = _PipelineRecvBufferSlots({}, {})
+        for stage in self._stages:
+            slots = slots_by_stage.get(stage.stage_index, empty)
+            stage._prepare_recv_buffer_pools(slots.forward, slots.backward)
+
     def _step_microbatches(
         self,
         arg_mbs: list | None = None,
@@ -2684,6 +3066,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._initialize_stages(
             arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
         )
+        self._prepare_recv_buffer_pools()
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -2868,6 +3251,23 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
+        def _release_recv_buffers(action: _Action) -> None:
+            if action.sub_actions is not None:
+                for sub_action in action.sub_actions:
+                    _release_recv_buffers(sub_action)
+                return
+            microbatch_index = action.microbatch_index
+            if microbatch_index is None:
+                return
+
+            stage = stage_index_to_stage[action.stage_index]
+            if stage.has_backward and action.computation_type in (
+                FULL_BACKWARD,
+                BACKWARD_WEIGHT,
+            ):
+                stage._release_bwd_recv_buffers(microbatch_index)
+                stage._release_fwd_recv_buffers(microbatch_index)
+
         # count either full_backward or backward_weight together, to determine when to sync DP grads
         self.backward_counter.clear()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
@@ -2903,6 +3303,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             _perform_action(sub_a)
                     else:
                         _perform_action(action)
+                    _release_recv_buffers(action)
             except Exception as e:
                 logger.error(
                     "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
@@ -2920,6 +3321,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
         while send_ops:
             _wait_batch_p2p(send_ops.pop())
+        if not self._has_backward:
+            for stage in self._stages:
+                stage._release_all_recv_buffers()
 
         if len(self.unshard_ops) != 0:
             raise AssertionError("Unused unshard operations")
@@ -2947,7 +3351,9 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         super().__init__(
             stages=stages,
@@ -2957,7 +3363,9 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -3186,7 +3594,9 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3199,7 +3609,9 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3297,7 +3709,9 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3312,7 +3726,9 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3496,7 +3912,9 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3511,7 +3929,9 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3684,7 +4104,9 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: _UnshardLookahead = "default",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3699,7 +4121,9 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3892,6 +4316,170 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             add_weight_action_if_pending(actions)
 
         return actions
+
+
+def _analyze_pipeline_resource_liveness(
+    schedule: PipelineScheduleMulti,
+    *,
+    physical_rank: int,
+    stage_indices: Sequence[int],
+    granularity: _PipelineResourceGranularity,
+) -> _PipelineResourceLiveness:
+    """Derive deterministic resource slots from a finalized pipeline schedule.
+
+    The resource is acquired immediately before forward and released after the
+    corresponding full backward or weight-backward action. Input-backward does
+    not release it because a later weight-backward may still consume state.
+
+    Args:
+        schedule: Constructed multi-stage schedule that will execute the step.
+        physical_rank: Pipeline rank whose local actions should be analyzed.
+        stage_indices: Global logical stages that use the planned resource.
+        granularity: Share one lifetime across a microbatch or track each
+            stage/microbatch pair independently.
+
+    Returns:
+        An immutable liveness and slot-assignment plan.
+
+    Raises:
+        ValueError: If the request or finalized schedule is inconsistent.
+    """
+    if granularity not in ("microbatch", "stage_microbatch"):
+        raise ValueError(f"Unsupported resource granularity: {granularity}")
+
+    tracked_stages = tuple(stage_indices)
+    if not tracked_stages:
+        raise ValueError("stage_indices must not be empty")
+    if len(set(tracked_stages)) != len(tracked_stages):
+        raise ValueError("stage_indices must be unique")
+
+    pipeline_order = getattr(schedule, "pipeline_order_with_comms", None)
+    if pipeline_order is None:
+        pipeline_order = schedule.pipeline_order
+    if physical_rank not in pipeline_order:
+        raise ValueError(
+            f"Rank {physical_rank} is not present in the pipeline schedule"
+        )
+
+    num_microbatches = schedule._n_microbatches
+    tracked_stage_set = set(tracked_stages)
+    local_compute_actions: list[tuple[int, _Action]] = []
+    starts: dict[tuple[int, int], int] = {}
+    releases: dict[tuple[int, int], int] = {}
+    input_backwards: set[tuple[int, int]] = set()
+
+    for position, action in enumerate(pipeline_order[physical_rank]):
+        if action is None:
+            continue
+        if action.sub_actions is not None:
+            if any(
+                sub_action.stage_index in tracked_stage_set
+                for sub_action in action.sub_actions
+            ):
+                raise ValueError(
+                    "Overlapped pipeline actions are not supported by resource "
+                    "liveness analysis"
+                )
+            continue
+        if not action.is_compute_op or action.stage_index not in tracked_stage_set:
+            continue
+        if action.microbatch_index is None:
+            raise ValueError(f"Compute action {action} has no microbatch index")
+        if not 0 <= action.microbatch_index < num_microbatches:
+            raise ValueError(
+                f"Action {action} has a microbatch outside [0, {num_microbatches})"
+            )
+
+        local_compute_actions.append((position, action))
+        key = (action.stage_index, action.microbatch_index)
+        if action.computation_type == FORWARD:
+            if key in starts:
+                raise ValueError(f"Resource lifetime {key} has multiple forwards")
+            starts[key] = position
+        elif action.computation_type == BACKWARD_INPUT:
+            if key in input_backwards:
+                raise ValueError(
+                    f"Resource lifetime {key} has multiple input backwards"
+                )
+            input_backwards.add(key)
+        elif action.computation_type in (FULL_BACKWARD, BACKWARD_WEIGHT):
+            if key in releases:
+                raise ValueError(
+                    f"Resource lifetime {key} has multiple release actions"
+                )
+            if (
+                action.computation_type == BACKWARD_WEIGHT
+                and key not in input_backwards
+            ):
+                raise ValueError(
+                    f"Resource lifetime {key} has weight backward without "
+                    "input backward"
+                )
+            releases[key] = position
+
+    expected = {
+        (stage_index, microbatch_index)
+        for stage_index in tracked_stages
+        for microbatch_index in range(num_microbatches)
+    }
+    if starts.keys() != expected:
+        missing = sorted(expected - starts.keys())
+        extra = sorted(starts.keys() - expected)
+        raise ValueError(
+            f"Forward actions do not match tracked lifetimes; {missing=}, {extra=}"
+        )
+    if releases.keys() != expected:
+        missing = sorted(expected - releases.keys())
+        extra = sorted(releases.keys() - expected)
+        raise ValueError(
+            f"Backward actions do not match tracked lifetimes; {missing=}, {extra=}"
+        )
+    for key in expected:
+        if releases[key] <= starts[key]:
+            raise ValueError(f"Resource lifetime {key} ends before its forward")
+
+    intervals: list[tuple[_PipelineResourceKey, int, int]]
+    if granularity == "microbatch":
+        intervals = [
+            (
+                microbatch_index,
+                min(
+                    starts[(stage_index, microbatch_index)]
+                    for stage_index in tracked_stages
+                ),
+                max(
+                    releases[(stage_index, microbatch_index)]
+                    for stage_index in tracked_stages
+                ),
+            )
+            for microbatch_index in range(num_microbatches)
+        ]
+    else:
+        intervals = [
+            (key, starts[key], releases[key])
+            for key in sorted(expected, key=lambda item: (starts[item], item))
+        ]
+
+    assignments, num_slots = _assign_pipeline_resource_slots(intervals)
+    lifetimes = tuple(
+        _PipelineResourceLifetime(
+            stage_index=key[0] if isinstance(key, tuple) else None,
+            microbatch_index=key[1] if isinstance(key, tuple) else key,
+            start_position=start,
+            release_position=release,
+            slot=assignments[key],
+        )
+        for key, start, release in intervals
+    )
+    return _PipelineResourceLiveness(
+        physical_rank=physical_rank,
+        granularity=granularity,
+        stage_indices=tracked_stages,
+        num_microbatches=num_microbatches,
+        local_compute_actions=tuple(local_compute_actions),
+        lifetimes=lifetimes,
+        num_slots=num_slots,
+    )
 
 
 def get_schedule_class(schedule_name: str):

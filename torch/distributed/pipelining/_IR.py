@@ -1159,10 +1159,21 @@ class Pipe(torch.nn.Module):
         stage_index: int,
         device: torch.device,
         group: ProcessGroup | None = None,
+        *,
+        pass_pipeline_metadata: bool = False,
     ) -> _PipelineStage:
         """
         Create a `PipelineStage` given a stage index and distributed group.
-        The `PipelineStage` can run with `PipelineSchedule`s.
+
+        Args:
+            stage_index: Global index of the stage to construct.
+            device: Device on which the stage executes.
+            group: Process group used for pipeline communication.
+            pass_pipeline_metadata: Add the global stage index and microbatch
+                index to every executed forward.
+
+        Returns:
+            A pipeline stage that can run with `PipelineSchedule`s.
         """
         # Find stage module
         stage_module = self.get_stage_module(stage_index)
@@ -1186,7 +1197,14 @@ class Pipe(torch.nn.Module):
         # recycling them. When python recycles them, other stage modules (which
         # are irrelevant to current rank) can be automatically freed.
         pipe_info = self.info()
-        return _PipelineStage(stage_module, stage_index, pipe_info, device, group)
+        return _PipelineStage(
+            stage_module,
+            stage_index,
+            pipe_info,
+            device,
+            group,
+            pass_pipeline_metadata=pass_pipeline_metadata,
+        )
 
 
 class SplitPoint(Enum):
