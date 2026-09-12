@@ -2598,14 +2598,42 @@ class TestShouldRun(unittest.TestCase):
         # 3.14t among them, because cp314t wheels exist for the pinned DSL: gating on
         # free-threaded alone would skip it and ship a kernel-free 3.14t CUDA wheel.
         # Free-threaded is not the question; a published tag is.
+        #
+        # 3.10/3.11 are NOT here despite having published wheels -- CI cannot install
+        # them, see test_an_interpreter_ci_cannot_install_for_skips.
         for version, ft in (
-            ((3, 10), False),
+            ((3, 12), False),
             ((3, 13), False),
             ((3, 14), False),
             ((3, 14), True),
         ):
             with self.subTest(version=version, free_threaded=ft):
                 self.assertTrue(self._run_on(version, ft, missing=("cutlass",)))
+
+    def test_an_interpreter_ci_cannot_install_for_skips(self):
+        # install_cutlass_dsl returns early below 3.12, so RUN there means stage 2
+        # reaches require_runtimes() and fails the build after a full compile -- which
+        # is what broke every CUDA manywheel leg of the 2026-09-10 nightly once the
+        # first aot.py declaration landed.
+        for version in ((3, 10), (3, 11)):
+            with self.subTest(version=version):
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertFalse(self._run_on(version, False, missing=("cutlass",)))
+                # The reason must NOT be the wheel-tag one: cp310/cp311 wheels are
+                # published, so printing "no DSL wheel" would send a reader to PyPI
+                # to check something that is not the problem.
+                reason = err.getvalue()
+                self.assertIn("below python 3.12 CI installs no DSL runtime", reason)
+                self.assertNotIn("no DSL wheel for python", reason)
+                self.assertIn(f"{version[0]}.{version[1]}", err.getvalue())
+
+    def test_an_installed_runtime_below_312_still_runs(self):
+        # The arm sits inside the missing_runtimes() guard, so it answers "will this
+        # build have to install something?" and not "which interpreter is this". A
+        # developer who installed the DSL by hand on 3.10 still gets AOT kernels.
+        for version in ((3, 10), (3, 11)):
+            with self.subTest(version=version):
+                self.assertTrue(self._run_on(version, False, missing=()))
 
     def test_interpreter_gate_survives_a_runtime_less_toolchain(self):
         # The gate asks "must this build install something?", so one toolchain missing
@@ -4392,6 +4420,10 @@ class TestCiAndCMakeWiring(unittest.TestCase):
             ("no toolchain targets this backend", "no toolchain targets this backend"),
             ("CUDA older than", "older than 13 or cannot be determined"),
             ("no published DSL wheel", "no published DSL wheel"),
+            (
+                "below python 3.12 CI installs no DSL runtime",
+                "below Python 3.12",
+            ),
             ("a static torch_cuda", "`BUILD_SHARED_LIBS=OFF`"),
             ("nothing declares kernels", "nothing declares kernels"),
             ("names no exportable arch", "no supported arch is targeted"),
