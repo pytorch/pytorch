@@ -1231,18 +1231,29 @@ if(USE_XPU)
     endif()
   endif()
   execute_process(
-    COMMAND git fetch --quiet
+    COMMAND git rev-parse HEAD
     WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
-    RESULT_VARIABLE _exitcode)
+    OUTPUT_VARIABLE TORCH_XPU_OPS_CURRENT_COMMIT
+    RESULT_VARIABLE _exitcode
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(NOT _exitcode EQUAL 0)
-    message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+    set(TORCH_XPU_OPS_CURRENT_COMMIT "")
   endif()
-  execute_process(
-    COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
-    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
-    RESULT_VARIABLE _exitcode)
-  if(NOT _exitcode EQUAL 0)
-    message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+  if(NOT TORCH_XPU_OPS_CURRENT_COMMIT STREQUAL TORCH_XPU_OPS_COMMIT)
+    execute_process(
+      COMMAND git fetch --quiet
+      WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+    endif()
+    execute_process(
+      COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
+      WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+    endif()
   endif()
 
   set(TORCH_XPU_OPS_INCLUDE_DIRS
@@ -1250,6 +1261,19 @@ if(USE_XPU)
       ${TORCH_SRC_DIR}/csrc/api/include
       ${Caffe2_CPU_INCLUDE}
       ${Caffe2_XPU_INCLUDE})
+  # Keep torch-xpu-ops compile flags Python-ABI-agnostic so unified manywheel
+  # jobs can reuse SYCL/C++ objects across per-Python wheel iterations.
+  if(DEFINED Python_INCLUDE_DIRS)
+    list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python_INCLUDE_DIRS})
+  endif()
+  if(DEFINED Python3_INCLUDE_DIRS)
+    list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python3_INCLUDE_DIRS})
+  endif()
+  # Some Python-derived include paths (for example NumPy/site-packages entries)
+  # can still arrive through transitive include sets and vary per CPython ABI.
+  # Strip them so FindSYCL custom-command scripts stay stable across iterations.
+  list(FILTER TORCH_XPU_OPS_INCLUDE_DIRS EXCLUDE REGEX "(^|/)site-packages(/|$)")
+  list(FILTER TORCH_XPU_OPS_INCLUDE_DIRS EXCLUDE REGEX "(^|/)python[0-9.]+(/|$)")
   # Pass the target as a dependency so that ATen headers generation
   # could be followed by torch-xpu-ops build.
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.

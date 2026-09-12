@@ -45,38 +45,54 @@ IF(NOT MKLDNN_FOUND)
                            Detected system '${CMAKE_SYSTEM_NAME}' is not supported.")
     endif()
 
-    set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
-    include(ProcessorCount)
-    ProcessorCount(proc_cnt)
-    if((DEFINED ENV{MAX_JOBS}) AND ("$ENV{MAX_JOBS}" LESS_EQUAL ${proc_cnt}))
-      list(APPEND DNNL_MAKE_COMMAND "-j" "$ENV{MAX_JOBS}")
-      if(CMAKE_GENERATOR MATCHES "Make|Ninja")
-        list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
-      endif()
+    if(XPU_MKLDNN_DIR_PREFIX)
+      set(_xpu_mkldnn_prefix "${XPU_MKLDNN_DIR_PREFIX}")
+    else()
+      set(_xpu_mkldnn_prefix "${CMAKE_CURRENT_BINARY_DIR}/xpu_mkldnn_proj-prefix")
     endif()
-    ExternalProject_Add(xpu_mkldnn_proj
-      GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
-      GIT_TAG v3.12.3
-      PREFIX ${XPU_MKLDNN_DIR_PREFIX}
-      BUILD_IN_SOURCE 0
-      CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
-      -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
-      -DDNNL_GPU_RUNTIME=SYCL
-      -DDNNL_CPU_RUNTIME=NONE
-      -DDNNL_BUILD_TESTS=OFF
-      -DDNNL_BUILD_EXAMPLES=OFF
-      -DONEDNN_BUILD_GRAPH=ON
-      -DDNNL_LIBRARY_TYPE=STATIC
-      -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
-      -G ${CMAKE_GENERATOR} # Align Generator to Torch
-      BUILD_COMMAND ${DNNL_MAKE_COMMAND}
-      BUILD_BYPRODUCTS "xpu_mkldnn_proj-prefix/src/xpu_mkldnn_proj-build/src/${DNNL_LIB_NAME}"
-      INSTALL_COMMAND ""
-    )
+    set(_xpu_mkldnn_src_dir "${_xpu_mkldnn_prefix}/src/xpu_mkldnn_proj")
+    set(_xpu_mkldnn_build_dir "${_xpu_mkldnn_prefix}/src/xpu_mkldnn_proj-build")
+    set(_xpu_mkldnn_lib "${_xpu_mkldnn_build_dir}/src/${DNNL_LIB_NAME}")
 
-    ExternalProject_Get_Property(xpu_mkldnn_proj SOURCE_DIR BINARY_DIR)
-    set(XPU_MKLDNN_LIBRARIES ${BINARY_DIR}/src/${DNNL_LIB_NAME})
-    set(XPU_MKLDNN_INCLUDE ${SOURCE_DIR}/include ${BINARY_DIR}/include)
+    if(EXISTS "${_xpu_mkldnn_lib}" AND IS_DIRECTORY "${_xpu_mkldnn_src_dir}/include")
+      message(STATUS "Reusing existing oneDNN XPU build: ${_xpu_mkldnn_lib}")
+      add_custom_target(xpu_mkldnn_proj)
+      set(XPU_MKLDNN_LIBRARIES "${_xpu_mkldnn_lib}")
+      set(XPU_MKLDNN_INCLUDE "${_xpu_mkldnn_src_dir}/include" "${_xpu_mkldnn_build_dir}/include")
+    else()
+      set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
+      include(ProcessorCount)
+      ProcessorCount(proc_cnt)
+      if((DEFINED ENV{MAX_JOBS}) AND ("$ENV{MAX_JOBS}" LESS_EQUAL ${proc_cnt}))
+        list(APPEND DNNL_MAKE_COMMAND "-j" "$ENV{MAX_JOBS}")
+        if(CMAKE_GENERATOR MATCHES "Make|Ninja")
+          list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
+        endif()
+      endif()
+      ExternalProject_Add(xpu_mkldnn_proj
+        GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
+        GIT_TAG v3.12.3
+        PREFIX ${XPU_MKLDNN_DIR_PREFIX}
+        BUILD_IN_SOURCE 0
+        CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
+        -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
+        -DDNNL_GPU_RUNTIME=SYCL
+        -DDNNL_CPU_RUNTIME=NONE
+        -DDNNL_BUILD_TESTS=OFF
+        -DDNNL_BUILD_EXAMPLES=OFF
+        -DONEDNN_BUILD_GRAPH=ON
+        -DDNNL_LIBRARY_TYPE=STATIC
+        -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER}
+        -G ${CMAKE_GENERATOR}
+        BUILD_COMMAND ${DNNL_MAKE_COMMAND}
+        BUILD_BYPRODUCTS "${_xpu_mkldnn_build_dir}/src/${DNNL_LIB_NAME}"
+        INSTALL_COMMAND ""
+      )
+
+      ExternalProject_Get_Property(xpu_mkldnn_proj SOURCE_DIR BINARY_DIR)
+      set(XPU_MKLDNN_LIBRARIES ${BINARY_DIR}/src/${DNNL_LIB_NAME})
+      set(XPU_MKLDNN_INCLUDE ${SOURCE_DIR}/include ${BINARY_DIR}/include)
+    endif()
     # This target would be further linked to libtorch_xpu.so.
     # The libtorch_xpu.so would contain Conv&GEMM operators that depend on
     # oneDNN primitive implementations inside libdnnl.a.
