@@ -168,11 +168,14 @@ static void complex_mps_kernel(TensorIterator& iter) {
 
 // `sub_out` routes through `add_stub` with a negated alpha, same as CPU/CUDA/XPU
 static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
-  if (alpha.isComplex() || alpha.toDouble() != 1.0) {
-    lib.exec_binary_kernel(iter, "add_alpha", alpha);
-  } else {
-    lib.exec_binary_kernel(iter, "add");
+  const auto alpha_val = alpha.toComplexDouble();
+  if (alpha_val == 1.0) {
+    return lib.exec_binary_kernel(iter, "add");
   }
+  if (alpha_val == -1.0 && iter.common_dtype() != kBool) {
+    return lib.exec_binary_kernel(iter, "sub");
+  }
+  lib.exec_binary_kernel(iter, "add_alpha", alpha);
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
