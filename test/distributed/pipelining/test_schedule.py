@@ -51,6 +51,7 @@ from torch.distributed.pipelining.schedules import (
     RECV_F,
     RESHARD,
     SEND_B,
+    SEND_F,
     UNSHARD,
     W,
 )
@@ -1009,6 +1010,165 @@ class TestSchedulePlan(TestCase):
         self.assertEqual(count_stage_15_unshards(default_schedule), 4)
         self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
 
+    @staticmethod
+    def _interleaved_schedule(*, unshard_lookahead="default"):
+        stages = [
+            MockPipelineStage(group_size=4, group_rank=3, num_stages=16)
+            for _ in range(4)
+        ]
+        return ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+            max_active_stages=4,
+            unshard_lookahead=unshard_lookahead,
+        )
+
+    @staticmethod
+    def _unshards_before_first_compute(actions):
+        count = 0
+        for action in actions:
+            if action.computation_type == UNSHARD:
+                count += 1
+            elif action.is_compute_op:
+                break
+        return count
+
+    def test_unshard_lookahead_default_preserves_residency_window(self):
+        schedule = self._interleaved_schedule()
+        self.assertEqual(
+            [
+                self._unshards_before_first_compute(
+                    schedule.pipeline_order_with_comms[rank]
+                )
+                for rank in range(4)
+            ],
+            [4, 4, 4, 4],
+        )
+
+    def test_unshard_lookahead_tuple_selects_each_rank(self):
+        schedule = self._interleaved_schedule(unshard_lookahead=(1, 2, 3, 4))
+        self.assertEqual(
+            [
+                self._unshards_before_first_compute(
+                    schedule.pipeline_order_with_comms[rank]
+                )
+                for rank in range(4)
+            ],
+            [1, 2, 3, 4],
+        )
+
+    def test_unshard_lookahead_auto_is_rank_aware(self):
+        schedule = self._interleaved_schedule(unshard_lookahead="auto")
+        self.assertEqual(
+            [
+                self._unshards_before_first_compute(
+                    schedule.pipeline_order_with_comms[rank]
+                )
+                for rank in range(4)
+            ],
+            [2, 3, 4, 4],
+        )
+
+    def test_unshard_lookahead_rejects_invalid_values(self):
+        for lookahead in (
+            None,
+            True,
+            2,
+            "adaptive",
+            [1, 2, 3, 4],
+            (1, 2, 3),
+            (1, 2, 3, 5),
+            (1, 2, 3, False),
+        ):
+            with self.subTest(unshard_lookahead=lookahead):
+                with self.assertRaises(ValueError):
+                    self._interleaved_schedule(  # type: ignore[arg-type]
+                        unshard_lookahead=lookahead
+                    )
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleLoopedBFS,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_unshard_lookahead_preserves_non_prefetch_work(self, ScheduleClass):
+        num_local_stages = (
+            2 if ScheduleClass in (ScheduleZBVZeroBubble, ScheduleDualPipeV) else 4
+        )
+        group_size = 4
+        num_stages = num_local_stages * group_size
+
+        def build(lookahead):
+            stages = [
+                MockPipelineStage(group_size=group_size, num_stages=num_stages)
+                for _ in range(num_local_stages)
+            ]
+            return ScheduleClass(
+                stages,
+                n_microbatches=16,
+                max_active_stages=num_local_stages,
+                unshard_lookahead=lookahead,
+            )
+
+        default = build("default")
+        p2p = (SEND_F, SEND_B, RECV_F, RECV_B)
+
+        for lookahead in ((1,) * group_size, "auto"):
+            staggered = build(lookahead)
+            for rank in range(group_size):
+                with self.subTest(lookahead=lookahead, rank=rank):
+                    staggered_actions = staggered.pipeline_order_with_comms[rank]
+                    default_actions = default.pipeline_order_with_comms[rank]
+                    self.assertEqual(
+                        sum(a.computation_type == UNSHARD for a in staggered_actions),
+                        sum(a.computation_type == UNSHARD for a in default_actions),
+                    )
+                    self.assertEqual(
+                        sum(a.computation_type == RESHARD for a in staggered_actions),
+                        sum(a.computation_type == RESHARD for a in default_actions),
+                    )
+                    self.assertEqual(
+                        [
+                            a
+                            for a in staggered_actions
+                            if a.computation_type != UNSHARD
+                            and a.computation_type not in p2p
+                        ],
+                        [
+                            a
+                            for a in default_actions
+                            if a.computation_type != UNSHARD
+                            and a.computation_type not in p2p
+                        ],
+                    )
+                    self.assertEqual(
+                        {
+                            kind: sum(
+                                a.computation_type == kind for a in staggered_actions
+                            )
+                            for kind in p2p
+                        },
+                        {
+                            kind: sum(
+                                a.computation_type == kind for a in default_actions
+                            )
+                            for kind in p2p
+                        },
+                    )
+
+    def test_unshard_lookahead_rejects_prelowered_schedule(self):
+        schedule = self._interleaved_schedule(unshard_lookahead=(2, 2, 2, 2))
+        with self.assertRaisesRegex(ValueError, "already-lowered"):
+            schedule._prepare_schedule_with_comms(
+                schedule.pipeline_order_with_comms,
+                format="compute_comms",
+            )
+
     @parametrize(
         "ScheduleClass",
         [ScheduleInterleaved1F1B, ScheduleInterleavedZeroBubble],
@@ -1197,7 +1357,10 @@ class TestScheduleLowering(TestCase):
         compute_sch = self._parse_actions(test_info["compute"])
         expected_comms_sch = self._parse_actions(test_info["comms"])
 
-        comms_sch = _add_unshard_reshard(compute_sch)
+        comms_sch = _add_unshard_reshard(
+            compute_sch,
+            unshard_lookahead=3,
+        )
         for expected, actual in zip(expected_comms_sch, comms_sch):
             self.assertEqual(
                 expected,
