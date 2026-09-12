@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
 
 import torch
 from torch._inductor import config
@@ -10,13 +9,9 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
     HAS_GPU_AND_TRITON,
     requires_gpu,
 )
-
-
-requires_cuda_triton = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
 
 
 class TestControlDeps(InductorTestCase):
@@ -685,7 +680,7 @@ class TestControlDeps(InductorTestCase):
                 "OrderingBarrier is_no_op() must be True",
             )
 
-    @requires_cuda_triton
+    @requires_gpu()
     def test_bidirectional_stream_sync_correctness(self):
         """Regression: passthrough OrderingBarrier must be ordered after all subgraph ops.
 
@@ -698,25 +693,25 @@ class TestControlDeps(InductorTestCase):
         from torch._inductor.utils import run_and_get_code
 
         def fn(x):
-            s1 = torch.cuda.Stream()
-            s2 = torch.cuda.Stream()
-            event_s1 = torch.cuda.Event()
-            event_s2 = torch.cuda.Event()
-            with torch.cuda.stream(s1):
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            event_s1 = torch.Event()
+            event_s2 = torch.Event()
+            with s1:
                 a = x * 2
                 event_s1.record(s1)
-            with torch.cuda.stream(s2):
+            with s2:
                 event_s1.wait(s2)
                 b = a + 1
                 event_s2.record(s2)
-            with torch.cuda.stream(s1):
+            with s1:
                 event_s2.wait(s1)
                 c = b * 2
             s1.synchronize()
             s2.synchronize()
             return c
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
         expected = fn(x)
         result, _ = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(result, expected)
@@ -789,7 +784,7 @@ class TestControlDeps(InductorTestCase):
             result = torch.compile(fn)(a, b)
             torch.testing.assert_close(result, fn(a, b))
 
-    @requires_cuda_triton
+    @requires_gpu()
     def test_host_to_device_transfer_between_sync_passthroughs(self):
         """The interleaving above, arrived at without touching the graph.
 
@@ -802,19 +797,19 @@ class TestControlDeps(InductorTestCase):
         def fn(x, w):
             meta = torch.tensor(x.shape[-2], dtype=torch.long)
             residual = x.sin()
-            s = torch.cuda.Stream()
-            with torch.cuda.stream(s):
+            s = torch.Stream()
+            with s:
                 out = x @ w
             s.synchronize()
             extra = meta.to(device=out.device, dtype=out.dtype)
             return torch.cat((out, extra.expand(*out.shape[:-1], 1), residual), dim=-1)
 
-        x = torch.randn(8, 128, device="cuda", dtype=torch.bfloat16)
-        w = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        w = torch.randn(128, 128, device=GPU_TYPE, dtype=torch.bfloat16)
         expected = fn(x, w)
         with torch.no_grad():
             result = torch.compile(fn, mode="reduce-overhead")(x, w)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         torch.testing.assert_close(result, expected)
 
 
