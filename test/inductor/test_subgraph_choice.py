@@ -1,12 +1,24 @@
 # Owner(s): ["module: inductor"]
+import math
+import unittest
 from unittest import mock
 from unittest.mock import MagicMock
 
 import torch
+from torch._inductor import config
+from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
 from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
-from torch._inductor.lowering import register_lowering
-from torch._inductor.select_algorithm import autotune_select_algorithm
+from torch._inductor.kernel.decompose_k import (
+    BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
+    decomposeK as blackwell_decomposeK,
+    get_blackwell_decompose_k_splits,
+    lower_blackwell_decompose_k_partial,
+)
+from torch._inductor.lowering import lowerings, register_lowering
+from torch._inductor.select_algorithm import autotune_select_algorithm, TritonTemplate
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -24,6 +36,42 @@ def decomposeK(a, b, kPartitions):
     return reduced_buf.to(a.dtype)
 
 
+BLACKWELL_K_SPLIT = 8
+
+
+# This test-only op exposes the internal partial-BMM lowering so tests can
+# force a specific Triton schedule without depending on whole-plan autotuning.
+@torch.library.custom_op(
+    "inductor_test::blackwell_decompose_k_partial", mutates_args={}
+)
+def blackwell_decompose_k_partial(
+    a: torch.Tensor, b: torch.Tensor, two_ctas: bool
+) -> torch.Tensor:
+    m, k = a.shape
+    n = b.shape[1]
+    m_pad = math.ceil(m / 128) * 128
+    block_k = 64 if two_ctas else 128
+    k_part = math.ceil(math.ceil(k / BLACKWELL_K_SPLIT) / block_k) * block_k
+    out = torch.zeros(
+        (BLACKWELL_K_SPLIT, m_pad, n), device=a.device, dtype=torch.float32
+    )
+    for split in range(BLACKWELL_K_SPLIT):
+        begin = split * k_part
+        end = min(begin + k_part, k)
+        if begin < end:
+            out[split, :m] = torch.mm(
+                a[:, begin:end], b[begin:end], out_dtype=torch.float32
+            )
+    return out.view(BLACKWELL_K_SPLIT * m_pad, n)
+
+
+@blackwell_decompose_k_partial.register_fake
+def _(a: torch.Tensor, b: torch.Tensor, two_ctas: bool) -> torch.Tensor:
+    del two_ctas
+    m_pad = math.ceil(a.shape[0] / 128) * 128
+    return a.new_empty((BLACKWELL_K_SPLIT * m_pad, b.shape[1]), dtype=torch.float32)
+
+
 class TestSubgraphChoice(TestCase):
     def setUp(self):
         super().setUp()
@@ -35,6 +83,7 @@ class TestSubgraphChoice(TestCase):
         )
 
     def test_subgraph_decompose_k(self):
+        from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
         from torch._inductor.kernel.mm import aten_mm
         from torch._inductor.kernel.mm_common import mm_args
 
@@ -56,9 +105,7 @@ class TestSubgraphChoice(TestCase):
 
             kPartitions = 256
 
-            decompose_k_subgraph_template = (
-                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
-            )
+            decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
             decompose_k_subgraph_template.maybe_append_choice(
                 choices,
@@ -95,6 +142,7 @@ class TestSubgraphChoice(TestCase):
         torch.testing.assert_close(res, a_in @ b_in, atol=1e-1, rtol=1e-1)
 
     def test_subgraph_freeze_layout(self):
+        from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
         from torch._inductor.kernel.mm_common import mm_args
 
         M, N, K = (4, 128, 14240)
@@ -125,9 +173,7 @@ class TestSubgraphChoice(TestCase):
 
             kPartitions = 2
 
-            decompose_k_subgraph_template = (
-                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
-            )
+            decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
             decompose_k_subgraph_template.maybe_append_choice(
                 choices,
@@ -168,6 +214,434 @@ class TestSubgraphChoice(TestCase):
             compiled_func = torch.compile(func, mode="max-autotune", dynamic=False)
 
             compiled_func(a_in, b_in)
+
+
+@unittest.skipUnless(
+    HAS_GPU and SM100OrLater,
+    "requires NVIDIA SM100+",
+)
+class TestBlackwellDecomposeKSubgraphChoice(TestCase):
+    def test_backend_specific_split_candidates(self):
+        one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
+        two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]
+
+        def splits(m, n, k, partial_config):
+            return get_blackwell_decompose_k_splits(m, n, k, 148, partial_config)
+
+        production_ks = (
+            10_879_109,
+            10_954_007,
+            11_091_857,
+            11_047_127,
+            11_029_264,
+        )
+        for k in production_ks:
+            self.assertEqual(splits(256, 128, k, one_cta), [74, 148])
+
+        self.assertEqual(splits(128, 128, 11_047_127, one_cta), [148, 296])
+        self.assertEqual(splits(128, 256, 969_147, one_cta), [74, 149])
+        self.assertEqual(splits(256, 424, 973_138, two_cta_wide), [37, 74])
+        self.assertEqual(splits(512, 424, 11_047_127, two_cta_wide), [19, 37])
+
+        # Exact and uneven K use the same bounded geometry-based candidates,
+        # while shallow K and a lone M tile reject the 2CTA schedule.
+        self.assertEqual(splits(256, 424, 973_248, two_cta_wide), [37, 74])
+        self.assertEqual(splits(256, 128, 8_193, one_cta), [])
+        self.assertEqual(splits(128, 424, 11_047_127, two_cta_wide), [])
+
+    def _run_forced_triton_plan(
+        self, two_ctas: bool, *, use_meta_ws: bool = True, m: int = 256
+    ) -> None:
+        config_index = 1 if two_ctas else 0
+        partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+        effective_two_ctas = use_meta_ws and two_ctas
+
+        def lowering(a, b, two_ctas_arg):
+            if bool(two_ctas_arg) != two_ctas:
+                raise AssertionError("unexpected 2CTA specialization")
+            m, k = map(int, a.get_size())
+            m_tiles = math.ceil(m / partial_config.block_m)
+            if effective_two_ctas:
+                m_tiles = math.ceil(m_tiles / 2) * 2
+            m_pad = m_tiles * partial_config.block_m
+            k_part = (
+                math.ceil(math.ceil(k / BLACKWELL_K_SPLIT) / partial_config.block_k)
+                * partial_config.block_k
+            )
+            return lower_blackwell_decompose_k_partial(
+                a,
+                b,
+                BLACKWELL_K_SPLIT,
+                config_index,
+                m_pad,
+                k_part,
+            )
+
+        k, n = 8193, 128
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def fn(x, y):
+            partial = blackwell_decompose_k_partial(x, y, two_ctas)
+            return partial.view(BLACKWELL_K_SPLIT, m, n).sum(0).to(torch.bfloat16)
+
+        with (
+            mock.patch.dict(
+                lowerings,
+                {
+                    torch.ops.inductor_test.blackwell_decompose_k_partial.default: lowering
+                },
+            ),
+            mock.patch(
+                "torch._inductor.kernel.decompose_k.meta_ws_enabled",
+                return_value=use_meta_ws,
+            ),
+            mock.patch("torch._inductor.kernel.decompose_k.USE_META_WS", use_meta_ws),
+            config.patch(
+                compile_threads=1,
+                **{"triton.enable_template_tma_store": True},
+            ),
+        ):
+            actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
+
+        torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
+        source = "\n".join(codes)
+        self.assertIn("make_tensor_descriptor", source)
+        self.assertIn(f"BATCH_SIZE : tl.constexpr = {BLACKWELL_K_SPLIT}", source)
+        self.assertEqual("USE_META_WS : tl.constexpr = True" in source, use_meta_ws)
+        self.assertEqual("FLATTEN : tl.constexpr = True" in source, not use_meta_ws)
+        self.assertEqual("TWO_CTAS : tl.constexpr = True" in source, effective_two_ctas)
+        self.assertIn("b_desc = triton.language.make_tensor_descriptor", source)
+        self.assertIn("b = b_desc.load", source)
+        self.assertNotIn("prologue_descriptor", source)
+
+    def test_forced_triton_1cta(self):
+        self._run_forced_triton_plan(False)
+
+    def test_1cta_fused_producer_uses_descriptor_loads(self):
+        m, k, n = 128, 262_145, 256
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        x = torch.randn(k, n, device=GPU_TYPE, dtype=torch.float32)
+        gate = torch.randn(k, n, device=GPU_TYPE, dtype=torch.float32)
+
+        def fn(a, x, gate):
+            b = (x * torch.sigmoid(gate)).to(torch.bfloat16)
+            return a @ b
+
+        with (
+            mock.patch.object(TritonTemplate, "test_cache", True),
+            config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="TRITON",
+                benchmark_epilogue_fusion=True,
+                compile_threads=1,
+                assume_aligned_inputs=True,
+                **{
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_blackwell_decompose_k": True,
+                    "triton.num_decompose_k_splits": 2,
+                    "triton.decompose_k_bmm_backends": "TRITON",
+                    "test_configs.autotune_choice_name_regex": "_triton_",
+                },
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, x, gate
+            )
+
+        torch.testing.assert_close(actual, fn(a, x, gate), atol=16.0, rtol=1e-1)
+        source = codes[-1]
+        self.assertIn("tl.sigmoid", source)
+        self.assertIn("prologue_descriptor0 = tl.make_tensor_descriptor", source)
+        self.assertIn("prologue_descriptor1 = tl.make_tensor_descriptor", source)
+        self.assertGreaterEqual(
+            source.count("shape=[262145, 256], strides=[256, 1]"), 2
+        )
+        self.assertIn("prologue_descriptor0.load([offs_k, offs_bn])", source)
+        self.assertIn("prologue_descriptor1.load([offs_k, offs_bn])", source)
+        self.assertIn("warp_specialize=WARP_SPECIALIZE", source)
+        self.assertIn("BLOCK_K : tl.constexpr = 64", source)
+        self.assertIn("TWO_CTAS : tl.constexpr = False", source)
+        self.assertIn("num_stages=4", source)
+        self.assertNotIn("arg_B", source)
+        self.assertIn("triton_red_fused", source)
+
+    def test_1cta_fused_cat_cast_uses_descriptor_loads(self):
+        m, k, half_n = 128, 262_145, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            b = torch.cat((left, right), dim=1).to(torch.bfloat16)
+            return a @ b
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="TRITON",
+            benchmark_epilogue_fusion=True,
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.num_decompose_k_splits": 2,
+                "triton.decompose_k_bmm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": "_triton_",
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right), atol=16.0, rtol=1e-1)
+        source = codes[-1]
+        self.assertEqual(source.count("shape=[262145, 64], strides=[64, 1]"), 2)
+        self.assertIn("prologue_descriptor0.load([offs_k, 0])", source)
+        self.assertIn("prologue_descriptor1.load([offs_k, 0])", source)
+        self.assertIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertIn("BLOCK_K : tl.constexpr = 64", source)
+        self.assertIn("TWO_CTAS : tl.constexpr = False", source)
+        self.assertIn("num_stages=3", source)
+        self.assertNotIn("arg_B", source)
+        self.assertNotIn(f"empty_strided_cuda(({k}, 128)", source)
+        self.assertIn("triton_red_fused", source)
+
+    def test_cat_cast_whole_plan_selects_fused_triton(self):
+        m, k, half_n = 128, 262_145, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            return a @ torch.cat((left, right), dim=1).to(torch.bfloat16)
+
+        def benchmark(choice, *args, **kwargs):
+            del args, kwargs
+            return 0.1 if "fused_triton" in choice.name else 1.0
+
+        with (
+            mock.patch.object(SubgraphChoiceCaller, "benchmark", benchmark),
+            config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="ATEN,TRITON",
+                compile_threads=1,
+                assume_aligned_inputs=True,
+                **{
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_blackwell_decompose_k": True,
+                    "triton.enable_blackwell_decompose_k_cat2_fusion": True,
+                    "triton.num_decompose_k_splits": 2,
+                    "triton.decompose_k_bmm_backends": "ATEN,TRITON",
+                },
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right), atol=16.0, rtol=1e-1)
+        source = codes[-1]
+        self.assertIn("subgraph: decompose_k_cat2_fused_triton_split_", source)
+        self.assertIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertNotIn(f"empty_strided_cuda(({k}, 128)", source)
+
+    def test_cat_cast_whole_plan_retains_materialized_aten_fallback(self):
+        m, k, half_n = 128, 262_145, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            return a @ torch.cat((left, right), dim=1).to(torch.bfloat16)
+
+        def benchmark(choice, *args, **kwargs):
+            del args, kwargs
+            return 0.1 if "materialized_aten" in choice.name else 1.0
+
+        with (
+            mock.patch.object(SubgraphChoiceCaller, "benchmark", benchmark),
+            config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="ATEN,TRITON",
+                compile_threads=1,
+                assume_aligned_inputs=True,
+                **{
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_blackwell_decompose_k": True,
+                    "triton.enable_blackwell_decompose_k_cat2_fusion": True,
+                    "triton.num_decompose_k_splits": 2,
+                    "triton.decompose_k_bmm_backends": "ATEN,TRITON",
+                },
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right))
+        source = codes[-1]
+        self.assertIn("subgraph: decompose_k_cat2_materialized_aten", source)
+        self.assertIn(f"empty_strided_cuda(({k}, 128)", source)
+        self.assertIn("extern_kernels.mm", source)
+
+    def test_fused_producer_aten_plan_fallback(self):
+        m, k, n = 128, 65_536, 256
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        x = torch.randn(k, n, device=GPU_TYPE, dtype=torch.float32)
+        gate = torch.randn(k, n, device=GPU_TYPE, dtype=torch.float32)
+
+        def fn(a, x, gate):
+            return a @ (x * torch.sigmoid(gate)).to(torch.bfloat16)
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="ATEN",
+            benchmark_epilogue_fusion=True,
+            compile_threads=1,
+            **{
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.num_decompose_k_splits": 2,
+                "triton.decompose_k_bmm_backends": "ATEN",
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, x, gate
+            )
+
+        torch.testing.assert_close(actual, fn(a, x, gate), atol=16.0, rtol=1e-1)
+        source = "\n".join(codes)
+        self.assertNotIn("prologue_descriptor", source)
+        self.assertIn("extern_kernels.mm", source)
+
+    def test_1cta_fused_producer_preserves_shared_input(self):
+        m, k, n = 128, 262_145, 256
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        x = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        gate = torch.randn(k, n, device=GPU_TYPE, dtype=torch.float32)
+
+        def fn(a, x, gate):
+            sigmoid = torch.sigmoid(gate)
+            return a @ (x.float() * sigmoid).to(torch.bfloat16), sigmoid
+
+        with (
+            mock.patch.object(TritonTemplate, "test_cache", True),
+            config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="TRITON",
+                benchmark_epilogue_fusion=True,
+                compile_threads=1,
+                assume_aligned_inputs=True,
+                **{
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_blackwell_decompose_k": True,
+                    "triton.num_decompose_k_splits": 2,
+                    "triton.decompose_k_bmm_backends": "TRITON",
+                    "test_configs.autotune_choice_name_regex": "_triton_",
+                },
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, x, gate
+            )
+
+        expected = fn(a, x, gate)
+        torch.testing.assert_close(actual[0], expected[0], atol=16.0, rtol=1e-1)
+        torch.testing.assert_close(actual[1], expected[1])
+        source = codes[-1]
+        self.assertIn("tl.sigmoid", source)
+        self.assertIn("prologue_descriptor0.load([offs_k, offs_bn])", source)
+        self.assertIn("prologue_descriptor1.load([offs_k, offs_bn])", source)
+        self.assertNotIn("arg_B", source)
+        # The shared sigmoid is materialized; the BF16 MMA operand is not.
+        self.assertEqual(source.count("empty_strided_cuda((262145, 256)"), 1)
+
+    def test_forced_triton_2cta(self):
+        self._run_forced_triton_plan(True)
+
+    def test_forced_triton_2cta_config_without_meta_ws(self):
+        # One M tile distinguishes the effective 1CTA geometry (M_PAD=128)
+        # from the 2CTA cluster geometry (M_PAD=256).
+        self._run_forced_triton_plan(True, use_meta_ws=False, m=128)
+
+    def _run_backend_selection(
+        self, outer_backends: str, nested_backends: str | None
+    ) -> str:
+        m, k, n = 256, 131072, 128
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        patch = {
+            "max_autotune_gemm": True,
+            "max_autotune_gemm_backends": outer_backends,
+            "compile_threads": 1,
+            "assume_aligned_inputs": True,
+            "triton.enable_template_tma_store": True,
+            "triton.enable_persistent_tma_matmul": True,
+            "triton.enable_blackwell_decompose_k": True,
+            "triton.num_decompose_k_splits": 4,
+            "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+        }
+        if nested_backends is not None:
+            patch["triton.decompose_k_bmm_backends"] = nested_backends
+
+        with config.patch(patch):
+            actual, codes = run_and_get_code(
+                torch.compile(lambda x, y: x @ y, fullgraph=True), a, b
+            )
+
+        torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
+        return "\n".join(codes)
+
+    def test_outer_aten_only_excludes_decompose_k(self):
+        source = self._run_backend_selection("ATEN", "ATEN,TRITON")
+        self.assertNotIn("_split_aten", source)
+        self.assertNotIn("_split_triton_config_", source)
+
+    def test_default_nested_backend_is_aten(self):
+        source = self._run_backend_selection("TRITON", None)
+        self.assertIn("_split_aten", source)
+        self.assertNotIn("_split_triton_config_", source)
+
+    def test_nested_triton_backend(self):
+        source = self._run_backend_selection("TRITON", "triton")
+        self.assertNotIn("_split_aten", source)
+        self.assertIn("_split_triton_config_", source)
+
+    def test_mixed_backend_plan_enumeration(self):
+        source = self._run_backend_selection("TRITON", "aten, TRITON")
+        self.assertIn("_split_aten", source)
+        self.assertIn("_split_triton_config_", source)
+
+    def test_complete_plan_forced_triton_codegen(self):
+        m, k, n = 256, 8193, 128
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        decompose_k = torch._dynamo.dont_skip_tracing(blackwell_decomposeK)
+        with config.patch(
+            compile_threads=1,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(
+                    lambda x, y: decompose_k(x, y, 33, "triton", 0),
+                    fullgraph=True,
+                ),
+                a,
+                b,
+            )
+        torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
+        source = "\n".join(codes)
+        self.assertIn("blackwell_decompose_k_partial", source)
+        self.assertIn("BATCH_SIZE : tl.constexpr = 33", source)
+        self.assertNotIn("extern_kernels.bmm_dtype", source)
 
 
 if __name__ == "__main__":

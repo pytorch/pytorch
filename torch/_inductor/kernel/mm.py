@@ -2,7 +2,7 @@
 import functools
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch._dynamo.utils import counters
@@ -15,13 +15,14 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config as inductor_config, distributed_autotune, lowering as L
+from .. import config as inductor_config, distributed_autotune, ir, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
@@ -64,6 +65,13 @@ from ..utils import (
     use_triton_tdm_template,
     use_triton_template,
     use_triton_tma_template,
+)
+from .decompose_k import (
+    BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
+    cat2_decompose_k_whole_plan_template,
+    decompose_k_subgraph_template,
+    get_blackwell_decompose_k_splits,
+    get_cat2_fp32_prologue_sources,
 )
 from .mm_common import (
     _fits_int32_buffer_span,
@@ -371,58 +379,6 @@ def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
     )
 
 
-def decomposeK(a, b, k_splits):
-    m = a.shape[0]
-    n = b.shape[1]
-    k = a.shape[1]
-
-    k_parts = k // k_splits
-    B = k_splits
-    a_reshaped = torch.permute(a.reshape(m, B, k_parts), (1, 0, 2))
-    b_reshaped = b.reshape(B, k_parts, n)
-    result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
-    reduced_buf = torch.sum(result, 0)
-    return reduced_buf.to(a.dtype)
-
-
-class DecomposeKSugraphTemplate(SubgraphTemplate):
-    def __init__(self):
-        super().__init__(
-            name="decompose_k",
-        )
-
-    def generate(  # type: ignore[override]
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        k_split: int,
-    ) -> SubgraphChoiceCaller:
-        from torch._dispatch.python import enable_python_dispatcher
-
-        from ..decomposition import select_decomp_table
-
-        name = f"decompose_k_mm_{k_split}_split"
-        description = f"{k_split=}"
-
-        with enable_python_dispatcher():
-            decompositions = select_decomp_table()
-            fn = make_fx(
-                functools.partial(decomposeK, k_splits=k_split),
-                decompositions,
-            )
-
-            return super().generate(
-                name=name,
-                input_nodes=input_nodes,
-                layout=layout,
-                make_fx_graph=fn,
-                description=description,
-            )
-
-
-decompose_k_subgraph_template = DecomposeKSugraphTemplate()
-
-
 class ContiguousTemplate(SubgraphTemplate):
     def __init__(self, name: str, description: str, fn: Any):
         self.name = name
@@ -557,6 +513,73 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
     # Create MMKernelInputs for standard MM at the top
     kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=out_dtype)
+
+    enable_cat2_fusion = inductor_config.triton.enable_blackwell_decompose_k_cat2_fusion
+    cat2_source_names = (
+        get_cat2_fp32_prologue_sources(mat2) if enable_cat2_fusion else None
+    )
+    decompose_k_backends = (
+        OrderedSet(
+            [
+                backend.strip().upper()
+                for backend in inductor_config.triton.decompose_k_bmm_backends.split(
+                    ","
+                )
+            ]
+        )
+        if enable_cat2_fusion
+        else OrderedSet()
+    )
+    if (
+        enable_cat2_fusion
+        and out_dtype is None
+        and static_shape
+        and is_nonzero
+        and cat2_source_names is not None
+        and use_aten_gemm_kernels()
+        and "TRITON" in decompose_k_backends
+        and use_decompose_k_choice(m, n, k)
+        and use_triton_blackwell_tma_template(
+            mat1, mat2, output_layout=layout, add_guards=True
+        )
+    ):
+        device_properties = DeviceProperties.create(layout.device)
+        config_index = 7
+        partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+        k_splits = get_blackwell_decompose_k_splits(
+            int(m),
+            int(n),
+            int(k),
+            device_properties.multi_processor_count,
+            partial_config,
+        )[:2]
+        source_nodes = [
+            ir.TensorBox.create(V.graph.get_buffer(name)) for name in cat2_source_names
+        ]
+        whole_plan_inputs = cast(list[Buffer], [mat1, *source_nodes])
+        whole_plan_choices = [
+            cat2_decompose_k_whole_plan_template.generate(
+                input_nodes=whole_plan_inputs,
+                layout=layout,
+            )
+        ]
+        whole_plan_choices.extend(
+            cat2_decompose_k_whole_plan_template.generate(
+                input_nodes=whole_plan_inputs,
+                layout=layout,
+                k_split=k_split,
+                bmm_config_index=config_index,
+            )
+            for k_split in k_splits
+        )
+        node, _ = autotune_select_algorithm(
+            "mm_cat2_decompose_k_whole_plan",
+            whole_plan_choices,
+            whole_plan_inputs,
+            layout,
+            benchmark_with_cudagraphs=True,
+        )
+        return node
 
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.mm_{m}_{n}_{k}"] += 1
@@ -759,12 +782,24 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         return box
 
+    # Some subgraph choices must be selected and inlined before scheduling so
+    # their inner templates can participate in fusion. MultiTemplateBuffer
+    # otherwise preserves the subgraph boundary until after fusion.
+    inline_selected_subgraph = mat2.get_name() not in V.graph.graph_inputs and any(
+        isinstance(choice, SubgraphChoiceCaller) and choice.inline_after_autotune
+        for choice in choices
+    )
+    if not inline_selected_subgraph:
+        for choice in choices:
+            if isinstance(choice, SubgraphChoiceCaller):
+                choice.inline_after_autotune = False
     node, _ = autotune_select_algorithm(
         name,
         choices,
         kernel_inputs.nodes(),
         layout,
         best_config_future=best_config_future,
+        return_multi_template=not inline_selected_subgraph,
     )
     return node
 

@@ -2306,10 +2306,29 @@ class triton:
         )
     )
 
+    # Backends for the partial BMM nested inside a decompose-K subgraph. This
+    # is independent of max_autotune_gemm_backends, which gates the outer MM.
+    decompose_k_bmm_backends = os.environ.get(
+        "TORCHINDUCTOR_DECOMPOSE_K_BMM_BACKENDS", "ATEN"
+    )
+
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+    )
+
+    # Experimental Blackwell decompose-K subgraph with divisor-free aligned K
+    # partitions. Kept opt-in until complete-plan coverage is broader.
+    enable_blackwell_decompose_k = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K", "0") == "1"
+    )
+
+    # Benchmark a materialized ATen MM against a bounded pair of fused Triton
+    # decompose-K plans for eligible two-input cat/cast producers.
+    enable_blackwell_decompose_k_cat2_fusion = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K_CAT2_FUSION", "0")
+        == "1"
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
