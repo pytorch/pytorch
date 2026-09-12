@@ -13,6 +13,7 @@ import socket
 import sys
 import unittest
 from contextlib import closing
+from unittest import mock
 
 from torch.distributed import DistNetworkError, DistStoreError
 from torch.distributed.elastic.utils.distributed import (
@@ -51,6 +52,21 @@ if IS_WINDOWS or IS_MACOS:
 
 
 class DistributedUtilTest(TestCase):
+    @mock.patch("torch.distributed.elastic.utils.distributed.socket.getaddrinfo")
+    @mock.patch("torch.distributed.elastic.utils.distributed.socket.socket")
+    def test_get_socket_with_port_continues_after_socket_creation_failure(
+        self, socket_mock, getaddrinfo_mock
+    ):
+        first_addr = (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("::1", 0))
+        second_addr = (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))
+        getaddrinfo_mock.return_value = [first_addr, second_addr]
+        usable_socket = mock.Mock()
+        socket_mock.side_effect = [OSError("unsupported address family"), usable_socket]
+
+        self.assertIs(get_socket_with_port(), usable_socket)
+        usable_socket.bind.assert_called_once_with(("localhost", 0))
+        usable_socket.listen.assert_called_once_with(0)
+
     def test_create_store_single_server(self):
         store = create_c10d_store(is_server=True, server_addr=socket.gethostname())
         self.assertIsNotNone(store)
