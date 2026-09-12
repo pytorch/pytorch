@@ -6,10 +6,15 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear, Module
 from torch.optim import SGD
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     subtest,
@@ -29,14 +34,17 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestInput(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 1
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
     @parametrize("input_cls", [subtest(dict, name="dict"), subtest(list, name="list")])
     def test_input_type(self, device, input_cls):
-        """Test FSDP with input being a list or a dict, only single GPU."""
+        """Test FSDP with input being a list or a dict on one accelerator."""
 
         class Model(Module):
             def __init__(self):
@@ -72,6 +80,7 @@ class TestInput(FSDPTestContinuous):
             optim.step()
             optim.zero_grad()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
     @parametrize("input_cls", [subtest(dict, name="dict"), subtest(list, name="list")])
     def test_input_identity_preserved(self, device, input_cls):
@@ -114,7 +123,11 @@ class TestInput(FSDPTestContinuous):
             self.assertIn("added", in_data)
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(TestInput, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    TestInput,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 if __name__ == "__main__":
     run_tests()
