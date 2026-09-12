@@ -193,49 +193,6 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     return (div, permute_3, view_3)""",
         )
 
-    def _test_export_blockmask_with_mask_fn(self, make_mask_fn):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        class Model(torch.nn.Module):
-            def __init__(self, mask_fn_factory):
-                super().__init__()
-                self.mask_fn_factory = mask_fn_factory
-
-            def forward(self, x):
-                mask_fn = self.mask_fn_factory()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model(make_mask_fn)
-
-        out_eager, mask_eager = module(x)
-
-        compiled = _dynamo_graph_capture_for_export(module)(x)
-        out_compiled, mask_compiled = compiled(x)
-
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(
-            mask_eager.mask_mod(1, 1, 64, 64),
-            mask_compiled.mask_mod(1, 1, 64, 64),
-        )
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask(self):
-        def make_mask_fn():
-            res = 4
-
-            def fn(b, h, q, k):
-                return q >= k + res
-
-            return fn
-
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
-
     def test_export_with_default_kwargs(self):
         class FunctionalWrapper(torch.nn.Module):
             """Wrapper with keyword-only argument in __call__."""
@@ -270,320 +227,6 @@ def forward(self, args_0):
     out = torch._C._nn.linear(l_args_0_, l_self_modules_module_parameters_weight_, l_self_modules_module_parameters_bias_);  l_args_0_ = l_self_modules_module_parameters_weight_ = l_self_modules_module_parameters_bias_ = None
     return self._dynamo_bytecode_unflatten((out,), _fn_args)""",
         )
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_mutated_closure(self):
-        def make_mask_fn():
-            res = 1
-
-            def fn(b, h, q, k):
-                return q >= k + res
-
-            res = 4  # mutation after function definition
-            return fn
-
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_with_containers(self):
-        def make_mask_fn():
-            offsets = [1, 2, 3]
-            config = {"base": 4, "nested": {"scale": 2}}
-
-            def fn(b, h, q, k):
-                return q >= k + config["base"] + sum(offsets)
-
-            return fn
-
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_triple_nested(self):
-        def make_mask_fn():
-            a = 1
-
-            def level1():
-                b = 2
-
-                def level2():
-                    c = 3
-
-                    def fn(bx, h, q, k):
-                        return q >= k + a + b + c
-
-                    return fn
-
-                return level2()
-
-            return level1()
-
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_self_recursive(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_fn():
-            # Self-referential: fn captures itself through the closure
-            def fn(b, h, q, k):
-                _ = fn  # self-reference
-                return q >= k + 4
-
-            return fn
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                mask_fn = make_mask_fn()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "nested function with non-constructible closure in output",
-        ):
-            _dynamo_graph_capture_for_export(module)(x)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_tensor(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_fn():
-            tensor = torch.ones(2, 2)
-
-            def fn(b, h, q, k):
-                _ = fn
-                return q >= k + 4 + tensor.sum()
-
-            return fn
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                mask_fn = make_mask_fn()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "nested function with non-constructible closure in output",
-        ):
-            _dynamo_graph_capture_for_export(module)(x)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_unsupported_class_instance(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        class MaskConfig:
-            def __init__(self, offset):
-                self.offset = offset
-
-        def make_mask_fn():
-            cfg = MaskConfig(offset=5)
-
-            def fn(b, h, q, k):
-                return q >= k + cfg.offset
-
-            return fn
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                mask_fn = make_mask_fn()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "nested function with non-constructible closure in output",
-        ):
-            _dynamo_graph_capture_for_export(module)(x)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_mutually_recursive(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_fn():
-            # Create mutually recursive closures: fn_a references fn_b, fn_b references fn_a
-            # This is non-constructible because we cannot serialize mutually recursive closures
-            def fn_a(b, h, q, k):
-                _ = fn_b  # reference to fn_b
-                return q >= k
-
-            def fn_b(b, h, q, k):
-                _ = fn_a  # reference to fn_a
-                return q >= k + 1
-
-            return fn_a
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                mask_fn = make_mask_fn()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "nested function with non-constructible closure in output",
-        ):
-            _dynamo_graph_capture_for_export(module)(x)
-
-    @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
-    )
-    def test_aot_export_flex_attention_callable_mask_mod(self):
-        """Test flex_attention AOT export with callable class as mask_mod.
-
-        _MaskModWrapper must delegate __eq__ to callable objects for TreeSpec
-        comparison in AOTAutograd's PytreeThunk.set() (utils.py:162).
-        """
-        from torch._functorch.aot_autograd import aot_export_module
-        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-
-        _register_blockmask_pytree()
-
-        class ComposedMaskMod:
-            def __init__(self, *mask_fns):
-                self.mask_fns = mask_fns
-
-            def __call__(self, b, h, q, k):
-                result = True
-                for fn in self.mask_fns:
-                    result = result & fn(b, h, q, k)
-                return result
-
-            def __eq__(self, other):
-                if not isinstance(other, ComposedMaskMod):
-                    return NotImplemented
-                return self.mask_fns == other.mask_fns
-
-            def __hash__(self):
-                return hash(self.mask_fns)
-
-        def causal_mask(b, h, q, k):
-            return q >= k
-
-        class FlexAttentionModel(torch.nn.Module):
-            def __init__(self, embed_dim: int, num_heads: int):
-                super().__init__()
-                self.num_heads = num_heads
-                self.head_dim = embed_dim // num_heads
-                self.q_proj = torch.nn.Linear(embed_dim, embed_dim)
-                self.k_proj = torch.nn.Linear(embed_dim, embed_dim)
-                self.v_proj = torch.nn.Linear(embed_dim, embed_dim)
-
-            def forward(self, x):
-                B, L, D = x.shape
-                q = self.q_proj(x).view(B, L, self.num_heads, self.head_dim)
-                k = self.k_proj(x).view(B, L, self.num_heads, self.head_dim)
-                v = self.v_proj(x).view(B, L, self.num_heads, self.head_dim)
-                q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-
-                mask_mod = ComposedMaskMod(causal_mask)
-                block_mask = create_block_mask(
-                    mask_mod, B=B, H=self.num_heads, Q_LEN=L, KV_LEN=L, device=x.device
-                )
-                out = flex_attention(q, k, v, block_mask=block_mask)
-                return (out.transpose(1, 2).contiguous().view(B, L, D),)
-
-        embed_dim, num_heads, seq_len = 64, 2, 128
-        model = FlexAttentionModel(embed_dim, num_heads).cuda()
-        x = torch.randn(1, seq_len, embed_dim, device="cuda")
-
-        gm, signature = aot_export_module(model, [x], trace_joint=False)
-
-        # aot_export_module flattens params/buffers into the graph signature
-        params = [p for p in model.parameters()]
-        out_eager = model(x)[0]
-        out_export = gm(*params, x)[0]
-        self.assertEqual(out_eager.shape, out_export.shape)
-        self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
-
-    @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
-    )
-    def test_aot_export_flex_attention_with_blockmask_placeholders(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-
-        _register_blockmask_pytree()
-
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.wq = torch.nn.Linear(64, 64, bias=False)
-                self.block_mask = create_block_mask(
-                    lambda b, h, q, kv: q >= kv,
-                    B=None,
-                    H=None,
-                    Q_LEN=16,
-                    KV_LEN=16,
-                    device="cuda",
-                )
-
-            def forward(self, x):
-                q = self.wq(x).view(1, 16, 4, 16).transpose(1, 2)
-                return flex_attention(q, q, q, block_mask=self.block_mask).sum()
-
-        with torch.device("meta"):
-            model = Model()
-
-        fake_mode = FakeTensorMode()
-        with fake_mode:
-            for name, param in list(model.named_parameters()):
-                parts = name.split(".")
-                mod = model
-                for part in parts[:-1]:
-                    mod = getattr(mod, part)
-                setattr(
-                    mod,
-                    parts[-1],
-                    torch.nn.Parameter(
-                        torch.empty(param.shape, dtype=param.dtype, device="cuda"),
-                        requires_grad=param.requires_grad,
-                    ),
-                )
-            x = torch.randn(1, 16, 64, device="cuda")
-
-        gm = dynamo_graph_capture_for_export(model)(x)
-        block_mask_placeholders = [
-            node
-            for node in gm.graph.nodes
-            if node.op == "placeholder" and "block_mask" in node.name
-        ]
-        self.assertGreater(len(block_mask_placeholders), 0)
-
-        with contextlib.ExitStack() as stack:
-            joint_with_descriptors = aot_export_joint_with_descriptors(stack, gm, (x,))
-
-        self.assertIsNotNone(joint_with_descriptors.graph_module)
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
@@ -1172,69 +815,6 @@ def forward(self, args_0):
         self.assertEqual(gm_results, foo(*test_inputs))
         self.assertEqual(len(GLOBAL_LIST), 1)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
-        class DummyOp(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, scalar):
-                ctx.save_for_backward(x)
-                return x + scalar
-
-            @staticmethod
-            def backward(ctx, grad_out):
-                return grad_out, None
-
-        def mock_fw_compute(x):
-            with fx_traceback.annotate({"compute": 0}):
-                return DummyOp.apply(x, 10)
-
-        def mock_bw_comm(x):
-            with fx_traceback.annotate({"comm": 0}):
-                return DummyOp.apply(x, 20)
-
-        def mock_bw_compute(x):
-            return DummyOp.apply(x, 30)
-
-        class Model(torch.nn.Module):
-            def forward(self, fw_in, bw_in):
-                fw_out = mock_fw_compute(fw_in)
-                # bw_in blocks bw_out
-                bw_in = mock_bw_comm(bw_in)
-                bw_out = mock_bw_compute(bw_in)
-                return fw_out, bw_out
-
-        def input_fn():
-            inputs = (torch.rand(2, 128, device="cuda", requires_grad=True),)
-            grad_ins = (torch.rand(2, 128, device="cuda"),)
-            return (
-                *inputs,
-                *grad_ins,
-            )
-
-        with torch.device("meta"):
-            model = Model()
-
-        import torch.fx.traceback as fx_traceback
-
-        with fx_traceback.preserve_node_meta():
-            gm = dynamo_graph_capture_for_export(model)(*input_fn())
-
-        """
-        def forward(self, args_0, args_1):
-            _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0, args_1,))
-            L_fw_in_ , L_bw_in_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
-            l_fw_in_ = L_fw_in_
-            l_bw_in_ = L_bw_in_
-            fwd_body_0 = self.fwd_body_0
-            bwd_body_0 = self.bwd_body_0
-            fw_out = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_fw_in_, args_tensor_mask = [True, False], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_fw_in_ = None
-            bw_in = l_bw_in_ + 20;  l_bw_in_ = None
-            bw_out = bw_in + 30;  bw_in = None
-            return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, fw_out, bw_out), self._out_spec)
-        """
-        test_inputs = input_fn()
-        self.assertEqual(gm(*test_inputs), model(*test_inputs))
-
     def test_dynamo_graph_capture_default_args(self):
         class Module(torch.nn.Module):
             def forward(self, x, y=1):
@@ -1362,6 +942,707 @@ def forward(self, args_0):
         # Should raise TypeError when given a non-module, non-bound-method
         with self.assertRaises(TypeError):
             _restore_state_dict(lambda x: x, gm)
+
+    def test_mask_mod_wrapper_eq_for_partials(self):
+        from torch.nn.attention.flex_attention import (
+            _extract_callable_pytree,
+            _MaskModWrapper,
+        )
+
+        def mask_rule(batch, head, query_idx, key_idx, attn_regions, document_ids):
+            return (
+                (query_idx >= key_idx)
+                & (attn_regions[query_idx] == attn_regions[key_idx])
+                & (document_ids[query_idx] == document_ids[key_idx])
+            )
+
+        document_ids = torch.zeros(8, dtype=torch.int64)
+        batch0_attn_regions = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.int32)
+        batch1_attn_regions = torch.tensor([0, 0, 1, 1, 0, 0, 1, 1], dtype=torch.int32)
+
+        def wrap(mask_mod):
+            _, spec, stripped = _extract_callable_pytree(mask_mod)
+            return _MaskModWrapper(stripped, spec)
+
+        partial_a = functools.partial(
+            mask_rule,
+            attn_regions=batch0_attn_regions,
+            document_ids=document_ids,
+        )
+        partial_b = functools.partial(
+            mask_rule,
+            attn_regions=batch1_attn_regions,
+            document_ids=document_ids,
+        )
+        recursive_partial_a = functools.partial(
+            functools.partial(mask_rule, attn_regions=batch0_attn_regions),
+            document_ids=document_ids,
+        )
+        recursive_partial_b = functools.partial(
+            functools.partial(mask_rule, attn_regions=batch1_attn_regions),
+            document_ids=document_ids,
+        )
+
+        wrapped_partial_a = wrap(partial_a)
+        wrapped_partial_b = wrap(partial_b)
+        wrapped_recursive_partial_a = wrap(recursive_partial_a)
+        wrapped_recursive_partial_b = wrap(recursive_partial_b)
+
+        self.assertEqual(wrapped_partial_a, wrapped_partial_b)
+        self.assertEqual(hash(wrapped_partial_a), hash(wrapped_partial_b))
+        self.assertEqual(wrapped_recursive_partial_a, wrapped_recursive_partial_b)
+        self.assertEqual(
+            hash(wrapped_recursive_partial_a), hash(wrapped_recursive_partial_b)
+        )
+        with self.assertRaisesRegex(RuntimeError, "stripped callable is not callable"):
+            wrapped_partial_a(
+                torch.tensor(0),
+                torch.tensor(0),
+                torch.tensor(0),
+                torch.tensor(0),
+            )
+
+    def test_mask_mod_wrapper_eq_for_plain_functions(self):
+        from torch.nn.attention.flex_attention import (
+            _extract_callable_pytree,
+            _MaskModWrapper,
+        )
+
+        def make_mask_mod():
+            def mask_mod(batch, head, query_idx, key_idx):
+                del batch, head
+                return query_idx >= key_idx
+
+            return mask_mod
+
+        def wrap(mask_mod):
+            _, spec, stripped = _extract_callable_pytree(mask_mod)
+            return _MaskModWrapper(stripped, spec)
+
+        wrapped_a = wrap(make_mask_mod())
+        wrapped_b = wrap(make_mask_mod())
+
+        self.assertEqual(wrapped_a, wrapped_b)
+        self.assertEqual(hash(wrapped_a), hash(wrapped_b))
+
+    def test_aot_export_closure_buffer_mutation(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(()))
+
+            def forward(self, x):
+                self.buf.add_(x.sum())
+                return x.sin()
+
+        def make_closure(mod):
+            def fn(x):
+                mod._buffers["buf"].add_(x.sum())
+                return x.sin()
+
+            return fn
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, fn, mod):
+                super().__init__()
+                self._parameters = mod._parameters
+                self._buffers = mod._buffers
+                self._modules = mod._modules
+                self._fn = fn
+
+            def forward(self, x):
+                return self._fn(x)
+
+        def run_export(capture_fn):
+            mod = Mod()
+            wrapped = Wrapper(make_closure(mod), mod)
+            x = torch.randn(4)
+            gm = capture_fn(wrapped)(x)
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch_tracing(
+                        gm.meta.get(
+                            "tracing_context", TracingContext(gm.meta["fake_mode"])
+                        )
+                    )
+                )
+                stack.enter_context(_compiling_state_context())
+                stack.enter_context(gm.meta["fake_mode"])
+
+                jd = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    args=(x,),
+                    kwargs={},
+                    keep_inference_input_mutations=True,
+                    disable_functionalization=True,
+                )
+            return jd.graph_module, wrapped, x
+
+        # Verify Dynamo-captured graph mutates the buffer via closure
+        mod = Mod()
+        wrapped = Wrapper(make_closure(mod), mod)
+        x = torch.randn(4)
+        gm = dynamo_graph_capture_for_export(wrapped)(x)
+        wrapped.buf.zero_()
+        gm(x)
+        self.assertEqual(wrapped.buf, x.sum())
+
+        # Verify joint graphs from both APIs match
+        joint_public, _, _ = run_export(dynamo_graph_capture_for_export)
+        joint_private, _, _ = run_export(_dynamo_graph_capture_for_export)
+        self.assertEqual(
+            str(joint_public.code).strip(), str(joint_private.code).strip()
+        )
+
+        # Verify numerical correctness of both joint graphs against eager
+        mod = Mod()
+        x = torch.randn(4)
+        eager_out = mod(x)
+        eager_buf = mod.buf.clone()
+
+        for label, joint_gm in [("public", joint_public), ("private", joint_private)]:
+            buf_input = torch.zeros(())
+            (exported_out,) = joint_gm(buf_input, x)
+            self.assertEqual(
+                exported_out,
+                eager_out,
+                msg=lambda msg: f"{msg}\n{label}: output mismatch",
+            )
+            self.assertEqual(
+                buf_input,
+                eager_buf,
+                msg=lambda msg: f"{msg}\n{label}: buffer mutation mismatch",
+            )
+
+    def _assert_blockmask_partial_replays_bound_tensors(self, make_mask_mod):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+
+        query_indices = torch.arange(8, dtype=torch.int32)[:, None]
+        key_indices = torch.arange(8, dtype=torch.int32)[None, :]
+        document_ids = torch.zeros(8, dtype=torch.int64)
+        batch0_attn_regions = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.int32)
+        batch1_attn_regions = torch.tensor([0, 0, 1, 1, 0, 0, 1, 1], dtype=torch.int32)
+
+        def mask_rule(batch, head, query_idx, key_idx, attn_regions, document_ids):
+            return (
+                (query_idx >= key_idx)
+                & (attn_regions[query_idx] == attn_regions[key_idx])
+                & (document_ids[query_idx] == document_ids[key_idx])
+            )
+
+        def build_block_mask(attn_regions):
+            return create_block_mask(
+                make_mask_mod(mask_rule, attn_regions, document_ids),
+                B=1,
+                H=1,
+                Q_LEN=8,
+                KV_LEN=8,
+                device="cpu",
+                BLOCK_SIZE=4,
+            )
+
+        def trace_mask_mod(attn_regions):
+            block_mask = build_block_mask(attn_regions)
+            flat_leaves, spec = block_mask._flatten()
+            return make_fx(
+                lambda *flat_leaves: BlockMask._unflatten(flat_leaves, spec).mask_mod(
+                    0, 0, query_indices, key_indices
+                )
+            )(*flat_leaves)
+
+        traced_mask_mod = trace_mask_mod(batch0_attn_regions)
+        replayed_batch1 = traced_mask_mod(
+            *build_block_mask(batch1_attn_regions)._flatten()[0]
+        )
+        expected_batch0 = build_block_mask(batch0_attn_regions).mask_mod(
+            0, 0, query_indices, key_indices
+        )
+        expected_batch1 = build_block_mask(batch1_attn_regions).mask_mod(
+            0, 0, query_indices, key_indices
+        )
+
+        self.assertFalse(torch.equal(replayed_batch1, expected_batch0))
+        self.assertTrue(torch.equal(replayed_batch1, expected_batch1))
+
+    def test_blockmask_partial_extraction_replays_bound_tensors(self):
+        self._assert_blockmask_partial_replays_bound_tensors(
+            lambda mask_rule, attn_regions, document_ids: functools.partial(
+                mask_rule,
+                attn_regions=attn_regions,
+                document_ids=document_ids,
+            )
+        )
+
+    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
+        self._assert_blockmask_partial_replays_bound_tensors(
+            lambda mask_rule, attn_regions, document_ids: functools.partial(
+                functools.partial(mask_rule, attn_regions=attn_regions),
+                document_ids=document_ids,
+            )
+        )
+
+    def test_blockmask_self_referential_function_closure_extraction(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_mod():
+            def helper():
+                return helper
+
+            def mask_mod(batch, head, query_idx, key_idx):
+                del batch, head
+                _ = helper
+                return query_idx >= key_idx
+
+            return mask_mod
+
+        mask_a = create_block_mask(
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
+        )
+        mask_b = create_block_mask(
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
+        )
+
+        leaves_a, spec_a = pytree.tree_flatten(mask_a)
+        leaves_b, spec_b = pytree.tree_flatten(mask_b)
+
+        self.assertEqual(spec_a, spec_b)
+
+        restored = pytree.tree_unflatten(leaves_a, spec_a)
+        self.assertTrue(
+            torch.equal(
+                restored.mask_mod(
+                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
+                ),
+                mask_a.mask_mod(
+                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
+                ),
+            )
+        )
+
+    def _test_export_blockmask_with_mask_fn(self, make_mask_fn):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        class Model(torch.nn.Module):
+            def __init__(self, mask_fn_factory):
+                super().__init__()
+                self.mask_fn_factory = mask_fn_factory
+
+            def forward(self, x):
+                mask_fn = self.mask_fn_factory()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model(make_mask_fn)
+
+        out_eager, mask_eager = module(x)
+
+        compiled = _dynamo_graph_capture_for_export(module)(x)
+        out_compiled, mask_compiled = compiled(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(
+            mask_eager.mask_mod(1, 1, 64, 64),
+            mask_compiled.mask_mod(1, 1, 64, 64),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask(self):
+        def make_mask_fn():
+            res = 4
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_mutated_closure(self):
+        def make_mask_fn():
+            res = 1
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            res = 4  # mutation after function definition
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_with_containers(self):
+        def make_mask_fn():
+            offsets = [1, 2, 3]
+            config = {"base": 4, "nested": {"scale": 2}}
+
+            def fn(b, h, q, k):
+                return q >= k + config["base"] + sum(offsets)
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_triple_nested(self):
+        def make_mask_fn():
+            a = 1
+
+            def level1():
+                b = 2
+
+                def level2():
+                    c = 3
+
+                    def fn(bx, h, q, k):
+                        return q >= k + a + b + c
+
+                    return fn
+
+                return level2()
+
+            return level1()
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_self_recursive(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            # Self-referential: fn captures itself through the closure
+            def fn(b, h, q, k):
+                _ = fn  # self-reference
+                return q >= k + 4
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_tensor(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            tensor = torch.ones(2, 2)
+
+            def fn(b, h, q, k):
+                _ = fn
+                return q >= k + 4 + tensor.sum()
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_unsupported_class_instance(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        class MaskConfig:
+            def __init__(self, offset):
+                self.offset = offset
+
+        def make_mask_fn():
+            cfg = MaskConfig(offset=5)
+
+            def fn(b, h, q, k):
+                return q >= k + cfg.offset
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_mutually_recursive(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            # Create mutually recursive closures: fn_a references fn_b, fn_b references fn_a
+            # This is non-constructible because we cannot serialize mutually recursive closures
+            def fn_a(b, h, q, k):
+                _ = fn_b  # reference to fn_b
+                return q >= k
+
+            def fn_b(b, h, q, k):
+                _ = fn_a  # reference to fn_a
+                return q >= k + 1
+
+            return fn_a
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_aot_export_flex_attention_callable_mask_mod(self):
+        """Test flex_attention AOT export with callable class as mask_mod.
+
+        _MaskModWrapper must delegate __eq__ to callable objects for TreeSpec
+        comparison in AOTAutograd's PytreeThunk.set() (utils.py:162).
+        """
+        from torch._functorch.aot_autograd import aot_export_module
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        _register_blockmask_pytree()
+
+        class ComposedMaskMod:
+            def __init__(self, *mask_fns):
+                self.mask_fns = mask_fns
+
+            def __call__(self, b, h, q, k):
+                result = True
+                for fn in self.mask_fns:
+                    result = result & fn(b, h, q, k)
+                return result
+
+            def __eq__(self, other):
+                if not isinstance(other, ComposedMaskMod):
+                    return NotImplemented
+                return self.mask_fns == other.mask_fns
+
+            def __hash__(self):
+                return hash(self.mask_fns)
+
+        def causal_mask(b, h, q, k):
+            return q >= k
+
+        class FlexAttentionModel(torch.nn.Module):
+            def __init__(self, embed_dim: int, num_heads: int):
+                super().__init__()
+                self.num_heads = num_heads
+                self.head_dim = embed_dim // num_heads
+                self.q_proj = torch.nn.Linear(embed_dim, embed_dim)
+                self.k_proj = torch.nn.Linear(embed_dim, embed_dim)
+                self.v_proj = torch.nn.Linear(embed_dim, embed_dim)
+
+            def forward(self, x):
+                B, L, D = x.shape
+                q = self.q_proj(x).view(B, L, self.num_heads, self.head_dim)
+                k = self.k_proj(x).view(B, L, self.num_heads, self.head_dim)
+                v = self.v_proj(x).view(B, L, self.num_heads, self.head_dim)
+                q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+
+                mask_mod = ComposedMaskMod(causal_mask)
+                block_mask = create_block_mask(
+                    mask_mod, B=B, H=self.num_heads, Q_LEN=L, KV_LEN=L, device=x.device
+                )
+                out = flex_attention(q, k, v, block_mask=block_mask)
+                return (out.transpose(1, 2).contiguous().view(B, L, D),)
+
+        embed_dim, num_heads, seq_len = 64, 2, 128
+        model = FlexAttentionModel(embed_dim, num_heads).cuda()
+        x = torch.randn(1, seq_len, embed_dim, device="cuda")
+
+        gm, signature = aot_export_module(model, [x], trace_joint=False)
+
+        # aot_export_module flattens params/buffers into the graph signature
+        params = [p for p in model.parameters()]
+        out_eager = model(x)[0]
+        out_export = gm(*params, x)[0]
+        self.assertEqual(out_eager.shape, out_export.shape)
+        self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_aot_export_flex_attention_with_blockmask_placeholders(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        _register_blockmask_pytree()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wq = torch.nn.Linear(64, 64, bias=False)
+                self.block_mask = create_block_mask(
+                    lambda b, h, q, kv: q >= kv,
+                    B=None,
+                    H=None,
+                    Q_LEN=16,
+                    KV_LEN=16,
+                    device="cuda",
+                )
+
+            def forward(self, x):
+                q = self.wq(x).view(1, 16, 4, 16).transpose(1, 2)
+                return flex_attention(q, q, q, block_mask=self.block_mask).sum()
+
+        with torch.device("meta"):
+            model = Model()
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            for name, param in list(model.named_parameters()):
+                parts = name.split(".")
+                mod = model
+                for part in parts[:-1]:
+                    mod = getattr(mod, part)
+                setattr(
+                    mod,
+                    parts[-1],
+                    torch.nn.Parameter(
+                        torch.empty(param.shape, dtype=param.dtype, device="cuda"),
+                        requires_grad=param.requires_grad,
+                    ),
+                )
+            x = torch.randn(1, 16, 64, device="cuda")
+
+        gm = dynamo_graph_capture_for_export(model)(x)
+        block_mask_placeholders = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "placeholder" and "block_mask" in node.name
+        ]
+        self.assertGreater(len(block_mask_placeholders), 0)
+
+        with contextlib.ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(stack, gm, (x,))
+
+        self.assertIsNotNone(joint_with_descriptors.graph_module)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
+        class DummyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, scalar):
+                ctx.save_for_backward(x)
+                return x + scalar
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out, None
+
+        def mock_fw_compute(x):
+            with fx_traceback.annotate({"compute": 0}):
+                return DummyOp.apply(x, 10)
+
+        def mock_bw_comm(x):
+            with fx_traceback.annotate({"comm": 0}):
+                return DummyOp.apply(x, 20)
+
+        def mock_bw_compute(x):
+            return DummyOp.apply(x, 30)
+
+        class Model(torch.nn.Module):
+            def forward(self, fw_in, bw_in):
+                fw_out = mock_fw_compute(fw_in)
+                # bw_in blocks bw_out
+                bw_in = mock_bw_comm(bw_in)
+                bw_out = mock_bw_compute(bw_in)
+                return fw_out, bw_out
+
+        def input_fn():
+            inputs = (torch.rand(2, 128, device="cuda", requires_grad=True),)
+            grad_ins = (torch.rand(2, 128, device="cuda"),)
+            return (
+                *inputs,
+                *grad_ins,
+            )
+
+        with torch.device("meta"):
+            model = Model()
+
+        import torch.fx.traceback as fx_traceback
+
+        with fx_traceback.preserve_node_meta():
+            gm = dynamo_graph_capture_for_export(model)(*input_fn())
+
+        """
+        def forward(self, args_0, args_1):
+            _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0, args_1,))
+            L_fw_in_ , L_bw_in_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
+            l_fw_in_ = L_fw_in_
+            l_bw_in_ = L_bw_in_
+            fwd_body_0 = self.fwd_body_0
+            bwd_body_0 = self.bwd_body_0
+            fw_out = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_fw_in_, args_tensor_mask = [True, False], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_fw_in_ = None
+            bw_in = l_bw_in_ + 20;  l_bw_in_ = None
+            bw_out = bw_in + 30;  bw_in = None
+            return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, fw_out, bw_out), self._out_spec)
+        """
+        test_inputs = input_fn()
+        self.assertEqual(gm(*test_inputs), model(*test_inputs))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_aot_export_blockmask_with_new_closure(self):
@@ -1551,196 +1832,6 @@ def forward(self, arg0_1):
         _, spec_c = pytree.tree_flatten(mask_c)
         self.assertNotEqual(spec_a, spec_c)
 
-    def _assert_blockmask_partial_replays_bound_tensors(self, make_mask_mod):
-        from torch.fx.experimental.proxy_tensor import make_fx
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-
-        query_indices = torch.arange(8, dtype=torch.int32)[:, None]
-        key_indices = torch.arange(8, dtype=torch.int32)[None, :]
-        document_ids = torch.zeros(8, dtype=torch.int64)
-        batch0_attn_regions = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.int32)
-        batch1_attn_regions = torch.tensor([0, 0, 1, 1, 0, 0, 1, 1], dtype=torch.int32)
-
-        def mask_rule(batch, head, query_idx, key_idx, attn_regions, document_ids):
-            return (
-                (query_idx >= key_idx)
-                & (attn_regions[query_idx] == attn_regions[key_idx])
-                & (document_ids[query_idx] == document_ids[key_idx])
-            )
-
-        def build_block_mask(attn_regions):
-            return create_block_mask(
-                make_mask_mod(mask_rule, attn_regions, document_ids),
-                B=1,
-                H=1,
-                Q_LEN=8,
-                KV_LEN=8,
-                device="cpu",
-                BLOCK_SIZE=4,
-            )
-
-        def trace_mask_mod(attn_regions):
-            block_mask = build_block_mask(attn_regions)
-            flat_leaves, spec = block_mask._flatten()
-            return make_fx(
-                lambda *flat_leaves: BlockMask._unflatten(flat_leaves, spec).mask_mod(
-                    0, 0, query_indices, key_indices
-                )
-            )(*flat_leaves)
-
-        traced_mask_mod = trace_mask_mod(batch0_attn_regions)
-        replayed_batch1 = traced_mask_mod(
-            *build_block_mask(batch1_attn_regions)._flatten()[0]
-        )
-        expected_batch0 = build_block_mask(batch0_attn_regions).mask_mod(
-            0, 0, query_indices, key_indices
-        )
-        expected_batch1 = build_block_mask(batch1_attn_regions).mask_mod(
-            0, 0, query_indices, key_indices
-        )
-
-        self.assertFalse(torch.equal(replayed_batch1, expected_batch0))
-        self.assertTrue(torch.equal(replayed_batch1, expected_batch1))
-
-    def test_blockmask_partial_extraction_replays_bound_tensors(self):
-        self._assert_blockmask_partial_replays_bound_tensors(
-            lambda mask_rule, attn_regions, document_ids: functools.partial(
-                mask_rule,
-                attn_regions=attn_regions,
-                document_ids=document_ids,
-            )
-        )
-
-    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
-        self._assert_blockmask_partial_replays_bound_tensors(
-            lambda mask_rule, attn_regions, document_ids: functools.partial(
-                functools.partial(mask_rule, attn_regions=attn_regions),
-                document_ids=document_ids,
-            )
-        )
-
-    def test_mask_mod_wrapper_eq_for_partials(self):
-        from torch.nn.attention.flex_attention import (
-            _extract_callable_pytree,
-            _MaskModWrapper,
-        )
-
-        def mask_rule(batch, head, query_idx, key_idx, attn_regions, document_ids):
-            return (
-                (query_idx >= key_idx)
-                & (attn_regions[query_idx] == attn_regions[key_idx])
-                & (document_ids[query_idx] == document_ids[key_idx])
-            )
-
-        document_ids = torch.zeros(8, dtype=torch.int64)
-        batch0_attn_regions = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.int32)
-        batch1_attn_regions = torch.tensor([0, 0, 1, 1, 0, 0, 1, 1], dtype=torch.int32)
-
-        def wrap(mask_mod):
-            _, spec, stripped = _extract_callable_pytree(mask_mod)
-            return _MaskModWrapper(stripped, spec)
-
-        partial_a = functools.partial(
-            mask_rule,
-            attn_regions=batch0_attn_regions,
-            document_ids=document_ids,
-        )
-        partial_b = functools.partial(
-            mask_rule,
-            attn_regions=batch1_attn_regions,
-            document_ids=document_ids,
-        )
-        recursive_partial_a = functools.partial(
-            functools.partial(mask_rule, attn_regions=batch0_attn_regions),
-            document_ids=document_ids,
-        )
-        recursive_partial_b = functools.partial(
-            functools.partial(mask_rule, attn_regions=batch1_attn_regions),
-            document_ids=document_ids,
-        )
-
-        wrapped_partial_a = wrap(partial_a)
-        wrapped_partial_b = wrap(partial_b)
-        wrapped_recursive_partial_a = wrap(recursive_partial_a)
-        wrapped_recursive_partial_b = wrap(recursive_partial_b)
-
-        self.assertEqual(wrapped_partial_a, wrapped_partial_b)
-        self.assertEqual(hash(wrapped_partial_a), hash(wrapped_partial_b))
-        self.assertEqual(wrapped_recursive_partial_a, wrapped_recursive_partial_b)
-        self.assertEqual(
-            hash(wrapped_recursive_partial_a), hash(wrapped_recursive_partial_b)
-        )
-        with self.assertRaisesRegex(RuntimeError, "stripped callable is not callable"):
-            wrapped_partial_a(
-                torch.tensor(0),
-                torch.tensor(0),
-                torch.tensor(0),
-                torch.tensor(0),
-            )
-
-    def test_mask_mod_wrapper_eq_for_plain_functions(self):
-        from torch.nn.attention.flex_attention import (
-            _extract_callable_pytree,
-            _MaskModWrapper,
-        )
-
-        def make_mask_mod():
-            def mask_mod(batch, head, query_idx, key_idx):
-                del batch, head
-                return query_idx >= key_idx
-
-            return mask_mod
-
-        def wrap(mask_mod):
-            _, spec, stripped = _extract_callable_pytree(mask_mod)
-            return _MaskModWrapper(stripped, spec)
-
-        wrapped_a = wrap(make_mask_mod())
-        wrapped_b = wrap(make_mask_mod())
-
-        self.assertEqual(wrapped_a, wrapped_b)
-        self.assertEqual(hash(wrapped_a), hash(wrapped_b))
-
-    def test_blockmask_self_referential_function_closure_extraction(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_mod():
-            def helper():
-                return helper
-
-            def mask_mod(batch, head, query_idx, key_idx):
-                del batch, head
-                _ = helper
-                return query_idx >= key_idx
-
-            return mask_mod
-
-        mask_a = create_block_mask(
-            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
-        )
-        mask_b = create_block_mask(
-            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
-        )
-
-        leaves_a, spec_a = pytree.tree_flatten(mask_a)
-        leaves_b, spec_b = pytree.tree_flatten(mask_b)
-
-        self.assertEqual(spec_a, spec_b)
-
-        restored = pytree.tree_unflatten(leaves_a, spec_a)
-        self.assertTrue(
-            torch.equal(
-                restored.mask_mod(
-                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
-                ),
-                mask_a.mask_mod(
-                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
-                ),
-            )
-        )
-
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_blockmask_and_masks_closure_extraction(self):
         """and_masks closure tensors are recursively extracted into pytree leaves.
@@ -1792,97 +1883,6 @@ def forward(self, arg0_1):
         # Round-trip: unflatten should reconstruct a working mask_mod
         restored = pytree.tree_unflatten(leaves, spec)
         self.assertTrue(callable(restored.mask_mod))
-
-    def test_aot_export_closure_buffer_mutation(self):
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("buf", torch.zeros(()))
-
-            def forward(self, x):
-                self.buf.add_(x.sum())
-                return x.sin()
-
-        def make_closure(mod):
-            def fn(x):
-                mod._buffers["buf"].add_(x.sum())
-                return x.sin()
-
-            return fn
-
-        class Wrapper(torch.nn.Module):
-            def __init__(self, fn, mod):
-                super().__init__()
-                self._parameters = mod._parameters
-                self._buffers = mod._buffers
-                self._modules = mod._modules
-                self._fn = fn
-
-            def forward(self, x):
-                return self._fn(x)
-
-        def run_export(capture_fn):
-            mod = Mod()
-            wrapped = Wrapper(make_closure(mod), mod)
-            x = torch.randn(4)
-            gm = capture_fn(wrapped)(x)
-
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(
-                    torch_tracing(
-                        gm.meta.get(
-                            "tracing_context", TracingContext(gm.meta["fake_mode"])
-                        )
-                    )
-                )
-                stack.enter_context(_compiling_state_context())
-                stack.enter_context(gm.meta["fake_mode"])
-
-                jd = aot_export_joint_with_descriptors(
-                    stack,
-                    gm,
-                    args=(x,),
-                    kwargs={},
-                    keep_inference_input_mutations=True,
-                    disable_functionalization=True,
-                )
-            return jd.graph_module, wrapped, x
-
-        # Verify Dynamo-captured graph mutates the buffer via closure
-        mod = Mod()
-        wrapped = Wrapper(make_closure(mod), mod)
-        x = torch.randn(4)
-        gm = dynamo_graph_capture_for_export(wrapped)(x)
-        wrapped.buf.zero_()
-        gm(x)
-        self.assertEqual(wrapped.buf, x.sum())
-
-        # Verify joint graphs from both APIs match
-        joint_public, _, _ = run_export(dynamo_graph_capture_for_export)
-        joint_private, _, _ = run_export(_dynamo_graph_capture_for_export)
-        self.assertEqual(
-            str(joint_public.code).strip(), str(joint_private.code).strip()
-        )
-
-        # Verify numerical correctness of both joint graphs against eager
-        mod = Mod()
-        x = torch.randn(4)
-        eager_out = mod(x)
-        eager_buf = mod.buf.clone()
-
-        for label, joint_gm in [("public", joint_public), ("private", joint_private)]:
-            buf_input = torch.zeros(())
-            (exported_out,) = joint_gm(buf_input, x)
-            self.assertEqual(
-                exported_out,
-                eager_out,
-                msg=lambda msg: f"{msg}\n{label}: output mismatch",
-            )
-            self.assertEqual(
-                buf_input,
-                eager_buf,
-                msg=lambda msg: f"{msg}\n{label}: buffer mutation mismatch",
-            )
 
 
 if __name__ == "__main__":
