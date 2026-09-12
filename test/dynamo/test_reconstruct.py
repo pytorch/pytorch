@@ -8,7 +8,11 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
@@ -20,6 +24,7 @@ def _filter_instructions(instructions, opname):
     return list(filter(lambda x: x.opname == opname, instructions))
 
 
+@instantiate_parametrized_tests
 class ReconstructTest(torch._dynamo.test_case.TestCase):
     @contextlib.contextmanager
     def register_bytecode_hook(self, fn):
@@ -777,6 +782,83 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         # AsPythonConstantNotImplementedError("self-referential").
         self.assertEqual(child.as_python_constant(), 42)
         self.assertTrue(child.is_python_constant())
+
+    @parametrize("name", ["list", "list_subclass", "deque", "deque_subclass"])
+    def test_self_referential_sourceful_sequence_keeps_identity(self, name):
+        # The self-reference on a container passed in from outside must resolve
+        # to that object, not to the throwaway built for the mutation replay.
+        class ListSub(list):
+            pass
+
+        class DequeSub(collections.deque):
+            pass
+
+        obj = {
+            "list": lambda: [1],
+            "list_subclass": lambda: ListSub([1]),
+            "deque": lambda: collections.deque([1]),
+            "deque_subclass": lambda: DequeSub([1]),
+        }[name]()
+
+        def fn(x, o):
+            o.append(o)
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3), obj)
+        self.assertIs(obj[1], obj)
+
+    @parametrize(
+        "name", ["dict", "dict_subclass", "ordereddict", "ordereddict_subclass"]
+    )
+    def test_self_referential_sourceful_mapping_keeps_identity(self, name):
+        class DictSub(dict):
+            pass
+
+        class OrderedDictSub(collections.OrderedDict):
+            pass
+
+        obj = {
+            "dict": lambda: {"a": 1},
+            "dict_subclass": lambda: DictSub(a=1),
+            "ordereddict": lambda: collections.OrderedDict(a=1),
+            "ordereddict_subclass": lambda: OrderedDictSub(a=1),
+        }[name]()
+
+        def fn(x, o):
+            o["self"] = o
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3), obj)
+        self.assertIs(obj["self"], obj)
+
+    @parametrize("name", ["list", "list_subclass", "deque", "deque_subclass"])
+    def test_mutated_container_aliases_after_attr_store(self, name):
+        # Storing the mutated container onto another object must store that same
+        # object, not the throwaway built for the mutation replay.
+        class ListSub(list):
+            pass
+
+        class DequeSub(collections.deque):
+            pass
+
+        class Holder:
+            pass
+
+        obj = {
+            "list": lambda: [1],
+            "list_subclass": lambda: ListSub([1]),
+            "deque": lambda: collections.deque([1]),
+            "deque_subclass": lambda: DequeSub([1]),
+        }[name]()
+        holder = Holder()
+
+        def fn(x, o, h):
+            o.append(2)
+            h.obj = o
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3), obj, holder)
+        self.assertIs(holder.obj, obj)
 
 
 if __name__ == "__main__":

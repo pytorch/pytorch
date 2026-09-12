@@ -80,6 +80,7 @@ from ..utils import (
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
+    str_methods,
     tensortype_to_dtype,
     unpack_iterable,
 )
@@ -450,6 +451,10 @@ class BaseBuiltinVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self._fn
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # A builtin type or function reprs to a fixed string, e.g. "<class 'int'>". type_repr / func_repr:
+        return VariableTracker.build(tx, repr(self.as_python_constant()))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         name = self.as_python_constant().__name__
@@ -1916,29 +1921,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if self.fn is object and name in ("__str__", "__repr__") and len(args) == 1:
-            # object.__str__ runs object_str, which returns tp_repr(obj). The
-            # type's own tp_str is never consulted, so this cannot be dispatched
-            # as a slot call on args[0].
-            return generic_repr(tx, args[0])
-
-        if self.fn is type and name == "__repr__" and len(args) == 1 and not kwargs:
-            # type.__repr__ runs type's own slot even when the metaclass
-            # overrides __repr__, so it must not be dispatched as a slot call on
-            # args[0].  Handled by BaseBuiltinVariable.call_method below.
-            return super().call_method(tx, name, args, kwargs)
-
-        if (
-            isinstance(self.fn, type)
-            and args
-            and isinstance(
-                inspect.getattr_static(self.fn, name, None),
-                (types.WrapperDescriptorType, types.MethodDescriptorType),
-            )
-        ):
+        if self.fn in (set, frozenset, list, tuple, int, str, float, complex):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
                 return args[0].call_base_method(tx, name, args[1:], kwargs)
-            return args[0].call_method(tx, name, args[1:], kwargs)
+            else:
+                return args[0].call_method(tx, name, args[1:], kwargs)
 
         if (
             name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
@@ -1956,6 +1943,20 @@ class BuiltinVariable(BaseBuiltinVariable):
             if isinstance(lval, self.fn):
                 return ConstantVariable.create(
                     getattr(self.fn, name)(lval, args[1].as_python_constant())
+                )
+
+        if self.fn is str and len(args) >= 1:
+            resolved_fn = getattr(self.fn, name, None)
+            if resolved_fn in str_methods:
+                # Only delegate to ConstantVariable, not other types that happen to be constants
+                if isinstance(args[0], ConstantVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if self.fn is float and len(args) >= 1:
+            # Only delegate to ConstantVariable, not other types that happen to be constants
+            if isinstance(args[0], ConstantVariable):
+                return VariableTracker.build(
+                    tx, getattr(float, name)(args[0].as_python_constant())
                 )
 
         if name == "__len__" and len(args) == 1 and not kwargs:
@@ -1997,19 +1998,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if name == "__hash__" and len(args) == 1 and not kwargs:
             arg = args[0]
-            arg_type = maybe_get_python_type(arg)
-            if (
-                isinstance(self.fn, type)
-                and arg_type is not None
-                and issubclass(arg_type, self.fn)
-            ):
-                if arg_type is self.fn:
-                    return generic_hash(tx, arg)
-                # Explicit base-class unbound call, e.g. int.__hash__(self)
-                real_value = arg.get_real_python_backed_value()
-                if real_value is not NO_SUCH_SUBOBJ:
-                    # pyrefly: ignore[bad-argument-count]
-                    return ConstantVariable.create(self.fn.__hash__(real_value))
+            generic_hash(tx, arg)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -3279,6 +3268,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
+        # Must precede the container fast path below: a user subclass now also
+        # satisfies those isinstance checks, but its __bool__/__len__ override
+        # has to win.
+        if isinstance(a, UserDefinedObjectVariable):
+            bool_result = self.call_bool(tx, a)
+            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
         if isinstance(
             a,
             (
@@ -3290,9 +3285,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
-        if isinstance(a, UserDefinedObjectVariable):
-            bool_result = self.call_bool(tx, a)
-            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
 
         return None
 

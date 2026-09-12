@@ -83,7 +83,6 @@ from ..utils import (
     deque_methods,
     deque_rev_iterator,
     dict_methods,
-    exception_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
@@ -1844,6 +1843,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
+    def is_python_constant(self) -> bool:
+        # The container base infers constness from the elements without probing
+        # as_python_constant(), so it would report a user subclass as a constant
+        # that as_python_constant() below refuses to build.
+        return VariableTracker.is_python_constant(self)
+
     def as_python_constant(self) -> object:
         from ..utils import is_pybind11_enum_member
 
@@ -1885,14 +1890,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     fn = fn_vt.as_python_constant()
                     return _MaskModWrapper(fn)
 
-        return super().as_python_constant()
+        return VariableTracker.as_python_constant(self)
 
     def as_proxy(self) -> object:
         if isinstance(self.value, enum.Enum):
             if isinstance(self.value, int):
                 return int(self.value)
             return self.value
-        return super().as_proxy()
+        # Same reason as as_python_constant above: the container base would
+        # rebuild through python_type(), i.e. the user subclass.
+        return VariableTracker.as_proxy(self)
 
     def guard_as_python_constant(self) -> object:
         if self.source:
@@ -2976,6 +2983,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self, tx: "InstructionTranslatorBase", key: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9294
+        if self.inherits_base_slot("__getitem__"):
+            return super().sq_item_impl(tx, key)
         return self._vectorcall_method(tx, "__getitem__", [key], {})
 
     def tp_init_impl(
@@ -3151,13 +3160,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
                 return fset_var.call_function(tx, [self, value], {})
 
+            # tp_descr_set takes None to mean delete, matching PyMemberDef's
+            # NULL store.
+            descr_val = None if isinstance(value, variables.DeletedVariable) else value
+
             if isinstance(descriptor, types.MemberDescriptorType):
-                tx.output.side_effects.store_attr(self, name_str, value)
-                return variables.ConstantVariable.create(None)
+                # An attribute modeled in tp_members must apply through its
+                # Member.setter. Delegating to the descriptor's tp_descr_set
+                # keeps the implicit STORE_ATTR path in sync with the explicit
+                # `member_descr.__set__(obj, v)` one; an unmodeled member (a
+                # plain __slots__ entry) still falls back to store_attr there.
+                desc_var = VariableTracker.build(tx, descriptor, desc_source)
+                return desc_var.tp_descr_set_impl(tx, self, descr_val)
 
             if isinstance(descriptor, types.GetSetDescriptorType):
                 if name_str == "__dict__":
                     self.dict_vt = None
+                if self.lookup_tp_getset_member(name_str) is not None:
+                    desc_var = VariableTracker.build(tx, descriptor, desc_source)
+                    return desc_var.tp_descr_set_impl(tx, self, descr_val)
                 # C get/set descriptors are applied by STORE_ATTR itself, so
                 # replay must stay descriptor-aware rather than using the
                 # descriptor-bypassing instance-dict or slot paths.
@@ -4461,8 +4482,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
         init_args = kwargs.get("init_args", [])
         super().__init__(value, exc_type=type(value), args=init_args, **kwargs)
         self._base_methods = (
-            exception_methods
-            if isinstance(value, Exception)
+            base_exception_methods
+            if isinstance(value, BaseException)
             else base_exception_methods
         )
 
@@ -4634,9 +4655,15 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
                 self._constant_base = base
                 self._base_methods = _constant_base_methods[base]
                 break
+        else:
+            raise AssertionError(f"No constant base type found in MRO of {type(value)}")
 
     def as_python_constant(self) -> Any:
         return self.value
+
+    def as_proxy(self) -> Any:
+        # Put the plain builtin in the graph, not the user subclass instance.
+        return self._constant_base(self.value)
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):

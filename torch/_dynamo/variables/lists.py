@@ -1165,11 +1165,12 @@ class ListVariable(BaseListVariable):
         return VariableTracker.build(tx, f"[{items}]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # An object built through the side effects new-object path is already
-        # materialized and cached, so the self-referencing item has something to
-        # load. Emitting the placeholder below would rebind that cache entry to
-        # the placeholder instead of the real object.
-        if self._contains_self_reference() and self not in codegen.tempvars:
+        # Only a sourceless object needs the empty-then-fill placeholder. Once
+        # it has a source -- including the TempLocalSource that
+        # codegen_save_tempvars assigns after materializing it -- the
+        # self-reference loads from that source, and caching a throwaway here
+        # would rebind every later codegen of this VT to the throwaway.
+        if self._contains_self_reference() and self.source is None:
             # Self-referential list: create empty, cache, then extend
             codegen.extend_output(
                 [
@@ -1659,9 +1660,9 @@ class DequeVariable(BaseListVariable):
         codegen.append_output(create_instruction("BUILD_LIST", arg=0))
         codegen(self.maxlen)
         codegen.extend_output([*codegen.create_call_function_kw(2, ("maxlen",), False)])
-        # See ConstDictVariable.reconstruct: skip the cache store when the object
-        # was already materialized, so self-references keep pointing at it.
-        if self not in codegen.tempvars:
+        # See ConstDictVariable.reconstruct: only cache a sourceless object, so
+        # the store cannot rebind a later codegen of this VT to this throwaway.
+        if self.source is None:
             codegen.append_output(create_dup_top())
             codegen.add_cache(self)
 

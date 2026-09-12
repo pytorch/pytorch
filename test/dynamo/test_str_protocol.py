@@ -393,7 +393,6 @@ class TpStrExceptionTests(TestCase):
     def test_runtime_error(self):
         assert str(RuntimeError("runtime failure")) == "runtime failure"  # noqa: S101
 
-    @unittest.expectedFailure
     def test_user_defined_exception_subclass_str(self):
         class MyError(ValueError):
             pass
