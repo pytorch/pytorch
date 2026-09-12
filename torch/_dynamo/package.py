@@ -325,37 +325,18 @@ class FunctionPicklerBase(pickle.Pickler):
         # not for a local function), so the caller prunes any it does not need.
         # `evaluate` asks for the VALUE format instead, for a caller that has to
         # serialize the values and cannot carry a proxy; that read raises for a
-        # name that does not resolve.
+        # name that does not resolve. Either format can raise -- FORWARDREF only
+        # when the annotation does real work outside a name lookup (formatting a
+        # proxy in an f-string, `()[0]`), which the guards.py caller explains --
+        # and both are left raising here: whether the set can be dropped is the
+        # caller's question, and each caller logs the drop it takes.
         if sys.version_info >= (3, 14):
             import annotationlib
 
-            if evaluate:
-                # An evaluating caller logs its own drop, with the reason.
-                return annotationlib.get_annotations(
-                    obj, format=annotationlib.Format.VALUE
-                )
-            # FORWARDREF reruns the annotate function with every NAME lookup
-            # proxied, so it absorbs a missing name, a raising attribute or a
-            # raising call, but a sub-expression with no name in it (an
-            # f-string, `()[0]`) still raises out of it; that would fail the
-            # dump for a slot the prune exists to make optional. Dropping the
-            # whole set is safe for guards: a guard rooted at fn.__annotations__
-            # evaluated them at trace time (VALUE format, cached on the
-            # function), so a read that raises here is one no guard performed.
-            try:
-                return annotationlib.get_annotations(
-                    obj, format=annotationlib.Format.FORWARDREF
-                )
-            except Exception as e:
-                code = obj.__code__
-                logger.debug(
-                    "dropping the annotations of %s (%s:%d): %s",
-                    getattr(code, "co_qualname", code.co_name),
-                    code.co_filename,
-                    code.co_firstlineno,
-                    e,
-                )
-                return {}
+            fmt = annotationlib.Format
+            return annotationlib.get_annotations(
+                obj, format=fmt.VALUE if evaluate else fmt.FORWARDREF
+            )
         return obj.__annotations__
 
     def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
