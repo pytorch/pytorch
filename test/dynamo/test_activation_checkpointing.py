@@ -3908,6 +3908,36 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
 
         ctx = TracingContext(fake_mode)
 
+       @requires_gpu_and_triton
+    def test_kwargs(self, device):
+        def gn(x, y, z=None):
+            a = torch.matmul(x, y)
+            if z is not None:
+                return torch.matmul(a, z)
+            return a
+
+        def fn(x, y, z):
+            return torch.cos(
+                torch.utils.checkpoint.checkpoint(
+                    gn, torch.sin(x), y, z=z, use_reentrant=False
+                )
+            )
+
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
+        z = torch.randn(4, 4, requires_grad=True, device=device)
+
+        fw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops, freq=6, op=torch.ops.aten.mm.default
+        )  # mm operations recomputed in backward pass
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y, z)
+
         with (
             fake_mode,
             tracing(ctx),
