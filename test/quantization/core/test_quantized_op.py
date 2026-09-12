@@ -3697,6 +3697,32 @@ class TestDynamicQuantizedOps(TestCase):
         self.assertTrue(torch.equal(w_fp16, w_unpacked_fp16[0]))
 
     @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_fbgemm_legacy_ops_reject_non_cpu_tensors(self):
+        w = torch.randn(4, 8)
+        w_int8, col_offsets, w_scale, w_zp = torch.fbgemm_linear_quantize_weight(w)
+        packed_int8 = torch.fbgemm_pack_quantized_matrix(w_int8)
+        packed_fp16 = torch.fbgemm_pack_gemm_matrix_fp16(w)
+        x = torch.randn(2, 8)
+        bias = torch.zeros(4)
+        cuda = torch.zeros(2, 8, device="cuda")
+        cases = [
+            lambda: torch.fbgemm_linear_quantize_weight(cuda),
+            lambda: torch.fbgemm_pack_quantized_matrix(cuda.to(torch.int8)),
+            lambda: torch.fbgemm_pack_gemm_matrix_fp16(cuda),
+            lambda: torch.fbgemm_linear_int8_weight_fp32_activation(cuda, w_int8, packed_int8, col_offsets, w_scale, w_zp, bias),
+            lambda: torch.fbgemm_linear_int8_weight_fp32_activation(x, w_int8, packed_int8.cuda(), col_offsets, w_scale, w_zp, bias),
+            lambda: torch.fbgemm_linear_int8_weight_fp32_activation(x, w_int8, packed_int8, col_offsets.cuda(), w_scale, w_zp, bias),
+            lambda: torch.fbgemm_linear_int8_weight_fp32_activation(x, w_int8, packed_int8, col_offsets, w_scale, w_zp, bias.cuda()),
+            lambda: torch.fbgemm_linear_fp16_weight_fp32_activation(cuda, packed_fp16, None),
+            lambda: torch.fbgemm_linear_fp16_weight_fp32_activation(x, packed_fp16, None, torch.empty(0, device="cuda")),
+            lambda: torch.fbgemm_linear_fp16_weight(x, packed_fp16.cuda(), bias),
+        ]
+        for fn in cases:
+            with self.assertRaisesRegex(RuntimeError, "only supports CPU tensors"):
+                fn()
+
+    @skipIfNoFBGEMM
     def test_qlinear_dynamic_fp16(self):
 
         options = itertools.product(
