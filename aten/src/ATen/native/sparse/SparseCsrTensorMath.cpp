@@ -1274,7 +1274,7 @@ In [4]: %timeit torch.sum(t.values())
     new_values = at::empty({1}, values.options().dtype(result_dtype));
     new_values.fill_(value);
   } else {
-    new_values = at::empty({}, values.options().dtype(result_dtype));
+    new_values = at::empty({nnz}, values.options().dtype(result_dtype));
   }
   return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
                                                {1, std::min<int64_t>(1, sparse.size(1))},

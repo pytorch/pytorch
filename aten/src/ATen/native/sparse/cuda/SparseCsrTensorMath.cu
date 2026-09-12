@@ -640,7 +640,7 @@ Tensor reduce_sparse_csr_dim01_cuda_template(const Tensor& sparse, ReductionOp r
     gpu_reduce_kernel<scalar_t, scalar_t>(iter, func_wrapper<scalar_t>(rop), rop.identity_cpu());
     new_values.copy_(new_values_acc);
   } else {
-    new_values = at::empty({}, values.options().dtype(result_dtype));
+    new_values = at::empty({nnz}, values.options().dtype(result_dtype));
   }
   Tensor new_col_indices = at::zeros({nnz}, ioptions);
   Tensor new_crow_indices = at::tensor(ArrayRef<int64_t>{0, nnz}, ioptions);
