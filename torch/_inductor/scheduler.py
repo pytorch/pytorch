@@ -403,10 +403,6 @@ class MixOrderReduction:
             ):
                 return False
 
-            # Don't gate on the nrow/ncol ratio: mix-order reduction can also
-            # be helpful on relatively flat inputs, and a `nrow >= ncol * 2`
-            # gate would reject profitable shapes.
-
             # Need enough rows to split the other reduction across; too few
             # gives insufficient parallelism to justify the fusion overhead.
             if not V.graph.sizevars.evaluate_expr(
