@@ -10068,6 +10068,60 @@ def forward(self, x):
         ep = export(Simple(), example_inputs)
         self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
 
+    # This suite folds run_decompositions into export, so the NYI error is
+    # raised by export itself rather than the explicit run_decompositions call.
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_effectful_while_loop_export_nyi(self):
+        class M(torch.nn.Module):
+            def forward(self, matrix, count):
+                def cond(i, out):
+                    return i < count
+
+                def body(i, out):
+                    return i + 1, out + torch.linalg.inv(matrix)
+
+                carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+                return torch.while_loop(cond, body, carries)[1]
+
+        inputs = (torch.eye(2), torch.tensor(1))
+        expected = M()(*inputs)
+        for strict in (True, False):
+            with self.subTest(strict=strict):
+                ep = export(M(), inputs, strict=strict)
+                self.assertEqual(ep.module()(*inputs), expected)
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "effects in while_loop are unsupported during export",
+                ):
+                    ep.run_decompositions()
+
+        # An op that is effectful at pre-dispatch keeps the same contract:
+        # the initial export stays valid and runnable, and only
+        # run_decompositions raises.
+        class P(torch.nn.Module):
+            def forward(self, x, count):
+                def cond(i, x):
+                    return i < count
+
+                def body(i, x):
+                    torch.ops.aten._print("loop")
+                    return i + 1, x + 1
+
+                carries = (torch.zeros_like(count), x)
+                return torch.while_loop(cond, body, carries)[1]
+
+        p_inputs = (torch.ones(2), torch.tensor(1))
+        for strict in (True, False):
+            with self.subTest(strict=strict, pre_dispatch_effect=True):
+                ep = export(P(), p_inputs, strict=strict)
+                self.assertEqual(ep.module()(*p_inputs), torch.ones(2) + 1)
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "effects in while_loop are unsupported during export",
+                ):
+                    ep.run_decompositions()
+
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
             def forward(self, x, y):

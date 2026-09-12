@@ -246,6 +246,38 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.compile(f, backend="aot_eager")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
+    def test_pure_while_loop_empty_carry_with_unrelated_effect(self):
+        class M(torch.nn.Module):
+            def forward(self, matrix, post, count):
+                def cond(empty, i, out):
+                    return i < count
+
+                def body(empty, i, out):
+                    return empty.clone(), i + 1, out + 1
+
+                carries = (matrix.new_empty(0), torch.zeros_like(count), matrix)
+                out = torch.while_loop(cond, body, carries)[2]
+                return out + torch.linalg.inv(post)
+
+        inputs = (torch.eye(2), 2 * torch.eye(2), torch.tensor(2))
+        expected = inputs[0] + 2 + torch.linalg.inv(inputs[1])
+
+        backend = AotEagerAndRecordGraphs()
+        actual = torch.compile(M(), backend=backend, fullgraph=True)(*inputs)
+        self.assertEqual(actual, expected)
+        loop_op = torch.ops.higher_order.while_loop
+        aot_loop = backend.fw_graphs[0].graph.find_nodes(
+            op="call_function", target=loop_op
+        )[0]
+        self.assertNotIn("num_effect_tokens", aot_loop.kwargs)
+
+        ep = torch.export.export(M(), inputs).run_decompositions()
+        self.assertEqual(ep.module()(*inputs), expected)
+        export_loop = ep.graph_module.graph.find_nodes(
+            op="call_function", target=loop_op
+        )[0]
+        self.assertNotIn("num_effect_tokens", export_loop.kwargs)
+
     @unittest.skipIf(IS_WINDOWS, "triton")
     @unittest.skipIf(not SM70OrLater, "triton")
     def test_compile_inductor(self):
