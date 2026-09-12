@@ -354,11 +354,41 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             key(128, 128, 1, 1, False),
         )
         self.assertEqual(flex_gemm_search_space(odd_default), odd_default)
-        sm120 = (
-            key(128, 160, 1, 1, True, device_capacity=12),
-            key(128, 32, 1, 1, True, device_capacity=12),
+        sm120 = tuple(
+            key(128, tile_n, 1, 1, True, device_capacity=12)
+            for tile_n in range(16, 256 + 1, 16)
         )
-        self.assertEqual(flex_gemm_search_space(sm120), sm120)
+        self.assertEqual(flex_gemm_search_space(sm120), sm120[:12])
+
+    def test_flex_gemm_dense_default_config_by_shape(self):
+        from torch._inductor.heuristics.template.flex_gemm import (
+            flex_gemm_default_config,
+        )
+
+        key = self.searchSpaceKey
+        quack_default = key(256, 256, 2, 1, True)
+        default, skinny = key(128, 256, 2, 1, True), key(128, 192, 2, 1, True)
+        large_rect, large = quack_default, key(256, 256, 2, 2, True)
+        legal = (quack_default, key(128, 32, 1, 1, True), large, skinny, default)
+        cases = {
+            (256, 4096): skinny,
+            (1024, 1024): skinny,
+            (4096, 768): large,
+            (4096, 1024): large_rect,
+            (2048, 2048): large,
+            (1024, 2048): default,
+        }
+        for shape, expected in cases.items():
+            with self.subTest(shape=shape):
+                self.assertEqual(
+                    flex_gemm_default_config(legal, dense_shape=shape), expected
+                )
+        self.assertEqual(flex_gemm_default_config(legal), quack_default)
+        # Unranked legal sets keep QuACK's default.
+        unranked = (quack_default, key(128, 32, 1, 1, True))
+        self.assertEqual(
+            flex_gemm_default_config(unranked, dense_shape=(256, 256)), quack_default
+        )
 
     @parametrize(
         "reduction_type",
@@ -1805,8 +1835,53 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             " kernel_options={'backend': 'QUACK', 'tuned': True}), fullgraph=True)\n"
             "fn(a, b)\n"
             "assert 'quack' not in sys.modules, 'pip quack was imported'\n"
+            "assert 'cloudpickle' not in sys.modules, 'cloudpickle was imported'\n"
         )
         subprocess.run([sys.executable, "-c", script], check=True, timeout=900)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @inductor_config.patch(force_disable_caches=True)
+    def test_tuned_winner_is_not_recompiled_by_final_wrapper(self):
+        # QuACK keys compiled kernels by the epilogue function's module; the
+        # benchmark and output-code modules can differ, so the selected kernel
+        # must carry a stable identity or it compiles a second time. Force a
+        # distinct module per kernel load to make the mismatch deterministic:
+        # every candidate and the final wrapper must present one EpiMod digest.
+        import torch._vendor.quack.gemm_runtime.host as quack_host
+        from torch._inductor.codecache import PyCodeCache
+
+        digests: list[str] = []
+        original_compile = quack_host._compile_gemm_epi
+        original_write = PyCodeCache.write.__func__
+
+        def recording_compile(gemm_cls_ref, *args, **kwargs):
+            digests.append(gemm_cls_ref.semantic_digest)
+            return original_compile(gemm_cls_ref, *args, **kwargs)
+
+        def unique_write(cls, source_code, extra=""):
+            return original_write(cls, source_code, extra + str(id(source_code)))
+
+        a = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(128, 256, device="cuda", dtype=torch.bfloat16)
+        fn = torch.compile(
+            lambda a, b: flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            ),
+            fullgraph=True,
+        )
+        with (
+            mock.patch.object(quack_host, "_compile_gemm_epi", recording_compile),
+            mock.patch.object(PyCodeCache, "write", classmethod(unique_write)),
+        ):
+            fn(a, b)
+            torch.cuda.synchronize()
+        self.assertGreater(len(digests), 2)
+        self.assertEqual(len(set(digests)), 1)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
