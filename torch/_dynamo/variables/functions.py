@@ -98,6 +98,7 @@ from .base import (
     getset_build,
     getset_load_or_build,
     getset_set,
+    load_pending_mutation,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -499,7 +500,8 @@ class BaseUserFunctionVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
         """Read func slot *name* off the real function object behind this VT, or
-        None when there is none (the caller then supplies the empty slot value).
+        None when there is none (the caller then falls back to what the VT itself
+        knows: an empty slot value, or the code object's name).
 
         UserFunctionVariable overrides this to reflect on the function it wraps;
         a synthesized function carries its filled slots as fields instead.
@@ -570,27 +572,35 @@ class BaseUserFunctionVariable(VariableTracker):
         return c if c is not None else ConstantVariable.create(None)
 
     def _get_name(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return ConstantVariable.create(self.get_name())
+        # func_get_name reads the function object, which a rename takes out of
+        # sync with co_name, so reflect on the real function when there is one.
+        pending = load_pending_mutation(tx, self, "__name__")
+        if pending is not None:
+            return pending
+        name = self.read_func_slot(tx, "__name__")
+        if name is not None:
+            return name
+        # Wrapper VTs (lru_cache, torch.compile'd functions) have no function to
+        # reflect on, but get_name() reads the wrapper object itself; keep the
+        # source so the name stays guarded.
+        source = self.source and AttrSource(self.source, "__name__")
+        return VariableTracker.build(tx, self.get_name(), source)
+
+    def _get_qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        pending = load_pending_mutation(tx, self, "__qualname__")
+        if pending is not None:
+            return pending
+        qualname = self.read_func_slot(tx, "__qualname__")
+        if qualname is not None:
+            return qualname
+        source = self.source and AttrSource(self.source, "__qualname__")
+        return VariableTracker.build(tx, self.get_qualname(), source)
 
     tp_getset = {
         "__defaults__": GetSet(_get_defaults, unmodeled_setter),
         "__kwdefaults__": GetSet(_get_kwdefaults, unmodeled_setter),
-        "__name__": GetSet(
-            getset_load_or_build(
-                lambda s: s.get_name(),
-                "__name__",
-                source=lambda s: s.source and AttrSource(s.source, "__name__"),
-            ),
-            _set_name,
-        ),
-        "__qualname__": GetSet(
-            getset_load_or_build(
-                lambda s: s.get_qualname(),
-                "__qualname__",
-                source=lambda s: s.source and AttrSource(s.source, "__qualname__"),
-            ),
-            _set_qualname,
-        ),
+        "__name__": GetSet(_get_name, _set_name),
+        "__qualname__": GetSet(_get_qualname, _set_qualname),
         "__code__": GetSet(
             getset_load_or_build(
                 lambda s: s.get_code(),
@@ -899,12 +909,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def read_func_slot(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Reads self.fn directly, bypassing side effects: callers (_get_defaults
-        # etc.) only reach here when the corresponding VT field (self.defaults,
-        # self.closure, ...) is still None, i.e. that slot has never been
-        # mutated. A mutation always sets the field directly (see
-        # _set_annotations et al.), so once set this path is never taken again
-        # for that slot.
+        # Reads self.fn directly, bypassing side effects: callers only reach here
+        # while the slot is unmutated on this VT. Most mutations set the VT field
+        # directly (self.defaults, self.closure, ... via _set_annotations et al.);
+        # __name__/__qualname__ writes are pending side effects, which
+        # _get_name/_get_qualname check before falling back to this.
         return VariableTracker.build(
             tx, getattr(self.fn, name), self.source and AttrSource(self.source, name)
         )
@@ -2145,6 +2154,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
+
+    def get_qualname(self) -> str:
+        # MAKE_FUNCTION's qualname; before 3.11 the code object has no
+        # co_qualname to recover it from.
+        return self.fn_name.as_python_constant()
 
     def python_type(self) -> type[types.FunctionType]:
         return types.FunctionType
