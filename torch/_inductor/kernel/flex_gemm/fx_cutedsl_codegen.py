@@ -269,6 +269,10 @@ def tuple_output_plan(
             for reduction in compressed_reductions
         ):
             feed_match = compressed_match
+        if compressed_match.physical_span > 1 and feed_match is None:
+            raise NotImplementedError(
+                "nested TensorSSA reductions must feed the main output"
+            )
         if feed_match is not None:
             if OrderedSet(analysis.physical_reduction_nodes(feed_match)) != OrderedSet(
                 compressed_reductions
@@ -415,7 +419,11 @@ class FlexGemmEpilogueAnalysis:
             return cls(gemm, outputs, local_reduce)
         if outputs.aux_outputs or outputs.indexed_output is not None:
             raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
-        if contraction_plan.transform.chunked and outputs.local_reduce is not None:
+        if (
+            contraction_plan.transform.chunked
+            and outputs.local_reduce is not None
+            and outputs.local_reduce.match.physical_span == 1
+        ):
             raise NotImplementedError(
                 "chunked grouped main outputs do not compose with grouped reductions"
             )
@@ -827,6 +835,8 @@ def epimod_local_reduce_spec(
             "FlexGEMM multi-plane grouped reductions currently support returned "
             "outputs, not feed-main consumers"
         )
+    if local_reduce.match.physical_span > 1 and spec.sink.finalize == "mean":
+        raise NotImplementedError("nested TensorSSA reductions do not support mean")
     reduction_node = spec.sink.node
     if (
         local_reduce.feeds_main
@@ -930,10 +940,18 @@ class FlexGemmEpilogueEmitter:
         self.operand_names = tuple(
             f"operand{index}" for index in range(len(epilogue_arg_placeholders))
         )
+        self.local_reduce_fragment_reduced = False
+        self.local_reduce_sink_value: CuteDSLCSEVariable | None = None
         if self.local_reduce is not None:
             spec = epimod_local_reduce_spec(analysis, self.local_reduce)
             self.local_reduce_spec = spec
             sink = spec.sink
+            match = self.local_reduce.match
+            paired = match.physical_span > 1
+            if paired and swap_ab:
+                raise NotImplementedError(
+                    "nested TensorSSA reductions do not support swap_ab=True"
+                )
             self.local_reduce_source_nodes = frozenset(
                 (
                     *analysis.local_reduce.graph.dependencies.get(sink.source, ()),
@@ -944,12 +962,19 @@ class FlexGemmEpilogueEmitter:
             if (
                 prepass is None
                 and self.local_reduce.feeds_main
-                and self.local_reduce.match.geometry.axis == 1
+                and match.geometry.axis == 1
+                and not paired
             ):
                 prepass = sink
             self.local_reduce_prepass = prepass
+            # Paired lanes complete their logical group inside one fragment
+            # (GroupedMainStore min_fragment_n); axis-N multi-plane state returns
+            # fragment partials. Both skip only QuACK's in-fragment fold.
+            self.local_reduce_fragment_reduced = paired or (
+                sink.reduce_planes > 1 and match.geometry.axis == 1 and not swap_ab
+            )
             if (
-                (not self.local_reduce.feeds_main or prepass is not None)
+                (not self.local_reduce.feeds_main or prepass is not None or paired)
                 and self.local_reduce.store is not None
                 and self.local_reduce.store.value_node is not sink.node
             ):
@@ -979,16 +1004,6 @@ class FlexGemmEpilogueEmitter:
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
-        fragment_reduced = (
-            self.local_reduce is not None
-            and self.local_reduce_spec is not None
-            and self.local_reduce_spec.sink.reduce_planes > 1
-            and not swap_ab
-            and self.local_reduce.match.geometry.axis == 1
-            and not self.local_reduce.feeds_main
-            and self.local_reduce_prepass is None
-        )
-        self.local_reduce_fragment_reduced = fragment_reduced
         grouped_tensors = analysis.output_contraction_layouts | (
             analysis.local_reduce.grouped_tensors
             if self.local_reduce_fragment_reduced
@@ -1009,8 +1024,10 @@ class FlexGemmEpilogueEmitter:
         self.kernel = GemmEpilogueCuteDSLKernel()
         self.params = ["acc"]
         self.base_env = self.initial_env_for_params(self.params)
-        if self.local_reduce is not None and (
-            self.local_reduce.feeds_main or self.local_reduce_prepass is not None
+        if self.local_reduce_prepass is not None or (
+            self.local_reduce is not None
+            and self.local_reduce.feeds_main
+            and self.local_reduce.match.physical_span == 1
         ):
             self.params.append(LOCAL_REDUCE_FEED_MAIN_ARG_NAME)
         self.local_reduce_prepass_value: CuteDSLCSEVariable | None = None
@@ -1289,7 +1306,8 @@ class FlexGemmEpilogueEmitter:
             raise AssertionError(
                 "TensorSSA grouped reduction requires a reduction plan"
             )
-        geometry = self.local_reduce.match.geometry
+        match = self.local_reduce.match
+        geometry = match.geometry
         layout = GroupedTensorSSALayout(geometry.group, geometry.axis)
         if isinstance(sink.reduction, NormalizedPrepareSoftmax):
             return self.lower_online_softmax_fragment_partial(source, layout)
@@ -1300,6 +1318,17 @@ class FlexGemmEpilogueEmitter:
             f"reduction_profile={layout.reduction_profile})",
             source,
         )
+        if match.physical_span > 1:
+            # QuACK collects this sink at physical fragment width; broadcast the
+            # logical group value across both paired lanes.
+            physical = GroupedTensorSSALayout(
+                match.physical_geometry.group, geometry.axis
+            )
+            self.local_reduce_sink_value = self.generate_like(
+                f"{reduced}.reshape({physical.keepdim_shape('acc')})"
+                f".broadcast_to({physical.tensorssa_shape('acc')})",
+                reduced,
+            )
         return self.broadcast_fragment_partial(reduced, layout, source)
 
     def lower_graph(self) -> None:
@@ -1321,7 +1350,8 @@ class FlexGemmEpilogueEmitter:
                 if node is self.gemm or node.op in ("placeholder", "output"):
                     continue
                 if (
-                    (
+                    (local_reduce is None or local_reduce.match.physical_span == 1)
+                    and (
                         self.local_reduce_prepass is None
                         or (spec is not None and spec.prepass is not None)
                     )
@@ -1365,7 +1395,9 @@ class FlexGemmEpilogueEmitter:
                     continue
                 if sink is not None and local_reduce is not None and node is sink.node:
                     source = flex_gemm_epilogue_arg(sink.source, self.env)
-                    if local_reduce.feeds_main:
+                    if self.local_reduce_fragment_reduced:
+                        self.env[node] = self.lower_fragment_partial_state(sink, source)
+                    elif local_reduce.feeds_main:
                         meta = node.meta.get("val")
                         dtype = (
                             meta.dtype
@@ -1378,8 +1410,6 @@ class FlexGemmEpilogueEmitter:
                             dtype=dtype,
                             shape=(1,),
                         )
-                    elif self.local_reduce_fragment_reduced:
-                        self.env[node] = self.lower_fragment_partial_state(sink, source)
                     else:
                         self.env[node] = sink.lift_value(source)
                     continue
@@ -1415,9 +1445,14 @@ class FlexGemmEpilogueEmitter:
             and (
                 not self.local_reduce.feeds_main
                 or self.local_reduce_prepass is not None
+                or self.local_reduce.match.physical_span > 1
             )
         ):
-            store_value = flex_gemm_epilogue_arg(sink.node, self.env)
+            store_value = (
+                flex_gemm_epilogue_arg(sink.node, self.env)
+                if self.local_reduce_sink_value is None
+                else self.local_reduce_sink_value
+            )
             if self.local_reduce_finalize_uses_prepass:
                 store_value = f"({store_value}, {LOCAL_REDUCE_FEED_MAIN_ARG_NAME})"
             result_items.append(

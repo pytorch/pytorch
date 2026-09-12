@@ -938,6 +938,10 @@ class TileStore(EpiOp):
             self._dtype_field(): tensor.element_type,
         }
 
+    def min_epi_tile_n(self, arg_tensor):
+        """Return a physical-N lower bound imposed by this store, if any."""
+        return None
+
     def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
         if self.epi_tile_fn is not None:
             epi_tile = self.epi_tile_fn(None, epi_tile)
