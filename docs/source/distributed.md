@@ -399,6 +399,11 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.distributed.Backend.Options
+    :members:
+```
+
+```{eval-rst}
 .. autofunction:: get_backend
 ```
 
