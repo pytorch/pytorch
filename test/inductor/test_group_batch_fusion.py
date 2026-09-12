@@ -10,7 +10,13 @@ import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.fx_passes.group_batch_fusion import (
+    apply_group_batch_fusion,
+    BatchSubPostGradFusion,
+)
 from torch._inductor.test_case import run_tests, TestCase
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import recover_orig_fp32_precision
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
@@ -251,6 +257,22 @@ class _TestPointwiseOps(torch.nn.Module):
         sub = [torch.sub(mul[i], mul[i]) for i in range(len(mul))]
         div = [torch.div(sub[i], sub[i]) for i in range(len(sub))]
         return torch.cat(div, dim=1)
+
+
+class _TestPointwiseOpsWithAlpha(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = torch.split(x.to(self.device), 500, dim=1)
+        x_split = torch.split(inputs[0], 50, dim=1)
+        y_split = torch.split(inputs[1], 50, dim=1)
+        add = [
+            torch.add(x_split[i], y_split[i], alpha=3.0) for i in range(len(x_split))
+        ]
+        sub = [torch.sub(add[i], y_split[i], alpha=2.0) for i in range(len(add))]
+        return torch.cat(sub, dim=1)
 
 
 class _TestPointwiseOpsPostGrad(torch.nn.Module):
@@ -679,6 +701,101 @@ class TestGroupBatchFusion(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "batch_aten_add": {},
+            "batch_aten_sub": {},
+        },
+    )
+    def test_pointwise_math_ops_with_alpha_fusion(self):
+        counters.clear()
+        module = _TestPointwiseOpsWithAlpha(GPU_TYPE)
+        input_ref = [torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)]
+        input_res = [input_ref[0].detach().clone().requires_grad_(True)]
+        traced = torch.compile(module)
+        ref = module(*input_ref)
+        res = traced(*input_res)
+        self.assertEqual(ref, res, rtol=1e-5, atol=1e-5)
+        self.assertEqual(counters["inductor"]["batch_aten_add"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_sub"], 1)
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(input_ref[0].grad, input_res[0].grad, rtol=1e-5, atol=1e-5)
+        counters.clear()
+
+    def test_batch_aten_sub_preserves_alpha(self):
+        class Model(torch.nn.Module):
+            def forward(self, *args):
+                # Two fusion groups: five subs with alpha=2.0, five with
+                # alpha=3.5.
+                alphas = [2.0] * 5 + [3.5] * 5
+                return tuple(
+                    torch.ops.aten.sub.Tensor(
+                        args[2 * i], args[2 * i + 1], alpha=alphas[i]
+                    )
+                    for i in range(10)
+                )
+
+        inputs = [torch.randn(16, 16) for _ in range(20)]
+        model = Model()
+        with FakeTensorMode() as fake_mode:
+            fake_inputs = [fake_mode.from_tensor(t) for t in inputs]
+            gm = make_fx(model)(*fake_inputs)
+            apply_group_batch_fusion(gm.graph, BatchSubPostGradFusion())
+
+        fused_sub_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target == torch.ops.aten.sub.Tensor
+        ]
+        self.assertEqual(len(fused_sub_nodes), 2)
+        alphas = {n.kwargs.get("alpha") for n in fused_sub_nodes}
+        self.assertEqual(alphas, {2.0, 3.5})
+
+        res = gm(*inputs)
+        ref = model(*inputs)
+        self.assertEqual(res, ref)
+
+    def test_batch_aten_sub_normalizes_default_alpha(self):
+        # The dispatcher elides kwargs equal to their schema defaults, so
+        # sub(x, y) and sub(x, y, alpha=1) trace to identical nodes and
+        # fuse into a single group: keying on node.kwargs loses no fusion
+        # opportunity for default-valued kwargs.
+        class Model(torch.nn.Module):
+            def forward(self, *args):
+                bare = [
+                    torch.ops.aten.sub.Tensor(args[2 * i], args[2 * i + 1])
+                    for i in range(5)
+                ]
+                explicit = [
+                    torch.ops.aten.sub.Tensor(
+                        args[10 + 2 * i], args[11 + 2 * i], alpha=1
+                    )
+                    for i in range(5)
+                ]
+                return tuple(bare + explicit)
+
+        inputs = [torch.randn(16, 16) for _ in range(20)]
+        model = Model()
+        with FakeTensorMode() as fake_mode:
+            fake_inputs = [fake_mode.from_tensor(t) for t in inputs]
+            gm = make_fx(model)(*fake_inputs)
+            apply_group_batch_fusion(gm.graph, BatchSubPostGradFusion())
+
+        fused_sub_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target == torch.ops.aten.sub.Tensor
+        ]
+        self.assertEqual(len(fused_sub_nodes), 1)
+        self.assertEqual(dict(fused_sub_nodes[0].kwargs), {})
+
+        res = gm(*inputs)
+        ref = model(*inputs)
+        self.assertEqual(res, ref)
 
     @requires_gpu()
     @torch._inductor.config.patch(
