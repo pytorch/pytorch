@@ -28,36 +28,15 @@ from .gemm_gfx950 import (
     GFX950_DMA_BYTES,
     GFX950_WAVE_SIZE,
     async_load_operand,
+    get_lds_swizzle_mask_bits,
     get_wave_lds_offset,
+    make_lds_layout,
+    make_tile_schedule,
 )
 
 
 def _make_wave_layout(m_waves, n_waves):
     return fx.make_layout((m_waves, n_waves, 1), (n_waves, 1, 0))
-
-
-def _make_row_major_lds_layout(rows, inner_extent, swizzle):
-    return fx.make_composed_layout(
-        swizzle,
-        fx.make_ordered_layout((rows, inner_extent), (1, 0)),
-    )
-
-
-def _make_transposed_lds_layout(rows, inner_extent, granule_bits):
-    base_layout = fx.make_ordered_layout((rows, inner_extent), (0, 1))
-    if const_expr(rows == 64):
-        return fx.make_composed_layout(
-            fx.static(fx.SwizzleType.get(2, granule_bits, 2)), base_layout
-        )
-    if const_expr(rows == 128):
-        return fx.make_composed_layout(
-            fx.static(fx.SwizzleType.get(2, granule_bits, 3)), base_layout
-        )
-    if const_expr(rows == 256):
-        return fx.make_composed_layout(
-            fx.static(fx.SwizzleType.get(2, granule_bits, 4)), base_layout
-        )
-    return base_layout
 
 
 def _permlane_swap(width, old, src):
@@ -91,8 +70,6 @@ MXFP_MFMA_M = 16
 MXFP_MFMA_N = 16
 MXFP_MFMA_K = 128
 GFX950_SCALE_DMA_BYTES = 4
-GFX950_LDS_CAPACITY = 163840
-GFX950_MAX_BLOCK_THREADS = 1024
 MXFP_OUT_BYTES = 2
 MXFP_MAX_MMA_REPEAT = 8
 MXFP_FORMAT_FP4 = 4
@@ -112,9 +89,6 @@ def _elements_per_byte(mxfp_format: MXFPFormat) -> int:
 @fx.struct
 class MXFPGemmParams:
     mxfp_format_id: fx.Constexpr[int]
-    m: fx.Constexpr[int]
-    n: fx.Constexpr[int]
-    k: fx.Constexpr[int]
     out_dtype_id: fx.Constexpr[int]
     block_m: fx.Constexpr[int]
     block_n: fx.Constexpr[int]
@@ -127,12 +101,12 @@ class MXFPGemmParams:
     a_is_transposed: fx.Constexpr[bool]
     b_is_transposed: fx.Constexpr[bool]
     use_cshuffle: fx.Constexpr[bool]
+    has_k_tail: fx.Constexpr[bool]
     block_threads: fx.Constexpr[int]
     block_k_bytes: fx.Constexpr[int]
     mma_m_repeat: fx.Constexpr[int]
     mma_n_repeat: fx.Constexpr[int]
     k_halves: fx.Constexpr[int]
-    granules_per_row: fx.Constexpr[int]
     ldg_a_iters: fx.Constexpr[int]
     ldg_b_iters: fx.Constexpr[int]
     ldg_wait_count: fx.Constexpr[int]
@@ -154,7 +128,6 @@ class MXFPGemmDerived:
     mma_m_repeat: int
     mma_n_repeat: int
     k_halves: int
-    granules_per_row: int
     ldg_a_iters: int
     ldg_b_iters: int
     ldg_wait_count: int
@@ -200,10 +173,6 @@ def mxfp_gemm_derived(
         )
     block_k_bytes = block_k // elements_per_byte
 
-    block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
-    if block_threads > GFX950_MAX_BLOCK_THREADS:
-        raise ValueError(f"block exceeds {GFX950_MAX_BLOCK_THREADS} threads")
-
     wave_tile_m, rem_m = divmod(block_m, m_waves)
     wave_tile_n, rem_n = divmod(block_n, n_waves)
     if rem_m or rem_n:
@@ -221,6 +190,7 @@ def mxfp_gemm_derived(
             f"mma_m_repeat={mma_m_repeat}, mma_n_repeat={mma_n_repeat}"
         )
 
+    block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
     cshuffle_vec_size = GFX950_DMA_BYTES // MXFP_OUT_BYTES
     cshuffle_x_threads = block_n // cshuffle_vec_size
     use_cshuffle = (
@@ -237,23 +207,6 @@ def mxfp_gemm_derived(
             f"block_k_bytes={block_k_bytes}"
         )
 
-    dma_bytes_per_pass = block_threads * GFX950_DMA_BYTES
-    if (block_m * block_k_bytes) % dma_bytes_per_pass != 0:
-        raise ValueError(
-            "A tile load schedule must exactly cover the LDS tile: "
-            f"block_m={block_m}, block_k={block_k}, block_threads={block_threads}"
-        )
-    if (block_n * block_k_bytes) % dma_bytes_per_pass != 0:
-        raise ValueError(
-            "B tile load schedule must exactly cover the LDS tile: "
-            f"block_n={block_n}, block_k={block_k}, block_threads={block_threads}"
-        )
-    ldg_a_iters = (block_m * block_k_bytes) // dma_bytes_per_pass
-    ldg_b_iters = (block_n * block_k_bytes) // dma_bytes_per_pass
-
-    a_stage_bytes = block_m * block_k_bytes
-    b_stage_bytes = block_n * block_k_bytes
-
     # ---- LDS-staged E8M0 scales -------------------------------------------
     scale_row_bytes = block_k // MXFP_SCALE_BLOCK_K
     sc_bytes_per_pass = block_threads * GFX950_SCALE_DMA_BYTES
@@ -262,15 +215,6 @@ def mxfp_gemm_derived(
     scale_dma_exact = (
         sc_a_bytes % sc_bytes_per_pass == 0 and sc_b_bytes % sc_bytes_per_pass == 0
     )
-    tile_bytes = stages * (a_stage_bytes + b_stage_bytes)
-    if tile_bytes > GFX950_LDS_CAPACITY:
-        raise ValueError(
-            "staged LDS buffers exceed the device shared-memory capacity: "
-            f"stages={stages}, block_m={block_m}, "
-            f"block_n={block_n}, block_k={block_k}, smem_bytes={tile_bytes}, "
-            f"capacity={GFX950_LDS_CAPACITY}"
-        )
-
     lds_scale = scale_dma_exact and bool(lds_scale_req)
     if lds_scale_req and not scale_dma_exact:
         raise ValueError(
@@ -280,44 +224,36 @@ def mxfp_gemm_derived(
         )
     sc_a_iters = sc_a_bytes // sc_bytes_per_pass if lds_scale else 0
     sc_b_iters = sc_b_bytes // sc_bytes_per_pass if lds_scale else 0
-    scale_bytes = stages * (sc_a_bytes + sc_b_bytes) if lds_scale else 0
-    ab_scale_bytes = tile_bytes + scale_bytes
     cshuffle_bytes = block_m * block_n * MXFP_OUT_BYTES if use_cshuffle else 0
-    if max(ab_scale_bytes, cshuffle_bytes) > GFX950_LDS_CAPACITY:
-        raise ValueError(
-            "staged tiles and C-shuffle exceed the device shared-memory capacity: "
-            f"ab_scale_bytes={ab_scale_bytes}, cshuffle_bytes={cshuffle_bytes}, "
-            f"capacity={GFX950_LDS_CAPACITY}"
-        )
-
-    ldg_wait_count = ldg_a_iters + sc_a_iters + ldg_b_iters + sc_b_iters
-    # Scale DMA contributes to the vmcnt wait budget.
-    if (stages - 2) * ldg_wait_count >= 63:
-        if lds_scale:
-            raise ValueError(
-                "the scale DMA lengthens the in-order vmcnt chain past the wait "
-                "budget for this pipeline depth"
-            )
-        raise ValueError("staged pipeline wait count exceeds supported range")
+    schedule = make_tile_schedule(
+        block_m,
+        block_n,
+        block_k_bytes,
+        stages,
+        m_waves,
+        n_waves,
+        extra_stage_bytes=sc_a_bytes + sc_b_bytes if lds_scale else 0,
+        extra_load_iters=sc_a_iters + sc_b_iters,
+        output_tile_bytes=cshuffle_bytes,
+    )
 
     return MXFPGemmDerived(
-        block_threads=block_threads,
+        block_threads=schedule.block_threads,
         block_k_bytes=block_k_bytes,
         mma_m_repeat=mma_m_repeat,
         mma_n_repeat=mma_n_repeat,
         k_halves=block_k // MXFP_MFMA_K,
-        granules_per_row=granules_per_row,
-        ldg_a_iters=ldg_a_iters,
-        ldg_b_iters=ldg_b_iters,
-        ldg_wait_count=ldg_wait_count,
+        ldg_a_iters=schedule.ldg_a_iters,
+        ldg_b_iters=schedule.ldg_b_iters,
+        ldg_wait_count=schedule.ldg_wait_count,
         lds_scale=lds_scale,
         sc_a_iters=sc_a_iters,
         sc_b_iters=sc_b_iters,
         sc_a_bytes=sc_a_bytes,
         sc_b_bytes=sc_b_bytes,
         scale_row_bytes=scale_row_bytes,
-        a_stage_bytes=a_stage_bytes,
-        b_stage_bytes=b_stage_bytes,
+        a_stage_bytes=schedule.a_stage_bytes,
+        b_stage_bytes=schedule.b_stage_bytes,
         use_cshuffle=use_cshuffle,
     )
 
@@ -360,15 +296,11 @@ def make_mxfp_param_and_validate(
     except ValueError:
         return None
 
-    if m % block_m or n % block_n or k % block_k:
+    if k % MXFP_MFMA_K or k > 2**31 - 1:
         return None
-    if (k // block_k) <= stages - 1:
-        return None
+    k_tiles = (k + block_k - 1) // block_k
     return MXFPGemmParams(
         mxfp_format_id=MXFP_FORMAT_FP4 if mxfp_format == "mxfp4" else MXFP_FORMAT_FP8,
-        m=m,
-        n=n,
-        k=k,
         out_dtype_id=(
             MXFP_OUT_DTYPE_BF16 if out_dtype == "bfloat16" else MXFP_OUT_DTYPE_FP16
         ),
@@ -382,13 +314,16 @@ def make_mxfp_param_and_validate(
         lds_scale=derived.lds_scale,
         a_is_transposed=a_is_transposed,
         b_is_transposed=b_is_transposed,
-        use_cshuffle=derived.use_cshuffle,
+        use_cshuffle=(
+            derived.use_cshuffle
+            and n % (GFX950_DMA_BYTES // MXFP_OUT_BYTES) == 0
+        ),
+        has_k_tail=(k % block_k != 0) or (k_tiles < stages - 1),
         block_threads=derived.block_threads,
         block_k_bytes=derived.block_k_bytes,
         mma_m_repeat=derived.mma_m_repeat,
         mma_n_repeat=derived.mma_n_repeat,
         k_halves=derived.k_halves,
-        granules_per_row=derived.granules_per_row,
         ldg_a_iters=derived.ldg_a_iters,
         ldg_b_iters=derived.ldg_b_iters,
         ldg_wait_count=derived.ldg_wait_count,
@@ -414,6 +349,7 @@ def make_mxfp_gemm_kernel_name(param: MXFPGemmParams) -> str:
         f"_s{param.stages}_mw{param.m_waves}_nw{param.n_waves}"
         f"_g{param.group_m}"
         f"_ls{param.lds_scale}"
+        f"_kt{int(param.has_k_tail)}"
         f"_l{'t' if param.a_is_transposed else 'n'}"
         f"{'t' if param.b_is_transposed else 'n'}"
     )
@@ -449,19 +385,21 @@ def make_mxfp_tiled_mma(param: MXFPGemmParams, operand_elem):
 def make_mxfp_ab_lds_layouts(
     block_m, block_n, block_k_bytes, a_is_transposed, b_is_transposed
 ):
-    granules_per_row = block_k_bytes // GFX950_DMA_BYTES
-    swizzle_bits = granules_per_row.bit_length() - 1
-    granule_byte_bits = GFX950_DMA_BYTES.bit_length() - 1
-    swizzle_bytes = fx.static(
-        fx.SwizzleType.get(swizzle_bits, granule_byte_bits, swizzle_bits)
-    )
     return (
-        _make_transposed_lds_layout(block_m, block_k_bytes, 4)
-        if a_is_transposed
-        else _make_row_major_lds_layout(block_m, block_k_bytes, swizzle_bytes),
-        _make_transposed_lds_layout(block_n, block_k_bytes, 4)
-        if not b_is_transposed
-        else _make_row_major_lds_layout(block_n, block_k_bytes, swizzle_bytes),
+        make_lds_layout(
+            block_m,
+            block_k_bytes,
+            a_is_transposed,
+            row_major_base=GFX950_DMA_BYTES.bit_length() - 1,
+            full_row_mask=True,
+        ),
+        make_lds_layout(
+            block_n,
+            block_k_bytes,
+            not b_is_transposed,
+            row_major_base=GFX950_DMA_BYTES.bit_length() - 1,
+            full_row_mask=True,
+        ),
     )
 
 
@@ -472,11 +410,11 @@ def gemm_mxfp_gfx950_kernel(
     b_nk: fx.Tensor,
     scale_a_u8: fx.Tensor,
     scale_b_u8: fx.Tensor,
+    m: fx.Int32,
+    n: fx.Int32,
+    k: fx.Int32,
     param: MXFPGemmParams,
 ):
-    m = param.m
-    n = param.n
-    k = param.k
     block_m = param.block_m
     block_n = param.block_n
     block_k = param.block_k
@@ -496,21 +434,17 @@ def gemm_mxfp_gfx950_kernel(
     )
     block_threads = param.block_threads
     block_k_bytes = param.block_k_bytes
-    granules_per_row = param.granules_per_row
+    row_swizzle_mask_bits = get_lds_swizzle_mask_bits(
+        block_k_bytes,
+        GFX950_DMA_BYTES.bit_length() - 1,
+        full_mask=True,
+    )
+    row_swizzle_mask = (1 << row_swizzle_mask_bits) - 1
+    has_k_tail = param.has_k_tail
     k_bytes = k // elements_per_byte
     scale_k = k // MXFP_SCALE_BLOCK_K
-    tiles_m = m // block_m
-    tiles_n = n // block_n
-    packed_repeat_scale = (
-        param.mma_m_repeat % 4 == 0 and param.mma_n_repeat % 4 == 0
-    )
-    a_scale_units = param.mma_m_repeat * param.k_halves
-    b_scale_units = param.mma_n_repeat * param.k_halves
-    packed_unit_scale = not packed_repeat_scale and (
-        -(-a_scale_units // 4) + -(-b_scale_units // 4)
-        < param.k_halves * (param.mma_m_repeat + param.mma_n_repeat)
-    )
-    packed_scale = packed_repeat_scale or packed_unit_scale
+    tiles_m = (m - 1) // block_m + 1
+    tiles_n = (n - 1) // block_n + 1
 
     tid = fx.thread_idx.x
 
@@ -576,12 +510,13 @@ def gemm_mxfp_gfx950_kernel(
     # A and B arrive as uint8 views, so their flat extents are byte counts.
     a_flat = make_flat_buffer(a, m * k_bytes)
     b_flat = make_flat_buffer(b_nk, n * k_bytes)
-    sa_flat = fx.logical_divide(
-        make_flat_buffer(scale_a_u8, m * scale_k), fx.make_layout(1, 1)
-    )
-    sb_flat = fx.logical_divide(
-        make_flat_buffer(scale_b_u8, n * scale_k), fx.make_layout(1, 1)
-    )
+    if const_expr(param.lds_scale):
+        sa_flat = fx.logical_divide(
+            make_flat_buffer(scale_a_u8, m * scale_k), fx.make_layout(1, 1)
+        )
+        sb_flat = fx.logical_divide(
+            make_flat_buffer(scale_b_u8, n * scale_k), fx.make_layout(1, 1)
+        )
     out_view = fx.Tensor(
         fx.make_view(
             fx.get_iter(out),
@@ -623,8 +558,6 @@ def gemm_mxfp_gfx950_kernel(
         thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(
             tid
         )
-    scale_atom = fx.make_copy_atom(fx.rocdl.BufferCopy8b(), fx.Uint8)
-
     a_lds_layout_bytes, b_lds_layout_bytes = make_mxfp_ab_lds_layouts(
         block_m,
         block_n,
@@ -643,14 +576,14 @@ def gemm_mxfp_gfx950_kernel(
 
     frag_C = thr_mma.make_fragment_C(gC)
     frag_C.fill(0.0)
+    row_coords = fx.make_view(0, fx.make_layout((block_m, block_n), (1, 0)))
+    col_coords = fx.make_view(0, fx.make_layout((block_m, block_n), (0, 1)))
+    thr_mma_cRow = thr_mma.partition_C(row_coords)
+    thr_mma_cCol = thr_mma.partition_C(col_coords)
 
     if const_expr(param.use_cshuffle):
         c_lds_layout = fx.make_layout((block_m, block_n), (block_n, 1))
         sC = fx.make_view(smem_c, c_lds_layout)
-        row_coords = fx.make_view(0, fx.make_layout((block_m, block_n), (1, 0)))
-        col_coords = fx.make_view(0, fx.make_layout((block_m, block_n), (0, 1)))
-        thr_mma_cRow = thr_mma.partition_C(row_coords)
-        thr_mma_cCol = thr_mma.partition_C(col_coords)
         cshuffle_s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), out_elem)
         cshuffle_r2g_atom = fx.make_copy_atom(
             fx.rocdl.BufferCopy128b(), out_elem
@@ -674,11 +607,28 @@ def gemm_mxfp_gfx950_kernel(
         thr_copy_cshuffle = tiled_copy_cshuffle.get_slice(tid)
         thr_sC = thr_copy_cshuffle.partition_S(sC)
         thr_gC = thr_copy_cshuffle.partition_D(gC)
+        thr_cRow = thr_copy_cshuffle.partition_S(row_coords)[(0, None), None, None]
+        thr_cCol = thr_copy_cshuffle.partition_S(col_coords)[(0, None), None, None]
         frag_C_cshuffle = fx.make_fragment_like(thr_sC)
+        pred_C = fx.make_fragment_like(thr_cRow, dtype=fx.Boolean)
+        for i in range_constexpr(fx.size(pred_C.shape).unpack()):
+            row = fx.get_scalar(thr_cRow[i])
+            col = fx.get_scalar(thr_cCol[i])
+            pred_C[i] = (block_m_offset + row < m) & (
+                block_n_offset + col < n
+            )
     else:
         r2g_atom = fx.make_copy_atom(fx.rocdl.BufferCopy16b(), out_elem)
         thr_copy_C = fx.make_tiled_copy_C(r2g_atom, tiled_mma).get_slice(tid)
         thr_gC = thr_copy_C.partition_S(gC)
+        pred_C_mma = fx.make_fragment_like(thr_mma_cRow, dtype=fx.Boolean)
+        for i in range_constexpr(fx.size(pred_C_mma.shape).unpack()):
+            row = fx.get_scalar(thr_mma_cRow[i])
+            col = fx.get_scalar(thr_mma_cCol[i])
+            pred_C_mma[i] = (block_m_offset + row < m) & (
+                block_n_offset + col < n
+            )
+        pred_C = thr_copy_C.retile(pred_C_mma)
 
     lane = fx.Int32(tid) % fx.Int32(GFX950_WAVE_SIZE)
     wave = rocdl.readfirstlane(
@@ -705,7 +655,7 @@ def gemm_mxfp_gfx950_kernel(
         in_data_bytes=1,
         ldg_x_threads=block_k_bytes // GFX950_DMA_BYTES,
         block_k=block_k_bytes,
-        has_k_tail=False,
+        has_k_tail=has_k_tail,
     )
     a_load_operand = AsyncLoadOperand(
         context=ab_load_context,
@@ -716,7 +666,7 @@ def gemm_mxfp_gfx950_kernel(
         leading_stride=a_leading_stride,
         load_iters=param.ldg_a_iters,
         is_k_major=a_is_transposed,
-        has_outer_tail=False,
+        has_outer_tail=True,
     )
     b_load_operand = AsyncLoadOperand(
         context=ab_load_context,
@@ -727,7 +677,7 @@ def gemm_mxfp_gfx950_kernel(
         leading_stride=b_leading_stride,
         load_iters=param.ldg_b_iters,
         is_k_major=not b_is_transposed,
-        has_outer_tail=False,
+        has_outer_tail=True,
     )
 
     if const_expr(param.lds_scale):
@@ -741,7 +691,7 @@ def gemm_mxfp_gfx950_kernel(
             in_data_bytes=1,
             ldg_x_threads=param.scale_row_bytes // GFX950_SCALE_DMA_BYTES,
             block_k=param.scale_row_bytes,
-            has_k_tail=False,
+            has_k_tail=has_k_tail,
         )
         a_scale_load_operand = AsyncLoadOperand(
             context=scale_load_context,
@@ -752,7 +702,7 @@ def gemm_mxfp_gfx950_kernel(
             leading_stride=scale_k,
             load_iters=param.sc_a_iters,
             is_k_major=False,
-            has_outer_tail=False,
+            has_outer_tail=True,
         )
         b_scale_load_operand = AsyncLoadOperand(
             context=scale_load_context,
@@ -763,7 +713,7 @@ def gemm_mxfp_gfx950_kernel(
             leading_stride=scale_k,
             load_iters=param.sc_b_iters,
             is_k_major=False,
-            has_outer_tail=False,
+            has_outer_tail=True,
         )
 
     def async_load_a_to_lds(k_tile, stage):
@@ -797,19 +747,6 @@ def gemm_mxfp_gfx950_kernel(
                 k_tile=k_tile,
             )
 
-
-    def load_scale_word(scale, row_global, scale_col):
-        scale_offset = fx.Int32(row_global) * fx.Int32(scale_k) + fx.Int32(
-            scale_col
-        )
-        scale_reg = fx.make_rmem_tensor(1, fx.Uint8)
-        fx.copy(
-            scale_atom,
-            fx.slice(scale, (None, scale_offset)),
-            scale_reg,
-        )
-        scale_byte = fx.get_scalar(scale_reg[0])
-        return scale_byte.to(fx.Int32) * fx.Int32(0x01010101)
 
     def scaled_mma(d_frag, a_frag, b_frag, scale_a, scale_b):
         if const_expr(not is_mxfp4):
@@ -848,7 +785,7 @@ def gemm_mxfp_gfx950_kernel(
         )
         return fx.rocdl.make_buffer_tensor(flat, max_size=True)
 
-    if const_expr(packed_scale):
+    if const_expr(not param.lds_scale):
         sa32 = fx.logical_divide(
             make_flat_buffer32(scale_a_u8, m * scale_k32), fx.make_layout(1, 1)
         )
@@ -856,33 +793,27 @@ def gemm_mxfp_gfx950_kernel(
             make_flat_buffer32(scale_b_u8, n * scale_k32), fx.make_layout(1, 1)
         )
 
-    def packed_scale_issue(buf, base, row_base, repeat_stride, n_repeat, col32):
-        """Issue dword scale loads and return their registers."""
-        regs = []
-        for q in range_constexpr(0, n_repeat, 4):
-            row = row_base + fx.Int32(repeat_stride) * (fx.Int32(q) + lane_grp)
-            offset = (base + row) * fx.Int32(scale_k32) + col32
-            reg = fx.make_rmem_tensor(1, fx.Uint32)
-            regs.append(reg)
-            fx.copy(scale32_atom, fx.slice(buf, (None, offset)), reg)
-        return regs
-
-    def packed_unit_issue(buf, base, row_base, repeat_stride, n_repeat, col_base):
+    def packed_unit_issue(
+        buf, base, row_base, repeat_stride, n_repeat, col_base, outer_bound
+    ):
         """Issue dword loads over groups of four repeat/K-half units."""
         n_units = n_repeat * param.k_halves
         regs = []
         for q in range_constexpr(0, n_units, 4):
             unit = fx.Int32(q) + lane_grp
             if const_expr(q + 4 > n_units):
-
+                # Wrapped lanes populate only padded units that consumers never index.
                 unit = unit % fx.Int32(n_units)
             row = row_base + fx.Int32(repeat_stride) * (
                 unit // fx.Int32(param.k_halves)
             )
+            global_row = base + row
+            safe_row = (global_row < outer_bound).select(global_row, 0)
+            col = col_base + unit % fx.Int32(param.k_halves)
+            safe_col = (col < scale_k32).select(col, 0)
             offset = (
-                (base + row) * fx.Int32(scale_k32)
-                + col_base
-                + unit % fx.Int32(param.k_halves)
+                safe_row * fx.Int32(scale_k32)
+                + safe_col
             )
             reg = fx.make_rmem_tensor(1, fx.Uint32)
             fx.copy(scale32_atom, fx.slice(buf, (None, offset)), reg)
@@ -923,7 +854,7 @@ def gemm_mxfp_gfx950_kernel(
         16-byte granule at index kh * granules_per_kh + g, XOR-swizzled
         against the row exactly as the direct-to-LDS write was."""
         granule = (fx.Int32(kh * granules_per_kh) + lane_grp) ^ (
-            row & fx.Int32(granules_per_row - 1)
+            row & fx.Int32(row_swizzle_mask)
         )
         off = row * fx.Int32(row_dwords) + granule * fx.Int32(GFX950_DMA_BYTES // 4)
         frag = fx.make_rmem_tensor(4, fx.Int32)
@@ -1070,6 +1001,28 @@ def gemm_mxfp_gfx950_kernel(
                 words.append(fx.get_scalar(reg[0]).to(fx.Int32))
         return words
 
+    def consume_fragments(av, bv, sa_words, sb_words, k_tile):
+        def consume_k_half(kh):
+            for ni in range_constexpr(param.mma_n_repeat):
+                for mi in range_constexpr(param.mma_m_repeat):
+                    scaled_mma(
+                        frag_C[(None, 0), mi, ni],
+                        a_fragment(av, mi, kh),
+                        b_fragment(bv, ni, kh),
+                        sa_words[mi * param.k_halves + kh],
+                        sb_words[ni * param.k_halves + kh],
+                    )
+
+        for kh in range_constexpr(param.k_halves):
+            if const_expr(has_k_tail):
+                global_k = (
+                    k_tile * fx.Int32(block_k) + fx.Int32(kh * MXFP_MFMA_K)
+                )
+                if global_k < k:
+                    consume_k_half(kh)
+            else:
+                consume_k_half(kh)
+
     def compute_stage(read_stage, k_tile):
         if const_expr(param.lds_scale):
             av, bv = load_fragments(read_stage)
@@ -1085,19 +1038,7 @@ def gemm_mxfp_gfx950_kernel(
                 n_repeat_stride,
                 param.mma_n_repeat,
             )
-            for kh in range_constexpr(param.k_halves):
-                for ni in range_constexpr(param.mma_n_repeat):
-                    for mi in range_constexpr(param.mma_m_repeat):
-                        scaled_mma(
-                            frag_C[(None, 0), mi, ni],
-                            a_fragment(av, mi, kh),
-                            b_fragment(bv, ni, kh),
-                            sa_words[mi * param.k_halves + kh],
-                            sb_words[ni * param.k_halves + kh],
-                        )
-            return
-
-        if const_expr(packed_unit_scale):
+        else:
             col_base = k_tile * fx.Int32(param.k_halves)
             a_regs = packed_unit_issue(
                 sa32,
@@ -1106,6 +1047,7 @@ def gemm_mxfp_gfx950_kernel(
                 m_repeat_stride,
                 param.mma_m_repeat,
                 col_base,
+                m,
             )
             b_regs = packed_unit_issue(
                 sb32,
@@ -1114,101 +1056,23 @@ def gemm_mxfp_gfx950_kernel(
                 n_repeat_stride,
                 param.mma_n_repeat,
                 col_base,
+                n,
             )
             av, bv = load_fragments(read_stage)
             sa_words = packed_scale_finish(a_regs)
             sb_words = packed_scale_finish(b_regs)
-            for kh in range_constexpr(param.k_halves):
-                for ni in range_constexpr(param.mma_n_repeat):
-                    for mi in range_constexpr(param.mma_m_repeat):
-                        scaled_mma(
-                            frag_C[(None, 0), mi, ni],
-                            a_fragment(av, mi, kh),
-                            b_fragment(bv, ni, kh),
-                            sa_words[mi * param.k_halves + kh],
-                            sb_words[ni * param.k_halves + kh],
-                        )
-            return
-
-        if const_expr(packed_repeat_scale):
-            issued = []
-            for kh in range_constexpr(param.k_halves):
-                col32 = k_tile * fx.Int32(param.k_halves) + fx.Int32(kh)
-                issued.append(
-                    (
-                        packed_scale_issue(
-                            sa32,
-                            block_m_offset,
-                            a_row_base,
-                            m_repeat_stride,
-                            param.mma_m_repeat,
-                            col32,
-                        ),
-                        packed_scale_issue(
-                            sb32,
-                            block_n_offset,
-                            b_row_base,
-                            n_repeat_stride,
-                            param.mma_n_repeat,
-                            col32,
-                        ),
-                    )
-                )
-            av, bv = load_fragments(read_stage)
-            for kh in range_constexpr(param.k_halves):
-                sa_words = packed_scale_finish(issued[kh][0])
-                sb_words = packed_scale_finish(issued[kh][1])
-                for ni in range_constexpr(param.mma_n_repeat):
-                    for mi in range_constexpr(param.mma_m_repeat):
-                        scaled_mma(
-                            frag_C[(None, 0), mi, ni],
-                            a_fragment(av, mi, kh),
-                            b_fragment(bv, ni, kh),
-                            sa_words[mi],
-                            sb_words[ni],
-                        )
-            return
-
-        av, bv = load_fragments(read_stage)
-        for kh in range_constexpr(param.k_halves):
-            scale_col = (
-                k_tile * fx.Int32(param.scale_row_bytes)
-                + fx.Int32(kh * (MXFP_MFMA_K // MXFP_SCALE_BLOCK_K))
-                + lane_grp
-            )
-            sa_words = [
-                load_scale_word(
-                    sa_flat,
-                    block_m_offset + a_row_base + fx.Int32(mi * m_repeat_stride),
-                    scale_col,
-                )
-                for mi in range_constexpr(param.mma_m_repeat)
-            ]
-            sb_words = [
-                load_scale_word(
-                    sb_flat,
-                    block_n_offset + b_row_base + fx.Int32(ni * n_repeat_stride),
-                    scale_col,
-                )
-                for ni in range_constexpr(param.mma_n_repeat)
-            ]
-            for ni in range_constexpr(param.mma_n_repeat):
-                for mi in range_constexpr(param.mma_m_repeat):
-                    scaled_mma(
-                        frag_C[(None, 0), mi, ni],
-                        a_fragment(av, mi, kh),
-                        b_fragment(bv, ni, kh),
-                        sa_words[mi],
-                        sb_words[ni],
-                    )
+        consume_fragments(av, bv, sa_words, sb_words, k_tile)
 
     for stage in range_constexpr(stages - 1):
         async_load_b_to_lds(fx.Int32(stage), fx.Int32(stage))
         async_load_a_to_lds(fx.Int32(stage), fx.Int32(stage))
     rocdl.sched_barrier(0)
 
-    k_tiles = k // block_k
-    main_loop_end = k_tiles - (stages - 1)
+    k_tiles = (k - 1) // block_k + 1
+    if const_expr(has_k_tail):
+        main_loop_end = (k_tiles > stages - 1).select(k_tiles - (stages - 1), 0)
+    else:
+        main_loop_end = k_tiles - (stages - 1)
     for kt in range(0, main_loop_end, 1):
         k_tile = fx.Int32(kt)
         current_stage = k_tile % fx.Int32(stages)
@@ -1220,7 +1084,7 @@ def gemm_mxfp_gfx950_kernel(
 
         compute_stage(current_stage, k_tile)
 
-    current_stage = fx.Int32(main_loop_end % stages)
+    current_stage = main_loop_end % stages
     for s in range_constexpr(stages - 1):
         k_tile = fx.Int32(main_loop_end + s)
         __barrier((stages - 2 - s) * param.ldg_wait_count)
@@ -1237,10 +1101,10 @@ def gemm_mxfp_gfx950_kernel(
             sC[row, col] = frag_C_out[i]
         fx.gpu.barrier()
         fx.copy(cshuffle_s2r_atom, thr_sC, frag_C_cshuffle)
-        fx.copy(cshuffle_r2g_atom, frag_C_cshuffle, thr_gC)
+        fx.copy(cshuffle_r2g_atom, frag_C_cshuffle, thr_gC, pred=pred_C)
     else:
         frag_C_retile = thr_copy_C.retile(frag_C_out)
-        fx.copy(r2g_atom, frag_C_retile, thr_gC)
+        fx.copy(r2g_atom, frag_C_retile, thr_gC, pred=pred_C)
 
 
 
@@ -1254,11 +1118,19 @@ def gemm_mxfp_gfx950(
     param: MXFPGemmParams,
     stream: fx.Stream = fx.Stream(None),
 ):
+    elements_per_byte = (
+        2 if const_expr(param.mxfp_format_id == MXFP_FORMAT_FP4) else 1
+    )
+    m = fx.Int32(fx.get_scalar(a.shape[0]))
+    n = fx.Int32(fx.get_scalar(b_nk.shape[0]))
+    k = fx.Int32(fx.get_scalar(a.shape[1])) * fx.Int32(elements_per_byte)
+    num_pid_m = (m - 1) // param.block_m + 1
+    num_pid_n = (n - 1) // param.block_n + 1
     kernel = gemm_mxfp_gfx950_kernel
     kernel._known_block_size = [param.block_threads, 1, 1]
     kernel._func.__name__ = make_mxfp_gemm_kernel_name(param)
-    kernel(out, a, b_nk, scale_a_u8, scale_b_u8, param).launch(
-        grid=((param.m // param.block_m) * (param.n // param.block_n), 1, 1),
+    kernel(out, a, b_nk, scale_a_u8, scale_b_u8, m, n, k, param).launch(
+        grid=(num_pid_m * num_pid_n, 1, 1),
         block=(param.block_threads, 1, 1),
         stream=stream,
     )

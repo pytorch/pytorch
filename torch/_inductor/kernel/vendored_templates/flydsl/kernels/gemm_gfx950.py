@@ -14,6 +14,7 @@ from flydsl.runtime.device import get_rocm_arch
 
 GFX950_DMA_BYTES = 16
 GFX950_WAVE_SIZE = 64
+GFX950_MAX_BLOCK_THREADS = 1024
 GEMM_DTYPE_BF16 = 2
 GEMM_DTYPE_FP16 = 3
 _LDS_BANK_PERIOD_LOG2 = 6
@@ -50,6 +51,14 @@ class GemmGfx950Param:
 
 @dataclass(slots=True, kw_only=True, eq=False)
 class AsyncLoadContext:
+    """Workgroup-wide state shared by direct-to-LDS operand loads.
+
+    ``wave_offset`` and ``tid`` select each lane's LDS destination;
+    ``inner_bound`` and ``has_k_tail`` describe the runtime K boundary;
+    ``block_threads``, ``async_load_bytes``, ``in_data_bytes``,
+    ``ldg_x_threads``, and ``block_k`` define the byte load schedule.
+    """
+
     wave_offset: Any
     tid: Any
     inner_bound: Any
@@ -63,6 +72,12 @@ class AsyncLoadContext:
 
 @dataclass(slots=True, kw_only=True, eq=False)
 class GemmABLoadContext(AsyncLoadContext):
+    """Direct-to-LDS state plus the A/B LDS-to-register copy partitions.
+
+    The copy atoms select the layout-specific LDS read instruction, while
+    ``thr_copy_a`` and ``thr_copy_b`` bind those atoms to the calling thread.
+    """
+
     uni_copy_atom: Any
     buffer_copy_atom: Any
     a_s2r_copy_atom: Any
@@ -73,6 +88,14 @@ class GemmABLoadContext(AsyncLoadContext):
 
 @dataclass(slots=True, kw_only=True, eq=False)
 class AsyncLoadOperand:
+    """One operand's resource, layout, iteration, and boundary metadata.
+
+    ``outer_tile_size`` and ``outer_bound`` describe the tiled M or N axis;
+    ``leading_stride`` is measured in source elements; ``load_iters`` is the
+    number of 16-byte loads per thread; ``is_k_major`` selects the address
+    mapping; and ``has_outer_tail`` enables runtime M/N bounds handling.
+    """
+
     context: AsyncLoadContext
     rsrc: Any
     lds_layout: Any
@@ -82,6 +105,87 @@ class AsyncLoadOperand:
     load_iters: Any
     is_k_major: Any
     has_outer_tail: Any
+
+
+@dataclass(frozen=True)
+class Gfx950TileSchedule:
+    block_threads: int
+    block_k_bytes: int
+    ldg_x_threads: int
+    ldg_a_iters: int
+    ldg_b_iters: int
+    ldg_wait_count: int
+    a_stage_bytes: int
+    b_stage_bytes: int
+
+
+def make_tile_schedule(
+    block_m: int,
+    block_n: int,
+    block_k_bytes: int,
+    stages: int,
+    m_waves: int,
+    n_waves: int,
+    *,
+    extra_stage_bytes: int = 0,
+    extra_load_iters: int = 0,
+    output_tile_bytes: int = 0,
+) -> Gfx950TileSchedule:
+    if block_k_bytes <= 0 or block_k_bytes % GFX950_DMA_BYTES != 0:
+        raise ValueError(
+            "block_k_bytes must be a positive multiple of the DMA width: "
+            f"block_k_bytes={block_k_bytes}, dma_bytes={GFX950_DMA_BYTES}"
+        )
+    block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
+    if block_threads <= 0 or block_threads > GFX950_MAX_BLOCK_THREADS:
+        raise ValueError(
+            f"block must contain between 1 and {GFX950_MAX_BLOCK_THREADS} threads"
+        )
+    dma_bytes_per_pass = block_threads * GFX950_DMA_BYTES
+    a_stage_bytes = block_m * block_k_bytes
+    b_stage_bytes = block_n * block_k_bytes
+    if a_stage_bytes % dma_bytes_per_pass != 0:
+        raise ValueError(
+            "A tile load schedule must exactly cover the LDS tile: "
+            f"block_m={block_m}, block_k_bytes={block_k_bytes}, "
+            f"block_threads={block_threads}"
+        )
+    if b_stage_bytes % dma_bytes_per_pass != 0:
+        raise ValueError(
+            "B tile load schedule must exactly cover the LDS tile: "
+            f"block_n={block_n}, block_k_bytes={block_k_bytes}, "
+            f"block_threads={block_threads}"
+        )
+    ldg_a_iters = a_stage_bytes // dma_bytes_per_pass
+    ldg_b_iters = b_stage_bytes // dma_bytes_per_pass
+    ldg_wait_count = ldg_a_iters + ldg_b_iters + extra_load_iters
+    if (stages - 2) * ldg_wait_count >= 63:
+        raise ValueError("staged pipeline wait count exceeds supported range")
+    smem_bytes = max(
+        stages * (a_stage_bytes + b_stage_bytes + extra_stage_bytes),
+        output_tile_bytes,
+    )
+    smem_capacity = {
+        "gfx942": 65536,
+        "gfx950": 163840,
+    }.get(get_rocm_arch(), 65536)
+    if smem_bytes > smem_capacity:
+        raise ValueError(
+            "staged LDS buffers exceed the device shared-memory capacity: "
+            f"stages={stages}, block_m={block_m}, block_n={block_n}, "
+            f"block_k_bytes={block_k_bytes}, smem_bytes={smem_bytes}, "
+            f"capacity={smem_capacity}"
+        )
+    return Gfx950TileSchedule(
+        block_threads=block_threads,
+        block_k_bytes=block_k_bytes,
+        ldg_x_threads=block_k_bytes // GFX950_DMA_BYTES,
+        ldg_a_iters=ldg_a_iters,
+        ldg_b_iters=ldg_b_iters,
+        ldg_wait_count=ldg_wait_count,
+        a_stage_bytes=a_stage_bytes,
+        b_stage_bytes=b_stage_bytes,
+    )
 
 
 def make_gemm_gfx950_param(
@@ -151,43 +255,21 @@ def make_gemm_gfx950_param(
     elif block_n % cshuffle_vec_size != 0:
         raise ValueError("block_n must be divisible by the c-shuffle vector size")
 
-    smem_bytes = stages * (block_m + block_n) * block_k * in_dbytes
-    smem_bytes = max(smem_bytes, block_m * block_n * out_dbytes)
-    smem_capacity = {
-        "gfx942": 65536,
-        "gfx950": 163840,
-    }.get(get_rocm_arch(), 65536)
-    if smem_bytes > smem_capacity:
-        raise ValueError(
-            "staged LDS buffers exceed the device shared-memory capacity: "
-            f"stages={stages}, block_m={block_m}, block_n={block_n}, "
-            f"block_k={block_k}, smem_bytes={smem_bytes}, capacity={smem_capacity}"
-        )
-
     async_load_vec_size = GFX950_DMA_BYTES // in_dbytes
-    ldg_x_threads = block_k // async_load_vec_size
-    if ldg_x_threads * async_load_vec_size != block_k:
-        raise ValueError(
-            "block_k must be divisible by the async load vector size: "
-            f"block_k={block_k}, async_load_vec_size={async_load_vec_size}"
-        )
-
-    block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
+    schedule = make_tile_schedule(
+        block_m,
+        block_n,
+        block_k * in_dbytes,
+        stages,
+        m_waves,
+        n_waves,
+        output_tile_bytes=block_m * block_n * out_dbytes,
+    )
+    ldg_x_threads = schedule.ldg_x_threads
+    block_threads = schedule.block_threads
+    ldg_a_iters = schedule.ldg_a_iters
+    ldg_b_iters = schedule.ldg_b_iters
     load_elems_per_iter = block_threads * async_load_vec_size
-    if (block_m * block_k) % load_elems_per_iter != 0:
-        raise ValueError(
-            "A tile load schedule must exactly cover the LDS tile: "
-            f"block_m={block_m}, block_k={block_k}, "
-            f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}"
-        )
-    if (block_n * block_k) % load_elems_per_iter != 0:
-        raise ValueError(
-            "B tile load schedule must exactly cover the LDS tile: "
-            f"block_n={block_n}, block_k={block_k}, "
-            f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}"
-        )
-    ldg_a_iters = (block_m * block_k) // load_elems_per_iter
-    ldg_b_iters = (block_n * block_k) // load_elems_per_iter
     if use_half_tile_interleaved:
         half_ldg_a_iters = ((block_m // 2) * block_k) // load_elems_per_iter
         half_ldg_b_iters = ((block_n // 2) * block_k) // load_elems_per_iter
@@ -199,9 +281,6 @@ def make_gemm_gfx950_param(
             raise ValueError(
                 "half-tile B load schedule must exactly cover the LDS tile"
             )
-    if (stages - 2) * (ldg_a_iters + ldg_b_iters) >= 63:
-        raise ValueError("staged pipeline wait count exceeds supported range")
-
     mma_m_repeat = block_m // m_waves // mma_m
     mma_n_repeat = block_n // n_waves // mma_n
     if mma_m_repeat * m_waves * mma_m != block_m:
@@ -304,22 +383,42 @@ def _make_xor_swizzle(mask, base, shift):
     return fx.static(fx.SwizzleType.get(mask, base, shift))
 
 
-def make_lds_layout(rows, block_k, is_transposed):
+def get_lds_swizzle_mask_bits(contiguous_extent, base, full_mask=False):
+    extent_log2 = contiguous_extent.bit_length() - 1
+    shift = extent_log2 - base
+    mask = shift if full_mask else _LDS_BANK_PERIOD_LOG2 - base
+    is_power_of_two = contiguous_extent == 1 << extent_log2
+    if not is_power_of_two or shift < mask:
+        return 0
+    return mask
+
+
+def make_lds_layout(
+    rows,
+    block_k,
+    is_transposed,
+    *,
+    row_major_base=_LDS_READ_B128_BASE,
+    full_row_mask=False,
+):
     if const_expr(is_transposed):
         contiguous_extent = rows
         base = _LDS_READ_TR16_BASE
         order = (0, 1)
     else:
         contiguous_extent = block_k
-        base = _LDS_READ_B128_BASE
+        base = row_major_base
         order = (1, 0)
 
     base_layout = fx.make_ordered_layout((rows, block_k), order)
     extent_log2 = contiguous_extent.bit_length() - 1
-    mask = _LDS_BANK_PERIOD_LOG2 - base
     shift = extent_log2 - base
-    is_power_of_two = contiguous_extent == 1 << extent_log2
-    if const_expr(not is_power_of_two or shift < mask):
+    mask = get_lds_swizzle_mask_bits(
+        contiguous_extent,
+        base,
+        full_mask=full_row_mask and not is_transposed,
+    )
+    if const_expr(mask == 0):
         return base_layout
     return fx.make_composed_layout(
         _make_xor_swizzle(mask, base, shift),
