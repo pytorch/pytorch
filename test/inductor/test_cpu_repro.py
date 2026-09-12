@@ -1467,6 +1467,27 @@ class CPUReproTests(TestCase):
             self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
 
     @requires_vectorization
+    def test_tile2d_reduction_masked_tail_store(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/196681
+        # A 2D-tiled reduction whose output axis is not a multiple of the
+        # vector width stored the tail block's accumulator at full width,
+        # spilling into the next row (or past the buffer on the last row).
+        # The main/tail suffix split misread the reduction layout whenever a
+        # pointwise level sat between the two tiled axes. 66 leaves a tail at
+        # every power-of-two vector width >= 2.
+        def fn(x):
+            v = (x * 0.5) * (torch.erf(x * 0.7071067811865476) + 1)
+            a = v.permute(3, 2, 1, 0)
+            p = F.pad(a, (0, 0, 0, 58), value=0.5)
+            q = F.pad(v, (0, 0, 0, 0, 0, 58), value=0.5)
+            return torch.matmul(q, p)
+
+        x = torch.randn(1, 8, 66, 66).contiguous(
+            memory_format=torch.channels_last
+        )
+        self.common(fn, (x,))
+
+    @requires_vectorization
     def test_max_parallel_depth_sub_vector_width_loop(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/190757
         # A vectorized loop smaller than the vector width runs 1 iteration, not
