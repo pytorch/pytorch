@@ -400,7 +400,7 @@ class StreamVariable(StreamContextVariable):
         super().__init__(None, **kwargs)
 
     def python_type(self) -> type:
-        return self._cpython_type
+        return type(self.value)
 
     def _stream_device_handle_get(
         self: "StreamVariable", tx: "InstructionTranslatorBase"
