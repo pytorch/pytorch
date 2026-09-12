@@ -2397,6 +2397,27 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    def test_linalg_ops_fxgraph_cache_hit(self):
+        def fn(a):
+            return torch.linalg.cholesky(a)
+
+        x = torch.randn(4, 4, dtype=torch.float64)
+        a = x @ x.T + torch.eye(4, dtype=torch.float64)
+        compiled_fn = torch.compile(fn)
+
+        self.assertEqual(compiled_fn(a), fn(a))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.reset()
+        self.assertEqual(compiled_fn(a), fn(a))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        with self.assertRaisesRegex(RuntimeError, "not positive-definite"):
+            compiled_fn(torch.zeros(4, 4, dtype=torch.float64))
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
     def test_cache_clear(self):
         """
         Test clearing the cache.
@@ -3830,6 +3851,47 @@ class TestFxGraphCacheHashing(TestCase):
             ),
             require_shape_env=False,
         ).validate()
+
+    def test_with_effects_linalg_check_errors_cacheable(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        info = graph.placeholder("info")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._linalg_check_errors.default,
+                info,
+                "cholesky",
+            ),
+            {"is_matrix": False},
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        validator = CacheabilityValidator(gm, require_shape_env=False)
+        validator.validate_graph(include_constants=False)
+
+    def test_with_effects_other_effectful_op_bypassed(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        msg = graph.placeholder("msg")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._print.default,
+                msg,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        validator = CacheabilityValidator(gm, require_shape_env=False)
+        with self.assertRaisesRegex(
+            BypassFxGraphCache, "Can't cache HigherOrderOperator: with_effects"
+        ):
+            validator.validate_graph(include_constants=False)
 
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
