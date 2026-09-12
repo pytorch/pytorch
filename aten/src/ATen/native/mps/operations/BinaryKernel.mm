@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
@@ -15,6 +16,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/complex_native.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/nextafter_native.h>
@@ -179,14 +181,54 @@ static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
-  lib.exec_binary_kernel(iter, "lerp_alpha", weight);
+  // Narrowing the weight to a low-precision dtype would overflow for weights outside its
+  // range and lose accuracy inside it, so hand it over at opmath precision.
+  lib.exec_binary_kernel(iter, "lerp_alpha", weight, at::toOpMathType(iter.common_dtype()));
 }
 
 static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
   using namespace mps;
-  auto type_str = scalarToMetalTypeString(iter.common_dtype());
+  // `lerp.Tensor` lets only a 0-dim `weight` differ in dtype from `self`/`end`, and
+  // TensorIterator materializes that promotion only when the common device is CPU, leaving
+  // other backends to cast while loading.
+  const auto common_dtype = iter.common_dtype();
+  const bool tensors_match =
+      iter.dtype(0) == common_dtype && iter.dtype(1) == common_dtype && iter.dtype(2) == common_dtype;
+
+  // Mirror the CUDA kernel: read a CPU scalar weight on the host, drop it from the iterator
+  // and let the scalar-weight path cast it to the compute dtype. `lerp_alpha` is instantiated
+  // for a single tensor dtype, so this needs the other operands to already agree.
+  if (tensors_match && iter.is_cpu_scalar(3)) {
+    const auto weight = iter.tensor(3).item();
+    iter.remove_operand(3);
+    return lerp_scalar_mps_kernel(iter, weight);
+  }
+
+  auto type_str = scalarToMetalTypeString(common_dtype);
   auto numel = static_cast<uint32_t>(iter.numel());
   auto ndim = static_cast<uint32_t>(iter.ndim());
+
+  // Anything still disagreeing goes through the runtime-cast kernel, which loads and stores
+  // through each operand's own dtype rather than reinterpreting it as `common_dtype`.
+  if (!tensors_match || iter.dtype(3) != common_dtype) {
+    std::array<int, 4> ndim_and_types = {
+        iter.ndim(), static_cast<int>(iter.dtype(1)), static_cast<int>(iter.dtype(3)), static_cast<int>(iter.dtype(0))};
+    auto pso = lib.getPipelineStateForFunc("lerp_tensor_strided_cast_" + type_str);
+    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      bind_iter_tensors(computeEncoder, iter);
+      mtl_setArgs<4>(computeEncoder,
+                     iter.shape(),
+                     iter.strides(0),
+                     iter.strides(1),
+                     iter.strides(2),
+                     iter.strides(3),
+                     ndim_and_types);
+      mtl_dispatch1DJob(computeEncoder, pso, numel);
+    });
+    return;
+  }
 
   // simple elementwise kernel for dense tensors
   if (iter.is_contiguous()) {
@@ -200,8 +242,10 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
     return;
   }
 
-  // Scalar weight broadcast path
-  if (ndim == 1 && iter.strides(3)[0] == 0) {
+  // Scalar weight broadcast path. The kernel indexes self/end/out linearly, so all three have
+  // to be dense: `self` or `end` may itself be broadcast down to a zero stride.
+  if (ndim == 1 && iter.strides(3)[0] == 0 && iter.strides(0)[0] == iter.element_size(0) &&
+      iter.strides(1)[0] == iter.element_size(1) && iter.strides(2)[0] == iter.element_size(2)) {
     auto pso = lib.getPipelineStateForFunc("lerp_tensor_scalar_weight_" + type_str);
     dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
       auto computeEncoder = getCurrentMPSStream()->commandEncoder();
