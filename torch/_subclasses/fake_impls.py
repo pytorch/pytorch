@@ -319,6 +319,11 @@ def non_kwarg_is_pinned(
     return r
 
 
+@register_op_impl(aten._async_error.default)
+def _async_error(fake_mode: FakeTensorMode, func: OpOverload, msg: str) -> None:
+    pass
+
+
 # Legacy profiler ops return Tensors but don't follow tensor constructor patterns
 # They take string arguments and should not have device/dtype parameters added
 @register_op_impl(torch.ops.profiler._record_function_enter.default)
