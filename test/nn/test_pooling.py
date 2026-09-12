@@ -1843,6 +1843,23 @@ torch.{device_type}.synchronize()
                 indices,
             )
 
+    @onlyNativeDeviceTypes
+    def test_max_pool3d_with_indices_backward_batch_mismatch(self, device):
+        grad_output = torch.randn(1, 2, 1, 3, 2, device=device)
+        input = torch.randn(1, 2, 3, 6, 5, device=device)
+        indices = torch.zeros(0, 2, 1, 3, 2, dtype=torch.long, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected a tensor of dimension"):
+            torch.ops.aten.max_pool3d_with_indices_backward(
+                grad_output,
+                input,
+                [3, 3, 3],
+                [2, 2, 2],
+                [0, 0, 0],
+                [1, 1, 1],
+                True,
+                indices,
+            )
+
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
     @expectedFailureMPS  # test_adaptive_pooling_max_nhwc currently fails on MPS - ISSUE#
