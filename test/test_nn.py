@@ -11917,6 +11917,29 @@ class TestNNDeviceType(NNTestCase):
         grad_3d = torch.autograd.grad(out_3d.sum(), grid_3d)[0]
         self.assertEqual(grad_3d.squeeze(1)[..., :2], grad_2d)
 
+    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_grid_sample_3d_bicubic_double_backward_low_precision(self, device, dtype):
+        # The kernels place a sample in the accumulate type, and on a 512-wide axis a half
+        # grid unnormalised in its own dtype lands on a neighbouring voxel. The reference
+        # runs the same quantised values in double.
+        volume = (torch.randn(1, 1, 4, 5, 512, device=device) * 0.01).to(dtype)
+        grid = torch.tensor([[[[[0.1, 0.2, 0.3]]]]], device=device).to(dtype)
+
+        def second_order(volume, grid):
+            volume = volume.detach().requires_grad_()
+            grid = grid.detach().requires_grad_()
+            out = F.grid_sample(volume, grid, mode='bicubic', padding_mode='border',
+                                align_corners=False)
+            d_grid = torch.autograd.grad(out.sum(), grid, create_graph=True)[0]
+            return torch.autograd.grad(d_grid.sum(), [volume, grid])
+
+        expected = second_order(volume.double(), grid.double())
+        for got, want in zip(second_order(volume, grid), expected):
+            self.assertEqual(got.dtype, dtype)
+            self.assertEqual(got.double(), want, rtol=1e-2, atol=0)
+
     @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
     @parametrize_test("wrt", ["input", "grid"])
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64

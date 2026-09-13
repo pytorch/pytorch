@@ -6,6 +6,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/WrapDimUtils.h>
@@ -8676,8 +8677,14 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto x_scale = static_cast<double>(align_corners ? W - 1 : W) / 2.0;
     auto y_scale = static_cast<double>(align_corners ? H - 1 : H) / 2.0;
     auto z_scale = static_cast<double>(align_corners ? D - 1 : D) / 2.0;
+    // the kernels place a sample in the accumulate type, so a reduced-precision
+    // grid has to resolve the same voxel here
+    const auto acc = at::toOpMathType(grid.scalar_type());
+    const auto grid_acc = grid.to(acc);
+    const auto ggGrid_acc = ggGrid.to(acc);
+    const auto grad_output_acc = grad_output.to(acc);
     auto raw = [&](int64_t axis, double scale) {
-      auto coord = (grid.select(-1, axis) + 1) * scale;
+      auto coord = (grid_acc.select(-1, axis) + 1) * scale;
       return align_corners ? coord : coord - 0.5;
     };
     auto x_raw = raw(0, x_scale), y_raw = raw(1, y_scale),
@@ -8688,9 +8695,9 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto fx = x_raw - x0.to(x_raw.dtype());
     auto fy = y_raw - y0.to(y_raw.dtype());
     auto fz = z_raw - z0.to(z_raw.dtype());
-    auto ggG_x = ggGrid.select(-1, 0) * x_scale;
-    auto ggG_y = ggGrid.select(-1, 1) * y_scale;
-    auto ggG_z = ggGrid.select(-1, 2) * z_scale;
+    auto ggG_x = ggGrid_acc.select(-1, 0) * x_scale;
+    auto ggG_y = ggGrid_acc.select(-1, 1) * y_scale;
+    auto ggG_z = ggGrid_acc.select(-1, 2) * z_scale;
 
     // Keys' coefficients and their first two derivatives in the fractional
     // offset, for the four taps at {-1, 0, 1, 2} from the base voxel.
@@ -8778,7 +8785,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
           w_in.addcmul_(ggG_y.unsqueeze(-1), B_dy);
           w_in.addcmul_(ggG_z.unsqueeze(-1), B_dz);
           auto contrib = gs_scatter3d_bc_multi(
-              grad_output,
+              grad_output_acc,
               w_in,
               z_idx,
               y_idx,
@@ -8795,7 +8802,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
         // for a separable cubic is the symmetric 3x3 of the taps weighted by
         // two derivative factors.
         if (output_mask[2]) {
-          auto tap_dot = (grad_output.unsqueeze(-1) * taps).sum(1);
+          auto tap_dot = (grad_output_acc.unsqueeze(-1) * taps).sum(1);
           auto dot = [&](const Tensor& along_x, const Tensor& other) {
             return (tap_dot * weight(along_x, other)).sum(-1);
           };
@@ -8831,6 +8838,15 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
           d_grid.defined() ? d_grid + ggrid_d_grid : std::move(ggrid_d_grid);
     }
 
+    if (d_grad_output.defined()) {
+      d_grad_output = d_grad_output.to(grad_output.scalar_type());
+    }
+    if (d_input.defined()) {
+      d_input = d_input.to(input.scalar_type());
+    }
+    if (d_grid.defined()) {
+      d_grid = d_grid.to(grid.scalar_type());
+    }
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
 
