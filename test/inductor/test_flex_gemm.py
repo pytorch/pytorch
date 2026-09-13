@@ -1552,7 +1552,7 @@ class FlexGemmTestCase(TestCase):
         w = self.makeTensor(len(seqlens), self.N, self.K, device=device)
         return x, w.transpose(-2, -1), offs
 
-    def makeBlockScaledMm(self, format_name, m, n, k, *, global_scales=None, **options):
+    def makeBlockScaledMm(self, format_name, m, n, k, *, global_scales=None):
         """Quantize random A (m, k) / B (k, n); return (a, b, scale_a, scale_b, gemm_kwargs, reference)."""
         import torch.nn.functional as F
         from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
@@ -1587,7 +1587,6 @@ class FlexGemmTestCase(TestCase):
             "swizzle_a": swizzles,
             "swizzle_b": swizzles,
             "output_dtype": torch.bfloat16,
-            **options,
         }
         reference = F.scaled_mm(
             a.qdata, b.qdata, scale_a, scale_b=scale_b, **gemm_kwargs
@@ -3148,10 +3147,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
             warm = compiled(a.qdata, b.qdata, scale_a, scale_b, row)
 
-        torch.testing.assert_close(actual[0], expected[0], rtol=0.02, atol=0.2)
-        torch.testing.assert_close(actual[1], expected[1], rtol=0.02, atol=0.2)
-        torch.testing.assert_close(warm[0], actual[0], rtol=0, atol=0)
-        torch.testing.assert_close(warm[1], actual[1], rtol=0, atol=0)
+        self.assertEqual(actual, expected, rtol=0.02, atol=0.2)
+        self.assertEqual(warm, actual, rtol=0, atol=0)
         self.assertIn(f"blockscaled_format={format_name!r}", code)
         self.assertIn("config=((", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
@@ -3160,15 +3157,20 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    @parametrize("shared_global_scale", (False, True))
-    def test_nvfp4_scaled_mm_global_scales(self, shared_global_scale):
+    @parametrize(
+        "case",
+        ((False, (1,)), (True, ()), (True, (1, 1))),
+        name_fn=lambda case: f"shared_{case[0]}_rank_{len(case[1])}",
+    )
+    def test_nvfp4_scaled_mm_global_scales(self, case):
         import torch.nn.functional as F
 
-        global_a = torch.tensor([0.5], device="cuda", dtype=torch.float32)
+        shared_global_scale, shape = case
+        global_a = torch.full(shape, 0.5, device="cuda", dtype=torch.float32)
         global_b = (
             global_a
             if shared_global_scale
-            else torch.tensor([1.5], device="cuda", dtype=torch.float32)
+            else torch.full(shape, 1.5, device="cuda", dtype=torch.float32)
         )
         a, b, scale_a, scale_b, gemm_kwargs, base = self.makeBlockScaledMm(
             "nvfp4", 256, 256, 256, global_scales=(global_a, global_b)
@@ -3177,10 +3179,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         def epilogue_fn(acc):
             return (acc + 0.125).relu()
 
-        def fn(a_data, b_data, a_scale, a_global, b_scale, b_global):
+        def fn(a_data, b_data, a_scale, b_scale, g, other_g=None):
+            # Share one FX node, not just two aliased arguments at the call site.
+            b_global = g if shared_global_scale else other_g
             return flex_gemm(
                 F.scaled_mm,
-                (a_data, b_data, [a_scale, a_global], [b_scale, b_global]),
+                (a_data, b_data, [a_scale, g], [b_scale, b_global]),
                 epilogue_fn,
                 gemm_kwargs=gemm_kwargs,
                 kernel_options={"backend": "QUACK"},
@@ -3191,26 +3195,40 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True),
             a.qdata,
             b.qdata,
-            *scale_a,
-            *scale_b,
+            scale_a[0],
+            scale_b[0],
+            *((global_a,) if shared_global_scale else (global_a, global_b)),
         )
 
-        torch.testing.assert_close(actual, expected, rtol=0.03, atol=0.3)
+        self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
         self.assertIn("((acc * operand0) * operand1)", code)
+        self.assertIn("epilogue_arg_kinds=('scalar', 'scalar')", code)
+        self.assertNotIn("operand2", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    def test_scaled_mm_output_contraction_and_local_reduce(self):
+    @parametrize(
+        "case",
+        (("mxfp8_e4m3", False), ("mxfp8_e4m3", True), ("nvfp4", False)),
+        name_fn=lambda case: f"{case[0]}_local_reduce_{case[1]}",
+    )
+    def test_scaled_mm_output_contraction_and_local_reduce(self, case):
         import torch.nn.functional as F
         from torch._vendor.quack.gemm_config import GemmConfig
 
+        format_name, local_reduce = case
         m = 256
         group = 16
-        a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
-            "mxfp8_e4m3", m, 256, 256
+        global_scales = (
+            tuple(torch.tensor([value], device="cuda") for value in (0.5, 1.5))
+            if format_name == "nvfp4"
+            else None
+        )
+        a, b, scale_a, scale_b, gemm_kwargs, base = self.makeBlockScaledMm(
+            format_name, m, 256, 256, global_scales=global_scales
         )
         config = dataclasses.asdict(
             GemmConfig(
@@ -3225,50 +3243,44 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
         )
 
-        def scaled(epilogue_fn):
-            def fn(a_data, b_data, a_scale, b_scale):
-                return flex_gemm(
-                    F.scaled_mm,
-                    (a_data, b_data, a_scale, b_scale),
-                    epilogue_fn,
-                    gemm_kwargs=gemm_kwargs,
-                    kernel_options={"backend": "QUACK", "config": config},
-                )
-
-            return fn
-
-        def grouped_main(acc):
+        def epilogue_fn(acc):
+            if local_reduce:
+                grouped = acc.float().view(m, -1, group)
+                return acc.relu(), nvfp4_e4m3_scale(grouped.abs().amax(-1))
             pairs = acc.float().view(m, -1, 2)
             return (pairs[..., 0] - pairs[..., 1]).to(acc.dtype)
 
-        grouped, (grouped_code,) = run_and_get_code(
-            torch.compile(scaled(grouped_main), backend="inductor", fullgraph=True),
+        def fn(a_data, b_data, a_scale, b_scale):
+            return flex_gemm(
+                F.scaled_mm,
+                (a_data, b_data, a_scale, b_scale),
+                epilogue_fn,
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
             a.qdata,
             b.qdata,
             scale_a,
             scale_b,
         )
-        torch.testing.assert_close(grouped, grouped_main(base), rtol=0.03, atol=0.3)
-        self.assertIn("OutputContraction(group=2", grouped_code)
-
-        def local_reduce(acc):
-            grouped = acc.float().view(m, -1, group)
-            return acc.relu(), nvfp4_e4m3_scale(grouped.abs().amax(-1))
-
-        (actual, scale), (reduce_code,) = run_and_get_code(
-            torch.compile(scaled(local_reduce), backend="inductor", fullgraph=True),
-            a.qdata,
-            b.qdata,
-            scale_a,
-            scale_b,
-        )
-        expected, expected_scale = local_reduce(base)
-        torch.testing.assert_close(actual, expected, rtol=0.03, atol=0.3)
-        torch.testing.assert_close(
-            scale.float(), expected_scale.float(), rtol=0.125, atol=0.0625
-        )
-        self.assertIn("local_reduce=FlexGemmRuntimeLocalReducePlan", reduce_code)
-        self.assertNotIn("aten._scaled_mm_v2", grouped_code + reduce_code)
+        expected = epilogue_fn(base)
+        if local_reduce:
+            self.assertEqual(actual[0], expected[0], rtol=0.03, atol=0.3)
+            self.assertEqual(
+                actual[1].float(), expected[1].float(), rtol=0.125, atol=0.0625
+            )
+            self.assertIn("local_reduce=FlexGemmRuntimeLocalReducePlan", code)
+        else:
+            self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
+            self.assertIn("OutputContraction(group=2", code)
+        if global_scales is not None:
+            self.assertIn("((acc * operand0) * operand1)", code)
+            self.assertIn("epilogue_arg_kinds=('scalar', 'scalar')", code)
+            self.assertNotIn("operand2", code)
+        self.assertNotIn("aten._scaled_mm_v2", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -3411,105 +3423,123 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
             torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.2)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_scaled_mm_unsupported_recipe_falls_back(self):
-        import torch.nn.functional as F
-
-        m = n = k = 64
-        a = torch.randn(m, k, device="cuda").to(torch.float8_e4m3fn)
-        b = torch.randn(n, k, device="cuda").to(torch.float8_e4m3fn).t()
-        scale_a = torch.tensor([0.5], device="cuda", dtype=torch.float32)
-        scale_b = torch.tensor([1.5], device="cuda", dtype=torch.float32)
-        gemm_kwargs = {
-            "scale_recipe_a": F.ScalingType.TensorWise,
-            "scale_recipe_b": F.ScalingType.TensorWise,
-            "swizzle_a": F.SwizzleType.NO_SWIZZLE,
-            "swizzle_b": F.SwizzleType.NO_SWIZZLE,
-            "output_dtype": torch.bfloat16,
-        }
-
-        def epilogue_fn(acc):
-            return (acc + 0.25).relu()
-
-        def fn(a_data, b_data, a_scale, b_scale):
-            return flex_gemm(
-                F.scaled_mm,
-                (a_data, b_data, a_scale, b_scale),
-                epilogue_fn,
-                gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        expected = epilogue_fn(
-            F.scaled_mm(
-                a,
-                b,
-                scale_a,
-                gemm_kwargs["scale_recipe_a"],
-                scale_b,
-                gemm_kwargs["scale_recipe_b"],
-                gemm_kwargs["swizzle_a"],
-                gemm_kwargs["swizzle_b"],
-                output_dtype=torch.bfloat16,
-            )
-        )
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a,
-            b,
-            scale_a,
-            scale_b,
-        )
-
-        torch.testing.assert_close(actual, expected)
-        self.assertIn("_scaled_mm_v2", code)
-        self.assertNotIn("flex_gemm_epilogue", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
     @parametrize(
         "case",
         (
-            ("fast_accum", {"use_fast_accum": True}),
-            # make_fx drops the trailing default, leaving an 11-arg _scaled_mm_v2 node.
-            ("contraction_dim", {"contraction_dim": (1, 0)}),
+            ("tensorwise", NotImplementedError),
+            ("recipe_mismatch", NotImplementedError),
+            ("swizzle_mismatch", NotImplementedError),
+            ("data_dtype", NotImplementedError),
+            ("scale_dtype", NotImplementedError),
+            ("scale_count", NotImplementedError),
+            ("global_dtype", NotImplementedError),
+            ("global_shape", NotImplementedError),
+            ("bias", NotImplementedError),
+            ("contraction_dim", NotImplementedError),
+            ("use_fast_accum", NotImplementedError),
+            ("missing_recipe", RuntimeError),
+            ("bad_recipe_enum", RuntimeError),
+            ("bad_swizzle_enum", RuntimeError),
+            ("unknown_option", RuntimeError),
+            ("argument_count", RuntimeError),
+            ("non_tensor_scale", RuntimeError),
+            ("empty_scale", RuntimeError),
+            ("missing_backend", NotImplementedError),
+            ("TRITON", NotImplementedError),
+            ("NVGEMM", NotImplementedError),
         ),
         name_fn=lambda case: case[0],
     )
-    def test_scaled_mm_option_falls_back(self, case):
+    def test_scaled_mm_eager_rejects_invalid_inputs(self, case):
         import torch.nn.functional as F
 
-        _, options = case
-        a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
-            "mxfp8_e4m3", 64, 64, 64, **options
-        )
-
-        def epilogue_fn(acc):
-            return (acc + 0.25).relu()
-
-        def fn(a_data, b_data, a_scale, b_scale):
-            return flex_gemm(
+        case, error = case
+        a = torch.empty(256, 256, dtype=torch.float8_e4m3fn)
+        b = torch.empty_like(a).t()
+        scale_a = [torch.empty(2048, dtype=torch.float8_e8m0fnu)]
+        scale_b = [torch.empty_like(scale_a[0])]
+        gemm_kwargs = {
+            "scale_recipe_a": F.ScalingType.BlockWise1x32,
+            "scale_recipe_b": F.ScalingType.BlockWise1x32,
+            "swizzle_a": F.SwizzleType.SWIZZLE_32_4_4,
+            "swizzle_b": F.SwizzleType.SWIZZLE_32_4_4,
+        }
+        kernel_options = {"backend": "QUACK"}
+        match case:
+            case "tensorwise":
+                for side in ("a", "b"):
+                    gemm_kwargs[f"scale_recipe_{side}"] = F.ScalingType.TensorWise
+                    gemm_kwargs[f"swizzle_{side}"] = F.SwizzleType.NO_SWIZZLE
+                scale_a = scale_b = [torch.ones(1)]
+            case "recipe_mismatch":
+                gemm_kwargs["scale_recipe_b"] = F.ScalingType.BlockWise1x16
+            case "swizzle_mismatch":
+                gemm_kwargs["swizzle_b"] = F.SwizzleType.NO_SWIZZLE
+            case "data_dtype":
+                a = torch.empty_like(a, dtype=torch.bfloat16)
+            case "scale_dtype":
+                scale_b = [torch.empty(2048, dtype=torch.float32)]
+            case "scale_count":
+                scale_a *= 2
+            case "global_dtype" | "global_shape":
+                a = torch.empty(256, 128, dtype=torch.float4_e2m1fn_x2)
+                b = torch.empty_like(a).t()
+                scale_a = [torch.empty(4096, dtype=torch.float8_e4m3fn), torch.ones(1)]
+                scale_b = [torch.empty_like(scale_a[0]), torch.ones(1)]
+                scale_a[1] = (
+                    torch.ones(1, dtype=torch.bfloat16)
+                    if case == "global_dtype"
+                    else torch.ones(1, 1, 1)
+                )
+                for side in ("a", "b"):
+                    gemm_kwargs[f"scale_recipe_{side}"] = [
+                        F.ScalingType.BlockWise1x16,
+                        F.ScalingType.TensorWise,
+                    ]
+                    gemm_kwargs[f"swizzle_{side}"] = [
+                        F.SwizzleType.SWIZZLE_32_4_4,
+                        F.SwizzleType.NO_SWIZZLE,
+                    ]
+            case "bias":
+                gemm_kwargs["bias"] = torch.zeros(256, dtype=torch.bfloat16)
+            case "contraction_dim":
+                gemm_kwargs["contraction_dim"] = (1, 0)
+            case "use_fast_accum":
+                gemm_kwargs["use_fast_accum"] = True
+            case "missing_recipe":
+                gemm_kwargs.pop("scale_recipe_a")
+            case "bad_recipe_enum":
+                gemm_kwargs["scale_recipe_a"] = F.SwizzleType.NO_SWIZZLE
+            case "bad_swizzle_enum":
+                gemm_kwargs["swizzle_b"] = 0
+            case "unknown_option":
+                gemm_kwargs["unknown"] = True
+            case "non_tensor_scale":
+                scale_a = [1]
+            case "empty_scale":
+                scale_a = []
+            case "missing_backend":
+                kernel_options = None
+            case "TRITON" | "NVGEMM":
+                kernel_options["backend"] = case
+        args = (a, b, scale_a, scale_b)
+        if case == "argument_count":
+            args = args[:3]
+        with (
+            mock.patch(
+                "torch._higher_order_ops.flex_gemm.flex_gemm_hop",
+                side_effect=AssertionError("invalid input reached HOP dispatch"),
+            ),
+            self.assertRaises(error) as raised,
+        ):
+            flex_gemm(
                 F.scaled_mm,
-                (a_data, b_data, a_scale, b_scale),
-                epilogue_fn,
+                args,
+                torch.relu,
                 gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK"},
+                kernel_options=kernel_options,
             )
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a.qdata,
-            b.qdata,
-            scale_a,
-            scale_b,
-        )
-
-        torch.testing.assert_close(actual, epilogue_fn(base), rtol=0.03, atol=0.3)
-        self.assertIn("_scaled_mm_v2", code)
-        self.assertNotIn("flex_gemm_epilogue", code)
+        self.assertIs(type(raised.exception), error)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -3524,12 +3554,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_scaled_mm_indexed_output_falls_back(self, case):
+    def test_scaled_mm_indexed_output_rejected(self, case):
         _, terminal_view, strided_indices = case
         import torch.nn.functional as F
 
         m = n = 256
-        a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
+        a, b, (scale_a,), (scale_b,), gemm_kwargs, _ = self.makeBlockScaledMm(
             "mxfp8_e4m3", m, n, 256
         )
         target_count = 2 * m if strided_indices else m
@@ -3552,28 +3582,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        expected = epilogue(base, targets)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a.qdata,
-            b.qdata,
-            scale_a,
-            scale_b,
-            targets,
-        )
-
-        if terminal_view:
-            self.assertEqual(
-                actual[0].view(torch.float16),
-                expected[0].view(torch.float16),
-                rtol=0.02,
-                atol=0.2,
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "scaled-mm does not yet support indexed outputs",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a.qdata, b.qdata, scale_a, scale_b, targets
             )
-        else:
-            self.assertEqual(actual[0], expected[0], rtol=0.02, atol=0.2)
-        self.assertEqual(actual[1], actual[0].gather(1, targets[:, None]).squeeze(1))
-        self.assertIn("_scaled_mm_v2", code)
-        self.assertNotIn("indexed_out=", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

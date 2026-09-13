@@ -40,15 +40,6 @@ _BUILTIN_CALLBACKS = LOCAL_REDUCE_COMBINE_NAMES | LOCAL_REDUCE_FINALIZE_NAMES
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmEpilogueBlockScaledConfig:
-    """Shared QuACK A/B block-scaled format and template positions of SFA/SFB."""
-
-    format: str
-    sfa_index: int
-    sfb_index: int
-
-
-@dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueIndexedOutputConfig:
     """Template input positions for one row-indexed auxiliary output."""
 
@@ -141,7 +132,7 @@ class FlexGemmEpilogueConfig:
         gemm_op: Original aten GEMM op spec used to map inputs into QuACK.
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
-        blockscaled: Shared block-scaled format and SFA/SFB input positions.
+        blockscaled_format: Shared QuACK A/B block-scaled format.
         quack_config: Exact QuACK GemmConfig fields pinned for this choice;
             None only before lowering has selected the candidates.
         cu_seqlens_index: Template input index of the varlen-M ``[0, *offs]``
@@ -158,7 +149,7 @@ class FlexGemmEpilogueConfig:
     gemm_op: FlexGemmOpSpec
     alpha: float
     beta: float
-    blockscaled: FlexGemmEpilogueBlockScaledConfig | None
+    blockscaled_format: str | None
     quack_config: QuackConfigKey | None
     cu_seqlens_index: int | None
     epilogue_arg_indices: tuple[int, ...]
@@ -361,11 +352,10 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         if config.quack_config is None:
             raise AssertionError("rendered FlexGEMM choices require a pinned config")
         kwargs = [f", config={config.quack_config!r}"]
-        if config.blockscaled is not None:
+        if config.blockscaled_format is not None:
             kwargs.append(
-                f", SFA={input_args[config.blockscaled.sfa_index]}, "
-                f"SFB={input_args[config.blockscaled.sfb_index]}, "
-                f"blockscaled_format={config.blockscaled.format!r}"
+                f", SFA={input_args[2]}, SFB={input_args[3]}, "
+                f"blockscaled_format={config.blockscaled_format!r}"
             )
         if config.cu_seqlens_index is not None:
             kwargs.append(f", cu_seqlens_m={input_args[config.cu_seqlens_index]}")
