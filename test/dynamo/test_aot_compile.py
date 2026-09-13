@@ -5170,7 +5170,7 @@ from user code:
         # Deliberately around AOTCompiledModel.deserialize: it takes no guard
         # scope at this commit, so the function loader is the only place a
         # caller-supplied one can be pinned. Resolving a module artifact's scope
-        # from model.forward is two commits up.
+        # from model.forward is a later commit in this stack.
         (serialized,) = pickle.loads(data)
         expected = mod(x)
         torch._dynamo.reset()
