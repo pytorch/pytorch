@@ -65,7 +65,10 @@ def pin_memory(data, device=None):
             return fn()
         param = params.get("device")
         if param is not None:
-            if param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.VAR_POSITIONAL,
+            ):
                 return fn(device)
             return fn(device=device)
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
