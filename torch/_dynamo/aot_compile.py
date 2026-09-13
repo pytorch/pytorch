@@ -544,7 +544,7 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # guard_on_key_order is deliberately not unioned in either, even though a
+    # guard_on_key_order is deliberately not unioned in, even though a
     # dict-order check roots a global: guard_filter_fn never prunes that set, so
     # a name only it contributes is precisely a name no surviving guard checks
     # the value of. On the default aot_compile filter, which drops every global
@@ -733,10 +733,13 @@ class AOTCompiledFunction:
         from .source import get_global_source_name
         from .utils import CleanupHook
 
-        # The serialized global_scope is pruned to the names the kept guards read
-        # (plus a DUPLICATE_INPUT source_b, which roots at a graph input and so is
-        # never a module alias), so it gates the aliases. Only a caller-supplied
-        # scope can be missing one -- forward_callable imports every recorded one.
+        # The serialized global_scope is pruned to the names the kept guards
+        # resolve at check time, which is wider than their originating_sources:
+        # a DUPLICATE_INPUT reads its source_b and a SHAPE_ENV guard reads the
+        # shape-env sources, and a scope lacking one of those fails with a
+        # KeyError on G[...] too. That is exactly the set the aliases need, so it
+        # gates them. Only a caller-supplied scope can be missing one --
+        # forward_callable imports every recorded one.
         guarded_globals = output_graph.global_scope
         for alias, module_name in self._artifacts.runtime_env.import_sources.items():
             if alias in guarded_globals and alias not in guard_scope:
@@ -744,12 +747,12 @@ class AOTCompiledFunction:
         builtins_key = output_graph.name_of_builtins_dict_key_in_fglobals
         if not builtins_key:
             return
-        # A dict-order check can name the builtins key as well as a guard source
-        # can, so this gate stays wide where _guard_source_globals cannot be:
-        # seeding a name no guard reads is at worst redundant, while reading one
-        # live -- what that set feeds -- would be a wrong answer.
+        # That pruned scope cannot gate the builtins key -- the serializer writes
+        # it in whether or not a guard reads it -- so match the deserialized
+        # guards' own roots instead. The two wider channels above never root at
+        # this key: load_builtin_from_argval is the only site that mints a
+        # source under it, and only for a callable builtin.
         sources = [guard.originating_source for guard in output_graph.guards]
-        sources += output_graph.guard_on_key_order
         roots = {get_global_source_name(source) for source in sources}
         if builtins_key not in roots:
             return
@@ -1235,10 +1238,15 @@ def _resolve_guard_scope(
 def _unwrap_optimized_module(model: torch.nn.Module) -> torch.nn.Module:
     # isinstance, not getattr(model, "_orig_mod", model): _orig_mod is a
     # registrable submodule name, and unwrapping to a child would run the
-    # parent's graph against the child's parameters.
+    # parent's graph against the child's parameters. A loop, because wrappers
+    # nest: OptimizedModule.__reduce__ rebuilds a deepcopied or unpickled
+    # wrapper without the metadata innermost_fn follows, so torch.compile
+    # wraps it again instead of collapsing onto the module.
     from torch._dynamo.eval_frame import OptimizedModule
 
-    return model._orig_mod if isinstance(model, OptimizedModule) else model
+    while isinstance(model, OptimizedModule):
+        model = model._orig_mod
+    return model
 
 
 @dataclass
@@ -1263,16 +1271,19 @@ class ModelInput:
 # it takes for config.wrap_top_frame or a skipped model.forward closes over the
 # module instead, so measured, passing it there fails len(L['args']) == 1. What
 # decides that skip is the FILE model.forward is DEFINED in -- _forward_has_skip_rule
-# is trace_rules.check(mod.forward) -- and not what the class is, so the clause
-# states that rule rather than naming stock torch.nn modules: measured, a subclass
-# of nn.Linear that does not override forward is skipped too.
+# is trace_rules.check(mod.forward), whose MOD_SKIPLIST covers torch.nn along with
+# torch.distributed, torch.fx, torch.export, torch.ao, torch.utils and more -- and
+# not what the class is, so the clause states that rule rather than naming stock
+# torch.nn modules: measured, a subclass of nn.Linear that does not override
+# forward is skipped too.
 _REDIRECT_CALL = (
     "call the artifact it returns with the module as its first argument if you "
-    "define forward yourself; if forward instead comes from torch.nn -- "
-    "inheriting it unoverridden counts, since dynamo decides on the file "
-    "forward is defined in rather than on the class -- or config.wrap_top_frame "
-    "is set, that capture wrapped the module rather than its __call__ and the "
-    "artifact takes only the forward arguments"
+    "define forward yourself; if forward is instead defined in a file dynamo "
+    "skips (torch.nn and the rest of trace_rules.MOD_SKIPLIST) -- inheriting it "
+    "unoverridden counts, since dynamo decides on the file forward is defined in "
+    "rather than on the class -- or config.wrap_top_frame is set, that capture "
+    "wrapped the module rather than its __call__ and the artifact takes only the "
+    "forward arguments"
 )
 
 
@@ -1293,9 +1304,9 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
     # the same trace ("Module-level backwards hooks require compiled autograd"),
     # which only compiled_autograd._enable does -- aot_compile never enters the
     # dynamo context that reads the config flag the graph break's hint names --
-    # and the artifact that produces cannot be reloaded. A dropped backward hook
-    # also leaves the forward result alone and changes the gradients, so it needs
-    # different wording than "the result may differ".
+    # and the artifact that produces saves but cannot be reloaded. A dropped
+    # backward hook also leaves the forward result alone and changes the
+    # gradients, so it needs different wording than "the result may differ".
     forward_hooked = [
         label
         for label, attr in (
@@ -1347,7 +1358,7 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
             "autograd enabled around the capture -- only the private "
             "torch._dynamo.compiled_autograd._enable does that, since the "
             "config flag of the same name is not read on this path; %s. Note "
-            "that the artifact cannot be saved and reloaded",
+            "that the artifact saves but cannot be reloaded",
             type(model).__name__,
             ", ".join(backward_hooked),
             type(model).__name__,
@@ -1364,33 +1375,35 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
     # every recompile, so a bare lookup reports an override for every one of
     # them, ExportedProgram.module() included. With no class __call__ to wrap,
     # the wrapper only prettifies tracebacks and delegates to super(cls, obj),
-    # so skip exactly the class it was installed on and take the next __call__
-    # the MRO offers, which is the one that delegation reaches. Skipping that
-    # class rather than starting the walk past it is what keeps an override
-    # sitting AHEAD of it visible: FSDP's and replicate's wrapping rebind
-    # __class__ to a type(name, (Wrapper, cls), ...) after the trace, so
-    # type(model) is no longer the class FX wrapped and its bases carry both
-    # (parametrize subclasses the traced class directly, with no wrapper base).
-    # cls_call being None does not by itself mean there is no
-    # override either: a GraphModule subclass that defines __call__ carries it
-    # on a base, where the delegation finds it.
-    # _wrapped_call, .cls and .cls_call are private to torch/fx/graph_module.py
-    # (_WrappedCall, installed by recompile); a rename there turns this
-    # back into a warning on every GraphModule, which
+    # so skip every class carrying one and take the next __call__ the MRO
+    # offers, which is the one that delegation reaches. The wrapper is told
+    # apart by the file it is defined in rather than by the class it sits on:
+    # recompile installs it on whatever type(self) is at the time, so a
+    # __class__ swap (FSDP, replicate, parametrize all rebind it after the
+    # trace) followed by another recompile leaves two wrapper classes on the
+    # MRO, while a real __call__ assigned onto the per-instance class afterwards
+    # sits on the very class FX wrapped and still has to count. Skipping those
+    # classes rather than starting past them keeps an override on a base AHEAD
+    # of them visible; a GraphModule subclass that defines __call__ carries it
+    # on a base BEHIND them, where the delegation finds it. A wrapper whose
+    # cls_call was set delegates there instead of to super -- functional_export
+    # hooks a hooked root's wrapper that way -- so it is not skipped. The
+    # wrapper is private to torch/fx/graph_module.py (call_wrapped and
+    # _WrappedCall, installed by recompile); moving it turns this back into a
+    # warning on every GraphModule, which
     # test_aot_compile_module_fx_call_wrapper_is_not_warned_about catches.
-    fx_wrapper = getattr(type(model), "_wrapped_call", None)
-    fx_wrapped_cls = (
-        getattr(fx_wrapper, "cls", None)
-        if getattr(fx_wrapper, "cls_call", None) is None
-        else None
-    )
+    fx_file = torch.fx.graph_module.__name__
     # nn.Module defines __call__ in its own vars, so the default is unreachable,
     # and only keeps a StopIteration out of a warning helper.
     call = next(
         (
             vars(c)["__call__"]
             for c in type(model).__mro__
-            if "__call__" in vars(c) and c is not fx_wrapped_cls
+            if "__call__" in vars(c)
+            and not (
+                getattr(vars(c)["__call__"], "__module__", None) == fx_file
+                and getattr(vars(c).get("_wrapped_call"), "cls_call", None) is None
+            )
         ),
         torch.nn.Module.__call__,
     )
@@ -1422,8 +1435,8 @@ class AOTCompiledModel:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         # Guard evaluation ignores _guard_check_enabled, which only the last
         # resort and the report read, so scan EVERY result for a real match
-        # first: skipping opted-out results here would, when all of them opted
-        # out, silently serve the first one's graph.
+        # first: a match among the opted-out results is served in index order like
+        # any other, not only after every other tree was checked twice below.
         raised: dict[int, Exception] = {}
         # `unanswered` holds the indices whose LAST evaluation reached no answer,
         # the only ones with no guard to quote, and `answered` those that reached
