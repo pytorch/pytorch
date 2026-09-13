@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 import re
 import sys
 import time
@@ -24,7 +25,13 @@ from torch._dynamo.exc import (
 )
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_FBCODE, IS_S390X, munge_exc
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_S390X,
+    munge_exc,
+    parametrize,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -59,6 +66,7 @@ class WarningOnceLogger(logging.Logger):
 warning_once_logger = WarningOnceLogger("warning_once_logger")
 
 
+@instantiate_parametrized_tests
 class ErrorMessagesTest(LoggingTestCase):
     def test_inplace_view_on_graph_input_hint(self):
         def fn(x):
@@ -1090,6 +1098,25 @@ from user code:
         self.assertIn("cuda", msg)
         self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
         self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
+
+    @parametrize("tensor_op", [False, True])
+    def test_data_dependent_branching_partial_graph(self, tensor_op):
+        def fn(x):
+            if tensor_op:
+                x = x + 1
+            if random.randrange(2):
+                return x.sin()
+            return x.cos()
+
+        with self.assertRaisesRegex(Unsupported, "Data-dependent") as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
+        partial_graph = cm.exception.partial_fx_graph
+        self.assertIn("class GraphModule", partial_graph)
+        self.assertIn("def forward", partial_graph)
+        if tensor_op:
+            self.assertIn("+ 1", partial_graph)
+            self.assertIn("cpu", partial_graph)
 
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
