@@ -1745,8 +1745,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             buf = io.BytesIO()
             with self.assertLogs("torch._dynamo.guards", level="DEBUG") as logs:
                 GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
-            records = logs.output
-            self.assertTrue(any("dropping the annotations" in line for line in records))
+            log_lines = logs.output
+            self.assertTrue(
+                any("dropping the annotations" in line for line in log_lines)
+            )
             exc = RecursionError("maximum recursion depth exceeded")
             with self.assertRaisesRegex(RecursionError, "maximum recursion depth"):
                 GuardsStatePickler({id(fn): fn}, {}, {}, {}, io.BytesIO()).dump(fn)

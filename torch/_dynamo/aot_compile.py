@@ -500,24 +500,29 @@ def atomic_write_binary(file_path: str, data: bytes):
 
 
 def _guard_source_globals(output_graph: Any) -> set[str]:
-    """The global names a kept guard's own originating_source roots at."""
-    # guard_on_key_order is deliberately not unioned in, even though a dict-order
-    # check roots a global: guard_filter_fn never prunes that set, so a name only
-    # it contributes is precisely a name no surviving guard checks the value of.
-    # On the default aot_compile filter, which drops every global guard, an
-    # iterated global dict is exactly that shape.
+    """The global names a kept guard's own originating_source IS."""
+    # A guard certifies its own source, not the object that source is reached
+    # through, so a CHAINED source does not count: a TENSOR_MATCH on
+    # G['D']['a'] certifies that one item, while the name a load can substitute
+    # is D, whose every other key the graph would then read live and unchecked.
+    # get_global_source_name would walk such a source up to D.
+    # guard_on_key_order is deliberately not unioned in either, even though a
+    # dict-order check roots a global: guard_filter_fn never prunes that set, so
+    # a name only it contributes is precisely a name no surviving guard checks
+    # the value of. On the default aot_compile filter, which drops every global
+    # guard, an iterated global dict is exactly that shape.
     # Narrower than the serialized global_scope for the same reason: the
     # serializer also fills that from a ShapeEnvSource guard's shape_env_sources
     # and from DUPLICATE_INPUT's source_b -- names whose value no guard checks,
     # and which DUPLICATE_INPUT records before its optimizer-source early return,
     # so an optimizer-rooted pair records one with no guard installed at all.
-    from .source import get_global_source_name
+    from .source import GlobalSource
 
-    names = {
-        get_global_source_name(guard.originating_source)
+    return {
+        guard.originating_source.global_name
         for guard in output_graph.guards
+        if isinstance(guard.originating_source, GlobalSource)
     }
-    return {name for name in names if name is not None}
 
 
 @dataclass
@@ -647,17 +652,21 @@ class AOTCompiledFunction:
     ) -> None:
         # Dynamo mints __import_* aliases and a __builtins_dict___N key into the
         # TRACING process's globals and roots guards at them; a process that only
-        # loads never traced. Each name is gated on a kept guard being rooted at
-        # THAT name, because this writes into a scope that may be a user module's
-        # live namespace and installs no CleanupHook. An already-bound name is
-        # left alone: a wrong binding fails the guard rather than passing it.
+        # loads never traced. Each name is gated on the artifact showing a kept
+        # guard reads it -- the aliases on the pruned global_scope, the builtins
+        # key on the deserialized guards' own roots -- because this writes into a
+        # scope that may be a user module's live namespace and installs no
+        # CleanupHook. A binding this process already had is left alone: a wrong
+        # binding fails the guard rather than passing it. The one value replaced
+        # is one this load itself put there, in the builtins branch below.
         from .output_graph import get_builtins_dict
         from .source import get_global_source_name
         from .utils import CleanupHook
 
-        # The serialized global_scope is already pruned to the names the kept
-        # guards read, so it gates the aliases. Only a caller-supplied scope can
-        # be missing one -- forward_callable imports every recorded alias.
+        # The serialized global_scope is pruned to the names the kept guards read
+        # (plus a DUPLICATE_INPUT source_b, which roots at a graph input and so is
+        # never a module alias), so it gates the aliases. Only a caller-supplied
+        # scope can be missing one -- forward_callable imports every recorded one.
         guarded_globals = output_graph.global_scope
         for alias, module_name in self._artifacts.runtime_env.import_sources.items():
             if alias in guarded_globals and alias not in guard_scope:
@@ -678,26 +687,41 @@ class AOTCompiledFunction:
         # leave its value alone; drop it so it can't delete the binding once
         # collected.
         CleanupHook.disown(guard_scope, builtins_key)
-        if builtins_key not in guard_scope:
-            # forward_callable builds fn.__globals__ as a plain dict, so unlike an
-            # exec'd module namespace it carries no __builtins__ to derive from.
-            # The LIVE dict, never a copy: the guard rooted here is an ID_MATCH on
-            # a builtin, so a snapshot would keep passing after that builtin is
-            # rebound.
-            if "__builtins__" not in guard_scope:
-                guard_scope["__builtins__"] = builtins.__dict__
-            bound = guard_scope["__builtins__"]
-            if not isinstance(bound, (dict, types.ModuleType)):
-                # Name the parameter this dict arrived by: get_builtins_dict
-                # would otherwise raise a bare AttributeError out of Dynamo
-                # internals. The TYPE and not the value -- a repr on a load
-                # failure path runs user code.
-                param = "f_globals" if self._guard_globals is None else "guard_globals"
-                raise TypeError(
-                    f"{param}['__builtins__'] must be a dict or a module, got "
-                    f"{type(bound).__name__}"
-                )
-            guard_scope[builtins_key] = get_builtins_dict(guard_scope)
+        # The dict this key resolves to has to be the LIVE builtins: the guard
+        # rooted here is an ID_MATCH on a builtin, so a snapshot goes on passing
+        # after that builtin is rebound. Two bindings reach a snapshot, and the
+        # second is this load's own -- when the generated bytecode reads this key,
+        # get_runtime_env records a pickle-filtered COPY of the tracing builtins
+        # under it and forward_callable spreads that copy into fn.__globals__,
+        # which IS the default guard scope. Re-derive over that one; a binding from
+        # anywhere else is a value this process chose and stays.
+        snapshot = self._artifacts.runtime_env.used_globals.get(builtins_key)
+        if builtins_key in guard_scope and (
+            snapshot is None or guard_scope[builtins_key] is not snapshot
+        ):
+            return
+        # forward_callable builds fn.__globals__ as a plain dict, so unlike an
+        # exec'd module namespace it carries no __builtins__ to derive from.
+        if "__builtins__" not in guard_scope:
+            guard_scope["__builtins__"] = builtins.__dict__
+        bound = guard_scope["__builtins__"]
+        if not isinstance(bound, (dict, types.ModuleType)):
+            # Name the parameter this dict arrived by: get_builtins_dict would
+            # otherwise raise a bare AttributeError out of Dynamo internals.
+            # load_compiled_function forwards one dict as both, so a dict that
+            # arrived by both routes is named by the public one -- guard_globals
+            # is not in that signature. The TYPE and not the value -- a repr on a
+            # load failure path runs user code.
+            arrived_as_f_globals = (
+                self._guard_globals is None
+                or self._guard_globals is self._extra_globals
+            )
+            param = "f_globals" if arrived_as_f_globals else "guard_globals"
+            raise TypeError(
+                f"{param}['__builtins__'] must be a dict or a module, got "
+                f"{type(bound).__name__}"
+            )
+        guard_scope[builtins_key] = get_builtins_dict(guard_scope)
 
     def _missing_global_hint(self, *, forward: str | None = None) -> str:
         """Advice for a guard that failed on a global its scope does not define,
@@ -874,8 +898,9 @@ class AOTCompiledFunction:
         a rebinding in this process is invisible.
 
         ``bytecode_reads_guard_scope`` additionally serves the graph the live
-        value of each global a kept guard is rooted at -- apart from the recorded
-        ``__builtins_dict___N`` key, which is excluded by name -- picked out of
+        value of each global a kept guard's own source IS -- not one reached only
+        through a sub-path of it, which the guard does not certify, and apart from
+        the recorded ``__builtins_dict___N`` key, excluded by name -- picked out of
         ``guard_globals`` one name at a time: a caller that cannot inspect the
         guards itself, i.e. the module load path, gets the substitution only
         where a guard certifies it, and never for a global whose guard a filter
@@ -1325,15 +1350,15 @@ class AOTCompiledModel:
             parts = reason.verbose_code_parts
             if missing_global is None and any(map(_names_a_missing_global, parts)):
                 missing_global = result
-            joined = "; ".join(parts).replace("\n", " ")
+            # A part embeds the guard's raw source line, which linecache ends
+            # only at \n: collapse every separator splitlines() reads it back on.
+            joined = " ".join("; ".join(parts).splitlines())
             lines.append(f"  [{i}] {joined}")
         # Both advice lines below can apply: an entry that named a missing global
         # says nothing about a call no input covers.
         if missing_global is not None:
             forward = f"{type(self.model).__name__}.forward"
             lines.append(missing_global._missing_global_hint(forward=forward))
-        # Both levers named are the capturing process's, which a load need not
-        # be in.
         lines.append(
             "Add a ModelInput covering this call, or check whether "
             "guard_filter_fn kept a guard this call cannot satisfy -- both "
@@ -1367,18 +1392,19 @@ class AOTCompiledModel:
         Guards on globals are evaluated, by reference, against the live
         ``__globals__`` of the function ``model.forward`` resolves to, and the
         compiled bytecode reads a snapshot, taken here, of the globals serialized
-        with the artifact in which the names a kept guard is rooted at -- the
-        recorded ``__builtins_dict___N`` key always excepted -- are replaced by
-        that live dict's values. So a value the graph reads live is one a passing
-        guard certifies, every other global is the one it was traced with, and a
-        guarded global the live dict lacks fails the guard rather than falling
-        back to the serialized value. Rebinding a global after the load changes
-        nothing the graph reads unless a guard on its value refuses the call, and
-        a kept ``TENSOR_MATCH`` checks metadata, not values. Loading also MUTATES
-        that dict: a recorded ``__import_*`` alias the serialized scope still
-        carries, and that builtins key when a guard source names it, are inserted
-        (never overwriting an existing key) so guards rooted at them resolve in a
-        process that never traced.
+        with the artifact in which the names a kept guard's own source IS -- not a
+        global reached only through a sub-path of it, and never the recorded
+        ``__builtins_dict___N`` key -- are replaced by that live dict's values. So
+        a value the graph reads live is one a passing guard certifies, every other
+        global is the one it was traced with, and a guarded global the live dict
+        lacks fails the guard rather than falling back to the serialized value.
+        Rebinding a global after the load changes nothing the graph reads unless a
+        guard on its value refuses the call, and a kept ``TENSOR_MATCH`` checks
+        metadata, not values. Loading also MUTATES that dict: a recorded
+        ``__import_*`` alias the serialized scope still carries, and that builtins
+        key when a guard source names it, are inserted (never overwriting an
+        existing key) so guards rooted at them resolve in a process that never
+        traced.
 
         Only when ``get_traced_fn`` cannot resolve ``model.forward`` to a Python
         function is there no live scope; guards then resolve against the scope
