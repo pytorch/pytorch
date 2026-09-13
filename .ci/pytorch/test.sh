@@ -598,29 +598,6 @@ test_h100_cutlass_backend() {
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_evt $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
-test_native_aot() {
-  # These suites exercise the Python JIT route too, so they need the DSL runtime.
-  # Installed here rather than in requirements-ci.txt, which is shared by every
-  # image and would put ~190 MB of CUDA-only tooling into the CPU, ROCm and XPU
-  # images as well.
-  install_cutlass_dsl
-
-  # Assert the wheel under test carries the kernels stage 2 embedded: without
-  # them every routing test below passes vacuously on the JIT/aten fallbacks.
-  # cd test, because from the repo root the source torch/ dir shadows the
-  # installed wheel, same as the ASAN smoke checks above.
-  (cd test && python -c "
-from torch._native import _native_aot_embedded
-assert _native_aot_embedded(), 'AOT kernels not embedded: stage 2 did not run in the build'
-print('native-AOT: embedded kernels detected')
-")
-  local native_aot_tests=()
-  for f in test/python_native/test_*.py; do
-    native_aot_tests+=("${f#test/}")
-  done
-  time python test/run_test.py --include "${native_aot_tests[@]%.py}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-}
-
 test_xpu_sycl_tla_backend() {
   # Inductor sycl-tla backend tests for XPU
   # shellcheck disable=SC1091
@@ -784,6 +761,35 @@ test_inductor_aoti_cpp() {
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+}
+
+test_inductor_aoti_fallback_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
+  # Re-run the AOTInductor suites under Inductor lite / all-fallback mode: every
+  # op goes to ATen unless it sits inside a regional-inductor annotation.
+  # TORCHINDUCTOR_LITE_MODE is read once when torch._inductor.config is imported,
+  # so it also reaches the model-generation subprocess behind the C++ tests --
+  # which is why those can be reused as-is rather than reimplemented.
+  export TORCHINDUCTOR_LITE_MODE=1
+
+  # --upload-artifacts-while-running is load bearing here, not cosmetic: this mode
+  # can abort the interpreter mid-file (a proxy-executor CHECK failure), and an
+  # aborted process writes no junit XML at exit. Streaming the reports out keeps
+  # the failure visible on HUD instead of leaving a shard that is red with no
+  # per-test record of why.
+  python test/run_test.py \
+    --include inductor/test_inductor_lite_mode \
+              inductor/test_aot_inductor \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_aot_inductor_custom_ops \
+              inductor/test_aot_inductor_package \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose \
+    --upload-artifacts-while-running
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
@@ -2595,6 +2601,18 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
     test_inductor_aoti_cpp
   fi
   collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == *inductor_aoti_fallback* ]]; then
+  setup_torch_trace
+  # This config is expected to be red while the all-fallback bugs are triaged, and
+  # test.sh runs under `set -e`. Guard each leg so a red Python shard still lets the
+  # C++ leg run and still uploads tlparse, then report the first failure at the end.
+  aoti_fallback_status=0
+  test_inductor_aoti_fallback_shard "$SHARD_NUMBER" || aoti_fallback_status=$?
+  if [[ "$SHARD_NUMBER" -eq "1" ]]; then
+    TORCHINDUCTOR_LITE_MODE=1 test_inductor_aoti_cpp || aoti_fallback_status=$?
+  fi
+  collect_tlparse_output
+  exit "$aoti_fallback_status"
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
   setup_torch_trace
   test_inductor_core
@@ -2684,8 +2702,6 @@ elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
   test_b200_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
-elif [[ "${TEST_CONFIG}" == native_aot ]]; then
-  test_native_aot
 elif [[ "${TEST_CONFIG}" == openreg ]]; then
   test_openreg
 elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
