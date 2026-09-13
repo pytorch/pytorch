@@ -717,9 +717,9 @@ def fn(x):
                 alias in entry.import_sources for entry in package._codes.values()
             )
             self.assertTrue(installs_alias)
-            # The other arm of the same check: the backend ids start unbound in
-            # this freshly imported module, so install() does create them and
-            # uninstall() does take them back out.
+            # The gate is scoped to the aliases: the backend ids go through
+            # the default record_only_if_new=False, so they are recorded and
+            # removed however the module scope looked beforehand.
             backend_ids = set(backends)
             self.assertTrue(backend_ids)
             self.assertEqual(backend_ids & set(scope), set())
@@ -730,6 +730,19 @@ def fn(x):
             self.assertIn(alias, set(scope))
             self.assertEqual(backend_ids & set(scope), set())
             self.assertEqual(loaded(*args), expected)
+
+            # The other arm of the record, which needs a scope where the alias
+            # is still unbound when install() runs: another fresh import gives
+            # one, and there the package IS the first binder, so uninstall()
+            # takes the alias back out.
+            module = import_from_path(module_name, helper_path)
+            unseeded_scope = vars(module)
+            self.assertNotIn(alias, set(unseeded_scope))
+            package, backends = ctx.load_package(module.fn, self.path())
+            package.install(backends)
+            self.assertIn(alias, set(unseeded_scope))
+            package.uninstall()
+            self.assertNotIn(alias, set(unseeded_scope))
 
     def test_file_change(self):
         ctx = DiskDynamoStore()
