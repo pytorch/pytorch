@@ -2,12 +2,15 @@
 
 #include <cstddef>
 #include <iterator>
+#include <ranges>
 #include <unordered_set>
 
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/irange.h>
 
 using namespace c10;
+
+static_assert(std::ranges::input_range<DispatchKeySet>);
 
 // This test exists not to be comprehensive, but to more clearly show
 // what the semantics of DispatchKeySet are.
