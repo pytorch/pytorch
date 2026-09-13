@@ -2121,6 +2121,30 @@ from user code:
         self.assertEqual(devices, frozenset(("cpu", "cuda")))
         self.assertEqual(_collapse_device_types(devices), "cuda")
 
+    def test_graph_device_types_reads_a_get_attr_submodule_body(self):
+        # A cond branch is a submodule the parent graph only references, and the
+        # cond node's meta shows what the branch returned (cpu) rather than the
+        # cuda it used -- the shape torch.cond emits.
+        with FakeTensorMode():
+            cpu = torch.empty(2)
+        body = torch.fx.Graph()
+        body_x = body.placeholder("x")
+        on_cuda = body.call_method("cuda", (body_x,))
+        body.output((body.call_method("cpu", (on_cuda,)),))
+        parent = torch.fx.Graph()
+        x = parent.placeholder("x")
+        x.meta["val"] = cpu
+        branch = parent.get_attr("cond_true_0")
+        cond = parent.call_function(
+            torch.ops.higher_order.cond, (x, branch, branch, (x,))
+        )
+        cond.meta["val"] = (cpu,)
+        parent.output((cond,))
+        root = {"cond_true_0": torch.fx.GraphModule({}, body)}
+        devices = _graph_device_types(torch.fx.GraphModule(root, parent).graph)
+        self.assertEqual(devices, frozenset(("cpu", "cuda")))
+        self.assertEqual(_collapse_device_types(devices), "cuda")
+
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
         # A dynamic-shape capture leads with a SymInt placeholder, which has no
         # device of its own -- the shape the first graph below imitates.
