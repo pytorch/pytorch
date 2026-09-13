@@ -77,7 +77,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     run_tests,
     skipIfTorchDynamo,
-    xfailIf,
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.jit_utils import JitTestCase
