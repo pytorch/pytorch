@@ -102,7 +102,7 @@ from .bytecode_transformation import (
     create_swap,
     Instruction,
     make_compiled_fn_name,
-    unique_id_unbound_in,
+    unique_id,
 )
 from .code_context import code_context
 from .codegen import PyCodegen
@@ -3598,7 +3598,8 @@ class OutputGraph(OutputGraphCommon):
 
         Returns the name of the newly installed global.
         """
-        name = unique_id_unbound_in(prefix, self.global_scope)
+        # NB: unique_id is unique, even across torch.compile instances
+        name = unique_id(prefix)
         self.install_global_unsafe(name, value)
         return name
 
