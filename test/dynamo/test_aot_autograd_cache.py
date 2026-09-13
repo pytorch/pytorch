@@ -952,7 +952,12 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         a = torch.randn(25)
         b = torch.randn(25)
 
-        fn(a, b)
+        self.assertEqual(fn(a, b), 2 * (a + b))
+        self._assert_autograd_cache_counters(miss=1, hit=0, saved=1, bypass=0)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a, b), 2 * (a + b))
+        self._assert_autograd_cache_counters(miss=1, hit=1, saved=1, bypass=0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
