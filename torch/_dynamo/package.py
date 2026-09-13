@@ -32,7 +32,7 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_types
+from torch._dynamo.graph_utils import _graph_device_type
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -325,11 +325,7 @@ class FunctionPicklerBase(pickle.Pickler):
         # not for a local function), so the caller prunes any it does not need.
         # `evaluate` asks for the VALUE format instead, for a caller that has to
         # serialize the values and cannot carry a proxy; that read raises for a
-        # name that does not resolve. Either format can raise -- FORWARDREF only
-        # when the annotation does real work outside a name lookup (formatting a
-        # proxy in an f-string, `()[0]`), which the guards.py caller explains --
-        # and both are left raising here: whether the set can be dropped is the
-        # caller's question, and each caller logs the drop it takes.
+        # name that does not resolve.
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -1176,8 +1172,7 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        devices = _graph_device_types(graph)
-        self._device_type = _collapse_device_types(devices)
+        self._device_type = _graph_device_type(graph)
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
