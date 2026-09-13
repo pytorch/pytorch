@@ -506,20 +506,14 @@ def gemm_epilogue(
         # Layout callbacks predicate logical stores but do not own padded bytes.
         if initialize_local_reduce_out is not None:
             initialize_local_reduce_out.zero_()
-        blockscaled_kwargs = (
-            {}
-            if blockscaled_format is None
-            else {
-                "SFA": SFA,
-                "SFB": SFB,
-                "bs_format_a": blockscaled_format,
-                "bs_format_b": blockscaled_format,
-            }
-        )
         result = epimod(
             a,
             b,
             C=effective_C,
+            SFA=SFA,
+            SFB=SFB,
+            bs_format_a=blockscaled_format,
+            bs_format_b=blockscaled_format,
             out=output_buffers,
             out_dtype=out.dtype,
             store_d=output_contraction is None,
@@ -527,7 +521,6 @@ def gemm_epilogue(
             tuned=False,
             concat_layout=concat_layout,
             compile_dispatch=False,
-            **blockscaled_kwargs,
             **operands,
         )
     return result[main_name]
