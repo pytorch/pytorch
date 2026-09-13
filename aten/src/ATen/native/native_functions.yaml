@@ -1841,7 +1841,7 @@
     CPU: count_nonzero_out_cpu
     CUDA: count_nonzero_out_cuda
     MPS: count_nonzero_out_mps
-    XPU: count_nonzero_out_xpu
+    # XPU: count_nonzero_out_xpu  # todo needs to be implemented
   tags: reduction
 
 - func: count_nonzero.dim_IntList(Tensor self, int[] dim, *, ScalarType? dtype=None) -> Tensor
