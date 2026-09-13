@@ -1000,29 +1000,25 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function. It
-                   REPLACES the dict the kept guards resolve globals against,
-                   so it must bind every global they read, with values that
-                   satisfy them: pass ``vars(mod)`` for the module ``mod`` that
-                   DEFINED the original function, not a dict of a few extra
-                   names. A guarded global it lacks gets no fallback to the
-                   value serialized with the artifact, and an artifact holds
-                   one graph, so the call raises ``RuntimeError: GuardManager
-                   check failed`` rather than recompiling. The load may insert
-                   Dynamo-minted names into this dict, and ``__builtins__``,
-                   never overwriting a key it already binds. The compiled
-                   bytecode reads a snapshot taken at load time -- the globals
-                   serialized with the artifact, with this dict merged over
-                   them -- so a name this dict omits still resolves there.
-                   Guards read this dict by reference, so a global rebound in
-                   it after loading is seen on the next call; that the bytecode
-                   keeps reading the snapshot is a known limitation rather than
-                   a contract to rely on, and it means a rebind the guards
-                   ACCEPT (a kept ``TENSOR_MATCH`` compares metadata, not
-                   values) leaves the call computing with the load-time value.
-                   Omitting ``f_globals`` resolves global guards against the
-                   scope rebuilt from the artifact, where a rebinding in this
-                   process is invisible.
+        f_globals: Optional live global scope enclosing the compiled function,
+                   and the scope its kept guards resolve globals against. Pass
+                   ``vars(mod)`` for the module ``mod`` that DEFINED the
+                   original function rather than a dict of a few extra names:
+                   every global a kept guard reads has to be bound here with a
+                   value that satisfies it, or else the call raises
+                   ``RuntimeError: GuardManager check failed`` rather than
+                   recompiling. Passing ``{}`` is an empty guard scope, not the
+                   same as omitting the argument, which resolves the guards
+                   against the scope rebuilt from the artifact instead. The
+                   dict is held by reference and written into: the load may add
+                   names of its own, never overwriting a key it already binds,
+                   and a global rebound in it afterwards is what the guards
+                   check on the next call. The compiled bytecode instead reads
+                   a load-time snapshot of this dict merged over the globals
+                   serialized with the artifact, so a name this dict omits
+                   still resolves there and a rebind the guards ACCEPT leaves
+                   the call computing with the load-time value -- a known
+                   limitation rather than a contract to rely on.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
