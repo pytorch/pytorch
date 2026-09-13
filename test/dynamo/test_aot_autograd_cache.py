@@ -3951,6 +3951,58 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 ):
                     check_cacheable(gm)
 
+    def test_wrapped_user_cache_hash_empty_falls_through(self):
+        # An empty hash must neither authorize caching (the node still faces
+        # the ordinary cacheability checks) nor raise the non-string bypass,
+        # and it must stay out of the key: a wrapped node with an empty hash
+        # keys identically to one with no hash at all.
+        example = torch.ones(3)
+
+        def make_graph(target, cache_hash):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["example_value"] = example
+            result = graph.call_function(target, (x,))
+            result.meta["example_value"] = example
+            result.meta["is_wrapped"] = True
+            if cache_hash is not None:
+                result.meta["user_cache_hash"] = cache_hash
+            graph.output(result)
+            return GraphModule(torch.nn.Module(), graph)
+
+        # Opaque target: falls through and is rejected on its own demerits.
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            r"Unsupported call_function target .*_opaque_unsupported_function",
+        ):
+            check_cacheable(make_graph(_opaque_unsupported_function, ""))
+
+        # Cacheable target: admitted on its own merits, and the empty hash is
+        # omitted from collection, so the key matches the hashless graph. The
+        # flat-named module-level target and the cacheable marking follow
+        # test_wrapped_user_cache_hash_is_module_scoped; a dotted name like
+        # "torch.sin" would poison the process-global fx wrap registry.
+        target = _module_scoped_hash_target
+        marked_cacheable = {f"{target.__module__}.{target.__name__}": "v1"}
+        config = self.default_config()
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", marked_cacheable
+        ):
+            empty_key, _ = self._gen_cache_key_from_gm(
+                make_graph(target, ""), [example], config
+            )
+            absent_key, _ = self._gen_cache_key_from_gm(
+                make_graph(target, None), [example], config
+            )
+            # Liveness anchor: a non-empty hash on this independently-cacheable
+            # target must still reach the key, so the equality above cannot pass
+            # via a collector that never reads this node's meta at all.
+            hashed_key, _ = self._gen_cache_key_from_gm(
+                make_graph(target, "nonempty_hash"), [example], config
+            )
+        self.assertEqual(empty_key, absent_key)
+        self.assertNotEqual(hashed_key, absent_key)
+
     def test_wrapped_user_cache_hash_is_module_scoped(self):
         # Two identical subgraphs; only which one carries the hash differs, and
         # meta is not part of the serialized graph. A collector that flattened
