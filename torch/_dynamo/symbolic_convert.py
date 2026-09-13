@@ -2432,9 +2432,20 @@ class InstructionTranslatorBase(
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
         f_globals = self.output.global_scope
-        if not (alias not in f_globals or f_globals[alias] is value):
+        # The alias outlives the compile that minted it, and _import_module is
+        # memoized, so a writer that resolves against live sys.modules instead --
+        # CompilePackage.install, or an artifact load seeding a guard scope --
+        # can leave it bound to a different object for the same module. A stale
+        # module is not a name collision: rebind it, and let the guards pin which
+        # object an artifact was built against. The offender is named by type,
+        # never repr'd: this raises out of tracing, where __repr__ is user code.
+        bound = f_globals.get(alias, value)
+        if bound is not value and not (
+            isinstance(bound, types.ModuleType) and bound.__name__ == module_name
+        ):
             raise AssertionError(
-                "expected alias not in f_globals or f_globals[alias] is value to be true"
+                f"module alias {alias} for {module_name} is already bound to a "
+                f"{type(bound).__name__} in the globals of the frame being traced"
             )
         f_globals[alias] = value
         self.output.update_co_names(alias)
