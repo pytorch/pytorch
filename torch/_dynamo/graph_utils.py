@@ -1,7 +1,7 @@
 from typing import Any
 
 import torch
-from torch.fx import Graph, map_arg, Node
+from torch.fx import Graph, GraphModule, map_arg, Node
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
 
@@ -87,7 +87,8 @@ _DEVICE_NAMING_METHODS = ("cpu", "cuda", "xpu", "ipu", "mtia")
 
 def _graph_device_types(graph: Graph | None) -> frozenset[str]:
     """Every device type the graph names -- from a meta value, a device-naming
-    method or a device position (a device= kwarg, .to()'s device argument) --
+    method or a device position (a device= kwarg, .to()'s device argument), in
+    this graph and in the submodule bodies it reaches through a get_attr --
     except "meta", which is abstract rather than a requirement of the host. An
     empty result means the graph names no device, which is not "cpu".
     """
@@ -125,8 +126,9 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
         return flat
 
     def _device_specs(node: Node) -> list[Any]:
-        # The only positions this scan reads as devices, so an ordinary
-        # positional arg (an autocast device string) is never read as one. Not
+        # The only positions this scan reads as devices: a device anywhere else
+        # (an autocast string, aten.to.device's positional Device) is not read
+        # as one, though such a node's meta names the device it returns. Not
         # every real device position is here: x.type() takes a
         # "torch.cuda.FloatTensor", which torch.device does not parse.
         specs: list[Any] = []
@@ -154,6 +156,14 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
         for obj in _device_specs(node):
             if (device := _device_from_spec(obj)) is not None:
                 devices.add(device)
+
+        # A HOP body (a cond branch, an invoke_subgraph region) is a submodule
+        # this graph only references, and the parent node's meta shows what the
+        # body returned rather than the devices it used.
+        if node.op == "get_attr" and (owner := graph.owning_module) is not None:
+            sub = getattr(owner, node.target, None)  # type: ignore[arg-type]
+            if isinstance(sub, GraphModule):
+                devices |= _graph_device_types(sub.graph)
     return frozenset(devices) - {"meta"}
 
 
