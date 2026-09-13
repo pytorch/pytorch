@@ -184,6 +184,12 @@ def _graph_device_types(
 def _collapse_device_types(device_types: frozenset[str]) -> str:
     """The single device type a package or an AOT artifact records: an
     accelerator wins over cpu, and naming no device reads as cpu. Among several
-    accelerators the pick is arbitrary (alphabetical).
+    accelerators one that `SystemInfo.check_compatibility` checks wins, since
+    any other name skips the load check; the rest tie alphabetically.
     """
+    from .package import SystemInfo  # package.py imports this module
+
+    for device_type in SystemInfo.CHECK_GPUS:
+        if device_type in device_types:
+            return device_type
     return next((d for d in sorted(device_types) if d != "cpu"), "cpu")

@@ -2170,13 +2170,16 @@ from user code:
         self.assertEqual(_collapse_device_types(_graph_device_types(graph)), "cpu")
 
     def test_collapse_device_types_prefers_an_accelerator(self):
-        # The single string both callers record. Among several accelerators the
-        # pick is alphabetical -- arbitrary, but pinned so a change of rule is
-        # not silent.
+        # The single string both callers record. Among several accelerators
+        # one SystemInfo.check_compatibility checks wins: alphabetical order
+        # would record "mps" for {"mps", "xpu"}, and a name outside CHECK_GPUS
+        # skips every host check the way the old "cpu" did.
         self.assertEqual(_collapse_device_types(frozenset()), "cpu")
         self.assertEqual(_collapse_device_types(frozenset(("cpu",))), "cpu")
         self.assertEqual(_collapse_device_types(frozenset(("cpu", "cuda"))), "cuda")
         self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
+        self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
+        self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
 
     def test_a_recorded_gpu_device_type_arms_the_load_check(self):
         # What the flip from "cpu" to an accelerator buys, and what it costs: a
