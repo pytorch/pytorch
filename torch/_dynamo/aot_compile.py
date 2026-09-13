@@ -28,7 +28,7 @@ from .hooks import Hooks
 
 
 if TYPE_CHECKING:
-    from .guards import GuardManagerWrapper
+    from .guards import GuardManagerWrapper, GuardsState
     from .package import SourceInfo
 
 
@@ -500,8 +500,6 @@ class AOTCompiledFunction:
 
         if self._artifacts.guard_manager is None:
             guards_state = load_guards_state(self._artifacts.guards_state)
-            # No fallback to the serialized scope: a name the loading process
-            # lacks must fail the guard rather than resolve to a baked-in value.
             guard_scope = self._guard_globals
             if guard_scope is None:
                 guard_scope = self.fn.__globals__
@@ -512,21 +510,20 @@ class AOTCompiledFunction:
                 guard_scope,
             )
 
-    def _seed_guard_scope(self, guard_scope: dict[str, Any], guards_state: Any) -> None:
+    def _seed_guard_scope(
+        self, guard_scope: dict[str, Any], guards_state: "GuardsState"
+    ) -> None:
         # Dynamo mints __import_* aliases and a __builtins_dict___N key into the
         # tracing process's globals and roots guards at them; a process that only
         # loads never traced, so seed them here. Every guarded name is gated on a
         # kept guard being rooted at it: the seeding mutates a scope that may be a
         # user module's live namespace and installs no CleanupHook, so a name
-        # nothing checks must not be written. __builtins__ is the one exception --
-        # it is what the builtins dict is derived from rather than a name a guard
-        # reads -- and it is written only when the gated builtins key itself is.
-        # This diverges from the precompile load path in torch/_dynamo/package.py:
-        # it leaves an already-bound name in place, whereas install()'s builtins
-        # branch raises on a mismatched binding. A wrong binding fails the guard
-        # rather than passing it, and a caller-supplied guard_scope may
-        # legitimately already carry these -- so keep what is there rather than
-        # fight over it.
+        # nothing checks must not be written. __builtins__ is the exception: it
+        # is what the builtins dict is derived from, and it is written only when
+        # the gated builtins key is. An already-bound name is left as it is,
+        # unlike install()'s builtins branch in package.py, which raises on a
+        # mismatch: a wrong binding fails the guard rather than passing it, and a
+        # caller-supplied scope may legitimately already carry these names.
         from .output_graph import get_builtins_dict
         from .source import get_global_source_name
         from .utils import CleanupHook
@@ -534,10 +531,8 @@ class AOTCompiledFunction:
         # The serialized global_scope is pruned to the names the kept guards read,
         # so it gates the aliases. It cannot gate the builtins key: the serializer
         # writes that key into the pruned scope whether or not a guard reads it.
-        # Only a caller-supplied guard_scope ever needs an alias -- forward_callable
-        # builds fn.__globals__ with every recorded alias already imported, so on
-        # the default path the loop below adds nothing; what can still be missing
-        # there is the builtins key.
+        # Only a caller-supplied scope can be missing an alias -- forward_callable
+        # imports every recorded one into fn.__globals__.
         output_graph = guards_state.output_graph
         guarded_globals = output_graph.global_scope
         for alias, module_name in self._artifacts.runtime_env.import_sources.items():
@@ -548,10 +543,11 @@ class AOTCompiledFunction:
             return
         # Every source that can root at the builtins key: guard_on_key_order roots
         # a dict-order check without appearing as any guard's originating_source.
-        # The serializer's pruning scan reads two channels beyond this list --
-        # the shape-env sources substituted for a ShapeEnvSource guard, and
-        # DUPLICATE_INPUT's source_b, unioned in as additional_used_global_vars
-        # -- but both root at a graph input, never at the builtins dict.
+        # The serializer's pruning scan reads two channels beyond this list -- the
+        # shape-env sources substituted for a ShapeEnvSource guard, and
+        # DUPLICATE_INPUT's source_b -- but both root at a graph input, and
+        # load_builtin_from_argval is the only place a source rooted at the
+        # builtins key is minted at all.
         sources = [guard.originating_source for guard in output_graph.guards]
         sources += output_graph.guard_on_key_order
         if builtins_key not in {get_global_source_name(source) for source in sources}:
@@ -764,8 +760,8 @@ def aot_compile_fullgraph(
         if backend_input is None:
             raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        graph_devices = _graph_device_types(backend_input.graph_module.graph)
-        device_type = _collapse_device_types(graph_devices)
+        graph = backend_input.graph_module.graph
+        device_type = _collapse_device_types(_graph_device_types(graph))
         if (
             backend_input.fake_mode.shape_env
             is not graph_capture_output.output_graph.shape_env
