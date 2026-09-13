@@ -2896,7 +2896,7 @@ TORCH_IMPL_FUNC(count_nonzero_out_cpu)(
     thread_count_nonzero[0] += thread_count_nonzero[i];
   }
   AT_DISPATCH_ALL_TYPES_AND2(
-      kHalf, kBFloat16, out_type, "nonzero_count_cpu", [&] {
+      kHalf, kBFloat16, result.scalar_type(), "nonzero_count_cpu", [&] {
         *result.mutable_data_ptr<scalar_t>() =
             static_cast<scalar_t>(thread_count_nonzero[0]);
       });
