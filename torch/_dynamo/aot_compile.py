@@ -513,7 +513,7 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # guard_on_key_order is deliberately not unioned in either, even though a
+    # guard_on_key_order is deliberately not unioned in, even though a
     # dict-order check roots a global: guard_filter_fn never prunes that set, so
     # a name only it contributes is precisely a name no surviving guard checks
     # the value of. On the default aot_compile filter, which drops every global
@@ -666,10 +666,13 @@ class AOTCompiledFunction:
         from .source import get_global_source_name
         from .utils import CleanupHook
 
-        # The serialized global_scope is pruned to the names the kept guards read
-        # (plus a DUPLICATE_INPUT source_b, which roots at a graph input and so is
-        # never a module alias), so it gates the aliases. Only a caller-supplied
-        # scope can be missing one -- forward_callable imports every recorded one.
+        # The serialized global_scope is pruned to the names the kept guards
+        # resolve at check time, which is wider than their originating_sources:
+        # a DUPLICATE_INPUT reads its source_b and a SHAPE_ENV guard reads the
+        # shape-env sources, and a scope lacking one of those fails with a
+        # KeyError on G[...] too. That is exactly the set the aliases need, so it
+        # gates them. Only a caller-supplied scope can be missing one --
+        # forward_callable imports every recorded one.
         guarded_globals = output_graph.global_scope
         for alias, module_name in self._artifacts.runtime_env.import_sources.items():
             if alias in guarded_globals and alias not in guard_scope:
@@ -677,12 +680,12 @@ class AOTCompiledFunction:
         builtins_key = output_graph.name_of_builtins_dict_key_in_fglobals
         if not builtins_key:
             return
-        # A dict-order check can name the builtins key as well as a guard source
-        # can, so this gate stays wide where _guard_source_globals cannot be:
-        # seeding a name no guard reads is at worst redundant, while reading one
-        # live -- what that set feeds -- would be a wrong answer.
+        # That pruned scope cannot gate the builtins key -- the serializer writes
+        # it in whether or not a guard reads it -- so match the deserialized
+        # guards' own roots instead. The two wider channels above never root at
+        # this key: load_builtin_from_argval is the only site that mints a
+        # source under it, and only for a callable builtin.
         sources = [guard.originating_source for guard in output_graph.guards]
-        sources += output_graph.guard_on_key_order
         roots = {get_global_source_name(source) for source in sources}
         if builtins_key not in roots:
             return
@@ -735,20 +738,25 @@ class AOTCompiledFunction:
         """Advice for a guard that failed on a global its scope does not define,
         worded for the scope the guards were actually resolved against."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
-            hint = (
+            if self._forward_not_resolved_reason is not None:
+                # A module load takes no f_globals=, which is the function load's
+                # parameter; _load_aot_compiled_module takes only the bytes.
+                return (
+                    " -- a guarded global is missing from the scope rebuilt from "
+                    "the artifact. That scope was rebuilt because get_traced_fn "
+                    f"cannot resolve {self._forward_not_resolved_reason} to a "
+                    "Python function; make model.forward a plain function or "
+                    "bound method so its own globals are used instead, or pass "
+                    "AOTCompiledModel.deserialize a guard_globals= scope that "
+                    "carries the name."
+                )
+            return (
                 " -- a guarded global is missing from the scope rebuilt from the "
                 "artifact; load with an f_globals= that is a complete live scope "
                 "carrying the name -- normally vars(mod) for the module mod that "
                 "defined the function, which is usually not the module doing the "
                 "loading -- so the guard can resolve it."
             )
-            # This scope also serves a module whose forward could not be resolved.
-            if self._forward_not_resolved_reason is not None:
-                hint += (
-                    " That scope was rebuilt because get_traced_fn cannot resolve "
-                    f"{self._forward_not_resolved_reason} to a Python function."
-                )
-            return hint
         if self._guard_scope is _GuardScope.SUPPLIED:
             return (
                 " -- a guarded global is missing from the live scope this "
@@ -1108,10 +1116,15 @@ def _resolve_guard_scope(
 def _unwrap_optimized_module(model: torch.nn.Module) -> torch.nn.Module:
     # isinstance, not getattr(model, "_orig_mod", model): _orig_mod is a
     # registrable submodule name, and unwrapping to a child would run the
-    # parent's graph against the child's parameters.
+    # parent's graph against the child's parameters. A loop, because wrappers
+    # nest: OptimizedModule.__reduce__ rebuilds a deepcopied or unpickled
+    # wrapper without the metadata innermost_fn follows, so torch.compile
+    # wraps it again instead of collapsing onto the module.
     from torch._dynamo.eval_frame import OptimizedModule
 
-    return model._orig_mod if isinstance(model, OptimizedModule) else model
+    while isinstance(model, OptimizedModule):
+        model = model._orig_mod
+    return model
 
 
 @dataclass
