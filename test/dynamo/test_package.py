@@ -724,9 +724,9 @@ def fn(x):
                 alias in entry.import_sources for entry in package._codes.values()
             )
             self.assertTrue(installs_alias)
-            # The other arm of the same check: the backend ids start unbound in
-            # this freshly imported module, so install() does create them and
-            # uninstall() does take them back out.
+            # The gate is scoped to the aliases: the backend ids go through
+            # the default record_only_if_new=False, so they are recorded and
+            # removed however the module scope looked beforehand.
             backend_ids = set(backends)
             self.assertTrue(backend_ids)
             self.assertEqual(backend_ids & set(scope), set())
@@ -737,6 +737,19 @@ def fn(x):
             self.assertIn(alias, set(scope))
             self.assertEqual(backend_ids & set(scope), set())
             self.assertEqual(loaded(*args), expected)
+
+            # The other arm of the record, which needs a scope where the alias
+            # is still unbound when install() runs: another fresh import gives
+            # one, and there the package IS the first binder, so uninstall()
+            # takes the alias back out.
+            module = import_from_path(module_name, helper_path)
+            unseeded_scope = vars(module)
+            self.assertNotIn(alias, set(unseeded_scope))
+            package, backends = ctx.load_package(module.fn, self.path())
+            package.install(backends)
+            self.assertIn(alias, set(unseeded_scope))
+            package.uninstall()
+            self.assertNotIn(alias, set(unseeded_scope))
 
     def test_file_change(self):
         ctx = DiskDynamoStore()
@@ -1065,10 +1078,65 @@ def add(x, y):
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
+    def test_import_alias_rebind_costs_at_most_a_recompile(self):
+        # The rebind hands the alias to the live module, so a loaded artifact
+        # whose guards read it sees the value the program itself now reads. When
+        # the handover changes that value the artifact is stale and its guard
+        # says so: a stance that forbids recompiling reports it, and the default
+        # stance recompiles and serves the live answer. Left on the abandoned
+        # module the same guard passes and the artifact answers out of a module
+        # nobody holds.
+        ctx = DiskDynamoStore()
+        name = "torch_test_package_import_alias_recompile"
+        alias = f"__import_{name}"
+        placeholder = types.ModuleType(name)
+        placeholder.VALUE = 2
+
+        def fn(x):
+            import torch_test_package_import_alias_recompile as shim
+
+            return x + shim.VALUE
+
+        def fn2(x):
+            import torch_test_package_import_alias_recompile as shim
+
+            return x * shim.VALUE
+
+        args = (torch.randn(3, 2),)
+        try:
+            sys.modules[name] = placeholder
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+            torch._dynamo.reset()
+            package, backends = ctx.load_package(fn, self.path())
+            loaded_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+            package.install(backends)
+
+            # This handover answers differently, so the artifact is now stale.
+            newer = types.ModuleType(name)
+            newer.VALUE = 7
+            sys.modules[name] = newer
+            torch.compile(fn2, backend="eager", fullgraph=True)(*args)
+            self.assertIs(fn.__globals__[alias], newer)
+
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
+                    loaded_fn(*args)
+            self.assertEqual(fn(*args), loaded_fn(*args))
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
     def test_import_alias_taken_by_a_non_module_raises(self):
         # The relaxed check still catches what it was written for: the alias name
-        # holding something other than the module it names, including a second
-        # module name that mangles onto the same alias.
+        # holding something other than the module it names -- a non-module, or a
+        # module of another name, which is the state two module names mangling
+        # onto one alias leave it in.
         name = "torch_test_package_import_alias_taken"
         alias = f"__import_{name}"
         module = types.ModuleType(name)

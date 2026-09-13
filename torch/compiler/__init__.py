@@ -1028,7 +1028,10 @@ def load_compiled_function(
                    rebind the guards ACCEPT -- a same-metadata swap under a
                    kept ``TENSOR_MATCH``, which checks metadata, not values --
                    is what the call computes with, while a rebind of a global
-                   no kept guard reads is not seen.
+                   no kept guard reads is not seen. That per-call write lands in
+                   globals every call of this artifact shares, so serving one
+                   artifact from several threads hands each call whatever the
+                   last write left there; load one per thread instead.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.

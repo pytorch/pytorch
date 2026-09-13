@@ -116,10 +116,11 @@ path, gated on `torch._dynamo.config.enable_aot_compile`:
 `torch.compile(model, fullgraph=True)._aot_compile(inputs)` takes a list of
 `torch._dynamo.aot_compile.ModelInput`, compiles one graph per input and
 replaces the wrapper's `forward` with a dispatcher over their guards. It serves
-the first input whose guards match, and evaluates the guards of a
-`disable_guard_check()` input as well: opting out here suppresses the failure,
-not the evaluation, so such an input is served only when nothing matched and
-one opt-out replaces the "no compiled graph matched" error for the whole model.
+the first input whose guards match, and evaluates the guards of an input opted
+out through `model.forward.compiled_results[i].disable_guard_check()` as well:
+opting out here suppresses the failure, not the evaluation, so such an input is
+served only when nothing matched and one opt-out replaces the "no compiled graph
+matched" error for the whole model.
 
 ## API reference
 
@@ -173,11 +174,16 @@ Load a previously saved AOT-compiled function from a file.
   `__builtins__` when it has to build the builtins dict one of those names
   holds. A global a kept guard is rooted at is re-read from this dict on every
   call, so a rebind the guards accept is what the call computes with, and one
-  they reject raises instead. Every other global is read once, at load time,
+  they reject raises instead. That per-call write lands in globals every call of
+  the loaded artifact shares, so load one artifact per thread rather than serving
+  one from several. Every other global is read once, at load time,
   from this dict merged over the globals serialized with the artifact, which is
   why a name the dict omits still resolves.
   When omitted, global guards are resolved against the scope rebuilt from the
-  artifact instead, where a rebinding in this process is invisible.
+  artifact instead, where a rebinding in this process is invisible. Passing
+  `{}` is not that: it installs a live but empty guard scope, so every kept
+  global guard fails with `KeyError on G['NAME']` until that name is bound in
+  the same dict, which the load holds by reference.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
   that could not be serialized (e.g., `nn.Module` instances). The keys should
