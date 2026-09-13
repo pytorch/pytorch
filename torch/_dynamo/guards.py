@@ -4172,8 +4172,8 @@ class _Missing:
 
 
 class _LiveBuiltins:
-    """A snapshot slot holding builtins.__dict__: the loading process's own
-    builtins.__dict__, by reference, rather than a copy of the saving one's."""
+    """Stands in a snapshot for builtins.__dict__: resolves to the loading
+    process's own, by reference, rather than a copy of the saving one's."""
 
     def __reduce__(self) -> tuple[Any, ...]:
         return vars, (builtins,)
