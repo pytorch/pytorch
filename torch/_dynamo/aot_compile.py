@@ -508,6 +508,7 @@ class AOTCompiledFunction:
             # Seeded AFTER forward_callable, never before: on the default path this
             # IS fn.__globals__, and PyFunction_New caches __builtins__ at creation,
             # so the __builtins__ written below cannot rewire the bytecode's lookups.
+            # The builtins-dict key below is an ordinary global and does; see there.
             self._seed_guard_scope(guard_scope, guards_state.output_graph)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
@@ -562,6 +563,11 @@ class AOTCompiledFunction:
         # under it and forward_callable spreads that copy into fn.__globals__,
         # which IS the default guard scope. Re-derive over that one; a binding from
         # anywhere else is a value this process chose and stays.
+        # Re-deriving it also decides what the bytecode subscripts, since that
+        # recording exists only because the bytecode reads this key, and it is
+        # filtered for picklability alone: a builtin the tracing process had and
+        # this one lacks stops being readable -- a kept guard on that name reports
+        # it, and without one the bytecode raises KeyError.
         snapshot = self._artifacts.runtime_env.used_globals.get(builtins_key)
         if builtins_key in guard_scope and (
             snapshot is None or guard_scope[builtins_key] is not snapshot
