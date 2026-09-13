@@ -152,8 +152,10 @@ Load a previously saved AOT-compiled function from a file.
   read this dict by reference, so a global rebound after loading is seen on
   the next call, and a guarded global the dict lacks fails the guard until
   that name is bound in it -- there is no fallback to the values serialized
-  with the artifact. Loading may insert names of its own, never overwriting an
-  existing key: the Dynamo-generated globals a kept guard is rooted at, and
+  with the artifact. Symbolic-shape guards are the exception: they run as
+  Python lambdas over the globals serialized with the artifact, so this dict
+  does not govern them. Loading may insert names of its own, never overwriting
+  an existing key: the Dynamo-generated globals a kept guard is rooted at, and
   `__builtins__` when it has to build the builtins dict one of those names
   holds. The bytecode does not read this dict: it reads a snapshot, taken at
   load time, of the globals serialized with the artifact with this dict merged
