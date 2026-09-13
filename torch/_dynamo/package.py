@@ -488,6 +488,9 @@ def load_guard_manager(
     target_code: types.CodeType,
     runtime_global_scope: Any,
 ) -> "GuardManagerWrapper":
+    # An EMPTY runtime_global_scope is a scope and not the absence of one: a
+    # global guard then fails on a name it lacks, rather than falling back to the
+    # globals serialized with the artifact, which only None selects.
     from .output_graph import OutputGraphCommon
 
     return torch._dynamo.guards.CheckFunctionManager(
