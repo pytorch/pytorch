@@ -555,8 +555,9 @@ class AOTCompiledFunction:
     # Whether a kept guard is rooted at a user global; False until a load
     # decides it. Arms the live-value pick, and deserialize's fallback warning.
     _has_global_guards: bool = dataclasses.field(init=False, default=False)
-    # Whether the compiled bytecode also reads the guarded names out of
-    # _guard_globals: the module load path passes one dict for both roles.
+    # Whether to pick the guarded names out of _guard_globals into the
+    # bytecode's globals snapshot, which only a caller that supplied a guard
+    # scope but no f_globals -- the module load path -- needs.
     _bytecode_reads_guard_scope: bool = False
     # The rebuilt callable, set by __post_init__ (never absent on a live
     # artifact); a declared field rather than an attribute setattr'd onto the
@@ -674,20 +675,44 @@ class AOTCompiledFunction:
         # gates them. Only a caller-supplied scope can be missing one --
         # forward_callable imports every recorded one.
         guarded_globals = output_graph.global_scope
-        for alias, module_name in self._artifacts.runtime_env.import_sources.items():
-            if alias in guarded_globals and alias not in guard_scope:
-                guard_scope[alias] = importlib.import_module(module_name)
-        builtins_key = output_graph.name_of_builtins_dict_key_in_fglobals
-        if not builtins_key:
-            return
         # That pruned scope cannot gate the builtins key -- the serializer writes
         # it in whether or not a guard reads it -- so match the deserialized
         # guards' own roots instead. The two wider channels above never root at
         # this key: load_builtin_from_argval is the only site that mints a
         # source under it, and only for a callable builtin.
+        builtins_key = output_graph.name_of_builtins_dict_key_in_fglobals
         sources = [guard.originating_source for guard in output_graph.guards]
         roots = {get_global_source_name(source) for source in sources}
-        if builtins_key not in roots:
+        seeds_builtins = bool(builtins_key) and builtins_key in roots
+        # Refused before anything below writes or disowns, so a refused load
+        # leaves the caller's scope exactly as it found it; the check reads only
+        # __builtins__ and has to run whenever the key is seeded, not only when
+        # it is derived, or a pre-bound key would let a bad binding load.
+        if seeds_builtins:
+            bound = guard_scope.get("__builtins__", builtins.__dict__)
+            if not isinstance(bound, (dict, types.ModuleType)):
+                # Name the parameter this dict arrived by: get_builtins_dict would
+                # otherwise raise a bare AttributeError out of Dynamo internals.
+                # load_compiled_function forwards one dict as both, so a dict that
+                # arrived by both routes is named by the public one -- guard_globals
+                # is not in that signature. The TYPE and not the value -- a repr on a
+                # load failure path runs user code.
+                arrived_as_f_globals = (
+                    self._guard_globals is None
+                    or self._guard_globals is self._extra_globals
+                )
+                param = "f_globals" if arrived_as_f_globals else "guard_globals"
+                raise TypeError(
+                    f"{param}['__builtins__'] must be a dict or a module, got "
+                    f"{type(bound).__name__}"
+                )
+        # No disown for an alias: import_source and CompilePackage._install_global
+        # bind one by plain dict assignment, and only install_global_unsafe
+        # creates a CleanupHook, never for an alias.
+        for alias, module_name in self._artifacts.runtime_env.import_sources.items():
+            if alias in guarded_globals and alias not in guard_scope:
+                guard_scope[alias] = importlib.import_module(module_name)
+        if not seeds_builtins or builtins_key is None:
             return
         # A pre-reset compile's CleanupHook may still own this name even when we
         # leave its value alone; drop it so it can't delete the binding once
@@ -713,25 +738,7 @@ class AOTCompiledFunction:
             return
         # forward_callable builds fn.__globals__ as a plain dict, so unlike an
         # exec'd module namespace it carries no __builtins__ to derive from.
-        if "__builtins__" not in guard_scope:
-            guard_scope["__builtins__"] = builtins.__dict__
-        bound = guard_scope["__builtins__"]
-        if not isinstance(bound, (dict, types.ModuleType)):
-            # Name the parameter this dict arrived by: get_builtins_dict would
-            # otherwise raise a bare AttributeError out of Dynamo internals.
-            # load_compiled_function forwards one dict as both, so a dict that
-            # arrived by both routes is named by the public one -- guard_globals
-            # is not in that signature. The TYPE and not the value -- a repr on a
-            # load failure path runs user code.
-            arrived_as_f_globals = (
-                self._guard_globals is None
-                or self._guard_globals is self._extra_globals
-            )
-            param = "f_globals" if arrived_as_f_globals else "guard_globals"
-            raise TypeError(
-                f"{param}['__builtins__'] must be a dict or a module, got "
-                f"{type(bound).__name__}"
-            )
+        guard_scope.setdefault("__builtins__", builtins.__dict__)
         guard_scope[builtins_key] = get_builtins_dict(guard_scope)
 
     def _missing_global_hint(self) -> str:
@@ -892,14 +899,15 @@ class AOTCompiledFunction:
         resolves global guards against the scope rebuilt from the artifact, where
         a rebinding in this process is invisible.
 
-        ``bytecode_reads_guard_scope`` additionally serves the graph the live
-        value of each global a kept guard's own source IS -- not one reached only
+        ``bytecode_reads_guard_scope`` picks the guarded names out of
+        ``guard_globals`` into the bytecode's globals snapshot as well -- the live
+        value of each global a kept guard's own source IS, not one reached only
         through a sub-path of it, which the guard does not certify, and apart from
-        the recorded ``__builtins_dict___N`` key, excluded by name -- picked out of
-        ``guard_globals`` one name at a time: a caller that cannot inspect the
-        guards itself, i.e. the module load path, gets the substitution only
-        where a guard certifies it, and never for a global whose guard a filter
-        dropped.
+        the recorded ``__builtins_dict___N`` key, excluded by name -- one name at
+        a time. Only a caller that supplies a guard scope but no ``f_globals``
+        needs it, i.e. the module load path: such a caller cannot inspect the
+        guards itself, so it gets the substitution only where a guard certifies
+        it, and never for a global whose guard a filter dropped.
         """
         f = io.BytesIO(data)
         f.seek(0)
