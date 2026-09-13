@@ -138,13 +138,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
-        # hand-built stand-in for a dynamic-shape cuda capture, whose first meta
-        # value is a SymInt with no device, has to record cuda: reading the first
-        # leaf recorded "cpu", and "cpu" buys no GPU check, so the artifact
-        # loaded on a host with the wrong GPU or toolkit. A meta graph records
-        # cpu rather than the abstract device "meta", which no host check can be
-        # run for. Both graphs are fabricated from fake tensors and never run, so
-        # this needs no accelerator.
+        # stand-in for a dynamic-shape cuda capture, whose first meta value is a
+        # SymInt with no device, has to record cuda: reading the first leaf
+        # recorded "cpu", which skips every GPU check at load. Both graphs are
+        # fake and never run, so this needs no accelerator.
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             cuda = torch.empty(2, device="cuda")
@@ -161,8 +158,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
         graph.call_function(torch.ops.aten.add.Tensor, (x, 1)).meta["val"] = cuda
 
         package = CompilePackage(fn)
-        # A package that has scanned no graph starts at cpu, so the flip below is
-        # this scan's answer rather than that initial value.
+        # A package that has scanned no graph starts at cpu, so the flip below
+        # is this scan's answer rather than that initial value.
         self.assertEqual(package.cache_entry().device_type, "cpu")
         package.update_device_type(graph)
         self.assertEqual(package.cache_entry().device_type, "cuda")
@@ -171,9 +168,28 @@ class TestPackage(torch._inductor.test_case.TestCase):
         meta_graph.placeholder("x").meta["val"] = meta
         package = CompilePackage(fn)
         package.update_device_type(meta_graph)
-        # Dropping meta leaves no device named, which reads as cpu rather than as
-        # no answer.
+        # Dropping meta leaves no device named, which reads as cpu rather than
+        # as no answer.
         self.assertEqual(package.cache_entry().device_type, "cpu")
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_package_keeps_a_device_a_later_frame_does_not_name(self):
+        # update_device_type runs once per compiled frame and a package spans
+        # frames, so recording only the last answer let the cpu-only resume
+        # frame of this cuda compile erase the cuda the first frame named. The
+        # input is fake, so the compile needs no accelerator.
+        def fn(x):
+            _y = x.sin()
+            torch._dynamo.graph_break()
+            return torch.ones(2) + 1
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            torch.compile(fn, backend="eager")(torch.randn(3, 2, device="cuda"))
+
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        names = [n for code in entry.codes for n in code.function_names]
+        self.assertTrue(any("resume" in n for n in names))
+        self.assertEqual(entry.device_type, "cuda")
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
