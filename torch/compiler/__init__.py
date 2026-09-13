@@ -1017,12 +1017,15 @@ def load_compiled_function(
                    and ``__builtins__`` when it has to build the builtins dict
                    one of those names holds, never overwriting a key it already
                    binds, and a global rebound in it afterwards is what the
-                   guards check on the next call. The compiled bytecode instead
-                   reads a load-time snapshot of this dict merged over the
-                   globals serialized with the artifact, so a name this dict
-                   omits still resolves there and a rebind the guards ACCEPT
-                   leaves the call computing with the load-time value -- a known
-                   limitation rather than a contract to rely on.
+                   guards check on the next call. The compiled bytecode reads a
+                   load-time snapshot of this dict merged over the globals
+                   serialized with the artifact, so a name this dict omits
+                   still resolves there; on top of that, a global a kept guard
+                   is rooted at is re-read from this dict on every call, so a
+                   rebind the guards ACCEPT -- a same-metadata swap under a
+                   kept ``TENSOR_MATCH``, which checks metadata, not values --
+                   is what the call computes with, while a rebind of a global
+                   no kept guard reads is not seen.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.

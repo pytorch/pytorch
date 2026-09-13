@@ -169,13 +169,12 @@ Load a previously saved AOT-compiled function from a file.
   does not govern them. Loading may insert names of its own, never overwriting
   an existing key: the Dynamo-generated globals a kept guard is rooted at, and
   `__builtins__` when it has to build the builtins dict one of those names
-  holds. The bytecode does not read this dict: it reads a snapshot, taken at
-  load time, of the globals serialized with the artifact with this dict merged
-  over them, so a name the dict omits still resolves there. That the two can
-  disagree is a known limitation rather than a contract to rely on: a rebind
-  the guards accept leaves the call computing with the load-time value, so
-  only a rebind they reject changes what the call does, by raising. When
-  omitted, global guards are resolved against the scope rebuilt from the
+  holds. A global a kept guard is rooted at is re-read from this dict on every
+  call, so a rebind the guards accept is what the call computes with, and one
+  they reject raises instead. Every other global is read once, at load time,
+  from this dict merged over the globals serialized with the artifact, which is
+  why a name the dict omits still resolves.
+  When omitted, global guards are resolved against the scope rebuilt from the
   artifact instead, where a rebinding in this process is invisible.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
