@@ -1077,7 +1077,6 @@ print("RECOVERED")
         torch._C._cuda_clearCublasWorkspaces()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
-    @unittest.skipIf(TEST_WITH_ROCM, "eager workspaces are CUDA-only")
     @serialTest()
     @parametrize("backend", ("cublas", "cublaslt"))
     def test_cublas_workspace_cache_env(self, backend):
@@ -1124,7 +1123,6 @@ print(public_active, active, allocated)
         self.assertGreater(cached_allocated, 0)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
-    @unittest.skipIf(TEST_WITH_ROCM, "eager workspaces are CUDA-only")
     @serialTest()
     @blas_library_context("cublaslt")
     def test_cublaslt_workspace_eager_resize_and_zero(self):
@@ -1324,7 +1322,6 @@ print(mem_after_first, torch.cuda.memory_allocated())
             torch.backends.cuda.blas_workspace_size(backend=42)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
-    @unittest.skipIf(TEST_WITH_ROCM, "workspace cache env is CUDA-only")
     @serialTest()
     @parametrize("backend", ("cublas", "cublaslt"))
     def test_cublas_workspace_cached_lazy_reallocation(self, backend):
@@ -4362,7 +4359,6 @@ exit(2)
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2**40, device="cuda")
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4370,23 +4366,24 @@ exit(2)
     @blas_library_context("cublas")
     def test_graph_capture_cublas_workspace_separate_graphs(self):
         if torch.cuda.get_device_capability()[0] != 9:
-            self.skipTest("The regression requires an SM90 cuBLAS kernel")
+            self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
 
-        rows = 32768
-        width = 640
+        # gfx9 only touches the workspace for split-K / stream-K kernels, which
+        # need a large K; the SM90 shape leaves it untouched and is vacuous here.
+        rows, depth, width = (32, 65536, 2048) if TEST_WITH_ROCM else (32768, 640, 640)
         stream = torch.cuda.Stream()
         left = torch.zeros(
-            (rows, width), device="cuda", dtype=torch.bfloat16, requires_grad=True
+            (rows, depth), device="cuda", dtype=torch.bfloat16, requires_grad=True
         )
         right = torch.zeros(
-            (width, width), device="cuda", dtype=torch.bfloat16, requires_grad=True
+            (depth, width), device="cuda", dtype=torch.bfloat16, requires_grad=True
         )
         stream.wait_stream(torch.cuda.current_stream())
 
         def capture_eval():
-            eval_left = torch.zeros((rows, width), device="cuda", dtype=torch.bfloat16)
+            eval_left = torch.zeros((rows, depth), device="cuda", dtype=torch.bfloat16)
             eval_right = torch.zeros(
-                (width, width), device="cuda", dtype=torch.bfloat16
+                (depth, width), device="cuda", dtype=torch.bfloat16
             )
             eval_left @ eval_right
             graph = torch.cuda.CUDAGraph()
@@ -4411,7 +4408,6 @@ exit(2)
 
         stream.synchronize()
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4422,8 +4418,10 @@ exit(2)
             self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
 
         torch._C._cuda_clearCublasWorkspaces()
-        x = torch.randn(32, 10944, device="cuda", dtype=torch.bfloat16)
-        weight = torch.randn(2048, 10944, device="cuda", dtype=torch.bfloat16)
+        # gfx9 needs a larger K than SM90 before a split-K kernel is selected.
+        depth = 65536 if TEST_WITH_ROCM else 10944
+        x = torch.randn(32, depth, device="cuda", dtype=torch.bfloat16)
+        weight = torch.randn(2048, depth, device="cuda", dtype=torch.bfloat16)
         expected = torch.nn.functional.linear(x, weight)
 
         stream = torch.cuda.Stream()
@@ -4465,7 +4463,6 @@ exit(2)
         stream.synchronize()
         self.assertEqual(state["output"], expected, rtol=1e-2, atol=2e-1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
