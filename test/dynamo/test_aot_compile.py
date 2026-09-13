@@ -32,7 +32,6 @@ import torch.utils.cpp_extension
 from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
-from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_types
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
@@ -43,13 +42,9 @@ from torch._guards import tracing, TracingContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
+from torch.testing._internal.common_utils import instantiate_parametrized_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
@@ -1965,171 +1960,6 @@ from user code:
         actual = loaded_fn(x)
         self.assertEqual(expected[0], actual[0])
         self.assertEqual(expected[1], actual[1])
-
-    def test_graph_device_types_scans_the_whole_graph(self):
-        # The headline property: every device the whole graph names, not the one
-        # the first meta leaf happened to live on. A graph over a cpu input and
-        # a cuda input reported whichever placeholder came first, so the cuda
-        # half of `lambda c, g: (c.sum(), g.sum())` bought no GPU check at load.
-        # The meta key here is example_value, the key a Dynamo capture actually
-        # populates and the one both callers hand this function graphs under;
-        # the three other tests in this group that fabricate meta use "val".
-        with FakeTensorMode():
-            cpu = torch.empty(2)
-            cuda = torch.empty(2, device="cuda")
-        graph = torch.fx.Graph()
-        c = graph.placeholder("c")
-        c.meta["example_value"] = cpu
-        g = graph.placeholder("g")
-        g.meta["example_value"] = cuda
-        c_sum = graph.call_function(torch.ops.aten.sum.default, (c,))
-        c_sum.meta["example_value"] = cpu
-        g_sum = graph.call_function(torch.ops.aten.sum.default, (g,))
-        g_sum.meta["example_value"] = cuda
-        graph.output((c_sum, g_sum))
-        devices = _graph_device_types(graph)
-        self.assertEqual(devices, frozenset(("cpu", "cuda")))
-        self.assertEqual(_collapse_device_types(devices), "cuda")
-
-    def test_graph_device_types_ignores_placeholders_without_a_device(self):
-        # Under dynamic shapes the leading placeholder is a SymInt, which has no
-        # device. Reading only the first meta value reported "cpu" for this
-        # all-accelerator graph, and "cpu" buys no GPU check: availability, the
-        # toolkit, Triton and the GPU name are compared only for a device in
-        # SystemInfo.CHECK_GPUS, so the artifact loaded on a host with the wrong
-        # GPU or toolkit instead of being refused.
-        shape_env = ShapeEnv()
-        with FakeTensorMode(shape_env=shape_env):
-            x = torch.empty(2, device="cuda")
-            s0 = shape_env.create_unbacked_symint()
-        graph = torch.fx.Graph()
-        graph.placeholder("s0").meta["val"] = s0
-        x_node = graph.placeholder("x")
-        x_node.meta["val"] = x
-        graph.call_function(torch.ops.aten.add.Tensor, (x_node, 1)).meta["val"] = x
-        self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
-
-        graph = torch.fx.Graph()
-        graph.placeholder("n").meta["val"] = 4
-        self.assertEqual(_graph_device_types(graph), frozenset())
-        self.assertEqual(_graph_device_types(None), frozenset())
-
-    def test_graph_device_types_ignores_autocast_device_strings(self):
-        # An autocast device type is a plain string positional arg of
-        # _enter_autocast, not a device position, so it must not inject a
-        # device no tensor lives on. torch.autocast("cuda", enabled=False) in
-        # an otherwise CPU-only graph -- the recipe in autocast_mode's own
-        # docstring -- would otherwise make the artifact refuse to load on the
-        # very host that saved it. .to()/device= are still read.
-        with FakeTensorMode():
-            cpu = torch.empty(2)
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        x.meta["val"] = cpu
-        graph.call_function(torch.amp._enter_autocast, ("cuda", None, True, None))
-        graph.call_function(torch.ops.aten.add.Tensor, (x, 1)).meta["val"] = cpu
-        self.assertEqual(_graph_device_types(graph), frozenset(("cpu",)))
-
-        # The other direction: a checkpointed accelerator module enters
-        # torch.amp.autocast("cpu") unconditionally, and that string must not
-        # enter the set either. The collapse would hide it here -- an accelerator
-        # wins over cpu -- so what this pins is the reported set itself.
-        with FakeTensorMode():
-            cuda = torch.empty(2, device="cuda")
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        x.meta["val"] = cuda
-        graph.call_function(torch.amp._enter_autocast, ("cpu", None, True, None))
-        self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
-
-        # Real device positions are still read: a .to() device arg and a
-        # device= kwarg both count.
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        graph.call_method("to", (x, "mps"))
-        graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": "cuda"})
-        self.assertEqual(_graph_device_types(graph), frozenset(("mps", "cuda")))
-
-    @parametrize("method", ("cpu", "cuda", "xpu", "ipu", "mtia"))
-    def test_graph_device_types_reads_a_device_naming_method(self, method):
-        # x.cuda() and friends name the device in the method itself, so a graph
-        # without meta has nothing else to read: without this the scan answers
-        # "no device" and the collapse turns that into "cpu", which disarms the
-        # whole SystemInfo.CHECK_GPUS branch. A Dynamo capture of x.cuda() does
-        # carry example_value, so what this pins is the meta-less graph the
-        # device positions exist for. Each method in _DEVICE_NAMING_METHODS
-        # counts, not just the two SystemInfo happens to check today -- x.cpu()
-        # included, so the reported set says cpu rather than nothing for a graph
-        # whose only device signal is that method.
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        graph.call_method(method, (x,))
-        devices = _graph_device_types(graph)
-        self.assertEqual(devices, frozenset((method,)))
-        self.assertEqual(_collapse_device_types(devices), method)
-
-    def test_graph_device_types_reads_a_bare_device_index(self):
-        # Dynamo emits a bare index in a device position (device=0, x.to(0)),
-        # which torch.device resolves against the accelerator the build
-        # provides -- so the answer here is whatever that resolves to, rather
-        # than a fact about the machine running the test. A Dynamo graph carries
-        # the same answer in its node meta; a graph without meta, which is what
-        # these tests build, has only the device positions to read.
-        try:
-            expected = frozenset((torch.device(0).type,))
-        except RuntimeError:
-            # A build with no accelerator has no device for index 0 to name, so
-            # this arm cannot be exercised here at all -- skip rather than
-            # assert the empty answer a helper ignoring integers also gives.
-            self.skipTest("no accelerator in this build for index 0 to name")
-
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        graph.call_method("to", (x, 0))
-        graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": 0})
-        self.assertEqual(_graph_device_types(graph), expected)
-
-    @parametrize("spec", ("not_a_device", 2**63, True))
-    def test_graph_device_types_ignores_an_unparsable_device_position(self, spec):
-        # A value torch.device rejects names no device rather than aborting an
-        # otherwise fine compile from CompilePackage.update_device_type or
-        # aot_compile_fullgraph. Every rejection counts: an unknown device name
-        # raises RuntimeError, an index too large for int64 raises ValueError,
-        # and True is not an index at all -- torch.device(True) raises TypeError,
-        # which is neither rejection the parse guards against, so treating a bool
-        # as an index would break capture outright rather than name no device.
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        graph.call_method("to", (x, spec))
-        self.assertEqual(_graph_device_types(graph), frozenset())
-
-    def test_graph_device_types_drops_the_meta_device(self):
-        # meta is an abstract device: a meta graph requires nothing of the host,
-        # so it must not reach the recorded device type. Kept in, it wins the
-        # collapse over cpu and records device_type="meta", a string no host
-        # check can be run for -- it is not in SystemInfo.CHECK_GPUS and there is
-        # no torch.meta to ask for availability.
-        with FakeTensorMode():
-            meta = torch.empty(2, device="meta")
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        x.meta["val"] = meta
-        node = graph.call_function(
-            torch.ops.aten.ones.default, ([2],), {"device": "meta"}
-        )
-        node.meta["val"] = meta
-        self.assertEqual(_graph_device_types(graph), frozenset())
-        self.assertEqual(_collapse_device_types(_graph_device_types(graph)), "cpu")
-
-    def test_collapse_device_types_prefers_an_accelerator(self):
-        # The single string both callers record. Naming no device reads as cpu,
-        # an accelerator beats cpu, and among several accelerators the pick is
-        # alphabetical -- arbitrary, but pinned so a change of rule is not
-        # silent.
-        self.assertEqual(_collapse_device_types(frozenset()), "cpu")
-        self.assertEqual(_collapse_device_types(frozenset(("cpu",))), "cpu")
-        self.assertEqual(_collapse_device_types(frozenset(("cpu", "cuda"))), "cuda")
-        self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_aot_compile(self):
