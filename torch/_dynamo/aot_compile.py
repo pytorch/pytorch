@@ -48,6 +48,7 @@ _EXTERNAL_DATA_HINT = (
 # resolved and only a key inside it is absent, so the advice to define the
 # global would be wrong.
 _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
+_UNBOUND = object()
 
 # Names Dynamo mints into the scope the guards resolve against, rather than
 # names the caller wrote: the __import_* module aliases, the __builtins_dict___N
@@ -586,9 +587,6 @@ class AOTCompiledFunction:
     # Whether a kept guard is rooted at a user global; False until a load
     # decides it. Arms the live-value pick, and deserialize's fallback warning.
     _has_global_guards: bool = dataclasses.field(init=False, default=False)
-    # Whether the load-time merge of the guarded names into the bytecode's
-    # globals runs: the module load path passes one dict for both roles.
-    _bytecode_reads_guard_scope: bool = False
     # The globals a kept guard is rooted at, armed only for a supplied live
     # scope. _serve re-takes them out of _guard_globals before every call: the
     # guards read that dict by reference while the bytecode's globals are a dict
@@ -648,7 +646,6 @@ class AOTCompiledFunction:
 
         self._artifacts.check_compatibility()
 
-        extra_globals = self._extra_globals
         guards_state = None
         guard_scope = self._guard_globals
         if self._artifacts.guard_manager is None:
@@ -683,23 +680,11 @@ class AOTCompiledFunction:
                     # artifact was traced with.
                     certified = _guard_source_globals(output_graph) - {builtins_key}
                     self._live_global_names = tuple(sorted(certified))
-                    if self._bytecode_reads_guard_scope:
-                        # Redundant for any call, since _serve re-takes these
-                        # same names before each one; kept so the bytecode's
-                        # globals agree with the scope from the load onwards,
-                        # and so this does not delete a field the stack below
-                        # just introduced.
-                        live = {
-                            name: guard_scope[name]
-                            for name in certified
-                            if name in guard_scope
-                        }
-                        extra_globals = {**(extra_globals or {}), **live}
 
         self.fn = self._artifacts.runtime_env.forward_callable(
             self._artifacts.backend_id,
             self._artifacts.compiled_fn,
-            extra_globals=extra_globals,
+            extra_globals=self._extra_globals,
         )
 
         if guards_state is not None:
@@ -913,8 +898,9 @@ class AOTCompiledFunction:
         if self._live_global_names and (scope := self._guard_globals) is not None:
             f_globals = self.fn.__globals__
             for name in self._live_global_names:
-                if name in scope:
-                    f_globals[name] = scope[name]
+                value = scope.get(name, _UNBOUND)
+                if value is not _UNBOUND:
+                    f_globals[name] = value
         return self.fn(*args, **kwargs)
 
     def source_info(self) -> "SourceInfo":
@@ -1003,7 +989,6 @@ class AOTCompiledFunction:
         external_closure_data: dict[str, Any] | None = None,
         *,
         guard_globals: dict[str, object] | None = None,
-        bytecode_reads_guard_scope: bool = False,
         forward_not_resolved_reason: str | None = None,
     ) -> "AOTCompiledFunction":
         """Rebuild a compiled function from ``serialize()`` output.
@@ -1023,10 +1008,6 @@ class AOTCompiledFunction:
         whose guard a filter dropped. Passing neither resolves global guards
         against the scope rebuilt from the artifact, where a rebinding in this
         process is invisible.
-
-        ``bytecode_reads_guard_scope`` additionally merges that same set into the
-        bytecode's globals at load time, for a caller whose scope the bytecode
-        does not otherwise read, i.e. the module load path.
         """
         f = io.BytesIO(data)
         f.seek(0)
@@ -1047,7 +1028,6 @@ class AOTCompiledFunction:
             artifacts,
             _extra_globals=f_globals,
             _guard_globals=guard_globals,
-            _bytecode_reads_guard_scope=bytecode_reads_guard_scope,
             _forward_not_resolved_reason=forward_not_resolved_reason,
         )
 
@@ -1794,7 +1774,6 @@ class AOTCompiledModel:
                     AOTCompiledFunction.deserialize(
                         result,
                         guard_globals=scope,
-                        bytecode_reads_guard_scope=True,
                         forward_not_resolved_reason=forward_not_resolved_reason,
                     )
                 )
