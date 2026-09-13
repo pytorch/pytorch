@@ -44,7 +44,10 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
@@ -53,6 +56,22 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
 EPS = torch.tensor(1e-7)
 AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
+# The global-name families a compile in this file binds into its module dict,
+# which for a function defined here is this module's dict. They are listed so a
+# leak does not linger, and because a leftover can collide with a later mint --
+# but only when it is a name that mint tries: the same prefix, at the index the
+# counter is on. The skip loop burns that index, which is what a test
+# pre-binding the next minted name is counting on. A leftover at another prefix,
+# or at an index the mint does not try, burns nothing, and a __compiled_fn name
+# carries a uuid no other counter reproduces.
+_MINTED_PREFIXES = (
+    "__builtins_dict__",
+    "__compiled_fn",
+    "__resume_at",
+    "__comprehension_",
+    "__gen_rand_values",
+    "__warnings_warn_wrapper",
+)
 
 
 def _aot_pep695_generic(body="return x"):
@@ -1439,6 +1458,107 @@ from user code:
 
     def test_aot_compile_module(self):
         _run_in_subprocess(_subprocess_aot_compile_module)
+
+    def _hide_leaked_dynamo_globals(self):
+        # A capture in this process leaks Dynamo's generated globals into this
+        # module dict. Pop the ones _MINTED_PREFIXES names for the duration of
+        # the test, and in cleanup strip whatever the test added before putting
+        # the originals back.
+        g = globals()
+        leaked = {k: g.pop(k) for k in [k for k in g if k.startswith(_MINTED_PREFIXES)]}
+        preexisting = frozenset(g)
+
+        def restore():
+            # A global the test installed carries a CleanupHook that deletes the
+            # name when its code object is dropped, so let those hooks run first:
+            # one firing after the update would take a restored name with it.
+            import gc
+
+            torch._dynamo.reset()
+            gc.collect()
+            for k in [k for k in g if k not in preexisting]:
+                del g[k]
+            g.update(leaked)
+
+        self.addCleanup(restore)
+
+    @parametrize("mint_site", ("install_global", "resume_function"))
+    def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
+        # A load in a fresh process binds names its own counter is still behind:
+        # a captured __builtins_dict___N key, and the __resume_at_* globals
+        # CompilePackage.install() re-installs. In process, unique_id is already
+        # ahead of any baked-in index, so rewinding the counter and pre-binding
+        # the name the next mint produces puts each site in the same position.
+        # Which name that is comes from the compile, not from a literal:
+        # hardcoding an index goes green covering nothing as soon as anything
+        # else burns an id first, because the retry loop then never runs. The
+        # resume name skips forward at its own generation site in
+        # symbolic_convert, since install_global_unsafe cannot hand a substitute
+        # back to callers that use the name they passed for more than the install.
+        import itertools
+
+        from torch._dynamo import bytecode_transformation
+
+        def fullgraph_fn(x):
+            return x + len(x)
+
+        def graph_breaking_fn(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        fn, fullgraph, minted_prefix = {
+            "install_global": (fullgraph_fn, True, "__builtins_dict__"),
+            "resume_function": (graph_breaking_fn, False, "__resume_at"),
+        }[mint_site]
+        self._hide_leaked_dynamo_globals()
+        g = globals()
+        taken = "taken by another process"
+        x = torch.randn(3)
+        expected = fn(x)
+
+        def compile_with_taken_names(*names):
+            # A fresh counter mints the same sequence of names on every run, so
+            # each phase learns the name the next one pre-binds. The loop drops
+            # every minted-prefix key -- both what a previous phase minted and
+            # the sentinels it pre-bound -- and the binds just below put this
+            # phase's sentinels back, so no minted-prefix binding survives a
+            # phase except by being re-bound in it. _hide_leaked_dynamo_globals
+            # already took the pre-existing ones out of the module dict.
+            torch._dynamo.reset()
+            for k in [k for k in list(g) if k.startswith(_MINTED_PREFIXES)]:
+                del g[k]
+            for name in names:
+                g[name] = taken
+            with patch.object(
+                bytecode_transformation, "_unique_id_counter", itertools.count()
+            ):
+                compiled = torch.compile(fn, fullgraph=fullgraph, backend="eager")
+                # The skipped-over name must not cost the function its result,
+                # and a later call must be SERVED rather than recompiled -- for
+                # install_global that means the builtin guards evaluate to a hit
+                # through the key the skip landed on, in a module dict that still
+                # carries the other process's binding, and for resume_function
+                # that neither the outer frame nor the resume frame recompiles.
+                # Comparing results alone would not see a guard that missed and
+                # recompiled to the same answer.
+                self.assertEqual(compiled(x), expected)
+                with torch._dynamo.config.patch(error_on_recompile=True):
+                    self.assertEqual(compiled(x), expected)
+            return [
+                k
+                for k in g
+                if k.startswith(minted_prefix) and not isinstance(g[k], str)
+            ]
+
+        # Two taken names, not one: the skip has to advance past both, so a retry
+        # that fires only once still hands the install a bound name and raises.
+        (minted,) = compile_with_taken_names()
+        (skipped_to,) = compile_with_taken_names(minted)
+        (installed,) = compile_with_taken_names(minted, skipped_to)
+        self.assertNotIn(installed, (minted, skipped_to))
+        self.assertEqual(g[minted], taken)
+        self.assertEqual(g[skipped_to], taken)
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
