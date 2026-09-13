@@ -1053,6 +1053,32 @@ def sample_inputs_linalg_solve_triangular(
         else:
             yield SampleInput(A, args=(B,), kwargs=kwargs)
 
+    shapes = (
+        (16, 16),
+        (16, 1),
+        (16, 8),
+        (16, 17),
+        (32, 31),
+        (32, 64),
+        (64, 1),
+        (64, 63),
+        (64, 128),
+        (64, 136),
+        (64, 129),
+    )
+    for (n, k), (left, upper, uni) in product(shapes, product((True, False), repeat=3)):
+        A = make_arg((2, n, n), low=-1, high=1).mul_(0.25 / n**0.5)
+        A = A.triu_() if upper else A.tril_()
+        A.diagonal(0, -2, -1).fill_(1)
+        if not uni:
+            A.diagonal(0, -2, -1).copy_(make_arg((2, n), low=1, high=2))
+        B = make_arg((2, n, k) if left else (2, k, n), low=-1, high=1)
+        yield SampleInput(
+            A.requires_grad_(requires_grad),
+            args=(B.requires_grad_(requires_grad),),
+            kwargs={"upper": upper, "unitriangular": uni, "left": left},
+        )
+
 
 def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     """
