@@ -1775,6 +1775,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             ns,
         )
         inner, odd = ns["outer"]()
+        # Pin the fixture: every unguarded annotation prunes to _Missing, so the
+        # assertion below reads the same whether x came back a proxy or resolved.
+        with self.assertRaisesRegex(NameError, "OnlyUnderTypeChecking"):
+            inner.__annotations__
         buf = io.BytesIO()
         GuardsStatePickler({id(inner): inner, id(odd): odd}, {}, {}, {}, buf).dump(
             {"inner": inner, "odd": odd}
