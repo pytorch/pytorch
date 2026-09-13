@@ -1816,6 +1816,7 @@ Tensor prod_mps(const Tensor& self, std::optional<ScalarType> opt_dtype) {
 TORCH_IMPL_FUNC(count_nonzero_out_mps)
 (const Tensor& self, IntArrayRef dims, std::optional<c10::ScalarType> opt_dtype, const Tensor& output_t) {
   auto out_type = opt_dtype.value_or(c10::ScalarType::Long);
+  TORCH_CHECK(out_type == c10::ScalarType::Long, "count_nonzero in MPS only supports int64 output, but got ", out_type)
   auto iter =
       make_reduction("count_nonzero_out_mps", output_t, self, dims, /*keepdim=*/false, self.scalar_type(), out_type);
   count_nonzero_kernel_mps(iter);
