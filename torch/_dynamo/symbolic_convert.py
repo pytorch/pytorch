@@ -2382,6 +2382,9 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self) -> VariableTracker:
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
+        # Deliberately the defining module and not the live sys.modules entry
+        # the alias binds: this models the global hook dicts nn.Module._call_impl
+        # reads through its own __globals__, which no sys.modules rebind moves.
         fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
@@ -2425,17 +2428,60 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = _import_module(module_name)
+            # Live sys.modules first: the guards this alias roots read
+            # attributes off whatever IMPORT_NAME pushed, which is what
+            # __import__ returned, and _import_module is memoized for the life
+            # of the process, so it can hand back a module that a sys.modules
+            # rebind has since replaced. Binding that one would specialize the
+            # graph on one module object and guard on another.
+            value = sys.modules.get(module_name)
+            if value is None:
+                value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
         f_globals = self.output.global_scope
-        if not (alias not in f_globals or f_globals[alias] is value):
-            raise AssertionError(
-                "expected alias not in f_globals or f_globals[alias] is value to be true"
+        # The alias outlives the compile that minted it, so a later writer that
+        # resolves the name itself -- CompilePackage.install, or an artifact load
+        # seeding a guard scope -- can leave it bound to a module object
+        # sys.modules no longer holds. That is not the name collision this
+        # checks for (two module names still mangle to one alias): rebind it.
+        # The rebind is a deliberate write into a live namespace and nothing
+        # unwinds it -- there is no CleanupHook here, unlike
+        # install_global_unsafe -- so it outlives a trace that graph-breaks or
+        # restarts, as does the unconditional write install makes to this name.
+        if alias in f_globals:
+            bound = f_globals[alias]
+            bound_name = (
+                bound.__dict__.get("__name__")
+                if isinstance(bound, types.ModuleType)
+                else None
             )
+            # A sys.modules key need not be the module's own __name__ --
+            # os.path is named posixpath, and torch's own BC shim entries are
+            # all of that shape -- so recognize a stale module by the name the
+            # resolved module answers to as well as by the key. Two module
+            # names mangling onto one alias still raise: their resolved names
+            # differ.
+            value_name = (
+                value.__dict__.get("__name__")
+                if isinstance(value, types.ModuleType)
+                else None
+            )
+            accepted = (module_name, value_name) if value_name else (module_name,)
+            if bound is not value and bound_name not in accepted:
+                # Named by type, and __name__ read out of __dict__: this raises
+                # out of tracing, and __repr__ and a module's __getattr__ are
+                # both user code.
+                offender = type(bound).__name__
+                if bound_name is not None:
+                    offender = f"{offender} named {bound_name}"
+                raise AssertionError(
+                    f"module alias {alias} for {module_name} is already bound "
+                    f"to a {offender} in the globals of the frame being traced"
+                )
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)

@@ -119,8 +119,9 @@ replaces the wrapper's `forward` with a dispatcher over their guards. It serves
 the first input whose guards match, and evaluates the guards of an input opted
 out through `model.forward.compiled_results[i].disable_guard_check()` as well:
 opting out here suppresses the failure, not the evaluation, so such an input is
-served only when nothing matched and one opt-out replaces the "no compiled graph
-matched" error for the whole model.
+served on a match like any other, and on the strength of its opt-out alone only
+when nothing matched -- one opt-out replaces the "no compiled graph matched"
+error for the whole model.
 
 ## API reference
 
@@ -181,8 +182,9 @@ Load a previously saved AOT-compiled function from a file.
   omitted, global guards are resolved against the scope rebuilt from the
   artifact instead, where a rebinding in this process is invisible. Passing
   `{}` is not that: it installs a live but empty guard scope, so every kept
-  global guard fails with `KeyError on G['NAME']` until that name is bound in
-  the same dict, which the load holds by reference.
+  guard rooted at a global the load does not seed itself fails with
+  `KeyError on G['NAME']` until that name is bound in the same dict, which the
+  load holds by reference.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
   that could not be serialized (e.g., `nn.Module` instances). The keys should
