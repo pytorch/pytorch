@@ -676,8 +676,8 @@ def aot_compile_fullgraph(
         if backend_input is None:
             raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        graph_devices = _graph_device_types(backend_input.graph_module.graph)
-        device_type = _collapse_device_types(graph_devices)
+        graph = backend_input.graph_module.graph
+        device_type = _collapse_device_types(_graph_device_types(graph))
         if (
             backend_input.fake_mode.shape_env
             is not graph_capture_output.output_graph.shape_env
