@@ -1171,6 +1171,48 @@ def add(x, y):
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
+    def test_import_alias_the_trace_refused_is_not_recorded_for_install(self):
+        # The graph break abandons the trace, but the CompilePackage entry made
+        # for the frame outlives it and is what gets saved. A record written
+        # before the check would ship in that entry, and install() binds every
+        # recorded alias unconditionally -- record_only_if_new gates only the
+        # uninstall bookkeeping -- over the very global the check refused to
+        # touch. Nothing is recorded for an alias the trace did not bind.
+        ctx = DiskDynamoStore()
+        name = "torch_test_package_import_alias_refused"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+        foreign = "not a module"
+
+        def fn(x):
+            y = x + 1
+            import torch_test_package_import_alias_refused as taken
+
+            return y + taken.VALUE
+
+        args = (torch.randn(3, 2),)
+        try:
+            sys.modules[name] = module
+            fn.__globals__[alias] = foreign
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertIs(fn.__globals__[alias], foreign)
+            for entry in package._codes.values():
+                self.assertNotIn(alias, entry.import_sources)
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+            torch._dynamo.reset()
+            package, backends = ctx.load_package(fn, self.path())
+            package.install(backends)
+            self.assertIs(fn.__globals__[alias], foreign)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
     def test_import_alias_check_does_not_run_a_module_getattribute(self):
         # Both slots hold a module whose class raises on a __dict__ read: the
         # one __import__ resolves and the stale one a prior writer left. The
