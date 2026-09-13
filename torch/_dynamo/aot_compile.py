@@ -602,10 +602,13 @@ class AOTCompiledFunction:
         from .source import get_global_source_name
         from .utils import CleanupHook
 
-        # The serialized global_scope is pruned to the names the kept guards read
-        # (plus a DUPLICATE_INPUT source_b, which roots at a graph input and so is
-        # never a module alias), so it gates the aliases. Only a caller-supplied
-        # scope can be missing one -- forward_callable imports every recorded one.
+        # The serialized global_scope is pruned to the names the kept guards
+        # resolve at check time, which is wider than their originating_sources:
+        # a DUPLICATE_INPUT reads its source_b and a SHAPE_ENV guard reads the
+        # shape-env sources, and a scope lacking one of those fails with a
+        # KeyError on G[...] too. That is exactly the set the aliases need, so it
+        # gates them. Only a caller-supplied scope can be missing one --
+        # forward_callable imports every recorded one.
         guarded_globals = output_graph.global_scope
         for alias, module_name in self._artifacts.runtime_env.import_sources.items():
             if alias in guarded_globals and alias not in guard_scope:
@@ -615,10 +618,10 @@ class AOTCompiledFunction:
             return
         # That pruned scope cannot gate the builtins key -- the serializer writes
         # it in whether or not a guard reads it -- so match the deserialized
-        # guards' own roots instead. guard_on_key_order roots a dict-order check
-        # without appearing as any guard's originating_source.
+        # guards' own roots instead. The two wider channels above never root at
+        # this key: load_builtin_from_argval is the only site that mints a
+        # source under it, and only for a callable builtin.
         sources = [guard.originating_source for guard in output_graph.guards]
-        sources += output_graph.guard_on_key_order
         if builtins_key not in {get_global_source_name(source) for source in sources}:
             return
         # A pre-reset compile's CleanupHook may still own this name even when we
