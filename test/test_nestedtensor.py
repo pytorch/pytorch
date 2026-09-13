@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -44,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipCUDAIf,
     skipMeta,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import (
@@ -6905,6 +6907,8 @@ torch.cuda.synchronize()
             else [torch.float16, torch.float32]
         )
     )
+    # XPU float16 SDPA failure: https://github.com/intel/torch-xpu-ops/issues/5346
+    @dtypesIfXPU(torch.float32, torch.bfloat16)
     def test_sdpa(self, device, dtype):
         batch_size = 1
         emb_dims = 128
@@ -7266,6 +7270,8 @@ torch.cuda.synchronize()
         )
 
     @dtypes(torch.float32, torch.double, torch.half)
+    # XPU float16 SDPA failure: https://github.com/intel/torch-xpu-ops/issues/5346
+    @dtypesIfXPU(torch.float32, torch.double)
     def test_sdpa_with_constant_sequence_length(self, device, dtype):
         # shape (B, P*, S, D)
         # B: batch size
@@ -7515,6 +7521,7 @@ torch.cuda.synchronize()
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipIfTorchDynamo("compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3093")
     @parametrize("use_legacy_api", [True, False])
     @skipCPUIf(True, "SDPA Math NT fallback causes failure: see issue #133644")
     @unittest.skipIf(
