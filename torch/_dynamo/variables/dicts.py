@@ -71,8 +71,8 @@ from .object_protocol import (
     _is_method_type,
     generic_getitem,
     generic_richcompare_bool,
+    generic_str,
     mro_lookup,
-    python_constant_repr_impl,
     repr_guard,
 )
 
@@ -1152,6 +1152,16 @@ class MappingProxyVariable(VariableTracker):
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length_impl(tx)
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation_guard(tx)
+        return VariableTracker.build(
+            tx, f"mappingproxy({tracked_repr(tx, self.dv_dict)})"
+        )
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation_guard(tx)
+        return generic_str(tx, self.dv_dict)
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
@@ -1167,9 +1177,6 @@ class MappingProxyVariable(VariableTracker):
         if self.python_type() is types.MappingProxyType:
             return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
         return super().call_obj_hasattr(tx, name)
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return python_constant_repr_impl(self, tx)
 
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
