@@ -168,8 +168,9 @@ Load a previously saved AOT-compiled function from a file.
   omitted, global guards are resolved against the scope rebuilt from the
   artifact instead, where a rebinding in this process is invisible. Passing
   `{}` is not that: it installs a live but empty guard scope, so every kept
-  global guard fails with `KeyError on G['NAME']` until that name is bound in
-  the same dict, which the load holds by reference.
+  guard rooted at a global the load does not seed itself fails with
+  `KeyError on G['NAME']` until that name is bound in the same dict, which the
+  load holds by reference.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
   that could not be serialized (e.g., `nn.Module` instances). The keys should
