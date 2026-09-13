@@ -3878,8 +3878,6 @@ class TestConvolutionNNCPU(NNTestCase):
                     y_ = conv(x2)
                     self.assertEqual(y, y_)
 
-    @xfailIf(IS_LINUX and IS_ARM64)
-    # see https://github.com/pytorch/pytorch/issues/177245
     def test_conv_ic1_channels_last_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
         for dtype in [torch.float, torch.bfloat16, torch.half]:
