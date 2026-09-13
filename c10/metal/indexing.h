@@ -1501,13 +1501,18 @@ inline long4 ternary_offsets(
 }
 
 // Ternary elementwise ops kernels
-// Right now there are 4 flavors available:
+// Right now the following flavors are available:
 // - ternary_dense where both input, other1, other2, and output are dense and
 // share the same type
 // - ternary_strided when all inputs are of the same types, but some elements
 // are strided
 // - ternary_dense_cast - inputs are dense, but of different dtypes
 // - ternary_strided_cast - inputs or output are strided and of different dtypes
+// The cast flavors are instantiated for the iterator's common dtype and load
+// and store through each buffer's own runtime dtype, i.e. they compute at the
+// same precision CPU does and cast the result into `out` on store
+// Each of those has an `alpha` counterpart (see ternary_alpha_strided below)
+// for ops that take a scalar alongside the three tensors, such as addcmul
 // Note about accuracy (for more info see
 // https://github.com/pytorch/pytorch/issues/152736) Sometimes when kernel is
 // invoked to produce `half` output, but one of the arguments is float arguments
@@ -1575,7 +1580,11 @@ kernel void ternary_strided_cast(
       val_at_offs<om_t>(other1, offs.z, static_cast<ScalarType>(types.y));
   const auto c =
       val_at_offs<om_t>(other2, offs.w, static_cast<ScalarType>(types.z));
-  ref_at_offs<res_t>(output, offs.x) = static_cast<res_t>(f(a, b, c));
+  store_at_offs<res_t>(
+      output,
+      offs.x,
+      static_cast<ScalarType>(types.w),
+      static_cast<res_t>(f(a, b, c)));
 }
 
 template <typename T, typename F, typename om_t = opmath_t<T>>
@@ -1593,12 +1602,12 @@ kernel void ternary_dense(
 
 template <typename T, typename F, typename om_t = T>
 kernel void ternary_dense_cast(
-    device result_of<F, T, T, T>* out [[buffer(0)]],
+    device void* out [[buffer(0)]],
     constant void* input [[buffer(1)]],
     constant void* other1 [[buffer(2)]],
     constant void* other2 [[buffer(3)]],
-    constant uint3& sizes [[buffer(4)]],
-    constant uint3& types [[buffer(5)]],
+    constant uint4& sizes [[buffer(4)]],
+    constant uint4& types [[buffer(5)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T, T>;
@@ -1608,7 +1617,124 @@ kernel void ternary_dense_cast(
       other1, tid * sizes.y, static_cast<ScalarType>(types.y));
   const auto c = val_at_offs<om_t>(
       other2, tid * sizes.z, static_cast<ScalarType>(types.z));
-  out[tid] = static_cast<res_t>(f(a, b, c));
+  store_at_offs<res_t>(
+      out,
+      tid * sizes.w,
+      static_cast<ScalarType>(types.w),
+      static_cast<res_t>(f(a, b, c)));
+}
+
+// Alpha flavors of the ternary kernels, for ops that carry a scalar next to
+// the three tensors (addcmul/addcdiv's `value`). The scalar is bound right
+// after the tensors, at buffer 4, which shifts shapes and strides by one
+// compared to the plain flavors above.
+
+template <typename T, typename A, typename F, typename om_t = T>
+kernel void ternary_alpha_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant A& alpha [[buffer(4)]],
+    constant long* sizes [[buffer(5)]],
+    constant long* output_strides [[buffer(6)]],
+    constant long* input_strides [[buffer(7)]],
+    constant long* other1_strides [[buffer(8)]],
+    constant long* other2_strides [[buffer(9)]],
+    constant uint& ndim [[buffer(10)]],
+    uint3 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T, A>;
+  const auto offs = ternary_offsets(
+      thread_pos,
+      sizes,
+      ndim,
+      output_strides,
+      input_strides,
+      other1_strides,
+      other2_strides);
+  const auto a = val_at_offs<T>(input, offs.y);
+  const auto b = val_at_offs<T>(other1, offs.z);
+  const auto c = val_at_offs<T>(other2, offs.w);
+  ref_at_offs<res_t>(output, offs.x) =
+      static_cast<res_t>(f(om_t(a), om_t(b), om_t(c), alpha));
+}
+
+template <typename T, typename A, typename F, typename om_t = opmath_t<T>>
+kernel void ternary_alpha_strided_cast(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant A& alpha [[buffer(4)]],
+    constant long* sizes [[buffer(5)]],
+    constant long* output_strides [[buffer(6)]],
+    constant long* input_strides [[buffer(7)]],
+    constant long* other1_strides [[buffer(8)]],
+    constant long* other2_strides [[buffer(9)]],
+    constant uint& ndim [[buffer(10)]],
+    constant uint4& types [[buffer(11)]],
+    uint3 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T, A>;
+  const auto offs = ternary_offsets(
+      thread_pos,
+      sizes,
+      ndim,
+      output_strides,
+      input_strides,
+      other1_strides,
+      other2_strides);
+  const auto a =
+      val_at_offs<om_t>(input, offs.y, static_cast<ScalarType>(types.x));
+  const auto b =
+      val_at_offs<om_t>(other1, offs.z, static_cast<ScalarType>(types.y));
+  const auto c =
+      val_at_offs<om_t>(other2, offs.w, static_cast<ScalarType>(types.z));
+  store_at_offs<res_t>(
+      output,
+      offs.x,
+      static_cast<ScalarType>(types.w),
+      static_cast<res_t>(f(a, b, c, alpha)));
+}
+
+template <typename T, typename A, typename F, typename om_t = opmath_t<T>>
+kernel void ternary_alpha_dense(
+    device result_of<F, T, T, T, A>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other1 [[buffer(2)]],
+    constant T* other2 [[buffer(3)]],
+    constant A& alpha [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T, A>;
+  out[tid] = static_cast<res_t>(
+      f(om_t(input[tid]), om_t(other1[tid]), om_t(other2[tid]), alpha));
+}
+
+template <typename T, typename A, typename F, typename om_t = T>
+kernel void ternary_alpha_dense_cast(
+    device void* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant A& alpha [[buffer(4)]],
+    constant uint4& sizes [[buffer(5)]],
+    constant uint4& types [[buffer(6)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T, A>;
+  const auto a =
+      val_at_offs<om_t>(input, tid * sizes.x, static_cast<ScalarType>(types.x));
+  const auto b = val_at_offs<om_t>(
+      other1, tid * sizes.y, static_cast<ScalarType>(types.y));
+  const auto c = val_at_offs<om_t>(
+      other2, tid * sizes.z, static_cast<ScalarType>(types.z));
+  store_at_offs<res_t>(
+      out,
+      tid * sizes.w,
+      static_cast<ScalarType>(types.w),
+      static_cast<res_t>(f(a, b, c, alpha)));
 }
 
 #define REGISTER_TERNARY_OP_(NAME, DTYPEI, DTYPEO, OMT)                        \
@@ -1655,14 +1781,12 @@ kernel void ternary_dense_cast(
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
       metal::ternary_dense_cast<DTYPEI, NAME##_functor, OMT>(                  \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI> *          \
-              out_,                                                            \
+          device void* out_,                                                   \
           constant void* input,                                                \
           constant void* other1,                                               \
           constant void* other2,                                               \
-          constant uint3& sizes,                                               \
-          constant uint3& types,                                               \
+          constant uint4& sizes,                                               \
+          constant uint4& types,                                               \
           uint tid)
 
 // OpMath ternary Op promotes inputs to higher precision type before Functor
@@ -1672,6 +1796,76 @@ kernel void ternary_dense_cast(
 
 #define REGISTER_TERNARY_OP(NAME, DTYPEI, DTYPEO) \
   REGISTER_TERNARY_OP_(NAME, DTYPEI, DTYPEO, DTYPEI)
+
+#define REGISTER_TERNARY_ALPHA_OP_(NAME, DTYPEI, DTYPEA, DTYPEO, OMT)         \
+  static_assert(                                                              \
+      ::metal::is_same_v<                                                     \
+          DTYPEO,                                                             \
+          ::c10::metal::                                                      \
+              result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI, DTYPEA>>,     \
+      "Output dtype mismatch for ternary op " #NAME " and input " #DTYPEI);   \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI                  \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      ternary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor, OMT>(             \
+          device void* out,                                                   \
+          constant void* input,                                               \
+          constant void* other1,                                              \
+          constant void* other2,                                              \
+          constant DTYPEA& alpha,                                             \
+          constant long* sizes,                                               \
+          constant long* output_strides,                                      \
+          constant long* input_strides,                                       \
+          constant long* other1_strides,                                      \
+          constant long* other2_strides,                                      \
+          constant uint& ndim,                                                \
+          uint3 tid);                                                         \
+  template [[host_name(#NAME "_strided_cast_" #DTYPEI                         \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      ternary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor, OMT>(        \
+          device void* out,                                                   \
+          constant void* input,                                               \
+          constant void* other1,                                              \
+          constant void* other2,                                              \
+          constant DTYPEA& alpha,                                             \
+          constant long* sizes,                                               \
+          constant long* output_strides,                                      \
+          constant long* input_strides,                                       \
+          constant long* other1_strides,                                      \
+          constant long* other2_strides,                                      \
+          constant uint& ndim,                                                \
+          constant uint4& types,                                              \
+          uint3 tid);                                                         \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                    \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      ternary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor, OMT>(               \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI, DTYPEA> * \
+              out_,                                                           \
+          constant DTYPEI * input_,                                           \
+          constant DTYPEI * other1_,                                          \
+          constant DTYPEI * other2_,                                          \
+          constant DTYPEA & alpha,                                            \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_cast_" #DTYPEI                           \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      ternary_alpha_dense_cast<DTYPEI, DTYPEA, NAME##_functor, OMT>(          \
+          device void* out_,                                                  \
+          constant void* input,                                               \
+          constant void* other1,                                              \
+          constant void* other2,                                              \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes,                                              \
+          constant uint4& types,                                              \
+          uint tid)
+
+// OpMath ternary alpha op promotes inputs to higher precision type before
+// Functor call
+#define REGISTER_OPMATH_TERNARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO) \
+  REGISTER_TERNARY_ALPHA_OP_(                                          \
+      NAME, DTYPEI, DTYPEA, DTYPEO, ::c10::metal::opmath_t<DTYPEI>)
+
+#define REGISTER_TERNARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO) \
+  REGISTER_TERNARY_ALPHA_OP_(NAME, DTYPEI, DTYPEA, DTYPEO, DTYPEI)
 
 } // namespace metal
 } // namespace c10
