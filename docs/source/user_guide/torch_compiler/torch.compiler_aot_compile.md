@@ -111,6 +111,18 @@ result.sum().backward()
 print(model.linear.weight.grad)
 ```
 
+A module can also be compiled for several calls at once by a private, unstable
+path, gated on `torch._dynamo.config.enable_aot_compile`:
+`torch.compile(model, fullgraph=True)._aot_compile(inputs)` takes a list of
+`torch._dynamo.aot_compile.ModelInput`, compiles one graph per input and
+replaces the wrapper's `forward` with a dispatcher over their guards. It serves
+the first input whose guards match, and evaluates the guards of an input opted
+out through `model.forward.compiled_results[i].disable_guard_check()` as well:
+opting out here suppresses the failure, not the evaluation, so such an input is
+served on a match like any other, and on the strength of its opt-out alone only
+when nothing matched -- one opt-out replaces the "no compiled graph matched"
+error for the whole model.
+
 ## API reference
 
 ### `torch.compile(...).aot_compile(example_inputs)`
@@ -128,6 +140,10 @@ original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
 - `disable_guard_check()` -- Disable runtime guard validation (advanced use).
+  The compiled function then runs whatever it is called with, without
+  evaluating its guards. The opt-out does not stop the per-call re-read of the
+  globals a kept guard is rooted at, so a loaded artifact that opted out goes
+  on serving whatever its guard scope binds, unchecked.
 
 **Requirements:**
 
@@ -144,9 +160,35 @@ Load a previously saved AOT-compiled function from a file.
 
 - **file** -- A file-like object (opened in binary read mode) containing the
   serialized compiled function.
-- **f_globals** (`dict | None`) -- Optional global scope for the compiled
-  function. Required when the original function references user-defined types
-  or other non-standard globals.
+- **f_globals** (`dict | None`) -- Optional global scope enclosing the
+  compiled function, and the scope the kept guards resolve against: it must
+  bind every global they read, with values that satisfy them, which normally
+  means `vars(my_module)` for the module that defined the original function
+  (as in the example below) rather than a dict of a few extra names. Guards
+  read this dict by reference, so a global rebound after loading is seen on
+  the next call, and a guarded global the dict lacks fails the guard until
+  that name is bound in it -- there is no fallback to the values serialized
+  with the artifact. Symbolic-shape guards are exempt by default: they install
+  as Python lambdas over the globals serialized with the artifact, while an
+  artifact captured under `enable_cpp_symbolic_shape_guards` may resolve their
+  global operands here instead, like any other guard. Loading may
+  insert names of its own, never overwriting an existing key: the
+  Dynamo-generated globals a kept guard is rooted at, and
+  `__builtins__` when it has to build the builtins dict one of those names
+  holds. A global a kept guard is rooted at is re-read from this dict on every
+  call, so a rebind the guards accept is what the call computes with, and one
+  they reject raises instead. That re-read is not atomic with the guard check
+  before it, so a rebind landing between the two is served unchecked, exactly as
+  an eager compiled frame serves one landing between its guards and its globals.
+  Every other global is read once, at load time,
+  from this dict merged over the globals serialized with the artifact, which is
+  why a name the dict omits still resolves.
+  When omitted, global guards are resolved against the scope rebuilt from the
+  artifact instead, where a rebinding in this process is invisible. Passing
+  `{}` is not that: it installs a live but empty guard scope, so every kept
+  guard rooted at a global the load does not seed itself fails with
+  `KeyError on G['NAME']` until that name is bound in the same dict, which the
+  load holds by reference.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
   that could not be serialized (e.g., `nn.Module` instances). The keys should
@@ -193,7 +235,9 @@ with open("scaled_add.pt", "rb") as f:
 ```
 
 When the function references user-defined types that cannot be found by the
-deserializer, pass `f_globals` to provide the necessary namespace:
+deserializer, pass `f_globals` to provide the necessary namespace. The same dict
+is what the kept guards resolve against, so pass the defining module's namespace
+rather than a dict of the missing names alone:
 
 ```python
 with open("my_fn.pt", "rb") as f:
