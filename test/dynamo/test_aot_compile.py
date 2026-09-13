@@ -41,6 +41,7 @@ from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_types
 from torch._dynamo.package import DynamoCache, SystemInfo
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.utils import CleanupHook
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
@@ -64,15 +65,14 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
 EPS = torch.tensor(1e-7)
 AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
-# The global-name families the tests here have to account for when a compile
-# binds into its module dict, which for a function defined here is this module's
-# dict; not every family Dynamo can mint. They are listed so a leak does not
-# linger, and because a leftover can collide with a later mint --
-# but only when it is a name that mint tries: the same prefix, at the index the
-# counter is on. The skip loop burns that index, which is what a test
-# pre-binding the next minted name is counting on. A leftover at another prefix,
-# or at an index the mint does not try, burns nothing, and a __compiled_fn name
-# carries a uuid no other counter reproduces.
+# The fixed-prefix families Dynamo mints through unique_id,
+# unique_id_unbound_in and make_compiled_fn_name and binds into the module dict
+# of the function being compiled -- this module's dict, for a function defined
+# here. Not every name a compile can bind: variables/builtin.py mints under the
+# builtin's own __name__, which no literal tuple can enumerate. A leftover
+# matters only when a later mint tries that exact name -- same prefix, at the
+# index the counter is on -- which is what a test pre-binding the next minted
+# name needs.
 _MINTED_PREFIXES = (
     "__builtins_dict__",
     "__compiled_fn",
@@ -1474,18 +1474,19 @@ from user code:
         # the test, and in cleanup strip whatever the test added before putting
         # the originals back.
         g = globals()
-        leaked = {k: g.pop(k) for k in [k for k in g if k.startswith(_MINTED_PREFIXES)]}
+        # Disown before popping: the hook that installed each name still owns it
+        # and fires whenever its code object is collected, which after the
+        # update below would take the restored name with it.
+        leaked = {}
+        for k in [k for k in g if k.startswith(_MINTED_PREFIXES)]:
+            CleanupHook.disown(g, k)
+            leaked[k] = g.pop(k)
         preexisting = frozenset(g)
 
         def restore():
-            # A global the test installed carries a CleanupHook that deletes the
-            # name when its code object is dropped, so let those hooks run first:
-            # one firing after the update would take a restored name with it.
-            import gc
-
             torch._dynamo.reset()
-            gc.collect()
             for k in [k for k in g if k not in preexisting]:
+                CleanupHook.disown(g, k)
                 del g[k]
             g.update(leaked)
 
@@ -1497,13 +1498,10 @@ from user code:
         # a captured __builtins_dict___N key, and the __resume_at_* globals
         # CompilePackage.install() re-installs. In process, unique_id is already
         # ahead of any baked-in index, so rewinding the counter and pre-binding
-        # the name the next mint produces puts each site in the same position.
-        # Which name that is comes from the compile, not from a literal:
-        # hardcoding an index goes green covering nothing as soon as anything
-        # else burns an id first, because the retry loop then never runs. The
-        # resume and comprehension names skip forward at their own generation
-        # sites, since install_global_unsafe cannot hand a substitute back to
-        # callers that use the name they passed for more than the install.
+        # the name the next mint produces puts each site in that same position.
+        # The name has to come from the compile: a hardcoded index goes green
+        # covering nothing as soon as anything else burns an id first, because
+        # the skip loop then never runs.
         import itertools
 
         from torch._dynamo import bytecode_transformation
@@ -1537,14 +1535,14 @@ from user code:
 
         def compile_with_taken_names(*names):
             # A fresh counter mints the same sequence of names on every run, so
-            # each phase learns the name the next one pre-binds. The loop drops
-            # every minted-prefix key -- both what a previous phase minted and
-            # the sentinels it pre-bound -- and the binds just below put this
-            # phase's sentinels back, so no minted-prefix binding survives a
-            # phase except by being re-bound in it. _hide_leaked_dynamo_globals
-            # already took the pre-existing ones out of the module dict.
+            # each phase learns the name the next one pre-binds.
             torch._dynamo.reset()
             for k in [k for k in list(g) if k.startswith(_MINTED_PREFIXES)]:
+                # reset() leaves the hook that installed this name still
+                # owning it in _cleanup_owners, and a hook fires whenever its
+                # code object is collected -- after the bind below, that would
+                # pop this phase's sentinel.
+                CleanupHook.disown(g, k)
                 del g[k]
             for name in names:
                 g[name] = taken
@@ -1552,14 +1550,11 @@ from user code:
                 bytecode_transformation, "_unique_id_counter", itertools.count()
             ):
                 compiled = torch.compile(fn, fullgraph=fullgraph, backend="eager")
-                # The skipped-over name must not cost the function its result,
-                # and a later call must be SERVED rather than recompiled -- for
-                # install_global that means the builtin guards evaluate to a hit
-                # through the key the skip landed on, in a module dict that still
-                # carries the other process's binding, and for resume_function
-                # that neither the outer frame nor the resume frame recompiles.
-                # Comparing results alone would not see a guard that missed and
-                # recompiled to the same answer.
+                # A later call must be SERVED rather than recompiled: for
+                # install_global the builtin guards have to hit through the key
+                # the skip landed on, in a module dict that still carries the
+                # other process's binding. Comparing results alone would not see
+                # a guard that missed and recompiled to the same answer.
                 self.assertEqual(compiled(x), expected)
                 with torch._dynamo.config.patch(error_on_recompile=True):
                     self.assertEqual(compiled(x), expected)
@@ -2107,11 +2102,8 @@ from user code:
         self.assertEqual(expected[1], actual[1])
 
     def test_graph_device_types_scans_the_whole_graph(self):
-        # The headline property: every device the whole graph names, not the one
-        # the first meta leaf happened to live on. A mixed cpu/cuda graph
-        # reported whichever placeholder came first, so its cuda half bought no
-        # GPU check at load. The meta key here is example_value, the key a
-        # Dynamo capture populates; the graphs below use "val".
+        # example_value is the key a Dynamo capture populates; the graphs below
+        # use "val".
         with FakeTensorMode():
             cpu = torch.empty(2)
             cuda = torch.empty(2, device="cuda")
@@ -2131,9 +2123,7 @@ from user code:
 
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
         # A dynamic-shape capture leads with a SymInt placeholder, which has no
-        # device, so reading only the first meta value reported "cpu" for this
-        # all-accelerator graph -- and "cpu" skips the SystemInfo.CHECK_GPUS
-        # branch entirely, so the artifact loaded on a host with the wrong GPU.
+        # device of its own -- the shape the first graph below imitates.
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             x = torch.empty(2, device="cuda")
@@ -2223,9 +2213,8 @@ from user code:
     def test_graph_device_types_ignores_an_unparsable_device_position(self, spec):
         # A value torch.device rejects names no device rather than aborting an
         # otherwise fine compile: an unknown name raises RuntimeError, an
-        # oversized index ValueError. True never reaches torch.device -- bool is
-        # excluded from the index arm deliberately, because torch.device(True)
-        # raises a TypeError the parse does not catch.
+        # oversized index ValueError. True is deliberately excluded from the
+        # index arm, so it never reaches torch.device at all.
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
         graph.call_method("to", (x, spec))
