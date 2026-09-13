@@ -80,16 +80,43 @@ def _detect_cycles(
     return "no cycle detected"
 
 
-def _graph_device_type(graph: Graph | None) -> str:
-    if graph is None:
-        return "cpu"
+# Tensor methods whose name is the device type they move to; not every device
+# type has one (there is no .mps() or .hpu()).
+_DEVICE_NAMING_METHODS = ("cpu", "cuda", "xpu", "ipu", "mtia")
 
-    def _device_type(x: Any) -> str:
+
+def _graph_device_types(graph: Graph | None) -> frozenset[str]:
+    """Every device type the graph names -- from a meta value, a device-naming
+    method or a device position (a device= kwarg, .to()'s device argument) --
+    except "meta", which is abstract rather than a requirement of the host. An
+    empty result means the graph names no device, which is not "cpu".
+    """
+    if graph is None:
+        return frozenset()
+
+    def _device_type(x: Any) -> str | None:
         if isinstance(x, torch.device):
             return x.type
         if isinstance(x, torch.Tensor):
             return x.device.type
-        return "cpu"
+        return None
+
+    def _device_from_spec(x: Any) -> str | None:
+        # A bare string or index in a device position names a device, and
+        # Dynamo emits both (device=0, x.to(0)); a value torch.device rejects
+        # names no device rather than aborting the compile, and bool is kept out
+        # of the index arm because torch.device rejects it with a TypeError this
+        # does not catch. An index carries no device type of its own:
+        # deviceFromLong resolves it through at::getAccelerator(true), the
+        # accelerator of the process doing the compile and never the target's,
+        # so a device=0 in a graph traced for another target contributes this
+        # build's accelerator or nothing.
+        if isinstance(x, str) or (isinstance(x, int) and not isinstance(x, bool)):
+            try:
+                return torch.device(x).type
+            except (RuntimeError, ValueError):
+                return None
+        return _device_type(x)
 
     def _flatten_meta(node: Node, key: str) -> list[Any]:
         if key not in node.meta:
@@ -97,21 +124,42 @@ def _graph_device_type(graph: Graph | None) -> str:
         flat, _ = tree_flatten(node.meta[key])
         return flat
 
+    def _device_specs(node: Node) -> list[Any]:
+        # The only positions this scan reads as devices, so an ordinary
+        # positional arg (an autocast device string) is never read as one. Not
+        # every real device position is here: x.type() takes a
+        # "torch.cuda.FloatTensor", which torch.device does not parse.
+        specs: list[Any] = []
+        if "device" in node.kwargs:
+            specs.append(node.kwargs["device"])
+        if node.op == "call_method" and node.target == "to" and len(node.args) >= 2:
+            # args[1] is a device only in some overloads (x.to(torch.float16)
+            # lands here too, and names no device).
+            specs.append(node.args[1])
+        return specs
+
+    # The rename can happen after this module is imported, so read it here.
+    naming_methods = (*_DEVICE_NAMING_METHODS, torch._C._get_privateuse1_backend_name())
+    devices: set[str] = set()
     for node in graph.nodes:
         for key in ("val", "example_value"):
             for obj in _flatten_meta(node, key):
-                return _device_type(obj)
+                if (device := _device_type(obj)) is not None:
+                    devices.add(device)
 
-        # Check for device conversions
-        if node.op == "call_method":
-            for gpu in ["cuda", "xpu"]:
-                if node.target == gpu:
-                    return gpu
-                if node.target == "to" and gpu in node.args:
-                    return gpu
+        # x.cuda() names the device in the method, not in an argument.
+        if node.op == "call_method" and node.target in naming_methods:
+            devices.add(node.target)
 
-        # Check args/kwargs for non-CPU device specs
-        flat_args, _ = tree_flatten((node.args, node.kwargs))
-        for obj in flat_args:
-            return _device_type(obj)
-    return "cpu"
+        for obj in _device_specs(node):
+            if (device := _device_from_spec(obj)) is not None:
+                devices.add(device)
+    return frozenset(devices) - {"meta"}
+
+
+def _collapse_device_types(device_types: frozenset[str]) -> str:
+    """The single device type a package or an AOT artifact records: an
+    accelerator wins over cpu, and naming no device reads as cpu. Among several
+    accelerators the pick is arbitrary (alphabetical).
+    """
+    return next((d for d in sorted(device_types) if d != "cpu"), "cpu")
