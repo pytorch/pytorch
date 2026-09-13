@@ -1190,7 +1190,9 @@ class ListVariable(BaseListVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Include/internal/pycore_list.h#L55-L59
-        return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
+        return ListIteratorVariable(
+            self.items, mutation_type=ValueMutationNew(), tracks_source=True
+        )
 
     def sq_inplace_repeat_impl(
         self,
@@ -1948,7 +1950,9 @@ class TupleVariable(BaseListVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L1101-L1117
-        return TupleIteratorVariable(self.items, mutation_type=ValueMutationNew())
+        return TupleIteratorVariable(
+            self.items, mutation_type=ValueMutationNew(), tracks_source=True
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
@@ -2407,11 +2411,16 @@ class BaseListIteratorVariable(IteratorVariable):
 
     _nonvar_fields = {
         "index",
+        "tracks_source",
         *IteratorVariable._nonvar_fields,
     }
 
     def __init__(
-        self, items: list[VariableTracker], index: int = 0, **kwargs: Any
+        self,
+        items: list[VariableTracker],
+        index: int = 0,
+        tracks_source: bool = False,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         if not isinstance(items, list):
@@ -2422,6 +2431,11 @@ class BaseListIteratorVariable(IteratorVariable):
         # assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
+        # Whether `items` aliases the live, mutation-tracked source container.
+        # Snapshot iterators (reversed lists, deques, iterators passed in from
+        # uncompiled code) set this False and decline __length_hint__ rather
+        # than report a length that ignores later mutations of the source.
+        self.tracks_source = tracks_source
         self.is_exhausted = False
 
     def __repr__(self) -> str:
@@ -2460,6 +2474,24 @@ class BaseListIteratorVariable(IteratorVariable):
             return []
         self.is_exhausted = True
         return list(self.items[self.index :])
+
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # listiter_len/tupleiter_len: items left, floored at 0; an exhausted
+        # iterator permanently reports 0.  Only a live source can answer this,
+        # so snapshots decline and let the caller graph-break.
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/listobject.c#L4100-L4108
+        if not self.tracks_source:
+            return None
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.items) - self.index, 0))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead

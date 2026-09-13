@@ -1245,6 +1245,30 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 hints=graph_break_hints.SUPPORTABLE,
             )
 
+        # Unbound C method call on a builtin type, e.g. Lib/operator.py does
+        # `type(obj).__length_hint__(obj)`.  The class VT has no per-type method
+        # table; the instance VT owns the slot implementation.  Only dispatch the
+        # class's own C methods, and only for an actual instance.
+        if (
+            args
+            and isinstance(self.value, type)
+            and self.value.__module__ == "builtins"
+        ):
+            descriptor = inspect.getattr_static(self.value, name, None)
+            if (
+                isinstance(
+                    descriptor,
+                    (types.MethodDescriptorType, types.WrapperDescriptorType),
+                )
+                and descriptor.__objclass__ is self.value
+            ):
+                try:
+                    obj_type = args[0].python_type()
+                except NotImplementedError:
+                    obj_type = None
+                if obj_type is not None and issubclass(obj_type, self.value):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
         # Dispatch dunder methods defined on the metaclass (e.g., EnumType.__contains__).
         # In Python, `x in Color` calls `type(Color).__contains__(Color, x)`.
         metaclass = type(self.value)
