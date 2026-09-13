@@ -21147,8 +21147,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type=('cuda', 'xpu')),
-               # RuntimeError: "max_values_cpu" not implemented for 'ComplexDouble'
-               # Falling back to non-numerically stabilized exp, causing nan in the results.
                DecorateInfo(
                    toleranceOverride({
                        torch.float16: tol(atol=7e-5, rtol=6e-3),

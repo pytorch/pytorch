@@ -143,7 +143,6 @@ class TestFwdGradients(TestGradients):
             skip("_batch_norm_with_update"),
             skip("nn.functional.scaled_dot_product_attention"),
             xfail("bernoulli"),
-            xfail("logcumsumexp", dtypes=(torch.complex128,)),
             xfail("nn.functional.feature_alpha_dropout", variant_name="with_train"),
             skip("nn.functional.multi_head_attention_forward"),
             xfail("scatter_reduce", variant_name="prod"),
