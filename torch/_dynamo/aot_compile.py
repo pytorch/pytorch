@@ -18,7 +18,7 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
-from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_types
+from torch._dynamo.graph_utils import _graph_device_type
 from torch._dynamo.package import FunctionPicklerBase, SerializedCode, SystemInfo
 
 from . import convert_frame
@@ -1011,8 +1011,7 @@ def aot_compile_fullgraph(
         if backend_input is None:
             raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        graph = backend_input.graph_module.graph
-        device_type = _collapse_device_types(_graph_device_types(graph))
+        device_type = _graph_device_type(backend_input.graph_module.graph)
         if (
             backend_input.fake_mode.shape_env
             is not graph_capture_output.output_graph.shape_env
