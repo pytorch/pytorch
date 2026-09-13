@@ -128,6 +128,11 @@ original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
 - `disable_guard_check()` -- Disable runtime guard validation (advanced use).
+  The compiled code then runs whatever it is called with. On a model
+  compiled for several inputs, the artifacts whose guards match are still
+  preferred, and an artifact that has opted out is served only when none of
+  them matches -- which also means one opt-out replaces the "no compiled
+  graph matched" error for the whole model.
 
 **Requirements:**
 
