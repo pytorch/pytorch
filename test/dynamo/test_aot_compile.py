@@ -1846,35 +1846,34 @@ from user code:
         # this capture registered would serve.
         def with_a_fresh_counter(action):
             # Frees the minted name so the next capture's counter really lands
-            # on it, and hands back the hooks that capture registered: a hook
-            # fires when its code object is collected, and in process that is at
-            # the mercy of whatever else still references the code, so the test
-            # calls them itself. That runs the hooks, which is the half of
-            # collection this test needs; unlike CleanupManager._remove_id it
-            # leaves them registered, so real collection would fire them again.
+            # on it, and hands back the CleanupManager entries that capture
+            # registered: a hook fires when its code object is collected, and in
+            # process that is at the mercy of whatever else still references the
+            # code, so the test runs the entry itself. _remove_id both fires and
+            # deregisters, so a later real collection cannot fire them a second
+            # time and strip the name from whoever owns it by then.
             torch._dynamo.reset()
             for name in [k for k in list(g) if k.startswith("__builtins_dict__")]:
+                # Disown before deleting, as the other deleting sites here do:
+                # a capture takes ownership of the name even when, as with
+                # aot_compile, it registers no hook that could fire.
+                CleanupHook.disown(g, name)
                 del g[name]
             before = set(CleanupManager.instance.values)
             with patch.object(
                 bytecode_transformation, "_unique_id_counter", itertools.count()
             ):
                 result = action()
-            hooks = [
-                hook
-                for idx in set(CleanupManager.instance.values) - before
-                for hook in CleanupManager.instance.values[idx]
-            ]
-            return result, hooks
+            return result, set(CleanupManager.instance.values) - before
 
         # aot_compile registers no hook with CleanupManager, so this capture's
         # ownership of the name can only ever be superseded, never fired.
-        compiled_fn, capture_hooks = with_a_fresh_counter(
+        compiled_fn, capture_entries = with_a_fresh_counter(
             lambda: torch.compile(
                 target, fullgraph=True, backend="eager", options=options
             ).aot_compile(((x,), {}))
         )
-        self.assertEqual(capture_hooks, [])
+        self.assertEqual(capture_entries, set())
         guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
         builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
         kept = [str(guard) for guard in guards_state.output_graph.guards]
@@ -1887,7 +1886,7 @@ from user code:
             live(x)
             return live
 
-        _, live_hooks = with_a_fresh_counter(compile_live)
+        _, live_entries = with_a_fresh_counter(compile_live)
         # The two captures burn unique ids independently; if they ever stopped
         # agreeing on the name there would be nothing here to disown, so pin that
         # the live compile really owns the artifact's key rather than assume it.
@@ -1899,8 +1898,8 @@ from user code:
             (id(g), builtins_key) in _cleanup_owners, not guard_reads_builtins
         )
 
-        for hook in live_hooks:
-            hook()
+        for idx in live_entries:
+            CleanupManager.instance._remove_id(idx)
         # The live compile is gone: it keeps its hands off a name the load took
         # over, and takes back one the load had no business touching.
         self.assertEqual(builtins_key in g, guard_reads_builtins)

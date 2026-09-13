@@ -86,7 +86,7 @@ _DEVICE_NAMING_METHODS = ("cpu", "cuda", "xpu", "ipu", "mtia")
 
 
 def _graph_device_types(
-    graph: Graph | None, _seen: set[int] | None = None
+    graph: Graph | None, _seen: set[Graph] | None = None
 ) -> frozenset[str]:
     """Every device type the graph names -- from a meta value, a device-naming
     method or a device position (a device= kwarg, .to()'s device argument), in
@@ -102,9 +102,9 @@ def _graph_device_types(
     # exponential in nesting depth, and one reachable from itself never ends.
     if _seen is None:
         _seen = set()
-    if id(graph) in _seen:
+    if graph in _seen:
         return frozenset()
-    _seen.add(id(graph))
+    _seen.add(graph)
 
     def _device_type(x: Any) -> str | None:
         if isinstance(x, torch.device):
