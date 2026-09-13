@@ -72,8 +72,6 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
     IS_MACOS,
-    IS_ARM64,
-    IS_LINUX,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
