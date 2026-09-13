@@ -21,7 +21,7 @@ from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.symbolic_convert import _import_module
-from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.testing import CompileCounter, reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -1131,8 +1131,11 @@ def add(x, y):
         # holding something other than the module it names -- a non-module, or a
         # module of another name, which is the state two module names mangling
         # onto one alias leave it in. The condition is the user's globals, so it
-        # is a graph break, not an internal error: without fullgraph the frame
-        # runs eagerly and the alias is left alone.
+        # is a graph break, not an internal error. Without fullgraph the import
+        # is the frame's first work, so there is no checkpoint to compile up to
+        # and the whole frame is skipped -- and stays skipped, the alias left
+        # alone, after the global is removed: nothing guards it, so only
+        # torch._dynamo.reset() makes Dynamo trace the frame again.
         name = "torch_test_package_import_alias_taken"
         alias = f"__import_{name}"
         module = types.ModuleType(name)
@@ -1163,9 +1166,19 @@ def add(x, y):
                     ):
                         torch.compile(fn, backend="eager", fullgraph=True)(*args)
                     torch._dynamo.reset()
-                    eager_fallback = torch.compile(fn, backend="eager")
-                    self.assertEqual(fn(*args), eager_fallback(*args))
+                    cnt = CompileCounter()
+                    skipped = torch.compile(fn, backend=cnt)
+                    self.assertEqual(fn(*args), skipped(*args))
                     self.assertIs(fn.__globals__[alias], bound)
+                    self.assertEqual(cnt.frame_count, 0)
+                    del fn.__globals__[alias]
+                    self.assertEqual(fn(*args), skipped(*args))
+                    self.assertEqual(cnt.frame_count, 0)
+                    self.assertNotIn(alias, fn.__globals__)
+                    torch._dynamo.reset()
+                    self.assertEqual(fn(*args), skipped(*args))
+                    self.assertEqual(cnt.frame_count, 1)
+                    self.assertIs(fn.__globals__[alias], module)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)

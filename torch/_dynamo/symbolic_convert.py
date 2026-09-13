@@ -126,7 +126,7 @@ from .polyfills import (
     impl_MATCH_KEYS,
     impl_MATCH_SEQUENCE,
 )
-from .replay_record import DummyModule, ExecutionRecorder
+from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
@@ -260,11 +260,11 @@ ExceptionTypes: TypeAlias = (
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
     """
-    Resolve the name once per process and keep returning that module object.
-    The one caller, nn_modules_globals_vt, wants the module nn.Module._call_impl
-    reads its hook dicts through -- its defining module, which no later
-    sys.modules rebind moves -- so it must not follow the live entry the way
-    import_source does.
+    Resolve the name once per process, at first use, and keep returning that
+    object: a sys.modules rebind before the first call is what gets cached, one
+    after it is never followed. The one caller, nn_modules_globals_vt, wants one
+    fixed module object for the process rather than the live entry
+    import_source follows.
     """
     return importlib.import_module(name)
 
@@ -2384,9 +2384,10 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self) -> VariableTracker:
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        # Deliberately the defining module and not the live sys.modules entry
-        # the alias binds: this models the global hook dicts nn.Module._call_impl
-        # reads through its own __globals__, which no sys.modules rebind moves.
+        # Deliberately the module memoized at first use, not the live
+        # sys.modules entry the alias binds: this stands in for the hook dicts
+        # nn.Module._call_impl reads through its own __globals__, which no
+        # sys.modules rebind moves either.
         fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
@@ -2474,6 +2475,13 @@ class InstructionTranslatorBase(
             accepted = (module_name, value_name) if value_name else (module_name,)
             if bound is not value and bound_name not in accepted:
                 # Named by type, never repr'd: __repr__ is user code too.
+                # IMPORT_NAME has no break_graph_if_unsupported, so this
+                # Unsupported reaches step(): the frame is skipped outright
+                # unless a checkpoint (an empty stack after two or more ops)
+                # precedes the import, and compiled up to that checkpoint
+                # otherwise. Either outcome is cached on the code object and
+                # nothing guards this global, so fixing it afterwards does not
+                # retrace the frame until torch._dynamo.reset().
                 offender = type(bound).__name__
                 if bound_name is not None:
                     offender = f"{offender} named {bound_name}"
@@ -2485,6 +2493,7 @@ class InstructionTranslatorBase(
                     hints=[
                         "Remove or rename the global of that name in the module of the frame being traced.",
                         "If it holds a module of another name, two module names mangle onto this alias: rename one of the two modules.",
+                        "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
         # Recorded only once the binding is made: the package entry outlives a
@@ -2568,8 +2577,11 @@ class InstructionTranslatorBase(
 
             # Before import_source, which binds the result into the traced
             # frame's globals: a non-module sys.modules entry stays out of them.
+            # Only this arm needs the check: a replayed value is a DummyModule
+            # by construction, add_local_mod having rejected non-modules when
+            # the record was written.
             # pyrefly: ignore [unbound-name]
-            if not isinstance(value, (types.ModuleType, DummyModule)):
+            if not isinstance(value, types.ModuleType):
                 unimplemented(
                     gb_type="Bad import result",
                     # pyrefly: ignore [unbound-name]
