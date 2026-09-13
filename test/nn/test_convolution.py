@@ -53,8 +53,6 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     HardwareClassification,
     instantiate_parametrized_tests,
-    IS_ARM64,
-    IS_LINUX,
     MACOS_VERSION,
     parametrize as parametrize_test,
     run_tests,
