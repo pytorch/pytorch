@@ -167,7 +167,11 @@ def get_socket_with_port() -> socket.socket:
     )
     for addr in addrs:
         family, type, proto, _, _ = addr
-        s = socket.socket(family, type, proto)
+        try:
+            s = socket.socket(family, type, proto)
+        except OSError as e:
+            logger.warning("Socket creation attempt failed.", exc_info=e)
+            continue
         try:
             s.bind(("localhost", 0))
             s.listen(0)
