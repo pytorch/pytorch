@@ -37,6 +37,14 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
+def import_from_path(module_name, file_path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def compute_loss_helper(x):
     return reduce_to_scalar_loss(x)
 
@@ -655,13 +663,6 @@ def fn(x):
     return CHILD(x)
 """
 
-        def import_helper(file_path):
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-            return module
-
         def guard_filter_fn(guards):
             # Keep the global guards, which is what puts the alias in the
             # artifact, minus the types the serializer rejects.
@@ -678,7 +679,7 @@ def fn(x):
             helper_path = os.path.join(tmp_dir, "package_alias_helper.py")
             with open(helper_path, "w") as f:
                 f.write(source)
-            module = import_helper(helper_path)
+            module = import_from_path(module_name, helper_path)
             args = (torch.randn(3),)
             expected = module.fn(*args)
 
@@ -703,7 +704,7 @@ def fn(x):
             torch._dynamo.reset()
             # A fresh import, as the loading process would see the module: the
             # alias is unbound there until the load seeds it.
-            module = import_helper(helper_path)
+            module = import_from_path(module_name, helper_path)
             scope = vars(module)
             self.assertNotIn(alias, set(scope))
             with open(aot_path, "rb") as f:
@@ -716,21 +717,22 @@ def fn(x):
                 alias in entry.import_sources for entry in package._codes.values()
             )
             self.assertTrue(installs_alias)
+            # The other arm of the same check: the backend ids start unbound in
+            # this freshly imported module, so install() does create them and
+            # uninstall() does take them back out.
+            backend_ids = set(backends)
+            self.assertTrue(backend_ids)
+            self.assertEqual(backend_ids & set(scope), set())
             package.install(backends)
             self.assertIn(alias, set(scope))
+            self.assertTrue(backend_ids <= set(scope))
             package.uninstall()
             self.assertIn(alias, set(scope))
+            self.assertEqual(backend_ids & set(scope), set())
             self.assertEqual(loaded(*args), expected)
 
     def test_file_change(self):
         ctx = DiskDynamoStore()
-
-        def import_from_path(module_name, file_path):
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-            return module
 
         mock_module_add_original = """
 def add(x, y):
