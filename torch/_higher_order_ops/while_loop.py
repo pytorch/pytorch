@@ -24,6 +24,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
+from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -442,7 +443,7 @@ def while_loop_tracing(
             # Solution: We clone the constant tensors and mark the cloned tensor as non-constant so they won't
             # be specialized to fixed values during tracing body_fn or cond_fn.
             elif isinstance(x, torch.Tensor):
-                x = x.clone()
+                x = clone_preserve_strides(x)
                 if hasattr(x, "constant") and x.constant is not None:
                     # pyrefly: ignore [missing-attribute]
                     x.constant = None
@@ -458,7 +459,7 @@ def while_loop_tracing(
 
             def produce_graph(fn):
                 cloned_carried_inputs = pytree.tree_map_only(
-                    torch.Tensor, lambda x: x.clone(), unspecialized_carried_inputs
+                    torch.Tensor, clone_preserve_strides, unspecialized_carried_inputs
                 )
                 return reenter_make_fx(fn)(*cloned_carried_inputs, *additional_inputs)
 
