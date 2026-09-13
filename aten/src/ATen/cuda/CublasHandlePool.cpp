@@ -464,7 +464,15 @@ static void setupCUDABlasHandle(
           cublasSetWorkspace(handle, workspace, workspace_size));
       break;
     case WorkspaceMode::Default:
+#ifdef USE_ROCM
+      // cublasSetStream maps to rocblas_set_stream, which does not touch the
+      // workspace binding, so the handle must be unbound explicitly. This also
+      // frees the arena the handle owns from creation; that free is illegal
+      // under stream capture, so spend it here rather than on a later bind.
+      TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, nullptr, 0));
+#else
       // cublasSetStream above resets the handle to cuBLAS's default workspace.
+#endif
       break;
   }
 
@@ -565,7 +573,13 @@ CUDABlasHandleWithWorkspace::~CUDABlasHandleWithWorkspace() {
   if (!restore_default_workspace_) {
     return;
   }
+#ifdef USE_ROCM
+  // rocblas_set_stream leaves the workspace binding in place, so restore by
+  // unbinding explicitly instead of relying on cuBLAS's set-stream semantics.
+  const cublasStatus_t status = cublasSetWorkspace(handle_, nullptr, 0);
+#else
   const cublasStatus_t status = cublasSetStream(handle_, stream_);
+#endif
   if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
     // The handle may still refer to this allocation. Retain it rather than
     // leaving a dangling workspace pointer in a handle returned by the public
