@@ -1718,6 +1718,23 @@ from user code:
             self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
             self.assertTrue(result._has_global_guards)
 
+    def test_aot_compile_module_fallback_scope_names_a_qualnamed_forward(self):
+        # The other half of the report. A bare partial has no __qualname__, and
+        # neither does an nn.Module instance, so functools.wraps is how the
+        # forward this path cannot resolve acquires one.
+        x = torch.randn(4, 8)
+        data = self._two_input_global_guard_artifact(x)
+        mod = GlobalConfigModule()
+        mod.forward = functools.wraps(GlobalConfigModule.forward)(
+            functools.partial(GlobalConfigModule.forward, mod)
+        )
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            AOTCompiledModel.deserialize(mod, data)
+        self.assertIn(
+            "GlobalConfigModule.forward (partial named GlobalConfigModule.forward)",
+            "\n".join(logs.output),
+        )
+
     def test_aot_compile_module_alias_only_globals_load_silently(self):
         # Dynamo's own __import_* aliases are the case neither half of the
         # fallback warning covers: the rebuilt scope carries every recorded one
@@ -2339,24 +2356,29 @@ from user code:
         scope["EPS"] = EPS
         self.assertEqual(loaded(x), x * EPS)
 
-    @torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True)
     def test_load_compiled_function_f_globals_governs_a_cpp_shape_guard(self):
         # The carve-out both public texts state is for the LAMBDA form of a
         # symbolic-shape guard; captured with enable_cpp_symbolic_shape_guards
         # the guard goes out as C++ with the global's size as an operand, whose
         # manager hangs off the live globals dict like any other global guard's.
         # The C++ compile is not what this observes: the operand managers are
-        # built before it is attempted, so this fails with no compiler too.
+        # built before it is attempted, so this fails with no compiler too. The
+        # config wraps the capture alone: the load reads what that capture
+        # recorded and never this config.
         self._hide_leaked_dynamo_globals()
+        # mark_dynamic writes its marking onto the tensor, and this one is a
+        # module global that outlives the test.
+        self.addCleanup(AOT_CPP_SHAPE_GLOBAL.__dict__.clear)
         torch._dynamo.mark_dynamic(AOT_CPP_SHAPE_GLOBAL, 0)
 
         def fn(x):
             return x + AOT_CPP_SHAPE_GLOBAL.sum(0)
 
         x = torch.randn(4)
-        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
-            ((x,), {})
-        )
+        with torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, backend="eager"
+            ).aot_compile(((x,), {}))
         shape_code_parts = load_guards_state(
             compiled_fn._artifacts.guards_state
         ).shape_code_parts
@@ -3030,35 +3052,34 @@ from user code:
         # this capture registered would serve.
         def with_a_fresh_counter(action):
             # Frees the minted name so the next capture's counter really lands
-            # on it, and hands back the hooks that capture registered: a hook
-            # fires when its code object is collected, and in process that is at
-            # the mercy of whatever else still references the code, so the test
-            # calls them itself. That runs the hooks, which is the half of
-            # collection this test needs; unlike CleanupManager._remove_id it
-            # leaves them registered, so real collection would fire them again.
+            # on it, and hands back the CleanupManager entries that capture
+            # registered: a hook fires when its code object is collected, and in
+            # process that is at the mercy of whatever else still references the
+            # code, so the test runs the entry itself. _remove_id both fires and
+            # deregisters, so a later real collection cannot fire them a second
+            # time and strip the name from whoever owns it by then.
             torch._dynamo.reset()
             for name in [k for k in list(g) if k.startswith("__builtins_dict__")]:
+                # Disown before deleting, as the other deleting sites here do:
+                # a capture takes ownership of the name even when, as with
+                # aot_compile, it registers no hook that could fire.
+                CleanupHook.disown(g, name)
                 del g[name]
             before = set(CleanupManager.instance.values)
             with patch.object(
                 bytecode_transformation, "_unique_id_counter", itertools.count()
             ):
                 result = action()
-            hooks = [
-                hook
-                for idx in set(CleanupManager.instance.values) - before
-                for hook in CleanupManager.instance.values[idx]
-            ]
-            return result, hooks
+            return result, set(CleanupManager.instance.values) - before
 
         # aot_compile registers no hook with CleanupManager, so this capture's
         # ownership of the name can only ever be superseded, never fired.
-        compiled_fn, capture_hooks = with_a_fresh_counter(
+        compiled_fn, capture_entries = with_a_fresh_counter(
             lambda: torch.compile(
                 target, fullgraph=True, backend="eager", options=options
             ).aot_compile(((x,), {}))
         )
-        self.assertEqual(capture_hooks, [])
+        self.assertEqual(capture_entries, set())
         guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
         builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
         kept = [str(guard) for guard in guards_state.output_graph.guards]
@@ -3071,7 +3092,7 @@ from user code:
             live(x)
             return live
 
-        _, live_hooks = with_a_fresh_counter(compile_live)
+        _, live_entries = with_a_fresh_counter(compile_live)
         # The two captures burn unique ids independently; if they ever stopped
         # agreeing on the name there would be nothing here to disown, so pin that
         # the live compile really owns the artifact's key rather than assume it.
@@ -3083,8 +3104,8 @@ from user code:
             (id(g), builtins_key) in _cleanup_owners, not guard_reads_builtins
         )
 
-        for hook in live_hooks:
-            hook()
+        for idx in live_entries:
+            CleanupManager.instance._remove_id(idx)
         # The live compile is gone: it keeps its hands off a name the load took
         # over, and takes back one the load had no business touching.
         self.assertEqual(builtins_key in g, guard_reads_builtins)
@@ -3250,7 +3271,7 @@ from user code:
         builtins.aot_probe = os.getcwd
         try:
             guarded, builtins_key = save(keep_builtin_guards)
-            unguarded, _ = save(drop_the_probe_guard)
+            unguarded, unguarded_key = save(drop_the_probe_guard)
         finally:
             del builtins.aot_probe
 
@@ -3277,6 +3298,24 @@ from user code:
         with self.assertRaises(KeyError) as read_failure:
             loaded(x)
         self.assertEqual(read_failure.exception.args, ("aot_probe",))
+
+        # Through the public wrapper the guards get the caller's dict, so the
+        # re-derive lands there and fn.__globals__ keeps the recording -- the key
+        # the bytecode subscripts. The artifact that just raised therefore serves
+        # here, off a builtin this process no longer has, while the guard reads
+        # the live builtins the caller's dict now holds.
+        torch._dynamo.reset()
+        scope: dict[str, object] = {}
+        loaded = torch.compiler.load_compiled_function(
+            io.BytesIO(unguarded), f_globals=scope
+        )
+        self.assertTrue(loaded.guard_check(x))
+        self.assertEqual(loaded(x)[1], os.getcwd)
+        self.assertIn("aot_probe", loaded.fn.__globals__[unguarded_key])
+        self.assertTrue(
+            scope[unguarded_key] is builtins.__dict__,
+            "the re-derive did not land in the caller's dict",
+        )
 
     def test_load_refuses_a_non_dict_builtins_binding(self):
         # guard_globals is the one dict on this path that comes from outside torch,
