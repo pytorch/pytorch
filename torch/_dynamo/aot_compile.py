@@ -56,7 +56,11 @@ _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
 # kept guard is rooted at, so a KeyError on one reports a gap in that seeding;
 # the last embeds id() of a dict in the tracing process, so no module's vars()
 # in a loading process holds it. None of the three is a name the advice below
-# can send a caller to define.
+# can send a caller to define. The list is complete because a report here needs
+# a serializable guard rooted at a GlobalSource on the name: every other minted
+# family builds no Source (the codegen-only installs) or a guard type in
+# UNSUPPORTED_SERIALIZATION_GUARD_TYPES, which ___unnamed_scope's was not -- so
+# moving a type off that list means re-checking this one.
 _MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", "___unnamed_scope")
 
 
