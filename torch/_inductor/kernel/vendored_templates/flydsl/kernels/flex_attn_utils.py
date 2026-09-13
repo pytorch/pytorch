@@ -144,7 +144,7 @@ def schedule_fence():
 
 
 def fast_exp2(value):
-    return fx.math.exp2(fx.Float32(value), fastmath=fx.FastMathFlags.afn)
+    return fx.Float32(fx.rocdl.exp2(fx.Float32.ir_type, value.ir_value()))
 
 
 def schedule_fwd_qk_pipeline(*, reduction_steps: int, vmem_count: int = 0):
