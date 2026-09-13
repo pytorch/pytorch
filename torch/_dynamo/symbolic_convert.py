@@ -260,9 +260,11 @@ ExceptionTypes: TypeAlias = (
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
     """
-    Import the named module and cache the result. importlib.import_module()
-    seems to do some filesystem checking to validate the name so not caching
-    this can be slow.
+    Resolve the name once per process and keep returning that module object.
+    The one caller, nn_modules_globals_vt, wants the module nn.Module._call_impl
+    reads its hook dicts through -- its defining module, which no later
+    sys.modules rebind moves -- so it must not follow the live entry the way
+    import_source does.
     """
     return importlib.import_module(name)
 
@@ -2437,9 +2439,6 @@ class InstructionTranslatorBase(
             value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
-        if self.package is not None:
-            self.package.add_import_source(alias, module_name)
-        self.output.import_sources[alias] = module_name
         f_globals = self.output.global_scope
         # The alias outlives the compile that minted it, so a later writer that
         # resolves the name itself -- CompilePackage.install, or an artifact load
@@ -2484,9 +2483,15 @@ class InstructionTranslatorBase(
                     explanation=f"The module alias {alias} for {module_name} is already "
                     f"bound to a {offender} in the globals of the frame being traced.",
                     hints=[
-                        "Rename one of the two modules whose names mangle onto this alias, or the global of that name.",
+                        "Remove or rename the global of that name in the module of the frame being traced.",
+                        "If it holds a module of another name, two module names mangle onto this alias: rename one of the two modules.",
                     ],
                 )
+        # Recorded only once the binding is made: the package entry outlives a
+        # graph break here, and install() rebinds every recorded alias.
+        if self.package is not None:
+            self.package.add_import_source(alias, module_name)
+        self.output.import_sources[alias] = module_name
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
