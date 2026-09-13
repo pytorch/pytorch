@@ -16,6 +16,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
@@ -64,6 +65,16 @@ def _import_alias_getattr_boom(name):
     # PEP 562 module __getattr__: reached only if the check reads __name__ with
     # getattr instead of out of the module __dict__.
     raise RuntimeError(f"module __getattr__ ran inside a trace for {name}")
+
+
+class _ImportAliasHookedModule(types.ModuleType):
+    # A class-level __getattribute__ intercepts __dict__ too, as
+    # importlib.util._LazyModule's does: reached only if the check reads
+    # __dict__ as an attribute instead of through object.__getattribute__.
+    def __getattribute__(self, name):
+        if name == "__dict__":
+            raise RuntimeError("module __getattribute__ ran inside a trace")
+        return object.__getattribute__(self, name)
 
 
 def _bound_method_guard_target(self, x):
@@ -1107,7 +1118,7 @@ def add(x, y):
             torch._dynamo.reset()
             fn.__globals__[alias] = types.ModuleType("some.other.name")
             with self.assertRaisesRegex(
-                AssertionError, f"alias {alias} for {key}.*named some.other.name"
+                Unsupported, f"alias {alias} for {key}.*named some.other.name"
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(*args)
         finally:
@@ -1115,11 +1126,13 @@ def add(x, y):
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
-    def test_import_alias_taken_by_a_non_module_raises(self):
+    def test_import_alias_taken_by_a_non_module_graph_breaks(self):
         # The relaxed check still catches what it was written for: the alias name
         # holding something other than the module it names -- a non-module, or a
         # module of another name, which is the state two module names mangling
-        # onto one alias leave it in.
+        # onto one alias leave it in. The condition is the user's globals, so it
+        # is a graph break, not an internal error: without fullgraph the frame
+        # runs eagerly and the alias is left alone.
         name = "torch_test_package_import_alias_taken"
         alias = f"__import_{name}"
         module = types.ModuleType(name)
@@ -1138,6 +1151,7 @@ def add(x, y):
             (types.ModuleType("other.name"), "bound to a module named other.name"),
             (nameless, "already bound to a module in the globals"),
         )
+        args = (torch.randn(3, 2),)
         try:
             sys.modules[name] = module
             for bound, expected in cases:
@@ -1145,11 +1159,69 @@ def add(x, y):
                     torch._dynamo.reset()
                     fn.__globals__[alias] = bound
                     with self.assertRaisesRegex(
-                        AssertionError, f"alias {alias} for {name}.*{expected}"
+                        Unsupported, f"alias {alias} for {name}.*{expected}"
                     ):
-                        torch.compile(fn, backend="eager", fullgraph=True)(
-                            torch.randn(3, 2)
-                        )
+                        torch.compile(fn, backend="eager", fullgraph=True)(*args)
+                    torch._dynamo.reset()
+                    eager_fallback = torch.compile(fn, backend="eager")
+                    self.assertEqual(fn(*args), eager_fallback(*args))
+                    self.assertIs(fn.__globals__[alias], bound)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_check_does_not_run_a_module_getattribute(self):
+        # Both slots hold a module whose class raises on a __dict__ read: the
+        # one __import__ resolves and the stale one a prior writer left. The
+        # check reads each module's name without running that hook; __import__
+        # and PythonModuleVariable read __spec__ and __name__ off the live one
+        # by design, and the frame reads nothing else off it.
+        name = "torch_test_package_import_alias_hooked"
+        alias = f"__import_{name}"
+        live = _ImportAliasHookedModule(name)
+        stale = _ImportAliasHookedModule(name)
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_hooked as hooked
+
+            del hooked
+            return x + 1
+
+        try:
+            sys.modules[name] = live
+            fn.__globals__[alias] = stale
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertIs(fn.__globals__[alias], live)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_is_not_bound_to_a_non_module_import(self):
+        # sys.modules accepts any object and __import__ hands it back verbatim.
+        # IMPORT_NAME rejects it before import_source binds the alias, so the
+        # traced globals never hold the non-module and a second trace after the
+        # entry is swapped for another non-module graph breaks the same way
+        # instead of tripping the alias check on two nameless objects.
+        name = "torch_test_package_import_alias_non_module"
+        alias = f"__import_{name}"
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_non_module as taken
+
+            return x + taken.VALUE
+
+        try:
+            for entry in (object(), object()):
+                torch._dynamo.reset()
+                sys.modules[name] = entry
+                with self.assertRaisesRegex(Unsupported, "Bad import result"):
+                    torch.compile(fn, backend="eager", fullgraph=True)(*args)
+                self.assertNotIn(alias, fn.__globals__)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
