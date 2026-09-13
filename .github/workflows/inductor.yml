@@ -34,6 +34,7 @@ on:
           - old_erff
           - old_powf
           - old_erff_powf
+          - validation_suite
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
