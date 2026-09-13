@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 """Lower FlexGEMM HOP bodies and connect epilogue analysis to backend templates.
 
-``flex_gemm_lowering`` is the main entry point. Non-QUACK
-requests execute the captured body through ordinary Inductor lowering. Although this
-is stale and will fix up later on. See ``lower_quack_flex_gemm`` for the flow.
+``flex_gemm_lowering`` is the main entry point. Non-QUACK dense requests execute
+through ordinary Inductor lowering. Scaled-mm requires the QUACK fused path.
+See ``lower_quack_flex_gemm`` for the template flow.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from torch._higher_order_ops.flex_gemm import (
     flex_gemm_body_gemm_op,
     flex_gemm_hop,
     FLEX_GEMM_OP_SPECS,
+    validate_scaled_mm,
 )
 from torch._inductor import config
 from torch._logging import warning_once
@@ -106,9 +107,8 @@ def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
 class QuackFallbackUnsupported(NotImplementedError):
     """Request ordinary lowering before FlexGEMM mutates the graph or realizes IR.
 
-    Raised only for compositions QuACK cannot run (scaled-mm recipes, varlen gaps,
-    fp32 without TF32); a pinned ``config`` turns it into a hard error instead of a
-    silent fallback.
+    Raised for unsupported grouped-mm compositions or fp32 without TF32;
+    a pinned ``config`` turns it into a hard error instead of a silent fallback.
     """
 
 
@@ -144,36 +144,6 @@ QUACK_EPILOGUE_FEATURE_OPS = frozenset(
     )
 )
 
-_BLOCKWISE_1X16 = torch.nn.functional.ScalingType.BlockWise1x16.value
-_BLOCKWISE_1X32 = torch.nn.functional.ScalingType.BlockWise1x32.value
-_TENSORWISE = torch.nn.functional.ScalingType.TensorWise.value
-_SWIZZLE_32_4_4 = torch.nn.functional.SwizzleType.SWIZZLE_32_4_4.value
-_NO_SWIZZLE = torch.nn.functional.SwizzleType.NO_SWIZZLE.value
-# Per-operand scale recipe -> (QuACK format, required swizzles, data dtype,
-# block-scale dtype). Both operands must use the same entry.
-QUACK_BLOCKSCALED_RECIPES: dict[
-    tuple[int, ...], tuple[str, tuple[int, ...], torch.dtype, torch.dtype]
-] = {
-    (_BLOCKWISE_1X32,): (
-        "mxfp8_e4m3",
-        (_SWIZZLE_32_4_4,),
-        torch.float8_e4m3fn,
-        torch.float8_e8m0fnu,
-    ),
-    (_BLOCKWISE_1X16,): (
-        "nvfp4",
-        (_SWIZZLE_32_4_4,),
-        torch.float4_e2m1fn_x2,
-        torch.float8_e4m3fn,
-    ),
-    (_BLOCKWISE_1X16, _TENSORWISE): (
-        "nvfp4",
-        (_SWIZZLE_32_4_4, _NO_SWIZZLE),
-        torch.float4_e2m1fn_x2,
-        torch.float8_e4m3fn,
-    ),
-}
-
 
 @dataclasses.dataclass(frozen=True)
 class QuackBlockScaledContract:
@@ -190,7 +160,7 @@ class QuackBlockScaledContract:
 
 
 def quack_blockscaled_contract(gemm_fx_node: torch.fx.Node) -> QuackBlockScaledContract:
-    """Resolve the contract or raise QuackFallbackUnsupported to request ordinary lowering."""
+    """Resolve the traced native call to the fused block-scaled input contract."""
     normalized = normalize_function(
         torch.ops.aten._scaled_mm_v2.default,
         gemm_fx_node.args,
@@ -200,54 +170,26 @@ def quack_blockscaled_contract(gemm_fx_node: torch.fx.Node) -> QuackBlockScaledC
     if normalized is None:
         raise AssertionError("aten._scaled_mm_v2 arguments must bind to its schema")
     call = normalized.kwargs
-    recipe = tuple(call["recipe_a"])
-    contract = QUACK_BLOCKSCALED_RECIPES.get(recipe)
-    if contract is None or tuple(call["recipe_b"]) != recipe:
-        raise QuackFallbackUnsupported(
-            "FlexGEMM QUACK scaled-mm currently supports matching "
-            "BlockWise1x32 MXFP8 or BlockWise1x16 NVFP4 recipes, with "
-            "optional NVFP4 TensorWise global scales"
+    if call["bias"] is not None or call["contraction_dim"] or call["use_fast_accum"]:
+        raise NotImplementedError(
+            "FlexGEMM scaled-mm does not support bias, custom contraction, or fast accumulation"
         )
-    format_name, swizzles, data_dtype, scale_dtype = contract
     scale_a, scale_b = tuple(call["scale_a"]), tuple(call["scale_b"])
-    if (
-        tuple(call["swizzle_a"]) != swizzles
-        or tuple(call["swizzle_b"]) != swizzles
-        or len(scale_a) != len(recipe)
-        or len(scale_b) != len(recipe)
-        or call["bias"] is not None
-        or call["contraction_dim"]
-        or call["use_fast_accum"]
-    ):
-        raise QuackFallbackUnsupported(
-            "FlexGEMM QUACK scaled-mm requires one SWIZZLE_32_4_4 block "
-            "scale per operand, optional unswizzled NVFP4 TensorWise scales, "
-            "and no bias, custom contraction, or fast accumulation"
-        )
-    gemm_inputs = (call["input"], call["mat2"], scale_a[0], scale_b[0])
-    if tuple(node.meta["val"].dtype for node in gemm_inputs) != (
-        data_dtype,
-        data_dtype,
-        scale_dtype,
-        scale_dtype,
-    ):
-        raise QuackFallbackUnsupported(
-            f"FlexGEMM QUACK {format_name} scaled-mm requires "
-            f"{data_dtype} data and {scale_dtype} scales"
-        )
-    tensorwise_scales = (*scale_a[1:], *scale_b[1:])
-    for node in tensorwise_scales:
-        meta = node.meta["val"]
-        if meta.dtype is not torch.float32 or not any(
-            statically_known_shape_equal(
-                ir.convert_shape_to_inductor(meta.shape), shape
-            )
-            for shape in ([], [1], [1, 1])
-        ):
-            raise QuackFallbackUnsupported(
-                "FlexGEMM NVFP4 TensorWise scales must be scalar Float32 tensors"
-            )
-    return QuackBlockScaledContract(format_name, gemm_inputs, tensorwise_scales)
+    format_name = validate_scaled_mm(
+        call["input"].meta["val"],
+        call["mat2"].meta["val"],
+        [node.meta["val"] for node in scale_a],
+        [node.meta["val"] for node in scale_b],
+        call["recipe_a"],
+        call["recipe_b"],
+        call["swizzle_a"],
+        call["swizzle_b"],
+    )
+    return QuackBlockScaledContract(
+        format_name,
+        (call["input"], call["mat2"], scale_a[0], scale_b[0]),
+        (*scale_a[1:], *scale_b[1:]),
+    )
 
 
 def quack_grouped_mm_contract(
@@ -546,7 +488,7 @@ def flex_gemm_quack_configs(
         sizevars.optimization_hint(mat1.get_size()[-2]),
         sizevars.optimization_hint(mat2.get_size()[-1]),
         None if output_contraction is None else output_contraction.concat_layout,
-        blockscaled=template_config.blockscaled is not None,
+        blockscaled=template_config.blockscaled_format is not None,
         varlen_m=template_config.cu_seqlens_index is not None,
     )
     legal = legal_mod_configs(
@@ -647,7 +589,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     from torch._inductor.kernel.flex_gemm.template import (
         flex_gemm_epilogue_template,
-        FlexGemmEpilogueBlockScaledConfig,
         FlexGemmEpilogueConfig,
         FlexGemmEpilogueIndexedOutputConfig,
         FlexGemmEpilogueLocalReduceConfig,
@@ -667,10 +608,18 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             *flex_gemm_output_values(subgraph.graph_module)
         )
     except NotImplementedError as exc:
-        if scaled_mm or grouped_mm:
+        if scaled_mm:
+            raise NotImplementedError(
+                "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
+            ) from exc
+        if grouped_mm:
             raise QuackFallbackUnsupported(indexed_output_error) from exc
         raise
-    if (scaled_mm or grouped_mm) and indexed_store is not None:
+    if scaled_mm and indexed_store is not None:
+        raise NotImplementedError(
+            "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
+        )
+    if grouped_mm and indexed_store is not None:
         raise QuackFallbackUnsupported(indexed_output_error)
     placeholders = [
         node for node in subgraph.graph_module.graph.nodes if node.op == "placeholder"
@@ -680,13 +629,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     mainloop_scale_nodes: tuple[torch.fx.Node, ...] = ()
     if scaled_mm:
         blockscaled = quack_blockscaled_contract(gemm_fx_node)
-        gemm_fx_node.args = blockscaled.gemm_inputs
+        gemm_operand_nodes = blockscaled.gemm_inputs
         mainloop_scale_nodes = blockscaled.tensorwise_scales
         alpha, beta = 1.0, 0.0
     elif grouped_mm:
         gemm_fx_node.args = quack_grouped_mm_contract(gemm_fx_node)
+        gemm_operand_nodes = gemm_fx_node.args
         alpha, beta = 1.0, 0.0
     else:
+        gemm_operand_nodes = gemm_fx_node.args
         unsupported_gemm_kwargs = OrderedSet(gemm_kwargs) - OrderedSet(
             ["alpha", "beta"]
         )
@@ -700,7 +651,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
 
     gemm_args: list[TensorBox] = []
-    for arg in gemm_fx_node.args:
+    for arg in gemm_operand_nodes:
         gemm_arg = placeholder_args[arg] if isinstance(arg, torch.fx.Node) else arg
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
@@ -732,7 +683,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     gemm_input_names = tuple(
         arg.name if isinstance(arg, torch.fx.Node) else f"gemm_arg{index}"
-        for index, arg in enumerate(gemm_fx_node.args)
+        for index, arg in enumerate(gemm_operand_nodes)
     )
     log_flex_gemm_artifact(
         "problem",
@@ -978,13 +929,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         gemm_op=op_spec,
         alpha=float(alpha),
         beta=float(beta),
-        blockscaled=(
-            None
-            if blockscaled is None
-            else FlexGemmEpilogueBlockScaledConfig(
-                blockscaled.format, *gemm_input_indices[2:]
-            )
-        ),
+        blockscaled_format=None if blockscaled is None else blockscaled.format,
         quack_config=None,
         cu_seqlens_index=gemm_input_indices[2] if grouped_mm else None,
         epilogue_arg_indices=epilogue_arg_indices,
@@ -1087,6 +1032,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
     backend = kernel_options.get("backend", "TRITON")
+    body_gemm_op = flex_gemm_body_gemm_op(gemm_op, gemm_kwargs)
+    if body_gemm_op is torch.ops.aten._scaled_mm_v2.default and backend != "QUACK":
+        raise NotImplementedError("FlexGEMM F.scaled_mm requires backend='QUACK'")
     if backend in ("NVGEMM", "QUACK") and gemm_op in FLEX_GEMM_OP_SPECS:
         mat1 = args[FLEX_GEMM_OP_SPECS[gemm_op].mat1_index]
         if isinstance(mat1, TensorBox) and is_bf16x9_matmul(
@@ -1122,10 +1070,8 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             )
         with config.patch(nvgemm_config):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
-    body_gemm_op = flex_gemm_body_gemm_op(gemm_op, gemm_kwargs)
     if backend == "QUACK":
-        # The QUACK path rewrites the body in place (1-D capture folding); the
-        # fallback below must re-lower the untouched original.
+        # Capture normalization mutates the body; grouped fallback needs the original.
         quack_subgraph = dataclasses.replace(
             subgraph, graph_module=copy.deepcopy(subgraph.graph_module)
         )
