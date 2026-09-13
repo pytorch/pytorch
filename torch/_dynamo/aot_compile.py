@@ -30,7 +30,8 @@ from .hooks import Hooks
 
 
 if TYPE_CHECKING:
-    from .guards import GuardManagerWrapper, GuardsState
+    from .guards import GuardManagerWrapper
+    from .output_graph import OutputGraphGuardsState
     from .package import SourceInfo
 
 
@@ -503,8 +504,9 @@ class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
     _extra_globals: dict[str, object] | None = None
-    # Guard-only scope, held by reference; kept apart from _extra_globals so it
-    # cannot rewire what the compiled bytecode reads.
+    # Guard-only scope, held by reference: never merged into fn.__globals__, so a
+    # caller-supplied one cannot rewire what the compiled bytecode reads. Left
+    # None, the guards resolve against fn.__globals__ itself and are seeded into it.
     _guard_globals: dict[str, object] | None = None
     # Which of the three scopes the artifact's guards resolve against, so a
     # guard failure can say something actionable about the dict the name was
@@ -566,7 +568,7 @@ class AOTCompiledFunction:
                 # A live scope: a name it lacks must fail the guard rather than
                 # fall back to the value serialized with the artifact.
                 self._guard_scope = _GuardScope.SUPPLIED
-            self._seed_guard_scope(guard_scope, guards_state)
+            self._seed_guard_scope(guard_scope, guards_state.output_graph)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
@@ -574,29 +576,21 @@ class AOTCompiledFunction:
             )
 
     def _seed_guard_scope(
-        self, guard_scope: dict[str, Any], guards_state: "GuardsState"
+        self, guard_scope: dict[str, Any], output_graph: "OutputGraphGuardsState"
     ) -> None:
         # Dynamo mints __import_* aliases and a __builtins_dict___N key into the
-        # tracing process's globals and roots guards at them; a process that only
-        # loads never traced, so seed them here. Every guarded name is gated on a
-        # kept guard being rooted at it: the seeding mutates a scope that may be a
-        # user module's live namespace and installs no CleanupHook, so a name
-        # nothing checks must not be written. __builtins__ is the exception: it
-        # is what the builtins dict is derived from, and it is written only when
-        # the gated builtins key is. An already-bound name is left as it is,
-        # unlike install()'s builtins branch in package.py, which raises on a
-        # mismatch: a wrong binding fails the guard rather than passing it, and a
-        # caller-supplied scope may legitimately already carry these names.
+        # TRACING process's globals and roots guards at them; a process that only
+        # loads never traced. Each name is gated on a kept guard being rooted at
+        # THAT name, because this writes into a scope that may be a user module's
+        # live namespace and installs no CleanupHook. An already-bound name is
+        # left alone: a wrong binding fails the guard rather than passing it.
         from .output_graph import get_builtins_dict
         from .source import get_global_source_name
         from .utils import CleanupHook
 
-        # The serialized global_scope is pruned to the names the kept guards read,
-        # so it gates the aliases. It cannot gate the builtins key: the serializer
-        # writes that key into the pruned scope whether or not a guard reads it.
-        # Only a caller-supplied scope can be missing an alias -- forward_callable
-        # imports every recorded one into fn.__globals__.
-        output_graph = guards_state.output_graph
+        # The serialized global_scope is already pruned to the names the kept
+        # guards read, so it gates the aliases. Only a caller-supplied scope can
+        # be missing one -- forward_callable imports every recorded alias.
         guarded_globals = output_graph.global_scope
         for alias, module_name in self._artifacts.runtime_env.import_sources.items():
             if alias in guarded_globals and alias not in guard_scope:
@@ -604,13 +598,10 @@ class AOTCompiledFunction:
         builtins_key = output_graph.name_of_builtins_dict_key_in_fglobals
         if not builtins_key:
             return
-        # Every source that can root at the builtins key: guard_on_key_order roots
-        # a dict-order check without appearing as any guard's originating_source.
-        # The serializer's pruning scan reads two channels beyond this list -- the
-        # shape-env sources substituted for a ShapeEnvSource guard, and
-        # DUPLICATE_INPUT's source_b -- but both root at a graph input, and
-        # load_builtin_from_argval is the only place a source rooted at the
-        # builtins key is minted at all.
+        # That pruned scope cannot gate the builtins key -- the serializer writes
+        # it in whether or not a guard reads it -- so match the deserialized
+        # guards' own roots instead. guard_on_key_order roots a dict-order check
+        # without appearing as any guard's originating_source.
         sources = [guard.originating_source for guard in output_graph.guards]
         sources += output_graph.guard_on_key_order
         if builtins_key not in {get_global_source_name(source) for source in sources}:
@@ -620,9 +611,11 @@ class AOTCompiledFunction:
         # collected.
         CleanupHook.disown(guard_scope, builtins_key)
         if builtins_key not in guard_scope:
-            # Neither a caller-supplied f_globals nor the scope rebuilt from the
-            # serialized bytecode need carry __builtins__; exec would seed it, so
-            # fall back to the real builtins here.
+            # forward_callable builds fn.__globals__ as a plain dict, so unlike an
+            # exec'd module namespace it carries no __builtins__ to derive from.
+            # The LIVE dict, never a copy: the guard rooted here is an ID_MATCH on
+            # a builtin, so a snapshot would keep passing after that builtin is
+            # rebound.
             if "__builtins__" not in guard_scope:
                 guard_scope["__builtins__"] = builtins.__dict__
             guard_scope[builtins_key] = get_builtins_dict(guard_scope)
@@ -761,22 +754,15 @@ class AOTCompiledFunction:
     ) -> "AOTCompiledFunction":
         """Rebuild a compiled function from ``serialize()`` output.
 
-        ``f_globals`` and ``guard_globals`` have distinct contracts and must not
-        be conflated. ``f_globals`` is MERGED over the scope reconstructed from
-        the serialized bytecode (extra names the compiled fn may reference), so a
-        name it omits still resolves to the baked-in value. ``guard_globals``
-        REPLACES the guard scope with no such fallback -- a name it lacks fails
-        the guard rather than resolving to a serialized value, and an empty dict
-        is an empty scope rather than "no scope" -- so it is the live namespace
-        global guards are re-rooted at on load. It is WRITTEN into as well as
-        read: the load seeds the recorded import aliases a kept guard is rooted
-        at, the recorded builtins-dict key if a kept guard reads it, and
-        ``__builtins__`` if that key has to be built -- never replacing a name it
-        already binds -- so pass the dict those names should land in.
-        Passing neither resolves global guards against the scope rebuilt from
-        the artifact: a global the graph lifted is checked against the value
-        serialized with it, one it did not lift is simply absent and fails the
-        guard, and either way a rebinding in this process is invisible.
+        ``f_globals`` is MERGED over the scope reconstructed from the serialized
+        bytecode, so a name it omits still resolves to the baked-in value.
+        ``guard_globals`` REPLACES the guard scope with no such fallback -- a name
+        it lacks fails the guard, and an EMPTY dict is an empty scope rather than
+        "no scope" -- and the load WRITES into it, seeding the recorded aliases and
+        builtins-dict key a kept guard is rooted at without replacing a name it
+        already binds, so pass the dict those should land in. Passing neither
+        resolves global guards against the scope rebuilt from the artifact, where
+        a rebinding in this process is invisible.
         """
         f = io.BytesIO(data)
         f.seek(0)
@@ -840,11 +826,10 @@ def aot_compile_fullgraph(
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
-                # NB: this is torch.compiler.skip_guard_on_globals_unsafe's
-                # behaviour, and it stays the default because narrowing it would
-                # need every load to supply a scope binding every global a kept
-                # guard reads. Callers who need one guarded pass their own
-                # guard_filter_fn.
+                # NB: dropping every global guard is deliberate, not a gap:
+                # narrowing it would need every load to supply a scope binding
+                # every global a kept guard reads. Callers who need one guarded
+                # pass their own guard_filter_fn.
                 return [
                     (
                         not (
