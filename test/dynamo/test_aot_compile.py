@@ -30,7 +30,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
+from torch._dynamo.aot_compile import (
+    AOTCompiledFunction,
+    AOTCompiledModel,
+    ModelInput,
+    SerializableCallable,
+)
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_types
@@ -59,9 +64,10 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
 EPS = torch.tensor(1e-7)
 AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
-# The global-name families a compile in this file binds into its module dict,
-# which for a function defined here is this module's dict. They are listed so a
-# leak does not linger, and because a leftover can collide with a later mint --
+# The global-name families the tests here have to account for when a compile
+# binds into its module dict, which for a function defined here is this module's
+# dict; not every family Dynamo can mint. They are listed so a leak does not
+# linger, and because a leftover can collide with a later mint --
 # but only when it is a name that mint tries: the same prefix, at the index the
 # counter is on. The skip loop burns that index, which is what a test
 # pre-binding the next minted name is counting on. A leftover at another prefix,
@@ -1485,7 +1491,7 @@ from user code:
 
         self.addCleanup(restore)
 
-    @parametrize("mint_site", ("install_global", "resume_function"))
+    @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
         # A load in a fresh process binds names its own counter is still behind:
         # a captured __builtins_dict___N key, and the __resume_at_* globals
@@ -1495,9 +1501,9 @@ from user code:
         # Which name that is comes from the compile, not from a literal:
         # hardcoding an index goes green covering nothing as soon as anything
         # else burns an id first, because the retry loop then never runs. The
-        # resume name skips forward at its own generation site in
-        # symbolic_convert, since install_global_unsafe cannot hand a substitute
-        # back to callers that use the name they passed for more than the install.
+        # resume and comprehension names skip forward at their own generation
+        # sites, since install_global_unsafe cannot hand a substitute back to
+        # callers that use the name they passed for more than the install.
         import itertools
 
         from torch._dynamo import bytecode_transformation
@@ -1510,9 +1516,18 @@ from user code:
             torch._dynamo.graph_break()
             return y * 2
 
+        def comprehension_fn(x):
+            y = x + 1
+            return y, [torch._dynamo.graph_break() or i for i in range(2)]
+
+        if mint_site == "comprehension" and sys.version_info < (3, 12):
+            # Comprehensions are inlined, and so can break, only from 3.12 on.
+            self.skipTest("inlined comprehensions are 3.12+")
+
         fn, fullgraph, minted_prefix = {
             "install_global": (fullgraph_fn, True, "__builtins_dict__"),
             "resume_function": (graph_breaking_fn, False, "__resume_at"),
+            "comprehension": (comprehension_fn, False, "__comprehension_"),
         }[mint_site]
         self._hide_leaked_dynamo_globals()
         g = globals()
@@ -1562,6 +1577,13 @@ from user code:
         self.assertNotIn(installed, (minted, skipped_to))
         self.assertEqual(g[minted], taken)
         self.assertEqual(g[skipped_to], taken)
+        # Every name here ends in its counter index, and each retry must step
+        # that counter rather than decorate the name: the other process mints
+        # from a counter too, so a name reached any other way is not one it will
+        # skip past in turn. The assertions above hold either way.
+        indexes = [int(n.rpartition("_")[2]) for n in (minted, skipped_to, installed)]
+        start = indexes[0]
+        self.assertEqual(indexes, [start, start + 1, start + 2])
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
@@ -2129,9 +2151,9 @@ from user code:
         self.assertEqual(_graph_device_types(None), frozenset())
 
     def test_graph_device_types_ignores_autocast_device_strings(self):
-        # An autocast device type is a plain positional arg of _enter_autocast,
-        # so it must not inject a device no tensor lives on: an artifact from a
-        # CPU-only graph would refuse to load on the host that saved it.
+        # An autocast device type is a plain positional arg of _enter_autocast;
+        # read as a device, a CPU-only graph would refuse to load where it was
+        # saved.
         with FakeTensorMode():
             cpu = torch.empty(2)
         graph = torch.fx.Graph()
@@ -2160,9 +2182,8 @@ from user code:
 
     @parametrize("method", ("cpu", "cuda", "xpu", "ipu", "mtia"))
     def test_graph_device_types_reads_a_device_naming_method(self, method):
-        # x.cuda() and friends name the device in the method itself, so a graph
-        # without meta has nothing else to read: the scan would answer "no
-        # device" and the collapse would turn that into "cpu".
+        # x.cuda() names the device in the method, so a graph without meta has
+        # nothing else to read and would collapse to "cpu".
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
         graph.call_method(method, (x,))
@@ -2201,18 +2222,18 @@ from user code:
     @parametrize("spec", ("not_a_device", 2**63, True))
     def test_graph_device_types_ignores_an_unparsable_device_position(self, spec):
         # A value torch.device rejects names no device rather than aborting an
-        # otherwise fine compile. Each spec is a different rejection:
-        # RuntimeError, ValueError, and True, which is not an index at all --
-        # torch.device(True) raises the TypeError the parse does not catch.
+        # otherwise fine compile: an unknown name raises RuntimeError, an
+        # oversized index ValueError. True never reaches torch.device -- bool is
+        # excluded from the index arm deliberately, because torch.device(True)
+        # raises a TypeError the parse does not catch.
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
         graph.call_method("to", (x, spec))
         self.assertEqual(_graph_device_types(graph), frozenset())
 
     def test_graph_device_types_drops_the_meta_device(self):
-        # meta is an abstract device: a meta graph requires nothing of the host.
-        # Kept in, it wins the collapse over cpu and records device_type="meta",
-        # a string no host check can be run for.
+        # meta is an abstract device: kept in, it wins the collapse over cpu
+        # and records device_type="meta", a string no host check can be run for.
         with FakeTensorMode():
             meta = torch.empty(2, device="meta")
         graph = torch.fx.Graph()
@@ -2238,13 +2259,42 @@ from user code:
         # What the flip from "cpu" to an accelerator buys, and what it costs: a
         # recorded "cuda" is what makes check_compatibility compare the GPU
         # name, so an artifact saved on one GPU is now refused on another, and
-        # the AOT load path calls this unguarded. is_available is patched so
-        # the refusal under test is the GPU-name one on a CPU-only host too.
-        saved = dataclasses.replace(SystemInfo.current(), gpu_name="Some Other GPU")
+        # the AOT load path calls this unguarded. Both names are fabricated --
+        # SystemInfo.current().gpu_name is None on a host without a GPU, which
+        # is a mismatch on one side of the check only -- and is_available is
+        # patched so the refusal under test is the GPU-name one there too.
+        here = dataclasses.replace(SystemInfo.current(), gpu_name="This GPU")
+        saved = dataclasses.replace(here, gpu_name="Some Other GPU")
         with patch.object(torch.cuda, "is_available", return_value=True):
-            SystemInfo.current().check_compatibility(saved, "cpu")
+            here.check_compatibility(saved, "cpu")
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
-                SystemInfo.current().check_compatibility(saved, "cuda")
+                here.check_compatibility(saved, "cuda")
+            # The two load paths pass the saved info in opposite positions (AOT
+            # as other, caching precompile as self). With both names known they
+            # agree; only the side passed as other is required to be known, so
+            # an unknown name splits them.
+            with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
+                saved.check_compatibility(here, "cuda")
+            unknown = dataclasses.replace(here, gpu_name=None)
+            with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
+                unknown.check_compatibility(saved, "cuda")
+            saved.check_compatibility(unknown, "cuda")
+
+    def test_a_recorded_device_the_host_lacks_refuses_the_compile(self):
+        # __post_init__ runs at the end of a compile as well as on load, so the
+        # flip reaches the compile: a graph read as cuda no longer compiles
+        # where cuda is missing, which recording "cpu" let through. No loadable
+        # artifact is lost -- such a host records toolkit_version=None, which
+        # every load of a cuda artifact refuses.
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        artifacts = compiled_fn.aot_compile(((torch.randn(3),), {}))._artifacts
+        artifacts = dataclasses.replace(artifacts, device_type="cuda")
+        with patch.object(torch.cuda, "is_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "cuda is not available"):
+                AOTCompiledFunction(artifacts)
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_aot_compile(self):
