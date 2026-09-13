@@ -56,9 +56,10 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
 EPS = torch.tensor(1e-7)
 AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
-# The global-name families a compile in this file binds into its module dict,
-# which for a function defined here is this module's dict. They are listed so a
-# leak does not linger, and because a leftover can collide with a later mint --
+# The global-name families the tests here have to account for when a compile
+# binds into its module dict, which for a function defined here is this module's
+# dict; not every family Dynamo can mint. They are listed so a leak does not
+# linger, and because a leftover can collide with a later mint --
 # but only when it is a name that mint tries: the same prefix, at the index the
 # counter is on. The skip loop burns that index, which is what a test
 # pre-binding the next minted name is counting on. A leftover at another prefix,
@@ -1482,7 +1483,7 @@ from user code:
 
         self.addCleanup(restore)
 
-    @parametrize("mint_site", ("install_global", "resume_function"))
+    @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
         # A load in a fresh process binds names its own counter is still behind:
         # a captured __builtins_dict___N key, and the __resume_at_* globals
@@ -1492,9 +1493,9 @@ from user code:
         # Which name that is comes from the compile, not from a literal:
         # hardcoding an index goes green covering nothing as soon as anything
         # else burns an id first, because the retry loop then never runs. The
-        # resume name skips forward at its own generation site in
-        # symbolic_convert, since install_global_unsafe cannot hand a substitute
-        # back to callers that use the name they passed for more than the install.
+        # resume and comprehension names skip forward at their own generation
+        # sites, since install_global_unsafe cannot hand a substitute back to
+        # callers that use the name they passed for more than the install.
         import itertools
 
         from torch._dynamo import bytecode_transformation
@@ -1507,9 +1508,18 @@ from user code:
             torch._dynamo.graph_break()
             return y * 2
 
+        def comprehension_fn(x):
+            y = x + 1
+            return y, [torch._dynamo.graph_break() or i for i in range(2)]
+
+        if mint_site == "comprehension" and sys.version_info < (3, 12):
+            # Comprehensions are inlined, and so can break, only from 3.12 on.
+            self.skipTest("inlined comprehensions are 3.12+")
+
         fn, fullgraph, minted_prefix = {
             "install_global": (fullgraph_fn, True, "__builtins_dict__"),
             "resume_function": (graph_breaking_fn, False, "__resume_at"),
+            "comprehension": (comprehension_fn, False, "__comprehension_"),
         }[mint_site]
         self._hide_leaked_dynamo_globals()
         g = globals()
@@ -1559,6 +1569,13 @@ from user code:
         self.assertNotIn(installed, (minted, skipped_to))
         self.assertEqual(g[minted], taken)
         self.assertEqual(g[skipped_to], taken)
+        # Every name here ends in its counter index, and each retry must step
+        # that counter rather than decorate the name: the other process mints
+        # from a counter too, so a name reached any other way is not one it will
+        # skip past in turn. The assertions above hold either way.
+        indexes = [int(n.rpartition("_")[2]) for n in (minted, skipped_to, installed)]
+        start = indexes[0]
+        self.assertEqual(indexes, [start, start + 1, start + 2])
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
