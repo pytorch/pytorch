@@ -4401,28 +4401,29 @@ class GuardsStatePickler(FunctionPicklerBase):
         dict is built over ONE shared scope after load (pickle memoizes it)."""
         snapshot: dict[str, Any] | None = self._globals_snapshots.get(id(f_globals))
         if snapshot is None:
-            # The live builtins.__dict__ is exempt from the keep contract
-            # wherever it is bound, not just under __builtins__: a traced
-            # module's own dict also holds it under Dynamo's
-            # __builtins_dict___N alias, the SAME object, and that is the dict
-            # a saved BUILTIN_MATCH guard registers. Keeping it "as read"
-            # would carry all of builtins (~6 KB) per snapshot, so every such
-            # slot travels as a reference resolved in the loading process. It
-            # stays a dict, since a guard may have walked through the slot and
-            # rebakes against whatever is in it; where no guard registered it
-            # at all (caching_precompile drops the BUILTIN_MATCH guard, and
-            # aot_compile's default filter drops every global one) this hands
-            # back the live dict rather than a sentinel, which the same rebake
-            # argument covers. The cost: a guard that walked the slot rebakes
-            # against the loading process's builtins rather than the binding
-            # the compile saw, which is the rule
-            # test_snapshot_keeps_the_save_time_value_of_a_guarded_global pins
-            # for a guarded global.
             snapshot = {}
             # Iterate a COPY: a CleanupHook can pop a name Dynamo installed out
             # of this dict from a weakref callback, and iterating it live while
             # pruning raises RuntimeError when that lands mid-loop.
             for name, value in dict(f_globals).items():
+                # The live builtins.__dict__ is exempt from the keep contract
+                # wherever it is bound, not just under __builtins__: a traced
+                # module's own dict also holds it under Dynamo's
+                # __builtins_dict___N alias, the SAME object, and that is the
+                # dict a saved BUILTIN_MATCH guard registers. Keeping it "as
+                # read" would carry all of builtins (~6 KB) per snapshot, so
+                # every such slot travels as a reference resolved in the
+                # loading process. It stays a dict, since a guard may have
+                # walked through the slot and rebakes against whatever is in
+                # it; where no guard registered it at all (caching_precompile
+                # drops the BUILTIN_MATCH guard, and aot_compile's default
+                # filter drops every global one) this hands back the live dict
+                # rather than a sentinel, which the same rebake argument
+                # covers. The cost: a guard that walked the slot rebakes
+                # against the loading process's builtins rather than the
+                # binding the compile saw, which is the rule
+                # test_snapshot_keeps_the_save_time_value_of_a_guarded_global
+                # pins for a guarded global.
                 if value is builtins.__dict__:
                     snapshot[name] = _live_builtins
                 else:
