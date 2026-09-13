@@ -1155,6 +1155,16 @@
       "Hints": []
     }
   ],
+  "GB3718": [
+    {
+      "Gb_type": "Import alias already bound",
+      "Context": "{alias} for {module_name}: {offender}",
+      "Explanation": "The module alias {alias} for {module_name} is already bound to a {offender} in the globals of the frame being traced.",
+      "Hints": [
+        "Rename one of the two modules whose names mangle onto this alias, or the global of that name."
+      ]
+    }
+  ],
   "GB0074": [
     {
       "Gb_type": "Invoking an nn.Module inside a higher order operator",
