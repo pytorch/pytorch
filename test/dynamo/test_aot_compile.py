@@ -44,6 +44,7 @@ from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_type
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import DynamoCache, load_guards_state, SystemInfo
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.utils import CleanupHook
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
@@ -67,15 +68,14 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
 EPS = torch.tensor(1e-7)
 AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
-# The global-name families the tests here have to account for when a compile
-# binds into its module dict, which for a function defined here is this module's
-# dict; not every family Dynamo can mint. They are listed so a leak does not
-# linger, and because a leftover can collide with a later mint --
-# but only when it is a name that mint tries: the same prefix, at the index the
-# counter is on. The skip loop burns that index, which is what a test
-# pre-binding the next minted name is counting on. A leftover at another prefix,
-# or at an index the mint does not try, burns nothing, and a __compiled_fn name
-# carries a uuid no other counter reproduces.
+# The fixed-prefix families Dynamo mints through unique_id,
+# unique_id_unbound_in and make_compiled_fn_name and binds into the module dict
+# of the function being compiled -- this module's dict, for a function defined
+# here. Not every name a compile can bind: variables/builtin.py mints under the
+# builtin's own __name__, which no literal tuple can enumerate. A leftover
+# matters only when a later mint tries that exact name -- same prefix, at the
+# index the counter is on -- which is what a test pre-binding the next minted
+# name needs.
 _MINTED_PREFIXES = (
     "__builtins_dict__",
     "__compiled_fn",
@@ -399,6 +399,12 @@ class SimpleLinearModule(torch.nn.Module):
 
 
 AOT_POOL_MODE = "sum"
+
+# Two globals bound to the SAME tensor: make_dupe_guard refuses to relate a local
+# source to a global one, so reading both is what gets a DUPLICATE_INPUT guard
+# whose source_b is a GlobalSource.
+AOT_DUPE_A = torch.randn(4, 4)
+AOT_DUPE_B = AOT_DUPE_A
 
 
 def global_rebind_fn(x):
@@ -1548,18 +1554,19 @@ from user code:
         # the test, and in cleanup strip whatever the test added before putting
         # the originals back.
         g = globals()
-        leaked = {k: g.pop(k) for k in [k for k in g if k.startswith(_MINTED_PREFIXES)]}
+        # Disown before popping: the hook that installed each name still owns it
+        # and fires whenever its code object is collected, which after the
+        # update below would take the restored name with it.
+        leaked = {}
+        for k in [k for k in g if k.startswith(_MINTED_PREFIXES)]:
+            CleanupHook.disown(g, k)
+            leaked[k] = g.pop(k)
         preexisting = frozenset(g)
 
         def restore():
-            # A global the test installed carries a CleanupHook that deletes the
-            # name when its code object is dropped, so let those hooks run first:
-            # one firing after the update would take a restored name with it.
-            import gc
-
             torch._dynamo.reset()
-            gc.collect()
             for k in [k for k in g if k not in preexisting]:
+                CleanupHook.disown(g, k)
                 del g[k]
             g.update(leaked)
 
@@ -1778,13 +1785,10 @@ from user code:
         # a captured __builtins_dict___N key, and the __resume_at_* globals
         # CompilePackage.install() re-installs. In process, unique_id is already
         # ahead of any baked-in index, so rewinding the counter and pre-binding
-        # the name the next mint produces puts each site in the same position.
-        # Which name that is comes from the compile, not from a literal:
-        # hardcoding an index goes green covering nothing as soon as anything
-        # else burns an id first, because the retry loop then never runs. The
-        # resume and comprehension names skip forward at their own generation
-        # sites, since install_global_unsafe cannot hand a substitute back to
-        # callers that use the name they passed for more than the install.
+        # the name the next mint produces puts each site in that same position.
+        # The name has to come from the compile: a hardcoded index goes green
+        # covering nothing as soon as anything else burns an id first, because
+        # the skip loop then never runs.
         import itertools
 
         from torch._dynamo import bytecode_transformation
@@ -1818,14 +1822,14 @@ from user code:
 
         def compile_with_taken_names(*names):
             # A fresh counter mints the same sequence of names on every run, so
-            # each phase learns the name the next one pre-binds. The loop drops
-            # every minted-prefix key -- both what a previous phase minted and
-            # the sentinels it pre-bound -- and the binds just below put this
-            # phase's sentinels back, so no minted-prefix binding survives a
-            # phase except by being re-bound in it. _hide_leaked_dynamo_globals
-            # already took the pre-existing ones out of the module dict.
+            # each phase learns the name the next one pre-binds.
             torch._dynamo.reset()
             for k in [k for k in list(g) if k.startswith(_MINTED_PREFIXES)]:
+                # reset() leaves the hook that installed this name still
+                # owning it in _cleanup_owners, and a hook fires whenever its
+                # code object is collected -- after the bind below, that would
+                # pop this phase's sentinel.
+                CleanupHook.disown(g, k)
                 del g[k]
             for name in names:
                 g[name] = taken
@@ -1833,14 +1837,11 @@ from user code:
                 bytecode_transformation, "_unique_id_counter", itertools.count()
             ):
                 compiled = torch.compile(fn, fullgraph=fullgraph, backend="eager")
-                # The skipped-over name must not cost the function its result,
-                # and a later call must be SERVED rather than recompiled -- for
-                # install_global that means the builtin guards evaluate to a hit
-                # through the key the skip landed on, in a module dict that still
-                # carries the other process's binding, and for resume_function
-                # that neither the outer frame nor the resume frame recompiles.
-                # Comparing results alone would not see a guard that missed and
-                # recompiled to the same answer.
+                # A later call must be SERVED rather than recompiled: for
+                # install_global the builtin guards have to hit through the key
+                # the skip landed on, in a module dict that still carries the
+                # other process's binding. Comparing results alone would not see
+                # a guard that missed and recompiled to the same answer.
                 self.assertEqual(compiled(x), expected)
                 with torch._dynamo.config.patch(error_on_recompile=True):
                     self.assertEqual(compiled(x), expected)
@@ -2054,6 +2055,13 @@ from user code:
         self._hide_leaked_dynamo_globals()
         g = globals()
 
+        # Two of the private internals here are load-bearing and two are not: the
+        # _unique_id_counter rewind is the only way in process to put a live
+        # compile on the artifact's exact key name, and _cleanup_owners IS the
+        # ownership under test. Recovering this capture's hooks by diffing
+        # CleanupManager.instance.values, and firing them by hand instead of
+        # waiting for collection, are only means -- any way of running the hooks
+        # this capture registered would serve.
         def with_a_fresh_counter(action):
             # Frees the minted name so the next capture's counter really lands
             # on it, and hands back the hooks that capture registered: a hook
@@ -2169,6 +2177,50 @@ from user code:
             self.assertNotIn("__builtins__", scope)
         self.assertEqual(set(scope) - {name}, added)
 
+    def test_load_refuses_a_non_dict_builtins_binding(self):
+        # guard_globals is the one dict on this path that comes from outside torch,
+        # so a bad __builtins__ in it has to be named: get_builtins_dict would
+        # otherwise raise a bare AttributeError out of Dynamo internals. A module
+        # is the other legal binding and is derived from, not replaced.
+        def fn(x):
+            if isinstance(x, torch.Tensor):
+                return x + 1
+            return x
+
+        x = torch.randn(3, 3)
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_builtin_guards},
+        ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            data = f.read()
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"guard_globals\['__builtins__'\] must be a dict or a module, "
+            r"got NoneType",
+        ):
+            AOTCompiledFunction.deserialize(data, guard_globals={"__builtins__": None})
+
+        # f_globals lands in fn.__globals__, which IS the default guard scope, so
+        # the message has to name the parameter the bad binding arrived by.
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"f_globals\['__builtins__'\] must be a dict or a module, got NoneType",
+        ):
+            AOTCompiledFunction.deserialize(data, f_globals={"__builtins__": None})
+
+        torch._dynamo.reset()
+        scope: dict[str, object] = {"__builtins__": builtins}
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=scope)
+        self.assertEqual(loaded(x), fn(x))
+        self.assertIs(scope["__builtins__"], builtins)
+
     def test_load_seeds_exactly_the_recorded_globals(self):
         # Loading may add only the aliases a kept guard is actually rooted at --
         # the artifact records more than that, and it records a builtins-dict key
@@ -2195,6 +2247,10 @@ from user code:
         guarded = set(import_sources) & set(guards_state.output_graph.global_scope)
         self.assertLess(len(guarded), len(import_sources))
         (kept_alias,) = guarded
+        # Deliberately around AOTCompiledModel.deserialize: it takes no guard
+        # scope at this commit, so the function loader is the only place a
+        # caller-supplied one can be pinned. Resolving a module artifact's scope
+        # from model.forward is two commits up.
         (serialized,) = pickle.loads(data)
         expected = mod(x)
         torch._dynamo.reset()
@@ -2226,6 +2282,59 @@ from user code:
             loaded(mod, x)
         self.assertIn("GuardManager check failed", str(ctx.exception))
         self.assertIn(kept_alias, str(ctx.exception))
+
+    def test_builtins_key_gate_covers_the_other_serializer_channels(self):
+        # The builtins-key gate matches the deserialized guards' own roots plus
+        # guard_on_key_order, while the serializer's pruning scan reads two more
+        # channels: the shape-env sources it substitutes for a ShapeEnvSource
+        # guard, and DUPLICATE_INPUT's source_b, collected in
+        # additional_used_global_vars. Both root at a graph input, never at the
+        # builtins key, so the gate can ignore them -- but nothing fails if a
+        # future guard type starts rooting one there, so pin it on an artifact
+        # that really populates both.
+        from torch._dynamo.source import get_global_source_name
+
+        def fn(x):
+            if isinstance(x, torch.Tensor):
+                return x * 2, AOT_DUPE_A + AOT_DUPE_B
+            return x
+
+        x = torch.randn(5)
+        torch._dynamo.mark_dynamic(x, 0)
+        additional = []
+        serialize_guards = CheckFunctionManager.serialize_guards
+
+        def record(self, *args, **kwargs):
+            # additional_used_global_vars lives on the manager and is never
+            # serialized, so read it off the instance the capture builds.
+            additional.append(set(self.additional_used_global_vars))
+            return serialize_guards(self, *args, **kwargs)
+
+        # enable_cpp_symbolic_shape_guards is what makes shape_env_sources
+        # non-empty at all -- it is filled from the cpp code parts'
+        # source_to_symbol -- so on the default config that half would be vacuous.
+        with (
+            patch.object(CheckFunctionManager, "serialize_guards", record),
+            torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True),
+        ):
+            compiled_fn = torch.compile(
+                fn,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_builtin_guards},
+            ).aot_compile(((x,), {}))
+
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertTrue(builtins_key)
+        shape_env_sources = guards_state.shape_code_parts.shape_env_sources
+        (dupe_globals,) = additional
+        # Both channels really fired, or the two assertions below say nothing.
+        self.assertTrue(shape_env_sources)
+        self.assertIn("AOT_DUPE_A", dupe_globals)
+        shape_globals = {get_global_source_name(s) for s in shape_env_sources}
+        self.assertNotIn(builtins_key, shape_globals)
+        self.assertNotIn(builtins_key, dupe_globals)
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
@@ -2749,11 +2858,8 @@ from user code:
         self.assertEqual(expected[1], actual[1])
 
     def test_graph_device_types_scans_the_whole_graph(self):
-        # The headline property: every device the whole graph names, not the one
-        # the first meta leaf happened to live on. A mixed cpu/cuda graph
-        # reported whichever placeholder came first, so its cuda half bought no
-        # GPU check at load. The meta key here is example_value, the key a
-        # Dynamo capture populates; the graphs below use "val".
+        # example_value is the key a Dynamo capture populates; the graphs below
+        # use "val".
         with FakeTensorMode():
             cpu = torch.empty(2)
             cuda = torch.empty(2, device="cuda")
@@ -2773,9 +2879,7 @@ from user code:
 
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
         # A dynamic-shape capture leads with a SymInt placeholder, which has no
-        # device, so reading only the first meta value reported "cpu" for this
-        # all-accelerator graph -- and "cpu" skips the SystemInfo.CHECK_GPUS
-        # branch entirely, so the artifact loaded on a host with the wrong GPU.
+        # device of its own -- the shape the first graph below imitates.
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             x = torch.empty(2, device="cuda")
@@ -2865,9 +2969,8 @@ from user code:
     def test_graph_device_types_ignores_an_unparsable_device_position(self, spec):
         # A value torch.device rejects names no device rather than aborting an
         # otherwise fine compile: an unknown name raises RuntimeError, an
-        # oversized index ValueError. True never reaches torch.device -- bool is
-        # excluded from the index arm deliberately, because torch.device(True)
-        # raises a TypeError the parse does not catch.
+        # oversized index ValueError. True is deliberately excluded from the
+        # index arm, so it never reaches torch.device at all.
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
         graph.call_method("to", (x, spec))
