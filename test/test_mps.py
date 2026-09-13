@@ -3870,6 +3870,31 @@ class TestMPS(TestCaseMPS):
         helper((100, 300), 1.0)
         helper((100, 300), 0.2)
 
+    # `value=0` used to short-circuit into a copy of `self`, which drops the
+    # non-finite values `tensor1`/`tensor2` still contribute
+    @parametrize("op_name", ["addcmul", "addcdiv"])
+    def test_addc_ops_value_zero(self, op_name):
+        op = getattr(torch, op_name)
+        cpu_x = torch.ones(4)
+        cpu_y = torch.tensor([float("nan"), float("inf"), -float("inf"), 2.0])
+        cpu_z = torch.tensor([1.0, 1.0, 0.0, 2.0])
+        x, y, z = cpu_x.to("mps"), cpu_y.to("mps"), cpu_z.to("mps")
+        self.assertEqual(op(x, y, z, value=0), op(cpu_x, cpu_y, cpu_z, value=0))
+
+    # An `out=` wider than the common dtype must not widen the computation:
+    # CPU computes at the common dtype and casts the result on store
+    @parametrize("op_name", ["addcmul", "addcdiv"])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_addc_ops_out_dtype(self, op_name, out_dtype):
+        op = getattr(torch, op_name)
+        cpu_args = [torch.randn(4, 5, dtype=torch.float16).clamp_min(0.5) for _ in range(3)]
+        mps_args = [t.to("mps") for t in cpu_args]
+        cpu_out = torch.empty(4, 5, dtype=out_dtype)
+        out = torch.empty(4, 5, dtype=out_dtype, device="mps")
+        op(*cpu_args, value=2.5, out=cpu_out)
+        op(*mps_args, value=2.5, out=out)
+        self.assertEqual(out, cpu_out)
+
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_lerp_scalar_weight_dtype(self, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/196067
