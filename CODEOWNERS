@@ -128,11 +128,11 @@
 # /test/expect/TestSparseCompressedDeviceXPU.test_print_SparseCSR_xpu.expect
 # /test/expect/TestSparseMPS.test_print_coalesced_mps_float32.expect
 # /test/expect/TestSparseMPS.test_print_uncoalesced_mps_float32.expect
-# /test/expect/TestSparseMeta.test_print_SparseBSC_float64.expect
-# /test/expect/TestSparseMeta.test_print_SparseBSR_float64.expect
-# /test/expect/TestSparseMeta.test_print_SparseCOO_float64.expect
-# /test/expect/TestSparseMeta.test_print_SparseCSC_float64.expect
-# /test/expect/TestSparseMeta.test_print_SparseCSR_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseBSC_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseBSR_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
 /test/test_sparse.py @amjames @pearu @nikitaved
 /test/test_sparse_csr.py @amjames @pearu @nikitaved
 # /test/test_sparse_semi_structured.py
@@ -428,10 +428,10 @@
 # /test/expect/TestJit.test_pretty_printer-if_one.expect
 # /test/expect/TestJit.test_pretty_printer-if_test.expect
 # /test/expect/TestJit.test_pretty_printer-loop_use_test.expect
-# /test/expect/TestJit.test_pretty_printer-print_weird.expect
-# /test/expect/TestJit.test_pretty_printer-python_op_name.expect
-# /test/expect/TestJit.test_pretty_printer-while_if.expect
-# /test/expect/TestJit.test_pretty_printer-while.expect
+# /test/expect/TestJit.test_pretty_printer-print_weird_test.expect
+# /test/expect/TestJit.test_pretty_printer-python_op_name_test.expect
+# /test/expect/TestJit.test_pretty_printer-while_if_test.expect
+# /test/expect/TestJit.test_pretty_printer-while_test.expect
 # /test/expect/TestPytorchExportModes.test_aten_fallback.expect
 # /test/expect/TestPytorchExportModes.test_onnx_aten.expect
 # /test/expect/TestScript.test_annot_ast_mypy_fn.expect
@@ -456,6 +456,7 @@
 # /test/expect/TestScript.test_torch_dot_tensor_annotation.expect
 # /test/expect/TestTensorBoard.test_audio.expect
 # /test/expect/TestTensorBoard.test_caffe2_simple_cnnmodel.expect
+# /test/expect/TestTensorBoard.test_caffe2_simple_model.expect
 # /test/expect/TestTensorBoard.test_histogram_auto.expect
 # /test/expect/TestTensorBoard.test_histogram_doane.expect
 # /test/expect/TestTensorBoard.test_histogram_fd.expect
@@ -507,7 +508,6 @@
 # /test/test_complex.py
 # /test/test_content_store.py
 # /test/test_dataloader.py
-# /test/test_pin_memory.py
 # /test/test_datapipe.py
 # /test/test_decomp.py
 # /test/test_determination.py
@@ -1119,7 +1119,7 @@
 /torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
 /torch/fx/experimental/symbolic_shapes.py @laithsakka
 /torch/fx/experimental/sym_node.py @laithsakka
-/torch/fx/experimental/recording.py @aorenste
+/torch/fx/experimental/recording.py @laithsakka
 /torch/fx/experimental/proxy_tensor.py @aorenste
 #
 # [compiler_dynamo]
