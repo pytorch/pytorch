@@ -505,6 +505,9 @@ class AOTCompiledFunction:
             guard_scope = self._guard_globals
             if guard_scope is None:
                 guard_scope = self.fn.__globals__
+            # Seeded AFTER forward_callable, never before: on the default path this
+            # IS fn.__globals__, and PyFunction_New caches __builtins__ at creation,
+            # so the __builtins__ written below cannot rewire the bytecode's lookups.
             self._seed_guard_scope(guard_scope, guards_state.output_graph)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
@@ -555,6 +558,17 @@ class AOTCompiledFunction:
             # rebound.
             if "__builtins__" not in guard_scope:
                 guard_scope["__builtins__"] = builtins.__dict__
+            bound = guard_scope["__builtins__"]
+            if not isinstance(bound, (dict, types.ModuleType)):
+                # Name the parameter this dict arrived by: get_builtins_dict
+                # would otherwise raise a bare AttributeError out of Dynamo
+                # internals. The TYPE and not the value -- a repr on a load
+                # failure path runs user code.
+                param = "f_globals" if self._guard_globals is None else "guard_globals"
+                raise TypeError(
+                    f"{param}['__builtins__'] must be a dict or a module, got "
+                    f"{type(bound).__name__}"
+                )
             guard_scope[builtins_key] = get_builtins_dict(guard_scope)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
