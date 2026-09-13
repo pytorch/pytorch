@@ -81,20 +81,18 @@ def _detect_cycles(
 
 
 # Tensor methods whose name is the device type they move to. Not every device
-# type has one (there is no .mps() or .hpu()), and a renamed PrivateUse1
-# backend generates one this tuple does not carry (.npu(), for a backend
-# renamed npu). x.cpu() names cpu as explicitly as x.cuda() names cuda, so it
-# belongs here even though the collapse reads an empty answer as cpu anyway.
+# type has one (there is no .mps() or .hpu()); a renamed PrivateUse1 backend
+# generates one whose name is only known at scan time.
 _DEVICE_NAMING_METHODS = ("cpu", "cuda", "xpu", "ipu", "mtia")
 
 
 def _graph_device_types(graph: Graph | None) -> frozenset[str]:
     """Every device type named by the graph's meta values, by a device-naming
-    method (_DEVICE_NAMING_METHODS) or by a device position (a device= kwarg,
-    .to()'s device argument), except "meta", which is an abstract device rather
-    than a runtime requirement of the host. Values that name no device (a
-    SymInt, None, a dtype) contribute nothing; an empty result means the graph
-    names no device, which is not "cpu".
+    method or by a device position (a device= kwarg, .to()'s device argument),
+    except "meta", which is an abstract device rather than a runtime
+    requirement of the host. Values that name no device (a SymInt, None, a
+    dtype) contribute nothing; an empty result means the graph names no device,
+    which is not "cpu".
     """
     if graph is None:
         return frozenset()
@@ -107,16 +105,13 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
         return None
 
     def _device_from_spec(x: Any) -> str | None:
-        # x sits in a device position -- a device= kwarg or .to()'s device arg
-        # -- so a bare string or a bare index names a device here (Dynamo emits
-        # both: device=0 and x.to(0) reach this as an int, which torch.device
-        # resolves against the accelerator the BUILD provides, a registered
-        # PrivateUse1 backend first, not one this host can currently use).
-        # Autocast device types (_enter_autocast('cuda', ...)) are ordinary
-        # positional args, never a device position, so they cannot reach this
-        # and inject a device no tensor lives on. Not every value parses, so
-        # let torch.device reject: an unknown device name raises RuntimeError,
-        # an index that does not fit int64 raises ValueError.
+        # In a device position a bare string or a bare index names a device,
+        # and Dynamo emits both (device=0, x.to(0)); an index resolves against
+        # the accelerator the build provides, not one this host can use. An
+        # autocast device type is an ordinary positional arg, never a device
+        # position, so it cannot reach here. A value torch.device rejects names
+        # no device rather than aborting the compile: an unknown name raises
+        # RuntimeError, an index too large for int64 raises ValueError.
         if isinstance(x, str) or (isinstance(x, int) and not isinstance(x, bool)):
             try:
                 return torch.device(x).type
@@ -131,23 +126,21 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
         return flat
 
     def _device_specs(node: Node) -> list[Any]:
-        # The device positions this scan reads. Most Dynamo nodes name the
-        # device in their meta already (`output` and the autocast enter/exit
-        # markers do not), so this is what a graph WITHOUT meta is read by. Not
-        # every position that names a device is here: x.type() takes a bare
-        # "torch.cuda.FloatTensor", which names cuda in a string torch.device
-        # does not parse, so a meta-less graph whose only signal is that reads
-        # as no device.
+        # The device positions this scan reads; a graph without meta is read
+        # by these alone. Not every position that names a device is here:
+        # x.type() takes a "torch.cuda.FloatTensor", a string torch.device
+        # does not parse.
         specs: list[Any] = []
         if "device" in node.kwargs:
             specs.append(node.kwargs["device"])
         if node.op == "call_method" and node.target == "to" and len(node.args) >= 2:
-            # args[0] is the tensor; args[1] is .to()'s first argument, which is
-            # a device only in some overloads (x.to(torch.float16) lands here
-            # too, and names no device).
+            # args[1] is a device only in some overloads (x.to(torch.float16)
+            # lands here too, and names no device).
             specs.append(node.args[1])
         return specs
 
+    # The rename can happen after this module is imported, so read it here.
+    naming_methods = (*_DEVICE_NAMING_METHODS, torch._C._get_privateuse1_backend_name())
     devices: set[str] = set()
     for node in graph.nodes:
         for key in ("val", "example_value"):
@@ -157,7 +150,7 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
 
         # x.cuda() and friends name the device in the method itself, so there
         # is no value in a device position to read.
-        if node.op == "call_method" and node.target in _DEVICE_NAMING_METHODS:
+        if node.op == "call_method" and node.target in naming_methods:
             devices.add(node.target)
 
         for obj in _device_specs(node):
@@ -168,8 +161,9 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
 
 
 def _collapse_device_types(device_types: frozenset[str]) -> str:
-    """The single device type both callers record: an accelerator wins over cpu,
-    and naming no device at all reads as cpu, because such a graph lowers to CPU
-    code. Among several accelerators the pick is arbitrary (alphabetical).
+    """The single device type a package or an AOT artifact records: an
+    accelerator wins over cpu, and naming no device reads as cpu, because such
+    a graph lowers to CPU code. Among several accelerators the pick is
+    arbitrary (alphabetical).
     """
     return next((d for d in sorted(device_types) if d != "cpu"), "cpu")
