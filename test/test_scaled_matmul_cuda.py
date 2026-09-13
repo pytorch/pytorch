@@ -748,7 +748,7 @@ class TestFP8Matmul(TestCase):
         if "mps" in device and e5m2_type in (x_dtype, y_dtype):
             raise unittest.SkipTest("MPS has no float8_e5m2")
         x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
-        y_fp8 = torch.eye(size, device=device).to(y_dtype)
+        y_fp8 = torch.eye(size, device=device, dtype=y_dtype)
         if not x_cm:
             x_fp8 = x_fp8.t()
         if not y_cm:
