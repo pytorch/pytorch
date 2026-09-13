@@ -2428,15 +2428,13 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            # Live sys.modules first: the guards this alias roots read
-            # attributes off whatever IMPORT_NAME pushed, which is what
-            # __import__ returned, and _import_module is memoized for the life
-            # of the process, so it can hand back a module that a sys.modules
-            # rebind has since replaced. Binding that one would specialize the
-            # graph on one module object and guard on another.
-            value = sys.modules.get(module_name)
-            if value is None:
-                value = _import_module(module_name)
+            # Not the memoized _import_module: the guards this alias roots
+            # read attributes off whatever IMPORT_NAME pushed, which is what
+            # __import__ returned, i.e. the live sys.modules entry, and a
+            # rebind can have replaced that since _import_module cached its
+            # answer. importlib.import_module returns the live entry and, like
+            # __import__, waits out a module another thread is still executing.
+            value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         if self.package is not None:
@@ -2454,8 +2452,12 @@ class InstructionTranslatorBase(
         # restarts, as does the unconditional write install makes to this name.
         if alias in f_globals:
             bound = f_globals[alias]
+            # __name__ is read out of the instance dict through
+            # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
+            # class-level __getattribute__ (importlib.util._LazyModule imports on
+            # any attribute read) runs inside the trace on the way to a verdict.
             bound_name = (
-                bound.__dict__.get("__name__")
+                object.__getattribute__(bound, "__dict__").get("__name__")
                 if isinstance(bound, types.ModuleType)
                 else None
             )
@@ -2463,24 +2465,27 @@ class InstructionTranslatorBase(
             # os.path is named posixpath, and torch's own BC shim entries are
             # all of that shape -- so recognize a stale module by the name the
             # resolved module answers to as well as by the key. Two module
-            # names mangling onto one alias still raise: their resolved names
-            # differ.
+            # names mangling onto one alias still graph break: their resolved
+            # names differ.
             value_name = (
-                value.__dict__.get("__name__")
+                object.__getattribute__(value, "__dict__").get("__name__")
                 if isinstance(value, types.ModuleType)
                 else None
             )
             accepted = (module_name, value_name) if value_name else (module_name,)
             if bound is not value and bound_name not in accepted:
-                # Named by type, and __name__ read out of __dict__: this raises
-                # out of tracing, and __repr__ and a module's __getattr__ are
-                # both user code.
+                # Named by type, never repr'd: __repr__ is user code too.
                 offender = type(bound).__name__
                 if bound_name is not None:
                     offender = f"{offender} named {bound_name}"
-                raise AssertionError(
-                    f"module alias {alias} for {module_name} is already bound "
-                    f"to a {offender} in the globals of the frame being traced"
+                unimplemented(
+                    gb_type="Import alias already bound",
+                    context=f"{alias} for {module_name}: {offender}",
+                    explanation=f"The module alias {alias} for {module_name} is already "
+                    f"bound to a {offender} in the globals of the frame being traced.",
+                    hints=[
+                        "Rename one of the two modules whose names mangle onto this alias, or the global of that name.",
+                    ],
                 )
         f_globals[alias] = value
         self.output.update_co_names(alias)
@@ -2556,6 +2561,18 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
+            # Before import_source, which binds the result into the traced
+            # frame's globals: a non-module sys.modules entry stays out of them.
+            # pyrefly: ignore [unbound-name]
+            if not isinstance(value, (types.ModuleType, DummyModule)):
+                unimplemented(
+                    gb_type="Bad import result",
+                    # pyrefly: ignore [unbound-name]
+                    context=typestr(value),
+                    explanation="Import result is not a Python module.",
+                    hints=[],
+                )
+
             if level != 0:
                 pkg = self.calc_package()
                 module_name = self.resolve_name(module_name, pkg, level)
@@ -2575,18 +2592,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name]
-        if isinstance(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name, bad-argument-type]
-            self.push(PythonModuleVariable(value, source=source))
-        else:
-            unimplemented(
-                gb_type="Bad import result",
-                # pyrefly: ignore [unbound-name]
-                context=typestr(value),
-                explanation="Import result is not a Python module.",
-                hints=[],
-            )
+        # pyrefly: ignore [unbound-name, bad-argument-type]
+        self.push(PythonModuleVariable(value, source=source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
