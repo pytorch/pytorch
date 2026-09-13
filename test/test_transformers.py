@@ -5248,8 +5248,7 @@ class TestSDPAAccelerator(NNTestCase):
             mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
-            unittest.skip("Reference implementation OOM")
-            return
+            self.skipTest("Reference implementation OOM")
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         seed = 42
@@ -5370,8 +5369,7 @@ class TestSDPAAccelerator(NNTestCase):
             mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
-            unittest.skip("Reference implementation OOM")
-            return
+            self.skipTest("Reference implementation OOM")
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         seed = 42
@@ -5796,8 +5794,7 @@ class TestSDPAAccelerator(NNTestCase):
         if (TEST_WITH_ROCM or TEST_XPU) and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
-            unittest.skip("Reference implementation OOM")
-            return
+            self.skipTest("Reference implementation OOM")
 
         # ROCm now supports 2 different backends for SDPA that require different set up.
         TEST_WITH_CK = False
