@@ -96,6 +96,10 @@ device_type = (
 )
 
 
+# Keep this flat-named and module-level: FX codegen emits a wrap("<name>")
+# preamble for is_wrapped nodes, and a dotted name like "torch.sin" registers
+# in the process-global torch.fx._symbolic_trace._wrapped_fns_to_patch against
+# a globals dict that cannot resolve it, killing every later symbolic_trace.
 def _module_scoped_hash_target(x):
     return x + 1
 
@@ -3696,6 +3700,19 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     act_input_paths=act_input_paths,
                 )
 
+    def _make_wrapped_gm(self, target, cache_hash, example):
+        """cache_hash=None leaves user_cache_hash unset."""
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["example_value"] = example
+        result = graph.call_function(target, (x,))
+        result.meta["example_value"] = example
+        result.meta["is_wrapped"] = True
+        if cache_hash is not None:
+            result.meta["user_cache_hash"] = cache_hash
+        graph.output(result)
+        return GraphModule(torch.nn.Module(), graph)
+
     @functorch_config.patch({"bypass_autograd_cache_key": True})
     def test_fallback_nonce_cache_dirs_are_unique(self):
         def fn(x):
@@ -3886,16 +3903,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     def test_wrapped_user_cache_hash_in_key(self):
         def make_graph(cache_hash, nested):
             example = torch.ones(3)
-            inner_graph = torch.fx.Graph()
-            x = inner_graph.placeholder("x")
-            x.meta["example_value"] = example
-            result = inner_graph.call_function(_opaque_unsupported_function, (x,))
-            result.meta["example_value"] = example
-            result.meta["is_wrapped"] = True
-            if cache_hash is not None:
-                result.meta["user_cache_hash"] = cache_hash
-            inner_graph.output(result)
-            inner = GraphModule(torch.nn.Module(), inner_graph)
+            inner = self._make_wrapped_gm(
+                _opaque_unsupported_function, cache_hash, example
+            )
             if not nested:
                 return inner, [example]
 
@@ -3930,58 +3940,32 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     self._gen_cache_key_from_gm(gm, inputs, config)
 
     def test_wrapped_user_cache_hash_must_be_str(self):
-        # A non-string hash has no stable reduction in the cache key (tensors
-        # reduce to metadata only), so admission must bypass instead of caching
-        # under it. A multi-element tensor also documents that the check runs
-        # before any truthiness test, which would raise on ambiguous bool().
+        # Bypass non-string hashes rather than key them: tensors reduce to
+        # metadata only, silently under-keying. The multi-element tensor also
+        # pins type-checking before truthiness, where bool() would raise.
         example = torch.ones(3)
         for bad_hash in (123, torch.ones(2)):
             with self.subTest(bad_hash=type(bad_hash).__name__):
-                graph = torch.fx.Graph()
-                x = graph.placeholder("x")
-                x.meta["example_value"] = example
-                result = graph.call_function(_opaque_unsupported_function, (x,))
-                result.meta["example_value"] = example
-                result.meta["is_wrapped"] = True
-                result.meta["user_cache_hash"] = bad_hash
-                graph.output(result)
-                gm = GraphModule(torch.nn.Module(), graph)
+                gm = self._make_wrapped_gm(
+                    _opaque_unsupported_function, bad_hash, example
+                )
                 with self.assertRaisesRegex(
                     BypassAOTAutogradCache, "user_cache_hash must be a str"
                 ):
                     check_cacheable(gm)
 
     def test_wrapped_user_cache_hash_empty_falls_through(self):
-        # An empty hash must neither authorize caching (the node still faces
-        # the ordinary cacheability checks) nor raise the non-string bypass,
-        # and it must stay out of the key: a wrapped node with an empty hash
-        # keys identically to one with no hash at all.
         example = torch.ones(3)
 
-        def make_graph(target, cache_hash):
-            graph = torch.fx.Graph()
-            x = graph.placeholder("x")
-            x.meta["example_value"] = example
-            result = graph.call_function(target, (x,))
-            result.meta["example_value"] = example
-            result.meta["is_wrapped"] = True
-            if cache_hash is not None:
-                result.meta["user_cache_hash"] = cache_hash
-            graph.output(result)
-            return GraphModule(torch.nn.Module(), graph)
-
-        # Opaque target: falls through and is rejected on its own demerits.
         with self.assertRaisesRegex(
             BypassAOTAutogradCache,
             r"Unsupported call_function target .*_opaque_unsupported_function",
         ):
-            check_cacheable(make_graph(_opaque_unsupported_function, ""))
+            check_cacheable(
+                self._make_wrapped_gm(_opaque_unsupported_function, "", example)
+            )
 
-        # Cacheable target: admitted on its own merits, and the empty hash is
-        # omitted from collection, so the key matches the hashless graph. The
-        # flat-named module-level target and the cacheable marking follow
-        # test_wrapped_user_cache_hash_is_module_scoped; a dotted name like
-        # "torch.sin" would poison the process-global fx wrap registry.
+        # Empty/absent hashes fall through, so the target must be cacheable.
         target = _module_scoped_hash_target
         marked_cacheable = {f"{target.__module__}.{target.__name__}": "v1"}
         config = self.default_config()
@@ -3989,39 +3973,31 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             "unsafe_marked_cacheable_functions", marked_cacheable
         ):
             empty_key, _ = self._gen_cache_key_from_gm(
-                make_graph(target, ""), [example], config
+                self._make_wrapped_gm(target, "", example), [example], config
             )
             absent_key, _ = self._gen_cache_key_from_gm(
-                make_graph(target, None), [example], config
+                self._make_wrapped_gm(target, None, example), [example], config
             )
-            # Liveness anchor: a non-empty hash on this independently-cacheable
-            # target must still reach the key, so the equality above cannot pass
-            # via a collector that never reads this node's meta at all.
+            # Equality alone would pass if collection skipped this cacheable
+            # target.
             hashed_key, _ = self._gen_cache_key_from_gm(
-                make_graph(target, "nonempty_hash"), [example], config
+                self._make_wrapped_gm(target, "nonempty_hash", example),
+                [example],
+                config,
             )
         self.assertEqual(empty_key, absent_key)
         self.assertNotEqual(hashed_key, absent_key)
 
     def test_wrapped_user_cache_hash_is_module_scoped(self):
-        # Two identical subgraphs; only which one carries the hash differs, and
-        # meta is not part of the serialized graph. A collector that flattened
-        # the hashes and dropped the module path would return ["shared_hash"]
-        # for both and collide here.
+        # Node meta is not serialized, so a collector that dropped the module
+        # path would return ["shared_hash"] for both graphs and collide here.
         #
-        # Both children must be is_wrapped even though only one is hashed. FX
-        # codegen emits a wrap("<global name>") preamble for every is_wrapped
-        # node, that preamble is part of the generated code and therefore part
-        # of the key, so marking only the hashed child would split the keys by
-        # codegen and the collector would never be exercised at all.
+        # Both children must be is_wrapped: FX emits a wrap() preamble per
+        # is_wrapped node into the generated code, so marking only the hashed
+        # child would split the keys by codegen alone and pass vacuously.
         #
-        # The target is a flat-named module-level function on purpose: a dotted
-        # name like "torch.sin" gets registered in the process-global
-        # torch.fx._symbolic_trace._wrapped_fns_to_patch against a globals dict
-        # that cannot resolve it, and every later symbolic_trace in the process
-        # then dies with KeyError. Marking the target cacheable is what lets the
-        # unhashed child pass check_node_safe, since is_wrapped without a hash
-        # falls through to the ordinary cacheability check.
+        # Marking the target cacheable lets the unhashed child pass
+        # check_node_safe.
         target = _module_scoped_hash_target
         marked_cacheable = {f"{target.__module__}.{target.__name__}": "v1"}
 
@@ -4029,16 +4005,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             example = torch.ones(3)
             root = torch.nn.Module()
             for child in ("body_a", "body_b"):
-                inner_graph = torch.fx.Graph()
-                inner_x = inner_graph.placeholder("x")
-                inner_x.meta["example_value"] = example
-                node = inner_graph.call_function(target, (inner_x,))
-                node.meta["example_value"] = example
-                node.meta["is_wrapped"] = True
-                if child == hashed_child:
-                    node.meta["user_cache_hash"] = "shared_hash"
-                inner_graph.output(node)
-                setattr(root, child, GraphModule(torch.nn.Module(), inner_graph))
+                cache_hash = "shared_hash" if child == hashed_child else None
+                setattr(root, child, self._make_wrapped_gm(target, cache_hash, example))
 
             outer_graph = torch.fx.Graph()
             x = outer_graph.placeholder("x")
