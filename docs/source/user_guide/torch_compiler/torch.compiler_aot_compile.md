@@ -111,6 +111,16 @@ result.sum().backward()
 print(model.linear.weight.grad)
 ```
 
+A module can also be compiled for several calls at once:
+`torch.compile(model, fullgraph=True)._aot_compile(inputs)` compiles one graph
+per `ModelInput` and replaces the wrapper's `forward` with an
+`AOTCompiledModel` that dispatches between them on the guards. It serves the
+first input whose guards match the call, and it evaluates the guards of an
+input that called `disable_guard_check()` as well -- unlike the function path,
+opting out here suppresses the failure and not the evaluation. Such an input is
+served only when nothing matched, so one opt-out replaces the "no compiled
+graph matched" error for the whole model.
+
 ## API reference
 
 ### `torch.compile(...).aot_compile(example_inputs)`
@@ -128,11 +138,8 @@ original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
 - `disable_guard_check()` -- Disable runtime guard validation (advanced use).
-  The compiled code then runs whatever it is called with. On a model
-  compiled for several inputs, the artifacts whose guards match are still
-  preferred, and an artifact that has opted out is served only when none of
-  them matches -- which also means one opt-out replaces the "no compiled
-  graph matched" error for the whole model.
+  The compiled function then runs whatever it is called with, without
+  evaluating its guards.
 
 **Requirements:**
 
@@ -157,8 +164,10 @@ Load a previously saved AOT-compiled function from a file.
   read this dict by reference, so a global rebound after loading is seen on
   the next call, and a guarded global the dict lacks fails the guard until
   that name is bound in it -- there is no fallback to the values serialized
-  with the artifact. Loading may insert names of its own, never overwriting an
-  existing key: the Dynamo-generated globals a kept guard is rooted at, and
+  with the artifact. Symbolic-shape guards are the exception: they run as
+  Python lambdas over the globals serialized with the artifact, so this dict
+  does not govern them. Loading may insert names of its own, never overwriting
+  an existing key: the Dynamo-generated globals a kept guard is rooted at, and
   `__builtins__` when it has to build the builtins dict one of those names
   holds. The bytecode does not read this dict: it reads a snapshot, taken at
   load time, of the globals serialized with the artifact with this dict merged
