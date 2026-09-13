@@ -1264,12 +1264,8 @@ class CompilePackage:
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
-        # An __import_* alias someone else bound first may be held BY REFERENCE
-        # by a loaded artifact's guards -- AOTCompiledFunction._seed_guard_scope
-        # seeds those aliases into a live module scope and nothing re-seeds them
-        # -- so uninstall() must leave a binding this package did not create
-        # alone. Only the alias loop opts in; no other name install() writes is
-        # ever seeded that way.
+        # record_only_if_new keeps a name this package did not create out of
+        # the bookkeeping, so uninstall() leaves that binding alone.
         record = not (record_only_if_new and name in module.__dict__)
         module.__dict__[name] = value
         if record:
@@ -1309,6 +1305,13 @@ class CompilePackage:
             )
             with context:
                 module = sys.modules[entry.python_module]
+                # An __import_* alias someone else bound first may be held BY
+                # REFERENCE by a loaded artifact's guards --
+                # AOTCompiledFunction._seed_guard_scope seeds those aliases into
+                # a live module scope and nothing re-seeds them -- so uninstall()
+                # must leave a binding this package did not create alone. The
+                # aliases are the only names install() writes that are ever
+                # seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,

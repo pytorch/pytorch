@@ -1078,7 +1078,7 @@ def add(x, y):
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
-    def test_import_alias_rebind_costs_at_most_a_recompile(self):
+    def test_import_alias_rebind_makes_a_stale_artifact_visible(self):
         # The rebind hands the alias to the live module, so a loaded artifact
         # whose guards read it sees the value the program itself now reads. When
         # the handover changes that value the artifact is stale and its guard
@@ -1129,6 +1129,46 @@ def add(x, y):
             self.assertEqual(fn(*args), loaded_fn(*args))
         finally:
             sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_accepts_a_stale_module_under_an_aliased_key(self):
+        # A sys.modules key need not equal the module's own __name__: os.path is
+        # named posixpath, and torch's own BC shims (torch.distributed._shard.
+        # checkpoint, torch._inductor.template_heuristics.triton) are all such
+        # entries. So the stale module one more handover after an install leaves
+        # in the alias slot has to be recognized by the name the resolved module
+        # answers to, since under such a key that is never the key itself. A
+        # module of some third name still raises: that is what two module names
+        # mangling onto one alias leave behind.
+        key = "torch_test_package_import_alias_shim_key"
+        alias = f"__import_{key}"
+        stale = types.ModuleType("torch_test_package_import_alias_shim_target")
+        stale.VALUE = 2
+        live = types.ModuleType(stale.__name__)
+        live.VALUE = 3
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_shim_key as shim
+
+            return x + shim.VALUE
+
+        try:
+            sys.modules[key] = live
+            fn.__globals__[alias] = stale
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertIs(fn.__globals__[alias], live)
+
+            torch._dynamo.reset()
+            fn.__globals__[alias] = types.ModuleType("some.other.name")
+            with self.assertRaisesRegex(
+                AssertionError, f"alias {alias} for {key}.*named some.other.name"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        finally:
+            sys.modules.pop(key, None)
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
