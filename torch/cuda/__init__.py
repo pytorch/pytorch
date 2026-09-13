@@ -1437,10 +1437,15 @@ def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
 def current_blas_handle():
     r"""Return the ``cublasHandle_t`` pointer for the current device and stream.
 
-    On CUDA, the handle uses cuBLAS's default workspace unless ATen workspace
+    The handle uses the BLAS library's default workspace unless ATen workspace
     caching is explicitly enabled. When caching is disabled, internal ATen
     operations may temporarily bind their own workspace, but restore the default
-    workspace before releasing it. ROCm caches workspaces by default.
+    workspace before releasing it.
+
+    On ROCm the handle is left with no workspace bound, and rocBLAS allocates
+    its own on demand, outside the caching allocator and not during stream
+    capture. Bind one with ``rocblas_set_workspace`` before using the handle
+    inside a captured graph.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()

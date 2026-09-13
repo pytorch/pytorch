@@ -118,10 +118,18 @@ To debug memory errors, set
 hipBLAS workspaces
 ------------------
 
-Unlike CUDA, ROCm continues to cache workspaces by default.
+As on CUDA, ATen allocates a hipBLAS workspace for each operation from the HIP caching allocator and
+releases it when the operation returns. Set ``TORCH_CUBLAS_WORKSPACE_CACHE=1`` to instead retain one
+workspace for each hipBLAS handle and HIP stream, which was the default before PyTorch 2.15.
+Persistent workspaces must not be used when capturing multiple HIP graphs on the same stream.
 
-For each combination of hipBLAS handle and HIP stream, a hipBLAS workspace will be allocated if that
-handle and stream combination executes a hipBLAS kernel that requires a workspace.  In order to
+Handles returned by ``torch.cuda.current_blas_handle()`` have no workspace bound when ATen workspace
+caching is disabled. rocBLAS then allocates its own workspace on demand, outside the HIP caching
+allocator and not during stream capture; bind one with ``rocblas_set_workspace`` before using such a
+handle inside a captured graph.
+
+When caching is enabled, a hipBLAS workspace is allocated for each combination of hipBLAS handle and
+HIP stream that executes a hipBLAS kernel requiring a workspace.  In order to
 avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
 ``torch._C._cuda_clearCublasWorkspaces()`` is called; note that it's the same function for CUDA or
 HIP. The workspace size per allocation can be specified via the environment variable

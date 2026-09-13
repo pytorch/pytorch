@@ -2532,8 +2532,7 @@ if HAS_CUDA_AND_TRITON:
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         @unittest.skipUnless(
-            torch.version.hip is not None
-            or os.environ.get("TORCH_CUBLAS_WORKSPACE_CACHE") == "1",
+            os.environ.get("TORCH_CUBLAS_WORKSPACE_CACHE") == "1",
             "persistent BLAS workspace caching is disabled",
         )
         def test_workspace_allocation_error(self):
