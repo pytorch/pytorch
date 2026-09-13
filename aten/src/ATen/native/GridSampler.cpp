@@ -160,11 +160,10 @@ namespace {
               scalar_t y = grid_ptr_NDHW[grid_sCoor];
               scalar_t z = grid_ptr_NDHW[2 * grid_sCoor];
 
-              scalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
-              scalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
-              scalar_t iz = grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
-
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+                scalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+                scalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
+                scalar_t iz = grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
                 // get corner pixel values from (x, y, z)
                 // for 4d, we used north-east-south-west
                 // for 5d, we add top-bottom
@@ -245,6 +244,9 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+                scalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+                scalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
+                scalar_t iz = grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
                 int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
@@ -260,8 +262,8 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-                // The taps are placed around the unclipped index, so this branch samples at the
-                // raw x, y, z rather than at the clipped ix, iy, iz above. It works in the
+                // The taps are placed around the unclipped index, so this branch samples at
+                // the raw x, y, z and never forms a clipped source index. It works in the
                 // accumulate type: the coefficients and the reflection arithmetic need more
                 // precision than a half carries, and CUDA computes every mode in it.
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
@@ -409,13 +411,12 @@ namespace {
               scalar_t y = grid_ptr_NDHW[grid_sCoor];
               scalar_t z = grid_ptr_NDHW[2 * grid_sCoor];
 
-              // multipliers for gradients on ix, iy, and iz
-              scalar_t gix_mult, giy_mult, giz_mult;
-              scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-              scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
-              scalar_t iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
-
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+                // multipliers for gradients on ix, iy, and iz
+                scalar_t gix_mult, giy_mult, giz_mult;
+                scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+                scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+                scalar_t iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
                 // get corner pixel values from (x, y, z)
                 // for 4d, we used north-east-south-west
                 // for 5d, we add top-bottom
@@ -536,6 +537,11 @@ namespace {
                 gGrid_ptr_NDHW[1] = giy_mult * giy;
                 gGrid_ptr_NDHW[2] = giz_mult * giz;
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+                // multipliers for gradients on ix, iy, and iz
+                scalar_t gix_mult, giy_mult, giz_mult;
+                scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+                scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+                scalar_t iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
                 int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
@@ -551,8 +557,8 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-                // The taps are placed around the unclipped index, so the clipping ix, iy, iz went
-                // through above is undone here; their multipliers are the unnormalize ones.
+                // The taps are placed around the unclipped index, so this branch forms no
+                // clipped source index; the grid multipliers are the unnormalize ones.
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
                 opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];
                 int64_t x_taps[4], y_taps[4], z_taps[4];
