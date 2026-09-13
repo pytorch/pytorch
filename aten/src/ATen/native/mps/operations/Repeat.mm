@@ -130,7 +130,7 @@ Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output
   auto result = at::empty({total}, repeat.options());
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync(mpsStream->queue(), ^() {
+  at::mps::dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
       auto pipelineState = lib.getPipelineStateForFunc(fmt::format("repeat_interleave_{}", scalar_type));
