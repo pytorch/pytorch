@@ -2109,19 +2109,21 @@ from user code:
         # guard_globals is the one dict on this path that comes from outside torch,
         # so a bad __builtins__ in it has to be named: get_builtins_dict would
         # otherwise raise a bare AttributeError out of Dynamo internals. A module
-        # is the other legal binding and is derived from, not replaced.
-        def fn(x):
+        # is the other legal binding and is derived from, not replaced. Calling a
+        # child module roots kept guards at an __import_ alias as well, which is
+        # what lets the last arm see that a refused load wrote nothing.
+        def fn(mod, x):
             if isinstance(x, torch.Tensor):
-                return x + 1
+                return mod(x)
             return x
 
-        x = torch.randn(3, 3)
+        lin, x = torch.nn.Linear(3, 3), torch.randn(3, 3)
         compiled_fn = torch.compile(
             fn,
             fullgraph=True,
             backend="eager",
             options={"guard_filter_fn": keep_builtin_guards},
-        ).aot_compile(((x,), {}))
+        ).aot_compile(((lin, x), {}))
         compiled_fn.save_compiled_function(self.path())
         with open(self.path(), "rb") as f:
             data = f.read()
@@ -2146,8 +2148,26 @@ from user code:
         torch._dynamo.reset()
         scope: dict[str, object] = {"__builtins__": builtins}
         loaded = AOTCompiledFunction.deserialize(data, guard_globals=scope)
-        self.assertEqual(loaded(x), fn(x))
+        self.assertEqual(loaded(lin, x), fn(lin, x))
         self.assertIs(scope["__builtins__"], builtins)
+
+        # The refusal comes before the load writes anything: a key a live
+        # compile's CleanupHook owns keeps its owner, so the hook still takes the
+        # binding back, and no alias is seeded. A pre-bound key is what lets the
+        # load skip re-deriving, which does not excuse the binding.
+        torch._dynamo.reset()
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        pruned = guards_state.output_graph.global_scope
+        self.assertTrue(any(k.startswith("__import_") for k in pruned))
+        scope = {"__builtins__": None}
+        hook = CleanupHook.create(scope, builtins_key, dict(builtins.__dict__))
+        self.addCleanup(CleanupHook.disown, scope, builtins_key)
+        with self.assertRaisesRegex(TypeError, r"guard_globals\['__builtins__'\]"):
+            AOTCompiledFunction.deserialize(data, guard_globals=scope)
+        self.assertEqual(set(scope), {"__builtins__", builtins_key})
+        hook()
+        self.assertNotIn(builtins_key, scope)
 
     def test_load_seeds_exactly_the_recorded_globals(self):
         # Loading may add only the aliases a kept guard is actually rooted at --
