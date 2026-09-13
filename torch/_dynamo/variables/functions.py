@@ -5172,6 +5172,11 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def as_python_constant(self) -> types.GetSetDescriptorType:
         return self.descriptor
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+        return ConstantVariable.create(repr(self.as_python_constant()))
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":

@@ -3,6 +3,7 @@
 
 import collections
 import enum
+import types
 import typing
 import unittest
 
@@ -294,6 +295,48 @@ class TpReprTests(TestCase):
 
         compiled = torch.compile(fn, backend="eager")
         self.assertEqual(compiled(x), repr({"x": x}))
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    def test_mappingproxy_repr_and_str(self, stringify):
+        d = {"descriptor": object.__dict__["__class__"]}
+        proxy = types.MappingProxyType(d)
+
+        def fn(x):
+            return x + 1, stringify(proxy)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+        d["descriptor"] = type.__dict__["__dict__"]
+        self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    def test_mappingproxy_after_dict_mutation_graph_breaks(self, stringify):
+        d = {"a": 1}
+        proxy = types.MappingProxyType(d)
+
+        def fn(x):
+            d["b"] = 2
+            return x + 1, stringify(proxy)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "mapping proxy affected by dictionary mutation",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(4))
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    def test_mappingproxy_cyclic_repr_and_str(self, stringify):
+        def fn(x):
+            d = {}
+            proxy = types.MappingProxyType(d)
+            d["proxy"] = proxy
+            return x + 1, stringify(proxy), stringify(d)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
 
     def test_nn_module_repr(self):
         mod = torch.nn.Sequential(torch.nn.ReLU(), torch.nn.Linear(4, 4))
