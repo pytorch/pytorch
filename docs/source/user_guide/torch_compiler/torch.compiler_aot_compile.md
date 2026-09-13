@@ -120,8 +120,8 @@ the first input whose guards match, and evaluates the guards of an input opted
 out through `model.forward.compiled_results[i].disable_guard_check()` as well:
 opting out here suppresses the failure, not the evaluation, so such an input is
 served on a match like any other, and on the strength of its opt-out alone only
-when nothing matched -- one opt-out replaces the "no compiled graph matched"
-error for the whole model.
+when nothing matched -- one opt-out replaces the
+`No AOT compiled graph matched this call` error for the whole model.
 
 ## API reference
 
@@ -160,9 +160,14 @@ Load a previously saved AOT-compiled function from a file.
   serialized compiled function.
 - **f_globals** (`dict | None`) -- Optional global scope enclosing the
   compiled function, and the scope the kept guards resolve against: it must
-  bind every global they read, with values that satisfy them, which normally
-  means `vars(my_module)` for the module that defined the original function
-  (as in the example below) rather than a dict of a few extra names. Guards
+  bind every global they read, with values that satisfy them. When a kept
+  guard reads a global -- which takes a `guard_filter_fn` that keeps global
+  guards, since the default drops them all -- that means `vars(my_module)` for
+  the module that defined the original function (as in the example below)
+  rather than a dict of a few extra names; under the default filter no kept
+  guard reads a global, so the dict only widens what the bytecode merges over
+  (below) with nothing checking it, and only the names the load cannot
+  otherwise resolve belong in it. Guards
   read this dict by reference, so a global rebound after loading is seen on
   the next call, and a guarded global the dict lacks fails the guard until
   that name is bound in it -- there is no fallback to the values serialized
@@ -232,8 +237,9 @@ with open("scaled_add.pt", "rb") as f:
 
 When the function references user-defined types that cannot be found by the
 deserializer, pass `f_globals` to provide the necessary namespace. The same dict
-is what the kept guards resolve against, so pass the defining module's namespace
-rather than a dict of the missing names alone:
+is what the kept guards resolve against, so an artifact that keeps global guards
+needs the defining module's namespace rather than a dict of the missing names
+alone:
 
 ```python
 with open("my_fn.pt", "rb") as f:
