@@ -1000,7 +1000,38 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function.
+        f_globals: Optional live global scope enclosing the compiled function,
+                   and the scope its kept guards resolve globals against.
+                   Symbolic-shape guards are exempt by default: they install as
+                   Python lambdas over the globals serialized with the
+                   artifact, while an artifact captured under
+                   ``enable_cpp_symbolic_shape_guards`` may resolve their
+                   global operands here instead, like any other guard. Pass
+                   ``vars(mod)`` for the module ``mod`` that DEFINED the
+                   original function rather than a dict of a few extra names:
+                   every global a kept guard reads has to be bound here with a
+                   value that satisfies it, or else the call raises
+                   ``RuntimeError: GuardManager check failed`` rather than
+                   recompiling. Passing ``{}`` is an empty guard scope, not the
+                   same as omitting the argument, which resolves the guards
+                   against the scope rebuilt from the artifact instead. The
+                   dict is held by reference and written into: the load may
+                   add the Dynamo-generated globals a kept guard is rooted at,
+                   and ``__builtins__`` when it has to build the builtins dict
+                   one of those names holds, never overwriting a key it already
+                   binds, and a global rebound in it afterwards is what the
+                   guards check on the next call. The compiled bytecode reads a
+                   load-time snapshot of this dict merged over the globals
+                   serialized with the artifact, so a name this dict omits
+                   still resolves there; on top of that, a global a kept guard
+                   is rooted at is re-read from this dict on every call, so a
+                   rebind the guards ACCEPT -- a same-metadata swap under a
+                   kept ``TENSOR_MATCH``, which checks metadata, not values --
+                   is what the call computes with, while a rebind of a global
+                   no kept guard reads is not seen. That per-call write lands in
+                   globals every call of this artifact shares, so serving one
+                   artifact from several threads hands each call whatever the
+                   last write left there; load one per thread instead.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
@@ -1011,4 +1042,6 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+    return AOTCompiledFunction.deserialize(
+        data, f_globals, external_data, guard_globals=f_globals
+    )
