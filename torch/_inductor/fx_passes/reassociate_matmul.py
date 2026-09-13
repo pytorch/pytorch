@@ -8,9 +8,11 @@ by the ratio of the two inner dimensions.
 """
 
 import logging
+from typing import TypeGuard
 
 import torch
 from torch._dynamo.utils import counters
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ def _static_shape(node: object) -> tuple[int, ...] | None:
     return shape  # type: ignore[return-value]
 
 
-def _is_matmul(node: object, target: object) -> bool:
+def _is_matmul(node: object, target: object) -> TypeGuard[torch.fx.Node]:
     return (
         isinstance(node, torch.fx.Node)
         and node.op == "call_function"
@@ -55,7 +57,7 @@ def _collect_chain(
     cost = 0
     for arg in node.args:
         if _is_matmul(arg, target) and len(arg.users) == 1:
-            sub_cost = _collect_chain(arg, target, leaves, interior)  # type: ignore[arg-type]
+            sub_cost = _collect_chain(arg, target, leaves, interior)
             if sub_cost is None:
                 return None
             cost += sub_cost
@@ -115,7 +117,7 @@ def _chain_root(node: torch.fx.Node) -> bool:
 
 
 def reassociate_matmul(graph: torch.fx.Graph) -> None:
-    handled: set[torch.fx.Node] = set()
+    handled: OrderedSet[torch.fx.Node] = OrderedSet()
     for node in list(graph.nodes):
         if (
             node in handled
