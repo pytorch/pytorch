@@ -2425,28 +2425,44 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = _import_module(module_name)
+            # Live sys.modules first: the guards this alias roots read
+            # attributes off whatever IMPORT_NAME pushed, which is what
+            # __import__ returned, and _import_module is memoized for the life
+            # of the process, so it can hand back a module that a sys.modules
+            # rebind has since replaced. Binding that one would specialize the
+            # graph on one module object and guard on another.
+            value = sys.modules.get(module_name)
+            if value is None:
+                value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
         f_globals = self.output.global_scope
-        # The alias outlives the compile that minted it, and _import_module is
-        # memoized, so a writer that resolves against live sys.modules instead --
-        # CompilePackage.install, or an artifact load seeding a guard scope --
-        # can leave it bound to a different object for the same module. A stale
-        # module is not a name collision: rebind it, and let the guards pin which
-        # object an artifact was built against. The offender is named by type,
-        # never repr'd: this raises out of tracing, where __repr__ is user code.
-        bound = f_globals.get(alias, value)
-        if bound is not value and not (
-            isinstance(bound, types.ModuleType) and bound.__name__ == module_name
-        ):
-            raise AssertionError(
-                f"module alias {alias} for {module_name} is already bound to a "
-                f"{type(bound).__name__} in the globals of the frame being traced"
+        # The alias outlives the compile that minted it, so a later writer that
+        # resolves the name itself -- CompilePackage.install, or an artifact load
+        # seeding a guard scope -- can leave it bound to a module object
+        # sys.modules no longer holds. That is not the name collision this
+        # checks for (two module names still mangle to one alias): rebind it.
+        if alias in f_globals:
+            bound = f_globals[alias]
+            bound_name = (
+                bound.__dict__.get("__name__")
+                if isinstance(bound, types.ModuleType)
+                else None
             )
+            if bound is not value and bound_name != module_name:
+                # Named by type, and __name__ read out of __dict__: this raises
+                # out of tracing, and __repr__ and a module's __getattr__ are
+                # both user code.
+                offender = type(bound).__name__
+                if bound_name is not None:
+                    offender = f"{offender} named {bound_name}"
+                raise AssertionError(
+                    f"module alias {alias} for {module_name} is already bound "
+                    f"to a {offender} in the globals of the frame being traced"
+                )
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
