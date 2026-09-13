@@ -1260,8 +1260,15 @@ class CompilePackage:
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
+        # Record for removal only the names this package created. A name
+        # someone else bound first may be held BY REFERENCE by a loaded
+        # artifact's guards -- AOTCompiledFunction._seed_guard_scope seeds
+        # __import_* aliases into a live module scope and nothing re-seeds
+        # them -- so uninstall() must leave that binding alone.
+        created = name not in module.__dict__
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        if created:
+            self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
