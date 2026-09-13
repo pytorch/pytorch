@@ -85,15 +85,26 @@ def _detect_cycles(
 _DEVICE_NAMING_METHODS = ("cpu", "cuda", "xpu", "ipu", "mtia")
 
 
-def _graph_device_types(graph: Graph | None) -> frozenset[str]:
+def _graph_device_types(
+    graph: Graph | None, _seen: set[int] | None = None
+) -> frozenset[str]:
     """Every device type the graph names -- from a meta value, a device-naming
     method or a device position (a device= kwarg, .to()'s device argument), in
     this graph and in the submodule bodies it reaches through a get_attr --
     except "meta", which is abstract rather than a requirement of the host. An
-    empty result means the graph names no device, which is not "cpu".
+    empty result means the graph names no device, which is not "cpu". A body
+    only set as an attribute, as the saved tensors hooks subgraphs are, is not
+    reached.
     """
     if graph is None:
         return frozenset()
+    # A reused body has one get_attr per call site, so scanning it per node is
+    # exponential in nesting depth, and one reachable from itself never ends.
+    if _seen is None:
+        _seen = set()
+    if id(graph) in _seen:
+        return frozenset()
+    _seen.add(id(graph))
 
     def _device_type(x: Any) -> str | None:
         if isinstance(x, torch.device):
@@ -159,11 +170,14 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
 
         # A HOP body (a cond branch, an invoke_subgraph region) is a submodule
         # this graph only references, and the parent node's meta shows what the
-        # body returned rather than the devices it used.
+        # body returned rather than the devices it used. A get_attr target is a
+        # qualified name, so resolve it one atom at a time as FX does.
         if node.op == "get_attr" and (owner := graph.owning_module) is not None:
-            sub = getattr(owner, node.target, None)  # type: ignore[arg-type]
+            sub: Any = owner
+            for atom in node.target.split("."):
+                sub = getattr(sub, atom, None)
             if isinstance(sub, GraphModule):
-                devices |= _graph_device_types(sub.graph)
+                devices |= _graph_device_types(sub.graph, _seen)
     return frozenset(devices) - {"meta"}
 
 
