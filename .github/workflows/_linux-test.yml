@@ -364,7 +364,13 @@ jobs:
             )
             python3 -m pip install --force-reinstall --no-deps "${TRITON_WHEEL_DIR}"/triton-*.whl
           fi
-          if [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" != "current" ]]; then
+          if [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "pytorch_libdevice" ]] || \
+             [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "no_ftz" ]] || \
+             [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "skip_loss" ]]; then
+            export A10G_BISECT_MODE="${A10G_BISECT_LIBDEVICE_VARIANT}"
+          elif [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "emulate_precision_casts" ]]; then
+            export TORCHINDUCTOR_EMULATE_PRECISION_CASTS=1
+          elif [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" != "current" ]]; then
             LIBDEVICE_CONTROL_DIR="${RUNNER_TEMP}/a10g-bisect-libdevice"
             mkdir -p "${LIBDEVICE_CONTROL_DIR}"
             curl --fail --location --retry 3 \

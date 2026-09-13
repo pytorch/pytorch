@@ -34,6 +34,10 @@ on:
           - old_erff
           - old_powf
           - old_erff_powf
+          - pytorch_libdevice
+          - no_ftz
+          - skip_loss
+          - emulate_precision_casts
           - validation_suite
 
 concurrency:
