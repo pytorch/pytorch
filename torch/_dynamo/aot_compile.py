@@ -1290,7 +1290,14 @@ def _resolve_guard_scope(
             # forward directly, so the scope it recorded is that forward's.
             # external_utils' non-wraps'd wrappers (wrap_dunder_call_ctx_manager's
             # inner, bound by error_on_graph_break, patch_dynamo_config and
-            # disable_nested_graph_breaks) carry no __wrapped__ to follow.
+            # disable_nested_graph_breaks) carry no __wrapped__ to follow. The
+            # test is that one module's identity, not "defined under
+            # torch._dynamo": functools.wraps copies __module__, so inner reports
+            # the forward's; and the wraps'd wrappers of torch._dynamo.decorators
+            # (nonstrict_trace, leaf_function) are applied by the user BEFORE the
+            # capture, which then traces them as its root frame and records
+            # decorators' dict (reaching the user's globals by __import_* alias),
+            # so a load that hopped through them would disagree with it.
             resolved: Any = innermost_fn(forward)
             while getattr(resolved, "__globals__", None) is vars(external_utils):
                 if not hasattr(resolved, "__wrapped__"):
@@ -1301,7 +1308,22 @@ def _resolve_guard_scope(
                         "model.forward instead"
                     )
                 resolved = resolved.__wrapped__
-            return convert_frame.get_traced_fn(resolved)[0].__globals__, None
+            try:
+                traced_fn = convert_frame.get_traced_fn(resolved)[0]
+            except RuntimeError:
+                if resolved is forward:
+                    raise
+                # torch.compile(functools.partial(...)) wraps the partial in
+                # wrap_inline (no source file, not a function), so the unwrap
+                # lands on it; the cannot-resolve advice below would describe
+                # the compile_wrapper, a plain function that resolves fine.
+                return None, (
+                    f"{described} resolves through a Dynamo wrapper to a "
+                    f"{type(resolved).__name__}, which get_traced_fn cannot "
+                    "resolve to a Python function; bind a plain function or "
+                    "bound method as model.forward instead"
+                )
+            return traced_fn.__globals__, None
         except (RuntimeError, AttributeError, AssertionError):
             pass
     return None, (
@@ -1610,31 +1632,31 @@ class AOTCompiledModel:
                     continue
                 self._warned.add((i, kind))
                 if self.compiled_results[i]._guard_check_enabled:
-                    cost = (
-                        "a tree that raises rejects nothing, and a C++ throw out "
-                        "of it leaves its own relational guard state stale, so its "
-                        "next check can reject a call it fits or accept one it "
-                        "does not"
+                    advice = (
+                        f"Fix or drop input [{i}]: a tree that raises rejects "
+                        "nothing, and a C++ throw out of it leaves its own "
+                        "relational guard state stale, so its next check can "
+                        "reject a call it fits or accept one it does not."
                     )
                 else:
                     # The last resort serves an opted-out result whatever its
-                    # guards say, so a stale rejection costs it nothing; what the
-                    # raise costs it is the match the scan can never find.
-                    cost = (
-                        "a tree that raises never matches in the scan, so this "
-                        "opted-out result's graph is reachable only through the "
-                        "last resort, which a raise from any enabled tree withholds"
+                    # guards say, so a stale rejection costs it nothing and the
+                    # report calls it an opt-out, not a defect; what the raise
+                    # costs it is the match the scan can never find.
+                    advice = (
+                        f"Input [{i}] opted out of guard checks, but a tree that "
+                        "raises never matches in the scan, so its graph is "
+                        "reachable only through the last resort, which a raise "
+                        "from any enabled tree withholds."
                     )
                 log.warning(
                     "AOT compiled input [%d]'s guard check raised %s: %s; "
-                    "dispatch served [%d] rather than propagating it. Fix or "
-                    "drop input [%d]: %s.",
+                    "dispatch served [%d] rather than propagating it. %s",
                     i,
                     kind,
                     reason,
                     served,
-                    i,
-                    cost,
+                    advice,
                 )
 
         for i, result in enumerate(self.compiled_results):
@@ -1729,6 +1751,10 @@ class AOTCompiledModel:
         )
         missing_global: AOTCompiledFunction | None = None
         withheld = False
+        # Whether an entry line below quotes a rejection: the re-check is a third
+        # evaluation, and where it raises or accepts instead, the qualifier on
+        # post-throw rejections would describe a line the report never printed.
+        rejected = False
         for i, result in enumerate(self.compiled_results):
             if not result._guard_check_enabled:
                 # Nobody asked about this result's guards, so quoting them would
@@ -1774,6 +1800,7 @@ class AOTCompiledModel:
                     "tree>"
                 )
                 continue
+            rejected = True
             if not reason.verbose_code_parts:
                 # A failing accessor can report no parts at all (a set index past
                 # the end of a shorter set answers GuardDebugInfo(false, 0)), so
@@ -1824,11 +1851,12 @@ class AOTCompiledModel:
                 "belong to the process that compiles the artifacts, which need "
                 "not be the one that loaded them."
             )
-        if raised and not withheld and not answered_first:
+        if raised and not withheld and not answered_first and (rejected or not covered):
             # Not with an opted-out entry reported, whose withheld line has
-            # already said what happened, and not for the empty artifact above,
-            # which has no raise to describe.
-            if covered:
+            # already said what happened; not for the empty artifact above, which
+            # has no raise to describe; and not where dispatch rejected but the
+            # re-check quoted no rejection, since there is no line to qualify.
+            if rejected:
                 # The ModelInput line above stands on post-throw rejections only.
                 tail = (
                     "every rejection above followed a raise from the same tree, "
@@ -1885,10 +1913,13 @@ class AOTCompiledModel:
         are inserted (never overwriting an existing key) so guards rooted at them
         resolve in a process that never traced.
 
-        Only when ``get_traced_fn`` cannot resolve ``model.forward`` to a Python
-        function is there no live scope; guards then resolve against the scope
-        rebuilt from the artifact, where they check nothing useful, and a guard
-        rooted at any global but those aliases and that key warns to say so.
+        There is no live scope only when ``model.forward`` does not resolve to a
+        Python function: ``get_traced_fn`` cannot resolve it, or it is a Dynamo
+        wrapper (a ``torch._dynamo.external_utils`` function) with no wrapped
+        forward to follow to, or one that itself does not resolve; guards then
+        resolve against the scope rebuilt from the artifact, where they check
+        nothing useful, and a guard rooted at any global but those aliases and
+        that key warns to say so, naming the cause.
 
         ``guard_globals``, when supplied, is that scope instead of anything
         resolved from ``model.forward``, so a caller who wants neither the live
