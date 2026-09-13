@@ -4978,6 +4978,29 @@ from user code:
             self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
         self.assertEqual({k for k in activation_globals if k not in preexisting}, set())
 
+    def test_aot_compile_module_deserialize_unwraps_a_compiled_forward(self):
+        # torch.compile(mod.forward) bound back on the instance is a plain
+        # function, eval_frame's functools.wraps'd compile_wrapper, so neither the
+        # OptimizedModule unwrap nor the nn.Module refusal sees it, and its own
+        # __globals__ is eval_frame's namespace. The scope has to come from the
+        # forward it wraps: this module's dict, where the guarded global lives.
+        x = torch.randn(4, 8)
+        data = self._two_input_global_guard_artifact(x)
+        mod = GlobalConfigModule()
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        mod.forward = torch.compile(mod.forward, backend="eager")
+        wrapper = torch.compile(mod, fullgraph=True, backend="eager")
+        wrapper._load_aot_compiled_module(data)
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                self.assertEqual(wrapper(x), expected[mode])
+        for result in wrapper.forward.compiled_results:
+            self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
+            self.assertIs(result._guard_globals, globals())
+
     def test_aot_compile_module_deserialize_takes_a_guard_globals_scope(self):
         # A caller who does not want the defining module's namespace read or
         # written to can pass its own dict. ParentWithChildModule roots a kept

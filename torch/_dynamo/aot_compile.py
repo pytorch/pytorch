@@ -1223,8 +1223,15 @@ def _resolve_guard_scope(
     # attribute keeps winning the lookup), but object.__setattr__ can; refusing
     # here also keeps get_traced_fn's Module branch, whose hook reads can raise
     # AttributeError on an uninitialized module, off this path entirely.
+    from torch._dynamo.eval_frame import innermost_fn
+
     forward = model.forward
     if not isinstance(forward, torch.nn.Module):
+        # As compiling forward would: torch.compile(mod.forward) bound back on
+        # the instance (and a disabled forward) is a functools.wraps'd wrapper
+        # whose own __globals__ is eval_frame's namespace. innermost_fn stops
+        # at a wrapper Dynamo did not mint, which is what the capture traced.
+        forward = innermost_fn(forward)
         try:
             # The __globals__ read is inside the try because get_traced_fn's
             # __self__ branch returns __func__ unchecked.
