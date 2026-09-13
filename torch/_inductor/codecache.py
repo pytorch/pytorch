@@ -4968,6 +4968,7 @@ class PyCodeCache:
         attrs: dict[str, Any] | None = None,
         *,
         set_sys_modules: bool | None = None,
+        cache_module: bool = True,
     ) -> ModuleType:
         if linemap is None:
             linemap = []
@@ -4976,7 +4977,7 @@ class PyCodeCache:
         set_sys_modules = in_toplevel if set_sys_modules is None else set_sys_modules
 
         # we only cache when attrs is None
-        if attrs is None and path in cls.modules_no_attr:
+        if cache_module and attrs is None and path in cls.modules_no_attr:
             mod = cls.modules_no_attr[path]
             if set_sys_modules:
                 sys.modules.setdefault(mod.__name__, mod)
@@ -4992,7 +4993,7 @@ class PyCodeCache:
             for k, v in attrs.items():
                 setattr(mod, k, v)
 
-        if in_toplevel:
+        if in_toplevel and cache_module:
             # we only cache when attrs is None
             if attrs is None:
                 cls.modules_no_attr[path] = mod

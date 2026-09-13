@@ -792,6 +792,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             self.module_cache_key,
             self.module_path,
             set_sys_modules=False,
+            cache_module=False,
         )
         self._benchmark_module = mod
         autotuning_log.debug(
@@ -876,10 +877,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         mod = self._benchmark_module
         self._benchmark_module = None
 
-        cached_mod = PyCodeCache.modules_no_attr.pop(self.module_path, None)
-        if mod is None:
-            mod = cached_mod
-
         if mod is not None:
             kernel = getattr(mod, self.kernel_name, None)
             release_benchmark_artifacts = getattr(
@@ -907,19 +904,13 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                     if close is not None:
                         close()
 
-        PyCodeCache.modules[:] = [
-            module
-            for module in PyCodeCache.modules
-            if getattr(module, "__file__", None) != self.module_path
-        ]
-        PyCodeCache.linemaps.pop(self.module_path, None)
-
     def precompile(self):
         try:
             mod = PyCodeCache.load_by_key_path(
                 self.module_cache_key,
                 self.module_path,
                 set_sys_modules=False,
+                cache_module=False,
             )
             self._benchmark_module = mod
             kernel = getattr(mod, self.kernel_name)
