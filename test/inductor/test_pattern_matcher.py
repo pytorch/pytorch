@@ -1036,6 +1036,19 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 1, 4)
 
+        # Equivalent negative dimensions
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], -1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 4)
+
         # Not all getitems are passed to cat
         def fn(a):
             split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 8, 16], 1)
@@ -1080,6 +1093,21 @@ class TestPatternMatcher(TestCase):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
             split_with_sizes = torch.ops.aten.split_with_sizes.default(
                 cat, [2, 3, 5], 1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, device=GPU_TYPE),
+            torch.randn(2, 3, device=GPU_TYPE),
+            torch.randn(2, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # Equivalent negative dimensions
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], -1
             )
             return [s**2 for s in split_with_sizes]
 
