@@ -111,6 +111,16 @@ result.sum().backward()
 print(model.linear.weight.grad)
 ```
 
+A module can also be compiled for several calls at once:
+`torch.compile(model, fullgraph=True)._aot_compile(inputs)` compiles one graph
+per `ModelInput` and replaces the wrapper's `forward` with an
+`AOTCompiledModel` that dispatches between them on the guards. It serves the
+first input whose guards match the call, and it evaluates the guards of an
+input that called `disable_guard_check()` as well -- unlike the function path,
+opting out here suppresses the failure and not the evaluation. Such an input is
+served only when nothing matched, so one opt-out replaces the "no compiled
+graph matched" error for the whole model.
+
 ## API reference
 
 ### `torch.compile(...).aot_compile(example_inputs)`
@@ -128,6 +138,8 @@ original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
 - `disable_guard_check()` -- Disable runtime guard validation (advanced use).
+  The compiled function then runs whatever it is called with, without
+  evaluating its guards.
 
 **Requirements:**
 
@@ -144,9 +156,27 @@ Load a previously saved AOT-compiled function from a file.
 
 - **file** -- A file-like object (opened in binary read mode) containing the
   serialized compiled function.
-- **f_globals** (`dict | None`) -- Optional global scope for the compiled
-  function. Required when the original function references user-defined types
-  or other non-standard globals.
+- **f_globals** (`dict | None`) -- Optional global scope enclosing the
+  compiled function, and the scope the kept guards resolve against: it must
+  bind every global they read, with values that satisfy them, which normally
+  means `vars(my_module)` for the module that defined the original function
+  (as in the example below) rather than a dict of a few extra names. Guards
+  read this dict by reference, so a global rebound after loading is seen on
+  the next call, and a guarded global the dict lacks fails the guard until
+  that name is bound in it -- there is no fallback to the values serialized
+  with the artifact. Symbolic-shape guards are the exception: they run as
+  Python lambdas over the globals serialized with the artifact, so this dict
+  does not govern them. Loading may insert names of its own, never overwriting
+  an existing key: the Dynamo-generated globals a kept guard is rooted at, and
+  `__builtins__` when it has to build the builtins dict one of those names
+  holds. The bytecode does not read this dict: it reads a snapshot, taken at
+  load time, of the globals serialized with the artifact with this dict merged
+  over them, so a name the dict omits still resolves there. That the two can
+  disagree is a known limitation rather than a contract to rely on: a rebind
+  the guards accept leaves the call computing with the load-time value, so
+  only a rebind they reject changes what the call does, by raising. When
+  omitted, global guards are resolved against the scope rebuilt from the
+  artifact instead, where a rebinding in this process is invisible.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
   that could not be serialized (e.g., `nn.Module` instances). The keys should
@@ -193,7 +223,9 @@ with open("scaled_add.pt", "rb") as f:
 ```
 
 When the function references user-defined types that cannot be found by the
-deserializer, pass `f_globals` to provide the necessary namespace:
+deserializer, pass `f_globals` to provide the necessary namespace. The same dict
+is what the kept guards resolve against, so pass the defining module's namespace
+rather than a dict of the missing names alone:
 
 ```python
 with open("my_fn.pt", "rb") as f:

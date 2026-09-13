@@ -93,7 +93,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .code_context import code_context
 from .codegen import PyCodegen
@@ -2432,9 +2432,20 @@ class InstructionTranslatorBase(
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
         f_globals = self.output.global_scope
-        if not (alias not in f_globals or f_globals[alias] is value):
+        # The alias outlives the compile that minted it, and _import_module is
+        # memoized, so a writer that resolves against live sys.modules instead --
+        # CompilePackage.install, or an artifact load seeding a guard scope --
+        # can leave it bound to a different object for the same module. A stale
+        # module is not a name collision: rebind it, and let the guards pin which
+        # object an artifact was built against. The offender is named by type,
+        # never repr'd: this raises out of tracing, where __repr__ is user code.
+        bound = f_globals.get(alias, value)
+        if bound is not value and not (
+            isinstance(bound, types.ModuleType) and bound.__name__ == module_name
+        ):
             raise AssertionError(
-                "expected alias not in f_globals or f_globals[alias] is value to be true"
+                f"module alias {alias} for {module_name} is already bound to a "
+                f"{type(bound).__name__} in the globals of the frame being traced"
             )
         f_globals[alias] = value
         self.output.update_co_names(alias)
@@ -3537,7 +3548,12 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected resume_inst.target to be true")
             resume_inst = resume_inst.target
 
-        resume_name = unique_id(f"__resume_at_{resume_inst.offset}")
+        # The name is skipped forward here rather than inside
+        # install_global_unsafe, which cannot hand a substitute back to callers
+        # that use the name they passed for more than the install: this one bakes
+        # it into the resume function itself and records it on the package.
+        resume_prefix = f"__resume_at_{resume_inst.offset}"
+        resume_name = unique_id_unbound_in(resume_prefix, self.output.global_scope)
 
         # More locals may have been pruned in the current/leaf frame
         # after the unsupported instruction (e.g. branch).
