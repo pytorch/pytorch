@@ -1001,9 +1001,12 @@ def load_compiled_function(
     Args:
         file: A file-like object containing the serialized compiled function.
         f_globals: Optional live global scope enclosing the compiled function,
-                   and the scope its kept guards resolve globals against --
-                   apart from symbolic-shape guards, which run as Python
-                   lambdas over the globals serialized with the artifact. Pass
+                   and the scope its kept guards resolve globals against.
+                   Symbolic-shape guards are exempt only when they install as
+                   Python lambdas, the default, which read the globals
+                   serialized with the artifact; one compiled to C++
+                   (``enable_cpp_symbolic_shape_guards`` at capture) resolves
+                   its global operands here like any other guard. Pass
                    ``vars(mod)`` for the module ``mod`` that DEFINED the
                    original function rather than a dict of a few extra names:
                    every global a kept guard reads has to be bound here with a
