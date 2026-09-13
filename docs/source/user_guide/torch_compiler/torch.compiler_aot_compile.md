@@ -152,10 +152,10 @@ Load a previously saved AOT-compiled function from a file.
   read this dict by reference, so a global rebound after loading is seen on
   the next call, and a guarded global the dict lacks fails the guard until
   that name is bound in it -- there is no fallback to the values serialized
-  with the artifact. Symbolic-shape guards are exempt only when they install
-  as Python lambdas, the default, which read the globals serialized with the
-  artifact; one compiled to C++ (`enable_cpp_symbolic_shape_guards` at
-  capture) resolves its global operands here like any other guard. Loading may
+  with the artifact. Symbolic-shape guards are exempt by default: they install
+  as Python lambdas over the globals serialized with the artifact, while an
+  artifact captured under `enable_cpp_symbolic_shape_guards` may resolve their
+  global operands here instead, like any other guard. Loading may
   insert names of its own, never overwriting an existing key: the
   Dynamo-generated globals a kept guard is rooted at, and
   `__builtins__` when it has to build the builtins dict one of those names
