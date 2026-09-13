@@ -18,6 +18,21 @@ class TestCustomPinMemory(TestCase):
         self.assertIs(result, batch)
         self.assertEqual(batch.device, "xpu")
 
+    def test_device_varargs(self):
+        class Batch:
+            def __init__(self):
+                self.device = None
+
+            def pin_memory(self, *device):
+                self.device = device
+                return self
+
+        batch = Batch()
+        result = pin_memory(batch, "xpu")
+
+        self.assertIs(result, batch)
+        self.assertEqual(batch.device, ("xpu",))
+
     def test_legacy_no_argument(self):
         class Batch:
             def __init__(self):
