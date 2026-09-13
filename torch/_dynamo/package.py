@@ -999,8 +999,8 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        # Every device type the graphs compiled into this package named.
+        self._device_types: frozenset[str] = frozenset()
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -1176,8 +1176,10 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        devices = _graph_device_types(graph)
-        self._device_type = _collapse_device_types(devices)
+        # One call per compiled frame, and a package spans frames (a graph
+        # break adds a resume code), so accumulate: a cpu-only resume frame
+        # must not erase the accelerator an earlier frame named.
+        self._device_types |= _graph_device_types(graph)
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
@@ -1398,7 +1400,7 @@ class CompilePackage:
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=_collapse_device_types(self._device_types),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
