@@ -1246,14 +1246,15 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
     # so skip exactly the class it was installed on and take the next __call__
     # the MRO offers, which is the one that delegation reaches. Skipping that
     # class rather than starting the walk past it is what keeps an override
-    # sitting AHEAD of it: parametrize.py:384-390, _fsdp_init.py:426-430 and
-    # replicate.py:248 rebind __class__ to a type(name, (Wrapper, cls), ...)
-    # after the trace, so type(model) is no longer the class FX wrapped and its
-    # bases carry both. cls_call being None does not by itself mean there is no
+    # sitting AHEAD of it visible: FSDP's and replicate's wrapping rebind
+    # __class__ to a type(name, (Wrapper, cls), ...) after the trace, so
+    # type(model) is no longer the class FX wrapped and its bases carry both
+    # (parametrize subclasses the traced class directly, with no wrapper base).
+    # cls_call being None does not by itself mean there is no
     # override either: a GraphModule subclass that defines __call__ carries it
     # on a base, where the delegation finds it.
     # _wrapped_call, .cls and .cls_call are private to torch/fx/graph_module.py
-    # (_WrappedCall at :453, installed at :1000-1003); a rename there turns this
+    # (_WrappedCall, installed by recompile); a rename there turns this
     # back into a warning on every GraphModule, which
     # test_aot_compile_module_fx_call_wrapper_is_not_warned_about catches.
     fx_wrapper = getattr(type(model), "_wrapped_call", None)
