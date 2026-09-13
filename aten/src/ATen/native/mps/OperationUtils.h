@@ -407,7 +407,7 @@ struct MPSGraphCache {
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
@@ -425,7 +425,7 @@ struct MPSGraphCache {
   }
 
   void clear() {
-    dispatch_sync(serialQueue_, ^() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       for (const auto& i : cache_) {
         delete i.second.cachedGraph_;
       }
@@ -727,7 +727,7 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
     auto cplState = getPipelineStateForFunc(kernel_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
 
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor}, mpsStream);
