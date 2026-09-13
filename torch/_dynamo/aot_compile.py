@@ -56,7 +56,11 @@ _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
 # kept guard is rooted at, so a KeyError on one reports a gap in that seeding;
 # the last embeds id() of a dict in the tracing process, so no module's vars()
 # in a loading process holds it. None of the three is a name the advice below
-# can send a caller to define.
+# can send a caller to define. The list is complete because a report here needs
+# a serializable guard rooted at a GlobalSource on the name: every other minted
+# family builds no Source (the codegen-only installs) or a guard type in
+# UNSUPPORTED_SERIALIZATION_GUARD_TYPES, which ___unnamed_scope's was not -- so
+# moving a type off that list means re-checking this one.
 _MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", "___unnamed_scope")
 
 
@@ -502,7 +506,7 @@ def atomic_write_binary(file_path: str, data: bytes):
     os.replace(temp_path, file_path)
 
 
-def _guard_source_globals(output_graph: Any) -> set[str]:
+def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     """The global names a kept guard's own originating_source IS."""
     # A guard certifies its own source, not the object that source is reached
     # through, so a CHAINED source does not count: a TENSOR_MATCH on
@@ -1158,13 +1162,18 @@ class ModelInput:
 # The redirect's artifact takes the module as its first argument only on the
 # _wrapped_call_impl branch of OptimizedModule._initialize; the wrap_inline branch
 # it takes for config.wrap_top_frame or a skipped model.forward closes over the
-# module instead, so measured, passing it there fails len(L['args']) == 1.
+# module instead, so measured, passing it there fails len(L['args']) == 1. What
+# decides that skip is the FILE model.forward is DEFINED in -- _forward_has_skip_rule
+# is trace_rules.check(mod.forward) -- and not what the class is, so the clause
+# states that rule rather than naming stock torch.nn modules: measured, a subclass
+# of nn.Linear that does not override forward is skipped too.
 _REDIRECT_CALL = (
-    "call the artifact it returns with the module as its first argument -- "
-    "unless that capture wrapped the module rather than its __call__, which "
-    "config.wrap_top_frame or a model.forward dynamo skips (every stock "
-    "torch.nn module) makes it do, in which case it takes only the forward "
-    "arguments"
+    "call the artifact it returns with the module as its first argument if you "
+    "define forward yourself; if forward instead comes from torch.nn -- "
+    "inheriting it unoverridden counts, since dynamo decides on the file "
+    "forward is defined in rather than on the class -- or config.wrap_top_frame "
+    "is set, that capture wrapped the module rather than its __call__ and the "
+    "artifact takes only the forward arguments"
 )
 
 
@@ -1248,34 +1257,43 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
     # Eager dispatches through type(model).__call__ while the artifact calls what
     # forward compiled to, so an overridden __call__ is dropped just like a hook
     # -- and no hook dict records it, so the lists above see nothing to report.
-    # The probe is that same type lookup: an instance attribute named __call__ is
-    # not an override, because CPython resolves a special method on the type, so
-    # eager ignores it too and the artifact matches.
-    call = type(model).__call__
+    # The probe is that same type lookup, walked over the MRO: an instance
+    # attribute named __call__ is not an override, because CPython resolves a
+    # special method on the type, so eager ignores it too and the artifact
+    # matches.
     # fx.GraphModule installs a wrapper as its per-instance class's __call__ on
-    # every recompile, so that lookup alone reports an override for every one of
+    # every recompile, so a bare lookup reports an override for every one of
     # them, ExportedProgram.module() included. With no class __call__ to wrap,
-    # the wrapper only prettifies tracebacks and delegates to super(cls, obj), so
-    # resolve to the next __call__ on the MRO instead. cls_call being None does
-    # not by itself mean there is no override: a GraphModule subclass that
-    # defines __call__ carries it on a base, where the delegation finds it.
+    # the wrapper only prettifies tracebacks and delegates to super(cls, obj),
+    # so skip exactly the class it was installed on and take the next __call__
+    # the MRO offers, which is the one that delegation reaches. Skipping that
+    # class rather than starting the walk past it is what keeps an override
+    # sitting AHEAD of it: parametrize.py:384-390, _fsdp_init.py:426-430 and
+    # replicate.py:248 rebind __class__ to a type(name, (Wrapper, cls), ...)
+    # after the trace, so type(model) is no longer the class FX wrapped and its
+    # bases carry both. cls_call being None does not by itself mean there is no
+    # override either: a GraphModule subclass that defines __call__ carries it
+    # on a base, where the delegation finds it.
     # _wrapped_call, .cls and .cls_call are private to torch/fx/graph_module.py
     # (_WrappedCall at :453, installed at :1000-1003); a rename there turns this
     # back into a warning on every GraphModule, which
     # test_aot_compile_module_fx_call_wrapper_is_not_warned_about catches.
     fx_wrapper = getattr(type(model), "_wrapped_call", None)
-    if getattr(fx_wrapper, "cls", None) is type(model) and (
-        getattr(fx_wrapper, "cls_call", None) is None
-    ):
-        bases = type(model).__mro__[1:]
-        inherited = next(
-            (vars(c)["__call__"] for c in bases if "__call__" in vars(c)), None
-        )
-        # Reaching here means type(model) is a GraphModule subclass, so nn.Module
-        # is among those bases and defines __call__ in its own vars: the default
-        # is unreachable, and only keeps a StopIteration out of a warning helper.
-        if inherited:
-            call = inherited
+    fx_wrapped_cls = (
+        getattr(fx_wrapper, "cls", None)
+        if getattr(fx_wrapper, "cls_call", None) is None
+        else None
+    )
+    # nn.Module defines __call__ in its own vars, so the default is unreachable,
+    # and only keeps a StopIteration out of a warning helper.
+    call = next(
+        (
+            vars(c)["__call__"]
+            for c in type(model).__mro__
+            if "__call__" in vars(c) and c is not fx_wrapped_cls
+        ),
+        torch.nn.Module.__call__,
+    )
     if call is not torch.nn.Module.__call__:
         log.warning(
             "%s overrides __call__; the AOT compiled forward runs what "
