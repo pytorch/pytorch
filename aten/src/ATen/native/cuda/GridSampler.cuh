@@ -3,6 +3,8 @@
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/GridSamplerUtils.h>
 
+#include <limits>
+
 namespace at::native {
 
 using detail::GridSamplerInterpolation;
@@ -395,15 +397,18 @@ void resolve_cubic_taps(
   if (coeffs_grad != nullptr) {
     get_cubic_coefficients_grad<scalar_t>(coeffs_grad, coord - base);
   }
+  const scalar_t index_limit =
+      static_cast<scalar_t>(std::numeric_limits<index_t>::max());
   #pragma unroll 4
   for (int i = 0; i < 4; ++i) {
-    // the comparison decides, not the cast: a coordinate that is not
-    // finite fails both sides, where converting it is undefined
     const scalar_t tap = compute_coordinates_sized(
         base - 1 + i, size, padding_mode, align_corners);
-    indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
+    // the comparison guards the cast: a coordinate that is not finite, or
+    // past the index type, fails it. The extent is exact only as an integer
+    const index_t index = (tap >= 0 && tap < index_limit)
         ? static_cast<index_t>(tap)
         : static_cast<index_t>(-1);
+    indices[i] = index < size ? index : static_cast<index_t>(-1);
   }
 }
 

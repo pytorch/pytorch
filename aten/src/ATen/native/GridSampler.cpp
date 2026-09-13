@@ -9,6 +9,8 @@
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <c10/util/irange.h>
 
+#include <limits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -73,11 +75,8 @@ namespace {
   // part, the index each tap reads at, and, when `coeffs_grad` is given, the derivative the grid
   // gradient needs. The taps sit around the UNCLIPPED index; a clipped one would place them around
   // the wrong voxel. A tap the padding drops takes a negative index and contributes a zero value
-  // while keeping its coefficient, which is what get_value_bounded does in 4-D. The bounds are
-  // taken on the coordinate where 4-D takes them on the truncated index; the two agree because
-  // compute_coordinates sends an integer to an integer in every padding mode. Where a scalar_t
-  // runs out of integers the bound stays conservative: it drops taps at the top of an extent
-  // rather than admitting one past the end.
+  // while keeping its coefficient, which is what get_value_bounded does in 4-D. The bound is
+  // taken on the truncated index, as 4-D takes it.
   template <typename scalar_t, typename index_t>
   static inline void resolve_cubic_taps(
       scalar_t coord,
@@ -92,14 +91,17 @@ namespace {
     if (coeffs_grad != nullptr) {
       get_cubic_coefficients_grad<scalar_t>(coeffs_grad, coord - base);
     }
+    const scalar_t index_limit =
+        static_cast<scalar_t>(std::numeric_limits<index_t>::max());
     for (const auto i : c10::irange(4)) {
       const scalar_t tap =
           compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
-      // the comparison decides, not the cast: a coordinate that is not finite fails
-      // both sides, where converting it is undefined
-      indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
+      // the comparison guards the cast: a coordinate that is not finite, or past the
+      // index type, fails it. The extent is exact only as an integer
+      const index_t index = (tap >= 0 && tap < index_limit)
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
+      indices[i] = index < size ? index : static_cast<index_t>(-1);
     }
   }
 

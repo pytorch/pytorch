@@ -11940,6 +11940,20 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(got.dtype, dtype)
             self.assertEqual(got.double(), want, rtol=1e-2, atol=0)
 
+    @parametrize_test("size", [2 ** 24 + 1, 2 ** 53 + 1])
+    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_3d_bicubic_last_voxel_of_a_wide_axis(self, device, size):
+        # Neither size is a float32, and the second is not a double: converted, the extent
+        # equals the last valid index, which a bound taken in that type drops. The view
+        # stores a single element.
+        volume = torch.ones(1, 1, 1, 1, 1, device=device).expand(1, 1, 1, 1, size)
+        grid = torch.tensor([[[[[1.0, 0.0, 0.0]]]]], device=device)
+        for padding_mode in ('zeros', 'border', 'reflection'):
+            out = F.grid_sample(volume, grid, mode='bicubic', padding_mode=padding_mode,
+                                align_corners=True)
+            self.assertEqual(out.item(), 1.0)
+
     @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
     @parametrize_test("wrt", ["input", "grid"])
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
