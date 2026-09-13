@@ -2462,6 +2462,40 @@ from user code:
         # evaluation, so the rescue cost exactly one more evaluation.
         self.assertEqual(compares, 2)
 
+    def test_module_dispatch_rechecks_an_opted_out_result_whose_tree_accepts(self):
+        # The same false rejection of [1], with both results opted out. A
+        # re-check that skipped opted-out results would leave the call to the
+        # last resort, which serves the FIRST opted-out result: [0], whose
+        # L['mode'] == 0 guard genuinely fails this call.
+        mod = ModeBranchGlobalModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(3, 3)
+        model._aot_compile(
+            [
+                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
+                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
+            ]
+        )
+        for result in model.forward.compiled_results:
+            result.disable_guard_check()
+        g = globals()
+        probe = CountedKey("AOT_BRANCH_SCALE", misses=1)
+        saved = g.pop("AOT_BRANCH_SCALE")
+        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
+        self.addCleanup(g.pop, probe, None)
+        g[probe] = saved
+        out = model(x, 1)
+        compares = probe.compares
+        self.assertEqual(out, x * saved)
+        # The second evaluation is the re-check reading [1]'s global again; the
+        # last resort would have served [0] without one.
+        self.assertEqual(compares, 2)
+
     def test_no_match_message_when_a_guard_answers_inconsistently(self):
         # Both dispatch passes ran [1]'s whole tree and both rejected the call,
         # so an accept while the report asks why contradicts them rather than
@@ -5713,9 +5747,10 @@ from user code:
         # load must resolve global guards against it rather than fall back to the
         # scope rebuilt from the artifact. A LIFTED global is what makes the two
         # distinguishable -- it is serialized with the artifact, so the rebuilt
-        # scope binds it and a guard rooted at it would pass on the baked-in
-        # value. A specialized global, as in the arm above, is absent from both
-        # scopes and fails the guard either way.
+        # scope binds it and the failure changes shape: the fallback's TENSOR_MATCH
+        # trips on the serialized FakeTensor's type, where this gate reports the
+        # name as missing. A specialized global, as in the arm above, is absent
+        # from both scopes and fails the guard either way.
         def fn(x):
             return x * EPS
 
@@ -5737,8 +5772,8 @@ from user code:
         torch._dynamo.reset()
         with open(self.path(), "rb") as f:
             loaded = AOTCompiledFunction.deserialize(f.read(), guard_globals={})
-        # The rebuilt scope does bind EPS, so refusing is a choice this gate makes
-        # and not the only answer available.
+        # The rebuilt scope does bind EPS (as a FakeTensor), so the KeyError below
+        # is this gate's answer and not the fallback's type-mismatch failure.
         self.assertIn("EPS", loaded.fn.__globals__)
         with self.assertRaisesRegex(RuntimeError, r"KeyError on G\['EPS'\]"):
             loaded(x)
@@ -6836,8 +6871,9 @@ from user code:
         self.assertEqual(_graph_device_types(gm.graph), frozenset())
 
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
-        # A dynamic-shape capture leads with a SymInt placeholder, which has no
-        # device of its own -- the shape the first graph below imitates.
+        # A dynamic-shape capture can lead with a SymInt placeholder -- it does
+        # under the default config; the test harness canonicalizes tensors first --
+        # which has no device of its own, the shape the first graph below imitates.
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             x = torch.empty(2, device="cuda")
