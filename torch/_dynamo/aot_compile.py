@@ -1577,31 +1577,31 @@ class AOTCompiledModel:
                     continue
                 self._warned.add((i, kind))
                 if self.compiled_results[i]._guard_check_enabled:
-                    cost = (
-                        "a tree that raises rejects nothing, and a C++ throw out "
-                        "of it leaves its own relational guard state stale, so its "
-                        "next check can reject a call it fits or accept one it "
-                        "does not"
+                    advice = (
+                        f"Fix or drop input [{i}]: a tree that raises rejects "
+                        "nothing, and a C++ throw out of it leaves its own "
+                        "relational guard state stale, so its next check can "
+                        "reject a call it fits or accept one it does not."
                     )
                 else:
                     # The last resort serves an opted-out result whatever its
-                    # guards say, so a stale rejection costs it nothing; what the
-                    # raise costs it is the match the scan can never find.
-                    cost = (
-                        "a tree that raises never matches in the scan, so this "
-                        "opted-out result's graph is reachable only through the "
-                        "last resort, which a raise from any enabled tree withholds"
+                    # guards say, so a stale rejection costs it nothing and the
+                    # report calls it an opt-out, not a defect; what the raise
+                    # costs it is the match the scan can never find.
+                    advice = (
+                        f"Input [{i}] opted out of guard checks, but a tree that "
+                        "raises never matches in the scan, so its graph is "
+                        "reachable only through the last resort, which a raise "
+                        "from any enabled tree withholds."
                     )
                 log.warning(
                     "AOT compiled input [%d]'s guard check raised %s: %s; "
-                    "dispatch served [%d] rather than propagating it. Fix or "
-                    "drop input [%d]: %s.",
+                    "dispatch served [%d] rather than propagating it. %s",
                     i,
                     kind,
                     reason,
                     served,
-                    i,
-                    cost,
+                    advice,
                 )
 
         for i, result in enumerate(self.compiled_results):
@@ -1696,6 +1696,10 @@ class AOTCompiledModel:
         )
         missing_global: AOTCompiledFunction | None = None
         withheld = False
+        # Whether an entry line below quotes a rejection: the re-check is a third
+        # evaluation, and where it raises or accepts instead, the qualifier on
+        # post-throw rejections would describe a line the report never printed.
+        rejected = False
         for i, result in enumerate(self.compiled_results):
             if not result._guard_check_enabled:
                 # Nobody asked about this result's guards, so quoting them would
@@ -1741,6 +1745,7 @@ class AOTCompiledModel:
                     "tree>"
                 )
                 continue
+            rejected = True
             if not reason.verbose_code_parts:
                 # A failing accessor can report no parts at all (a set index past
                 # the end of a shorter set answers GuardDebugInfo(false, 0)), so
@@ -1791,11 +1796,12 @@ class AOTCompiledModel:
                 "belong to the process that compiles the artifacts, which need "
                 "not be the one that loaded them."
             )
-        if raised and not withheld and not answered_first:
+        if raised and not withheld and not answered_first and (rejected or not covered):
             # Not with an opted-out entry reported, whose withheld line has
-            # already said what happened, and not for the empty artifact above,
-            # which has no raise to describe.
-            if covered:
+            # already said what happened; not for the empty artifact above, which
+            # has no raise to describe; and not where dispatch rejected but the
+            # re-check quoted no rejection, since there is no line to qualify.
+            if rejected:
                 # The ModelInput line above stands on post-throw rejections only.
                 tail = (
                     "every rejection above followed a raise from the same tree, "
