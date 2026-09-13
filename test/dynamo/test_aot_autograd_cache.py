@@ -3929,6 +3929,28 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 ):
                     self._gen_cache_key_from_gm(gm, inputs, config)
 
+    def test_wrapped_user_cache_hash_must_be_str(self):
+        # A non-string hash has no stable reduction in the cache key (tensors
+        # reduce to metadata only), so admission must bypass instead of caching
+        # under it. A multi-element tensor also documents that the check runs
+        # before any truthiness test, which would raise on ambiguous bool().
+        example = torch.ones(3)
+        for bad_hash in (123, torch.ones(2)):
+            with self.subTest(bad_hash=type(bad_hash).__name__):
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                x.meta["example_value"] = example
+                result = graph.call_function(_opaque_unsupported_function, (x,))
+                result.meta["example_value"] = example
+                result.meta["is_wrapped"] = True
+                result.meta["user_cache_hash"] = bad_hash
+                graph.output(result)
+                gm = GraphModule(torch.nn.Module(), graph)
+                with self.assertRaisesRegex(
+                    BypassAOTAutogradCache, "user_cache_hash must be a str"
+                ):
+                    check_cacheable(gm)
+
     def test_wrapped_user_cache_hash_is_module_scoped(self):
         # Two identical subgraphs; only which one carries the hash differs, and
         # meta is not part of the serialized graph. A collector that flattened

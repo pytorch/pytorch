@@ -213,6 +213,27 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
     return False
 
 
+def _validated_user_cache_hash(node: Node) -> str | None:
+    """Return the user_cache_hash that authorizes caching this wrapped node.
+
+    Admission (check_node_safe) and key collection
+    (_collect_wrapped_user_cache_hashes) must apply the same rule: a missing
+    or empty hash returns None so the node falls through to the ordinary
+    cacheability checks, and a non-string hash bypasses because it has no
+    stable reduction in the cache key (e.g. tensors reduce to metadata only).
+    """
+    if not node.meta or not node.meta.get("is_wrapped", False):
+        return None
+    cache_hash = node.meta.get("user_cache_hash")
+    if cache_hash is None:
+        return None
+    if not isinstance(cache_hash, str):
+        raise BypassAOTAutogradCache(
+            f"user_cache_hash must be a str, got {type(cache_hash).__name__}"
+        )
+    return cache_hash or None
+
+
 def check_node_safe(node: Node) -> None:
     """
     Checks that the node only uses supported operators. We are starting with very
@@ -312,7 +333,7 @@ def check_node_safe(node: Node) -> None:
             # This is fx.wrap function
             # By default we BypassAOTAutogradCache for unknown functions,
             # But if user explicitly specified cache hash - allow caching it.
-            if node.meta.get("user_cache_hash", None):
+            if _validated_user_cache_hash(node) is not None:
                 return
         if isinstance(node.target, str):
             raise AssertionError(
@@ -451,15 +472,13 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
 
 def _collect_wrapped_user_cache_hashes(
     gm: torch.fx.GraphModule,
-) -> list[tuple[str, list[object]]]:
+) -> list[tuple[str, list[str]]]:
     hashes_by_module = []
     for module_name, module in _iter_named_graph_modules(gm):
-        hashes: list[object] = []
+        hashes: list[str] = []
         for node in module.graph.nodes:
-            # Keep user_cache_hash truthiness aligned with check_node_safe.
-            if node.meta.get("is_wrapped", False) and (
-                cache_hash := node.meta.get("user_cache_hash")
-            ):
+            cache_hash = _validated_user_cache_hash(node)
+            if cache_hash is not None:
                 hashes.append(cache_hash)
         if hashes:
             hashes_by_module.append((module_name, hashes))
