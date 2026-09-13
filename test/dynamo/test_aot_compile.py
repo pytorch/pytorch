@@ -2184,8 +2184,9 @@ from user code:
         self.assertEqual(_graph_device_types(gm.graph), frozenset())
 
     def test_graph_device_types_ignores_placeholders_without_a_device(self):
-        # A dynamic-shape capture leads with a SymInt placeholder, which has no
-        # device of its own -- the shape the first graph below imitates.
+        # A dynamic-shape capture can lead with a SymInt placeholder -- it does
+        # under the default config; the test harness canonicalizes tensors first --
+        # which has no device of its own, the shape the first graph below imitates.
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             x = torch.empty(2, device="cuda")
