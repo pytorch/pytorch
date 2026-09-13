@@ -470,6 +470,9 @@ def generic_repr(
     if tp_repr is not None:
         obj_id = id(obj)
         if obj_id in _repr_running:
+            if obj_type is types.MappingProxyType:
+                # mappingproxy delegates cycle detection to its underlying mapping.
+                return obj.tp_repr_impl(tx)
             sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
             if obj_type in sentinel:
                 return ConstantVariable.create(sentinel[obj_type])
