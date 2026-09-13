@@ -103,11 +103,14 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
 
     def _device_from_spec(x: Any) -> str | None:
         # A bare string or index in a device position names a device, and
-        # Dynamo emits both (device=0, x.to(0)); an index resolves against the
-        # accelerator the build provides, not one this host can use. bool is
-        # excluded because torch.device(True) raises a TypeError this does not
-        # catch; a value torch.device rejects names no device rather than
-        # aborting the compile.
+        # Dynamo emits both (device=0, x.to(0)); a value torch.device rejects
+        # names no device rather than aborting the compile, and bool is kept out
+        # of the index arm because torch.device rejects it with a TypeError this
+        # does not catch. An index carries no device type of its own:
+        # deviceFromLong resolves it through at::getAccelerator(true), the
+        # accelerator of the process doing the compile and never the target's,
+        # so a device=0 in a graph traced for another target contributes this
+        # build's accelerator or nothing.
         if isinstance(x, str) or (isinstance(x, int) and not isinstance(x, bool)):
             try:
                 return torch.device(x).type
