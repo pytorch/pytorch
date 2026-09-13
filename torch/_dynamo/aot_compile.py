@@ -50,11 +50,14 @@ _EXTERNAL_DATA_HINT = (
 _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
 
 # Names Dynamo mints into the scope the guards resolve against, rather than
-# names the caller wrote: the __import_* module aliases and the
-# __builtins_dict___N key. A load seeds each one a kept guard is rooted at, so a
-# KeyError on one reports a gap in that seeding, which no caller can close by
-# defining the name.
-_MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__")
+# names the caller wrote: the __import_* module aliases, the __builtins_dict___N
+# key, and the ___unnamed_scope_<id>_c<n> key an inlined frame whose globals
+# belong to no module is guarded through. A load seeds each of the first two a
+# kept guard is rooted at, so a KeyError on one reports a gap in that seeding;
+# the last embeds id() of a dict in the tracing process, so no module's vars()
+# in a loading process holds it. None of the three is a name the advice below
+# can send a caller to define.
+_MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", "___unnamed_scope")
 
 
 def _names_a_missing_global(text: str) -> bool:
@@ -640,6 +643,7 @@ class AOTCompiledFunction:
             # Seeded AFTER forward_callable, never before: on the default path this
             # IS fn.__globals__, and PyFunction_New caches __builtins__ at creation,
             # so the __builtins__ written below cannot rewire the bytecode's lookups.
+            # The builtins-dict key below is an ordinary global and does; see there.
             self._seed_guard_scope(guard_scope, guards_state.output_graph)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
@@ -695,6 +699,11 @@ class AOTCompiledFunction:
         # under it and forward_callable spreads that copy into fn.__globals__,
         # which IS the default guard scope. Re-derive over that one; a binding from
         # anywhere else is a value this process chose and stays.
+        # Re-deriving it also decides what the bytecode subscripts, since that
+        # recording exists only because the bytecode reads this key, and it is
+        # filtered for picklability alone: a builtin the tracing process had and
+        # this one lacks stops being readable -- a kept guard on that name reports
+        # it, and without one the bytecode raises KeyError.
         snapshot = self._artifacts.runtime_env.used_globals.get(builtins_key)
         if builtins_key in guard_scope and (
             snapshot is None or guard_scope[builtins_key] is not snapshot
@@ -727,8 +736,9 @@ class AOTCompiledFunction:
         """Advice for a guard that failed on a global its scope does not define,
         worded for the scope the guards were actually resolved against. Returns a
         bare sentence; a caller that continues a line of its own adds the
-        separator. ``forward`` is the model class's ``forward``, honoured only in
-        the SUPPLIED branch -- the only scope a module attribute resolved."""
+        separator. ``forward`` is the model class's ``forward``, passed only when
+        the guards hold the dict it resolves to, and honoured only in the
+        SUPPLIED branch."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
             rebuilt = (
                 "a guarded global is missing from the scope rebuilt from the artifact"
@@ -1358,6 +1368,12 @@ class AOTCompiledModel:
         # says nothing about a call no input covers.
         if missing_global is not None:
             forward = f"{type(self.model).__name__}.forward"
+            # deserialize resolves the scope from model.forward only when the
+            # caller passed no guard_globals=, so that forward names the dict
+            # the guards hold only while it still resolves to it.
+            resolved, _ = _resolve_guard_scope(self.model)
+            if resolved is None or resolved is not missing_global._guard_globals:
+                forward = None
             lines.append(missing_global._missing_global_hint(forward=forward))
         lines.append(
             "Add a ModelInput covering this call, or check whether "
@@ -1399,8 +1415,10 @@ class AOTCompiledModel:
         global is the one it was traced with, and a guarded global the live dict
         lacks fails the guard rather than falling back to the serialized value.
         Rebinding a global after the load changes nothing the graph reads unless a
-        guard on its value refuses the call, and a kept ``TENSOR_MATCH`` checks
-        metadata, not values. Loading also MUTATES that dict: a recorded
+        guard on its value refuses the call, and the certification is only as strong
+        as the guard's type: a kept ``TENSOR_MATCH`` checks metadata, not values,
+        and a root ``TYPE_MATCH`` on a container checks its type, not the members
+        the graph reads through it. Loading also MUTATES that dict: a recorded
         ``__import_*`` alias the serialized scope still carries, and that builtins
         key when a guard source names it, are inserted (never overwriting an
         existing key) so guards rooted at them resolve in a process that never
