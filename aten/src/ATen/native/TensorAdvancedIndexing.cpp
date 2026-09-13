@@ -2840,32 +2840,29 @@ static int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   return num_nonzero;
 }
 
-
-TORCH_IMPL_FUNC(count_nonzero_out_cuda)
-(const Tensor& self,
- IntArrayRef dims,
- std::optional<ScalarType> opt_dtype,
- const Tensor& result) {
-  auto out_type = opt_dtype.value_or(ScalarType::Long);
+TORCH_IMPL_FUNC(count_nonzero_out_cuda)(
+    const Tensor& self,
+    IntArrayRef dims,
+    std::optional<ScalarType> opt_dtype,
+    const Tensor& result) {
   auto reduce = self;
   if (reduce.scalar_type() != kBool) {
     reduce = reduce != 0;
   }
-  result.copy_(reduce.sum(dims, /*keepdim*/ false, /*dtypes=*/out_type));
+  at::sum_out(const_cast<Tensor&>(result), reduce, dims);
 }
 
-TORCH_IMPL_FUNC(count_nonzero_out_cpu)
-(const Tensor& self,
- IntArrayRef dims,
- std::optional<ScalarType> opt_dtype,
- const Tensor& result) {
-  auto out_type = opt_dtype.value_or(ScalarType::Long);
+TORCH_IMPL_FUNC(count_nonzero_out_cpu)(
+    const Tensor& self,
+    IntArrayRef dims,
+    std::optional<ScalarType> opt_dtype,
+    const Tensor& result) {
   if (!dims.empty()) {
     auto reduce = self;
     if (reduce.scalar_type() != kBool) {
       reduce = reduce != 0;
     }
-    result.copy_(reduce.sum(dims, /*keepdim=*/false, /*dtypes=*/out_type));
+    at::sum_out(const_cast<Tensor&>(result), reduce, dims);
     return;
   }
 
