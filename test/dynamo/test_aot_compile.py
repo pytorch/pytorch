@@ -528,6 +528,16 @@ class DictBranchModule(torch.nn.Module):
         return x * 3
 
 
+class NeverReChecked:
+    # Base for a stub guard manager whose check() raises on every evaluation: the
+    # report never re-checks an entry whose last evaluation raised, so a
+    # regression that does fails on this line, which names the re-check, rather
+    # than on an AttributeError the report's handler would dress up as the tree's
+    # own raise -- and the same exception would let that regression pass.
+    def check_verbose(self, f_locals):
+        raise RuntimeError("the report re-checked a tree that raised in dispatch")
+
+
 # Not the identity: an identity weight makes "read the serialized weight" and
 # "dropped the matmul" produce the same tensor.
 AOT_HERMETIC_WEIGHT = torch.eye(3) * 3
@@ -2039,7 +2049,7 @@ from user code:
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
         )
 
-        class RaisingGuardManager:
+        class RaisingGuardManager(NeverReChecked):
             def check(self, f_locals):
                 raise RuntimeError("page\x0cbreak\rrec\x1esep\u2028line")
 
@@ -2185,7 +2195,7 @@ from user code:
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
         )
 
-        class RaisingGuardManager:
+        class RaisingGuardManager(NeverReChecked):
             def check(self, f_locals):
                 raise RuntimeError("guard tree is unhappy")
 
@@ -2217,7 +2227,7 @@ from user code:
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
         )
 
-        class RaisingGuardManager:
+        class RaisingGuardManager(NeverReChecked):
             def check(self, f_locals):
                 raise SystemError("stub tree is unhappy")
 
@@ -2313,7 +2323,7 @@ from user code:
             ]
         )
 
-        class Raises:
+        class Raises(NeverReChecked):
             def check(self, f_locals):
                 raise RuntimeError("the scanned tree is unhappy")
 
@@ -2369,7 +2379,7 @@ from user code:
             ]
         )
 
-        class Raises:
+        class Raises(NeverReChecked):
             def check(self, f_locals):
                 raise RuntimeError("the scanned tree is unhappy")
 
@@ -2593,7 +2603,10 @@ from user code:
         # The same line is reachable with ONE rejection on record once a raise is
         # tolerated: pass 1 raised, pass 2 rejected, the report accepted. The
         # line has to describe what dispatch did without claiming a count it
-        # never took -- the raise itself survives only in the chain.
+        # never took -- the raise itself survives only in the chain. And the
+        # footer qualifying post-throw rejections keys on the lines the report
+        # printed, not on what dispatch recorded: this report quotes no
+        # rejection, so there is nothing for it to qualify.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -2628,6 +2641,48 @@ from user code:
         )
         self.assertIn(accepted, message.splitlines())
         self.assertNotIn("twice", message)
+        self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
+        self.assertIn("Add a ModelInput", message)
+        self.assertNotIn("Every guard tree raised", message)
+
+    def test_no_match_message_qualifies_no_rejection_when_the_re_check_raises(self):
+        # The other line the re-check can put where dispatch saw a rejection: it
+        # raised. The report's only entry line is then a raise, so a footer
+        # saying every rejection above followed a raise would describe a line
+        # that is not there, and the raise it quotes is the re-check's own.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        class RaisesThenRejectsThenRaises:
+            def __init__(self):
+                self.checks = 0
+
+            def check(self, f_locals):
+                self.checks += 1
+                if self.checks == 1:
+                    raise RuntimeError("the first pass is unhappy")
+                return False
+
+            def check_verbose(self, f_locals):
+                raise RuntimeError("the re-check is unhappy")
+
+        stub = RaisesThenRejectsThenRaises()
+        model.forward.compiled_results[0]._artifacts.guard_manager = stub
+        with self.assertRaises(RuntimeError) as ctx:
+            served = model(torch.randn(3, 3))
+            self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual(stub.checks, 2)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
+        raised = "  [0] <guard check raised RuntimeError: the re-check is unhappy>"
+        self.assertIn(raised, lines)
+        self.assertIn("[0]'s guard check raised while checking this call", message)
+        self.assertIn("Add a ModelInput", message)
+        self.assertNotIn("Every guard tree raised", message)
         self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
 
     def test_no_match_message_advises_an_input_for_a_missing_global(self):
@@ -3221,7 +3276,7 @@ from user code:
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
         )
 
-        class RaisesTwice:
+        class RaisesTwice(NeverReChecked):
             def __init__(self):
                 self.checks = 0
 
@@ -3255,7 +3310,7 @@ from user code:
             ]
         )
 
-        class Raises:
+        class Raises(NeverReChecked):
             def __init__(self, message):
                 self.message = message
 
@@ -3770,34 +3825,41 @@ from user code:
             AOTCompiledModel(ScaleModule(), [], set())
 
     def test_aot_compile_module_binds_a_call_once_per_result(self):
-        # Binding costs more than a whole check() does, and the two dispatch
-        # passes and the report all ask about the same call, so each result binds
-        # once and the three readers share it: a rebind per pass would leave the
-        # rest of this file green and pay for itself on every no-match.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        model._aot_compile(
-            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
-        )
+        # Results whose signatures differ cannot share a binding, so each binds
+        # on its own -- and still only once: the two dispatch passes and the
+        # report all ask about the same call, so a rebind per pass would leave
+        # the rest of this file green and pay for itself on every no-match.
+        # test_module_dispatch_binds_a_call_once_for_results_sharing_a_signature
+        # pins the shared case; this is the per-result count it cannot see.
+        mod = ScaleModule()
+        x = torch.randn(3, 3)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        doubled = model.forward.compiled_results
 
-        class Rejects:
-            def check(self, f_locals):
-                return False
+        def triple(self, y):
+            return y * 3
 
-            def check_verbose(self, f_locals):
-                return types.SimpleNamespace(
-                    result=False, verbose_code_parts=["stub guard rejected"]
-                )
+        mod.forward = types.MethodType(triple, mod)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x.double(),), kwargs={}, contexts=[])])
+        combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
+        self.assertFalse(combined._shared_binding)
+        binds = []
+        bind = AOTCompiledFunction.prepare_f_locals
 
-        result = model.forward.compiled_results[0]
-        result._artifacts.guard_manager = Rejects()
-        bind = patch.object(result, "prepare_f_locals", wraps=result.prepare_f_locals)
-        with bind as bound, self.assertRaises(RuntimeError) as ctx:
-            model(torch.randn(3, 3))
-        # Both passes and the report ran on it: the report quoted the rejection
-        # it explained from that one binding.
-        self.assertIn("  [0] stub guard rejected", str(ctx.exception).splitlines())
-        self.assertEqual(bound.call_count, 1)
+        def counted(result, *args, **kwargs):
+            binds.append(result)
+            return bind(result, *args, **kwargs)
+
+        with patch.object(AOTCompiledFunction, "prepare_f_locals", counted):
+            with self.assertRaises(RuntimeError) as ctx:
+                combined(x.half())
+        # Both passes and the report ran on both results, each from its own one
+        # binding: one bind per result, in index order.
+        self.assertEqual(binds, list(combined.compiled_results))
+        lines = str(ctx.exception).splitlines()
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
 
     def test_aot_compile_module_warns_once_per_model_not_per_process(self):
         # The dedup set is a field on the model, which is the whole reason it is
