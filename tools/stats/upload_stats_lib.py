@@ -64,7 +64,7 @@ def _get_artifact_urls(prefix: str, workflow_run_id: int) -> dict[Path, str]:
 
 def _download_artifact(
     artifact_name: Path, artifact_url: str, workflow_run_attempt: int
-) -> Path:
+) -> Path | None:
     # [Artifact run attempt]
     # All artifacts on a workflow share a single namespace. However, we can
     # re-run a workflow and produce a new set of artifacts. To avoid name
@@ -81,6 +81,7 @@ def _download_artifact(
                     f"Skipping {artifact_name} as it is an invalid run attempt. "
                     f"Expected {workflow_run_attempt}, found {found_run_attempt}."
                 )
+                return None
 
     print(f"Downloading {artifact_name}")
 
@@ -128,7 +129,9 @@ def download_gha_artifacts(
     artifact_urls = _get_artifact_urls(prefix, workflow_run_id)
     paths = []
     for name, url in artifact_urls.items():
-        paths.append(_download_artifact(Path(name), url, workflow_run_attempt))
+        path = _download_artifact(Path(name), url, workflow_run_attempt)
+        if path is not None:
+            paths.append(path)
     return paths
 
 
