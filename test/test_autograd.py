@@ -2554,13 +2554,19 @@ class TestAutograd(TestCase):
         view.register_hook(fn0)
         view2.register_hook(fn1)
         view.mul_(2)
-        # We need to explicitly trigger an update to view to update its grad_fn
-        view2.grad_fn
         view2.register_hook(fn2)
         (view + view2).sum().backward()
-        # The hooks originally registered to view are not fired, one must explicitly
-        # trigger an update to the view's grad_fn, and then register a new hook
+        # Hooks registered before the inplace operation are not fired, but registering
+        # a new hook refreshes the view's grad_fn and attaches it to the new node.
         self.assertEqual(count[0], 1)
+
+    def test_tensor_hooks_inplace_through_view_alias(self):
+        leaf = torch.ones(2, requires_grad=True)
+        view = leaf.clone().view(2)
+        view[:].add_(1)
+        view.register_hook(lambda grad: grad * 2)
+        view.sum().backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
 
     def test_retain_grad_cycle(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -6845,6 +6851,13 @@ Done""",
         check(fast_mode=True)
         check(fast_mode=False)
 
+    def test_gradcheck_mixed_differentiable_outputs(self):
+        def fn(x):
+            return torch.ones_like(x), x.square()
+
+        x = torch.randn(2, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradcheck(fn, (x,), fast_mode=True))
+
     @parametrize(
         "layout",
         (
@@ -7584,6 +7597,58 @@ Done""",
 
         check(fast_mode=True)
         check(fast_mode=False)
+
+    def test_gradcheck_fast_mode_forward_ad_error_indexing(self):
+        from torch.autograd.gradcheck import FAST_FAIL_SLOW_OK_MSG, GradcheckError
+
+        class BadMul(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.mul(2)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.mul(2)
+
+            @staticmethod
+            def jvp(ctx, grad):
+                return grad.mul(5)
+
+        x = torch.ones(2, dtype=torch.double, requires_grad=True)
+        a = torch.ones(3, dtype=torch.double)
+        cases = (
+            (
+                "non-differentiable output",
+                lambda x: (torch.zeros_like(x), BadMul.apply(x)),
+                (x,),
+                1,
+            ),
+            (
+                "integer output",
+                lambda x: (torch.ones_like(x, dtype=torch.int64), BadMul.apply(x)),
+                (x,),
+                0,
+            ),
+            ("non-differentiable input", lambda a, x: BadMul.apply(x), (a, x), 0),
+        )
+        kwargs = {
+            "fast_mode": True,
+            "check_backward_ad": False,
+            "check_batched_grad": False,
+            "check_forward_ad": True,
+        }
+
+        for name, fn, inputs, output_idx in cases:
+            with self.subTest(name=name):
+                err_msg = (
+                    "Jacobian computed with forward mode mismatch for output "
+                    f"{output_idx} with respect to input 0"
+                )
+                with self.assertRaisesRegex(GradcheckError, err_msg) as cm:
+                    gradcheck(fn, inputs, **kwargs)
+                if name == "integer output":
+                    self.assertNotIn(FAST_FAIL_SLOW_OK_MSG, str(cm.exception))
+                self.assertFalse(gradcheck(fn, inputs, raise_exception=False, **kwargs))
 
     def test_gradcheck_forward_ad(self):
         def fn(x, y):
@@ -11745,6 +11810,21 @@ for shape in [(1,), ()]:
             out = torch.sin(a)
             with self.assertRaisesRegex(CustomError, "unpack"):
                 out.backward()
+
+    def test_saved_tensor_hooks_pack_error_then_data_access(self):
+        # register_hooks sets hooks_ before running pack_hook, so a raising
+        # pack_hook leaves the SavedVariable with hooks but no packed data.
+        a = torch.randn(5, requires_grad=True)
+        y = a * a
+
+        def bad_pack(t):
+            raise ValueError("boom")
+
+        with self.assertRaisesRegex(ValueError, "boom"):
+            y.grad_fn._raw_saved_self.register_hooks(bad_pack, lambda x: x)
+
+        with self.assertRaisesRegex(RuntimeError, "pack hook raised"):
+            y.grad_fn._raw_saved_self.data
 
     def test_saved_tensor_hooks_custom_function_intermediates(self):
         class Func(torch.autograd.Function):

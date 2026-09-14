@@ -932,7 +932,18 @@ class ComboKernel(Kernel):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         triton_meta["configs"] = [
-            config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
+            config_of(
+                signature,
+                # sub-kernel bodies are spliced into this kernel, so their
+                # atomics are this kernel's atomics
+                pointer_range_override=(
+                    ()
+                    if torch.version.hip is not None
+                    and any(k.atomic_add_found for k in self.sub_kernels)
+                    else None
+                ),
+                skip_cpp_wrapper_input_tensor_alignment=True,
+            )
         ]
 
         mutated_args = self.get_mutated_args_sub_kernels()

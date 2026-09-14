@@ -3,6 +3,7 @@
 # Tests specific to the in-tree torchcomms NCCL backends.
 
 import ctypes
+import gc
 import json
 import os
 import pickle
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+import weakref
 from datetime import timedelta
 from unittest import mock
 
@@ -19,6 +21,7 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import ErrorType, ReconfigureOptions
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    MultiProcessTestCase,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
@@ -65,6 +68,34 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         torch.cuda.synchronize()
         time.sleep(2)
         dist.barrier()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_tensor_releases_work_tensors(self) -> None:
+        output = torch.ops._c10d_functional.all_reduce(
+            torch.ones(4, device=self.device), "sum", dist.group.WORLD
+        )
+        output_ref = weakref.ref(output)
+
+        torch.ops._c10d_functional.wait_tensor(output)
+        del output
+
+        self.assertIsNone(output_ref())
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_tensors_releases_coalesced_work_tensors(self) -> None:
+        outputs = torch.ops._c10d_functional.all_reduce_coalesced(
+            [torch.ones(4, device=self.device) for _ in range(2)],
+            "sum",
+            dist.group.WORLD,
+        )
+        output_refs = [weakref.ref(output) for output in outputs]
+
+        torch.ops._c10d_functional.wait_tensors(outputs)
+        del outputs
+
+        self.assertEqual([ref() for ref in output_refs], [None, None])
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -175,6 +206,46 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             work.wait()
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
+
+
+class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        return False
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_work_outlives_process_group(self) -> None:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=dist.FileStore(self.file_name, self.world_size),
+            device_id=device,
+        )
+        work = dist.all_reduce(torch.ones(4, device=device), async_op=True)
+        work.wait()
+
+        dist.destroy_process_group()
+        del work
+        gc.collect()
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
@@ -815,6 +886,25 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_register_mem_pool_symmetric(self) -> None:
         self._check_all_reduce_over_pool(symm=True)
+
+    @requires_nccl()
+    @unittest.skipUnless(torch.version.hip is not None, "ROCm-only contract")
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_symmetric_rejects_unrelated_allocator(
+        self,
+    ) -> None:
+        backend = self._backend()
+        pool = torch.cuda.MemPool()
+        tensor = self._pool_tensor(pool)
+        # register_mem_pool validates provenance before touching any state, so a
+        # rejected pool is never recorded.
+        with self.assertRaisesRegex(RuntimeError, "mem_allocator|ncclMemAlloc"):
+            backend.register_mem_pool(pool, symm=True)
+        # Guard the no-leftover-state contract: a revert to insert-then-throw
+        # would leave the pool registered and this deregister would succeed.
+        with self.assertRaisesRegex(RuntimeError, "not previously registered"):
+            backend.deregister_mem_pool(pool)
+        del tensor
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
