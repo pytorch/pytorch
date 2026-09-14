@@ -8448,6 +8448,33 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
             self.assertNotIn("operand2", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
 
+    @parametrize("format_name", ("mxfp8_e4m3", "nvfp4"))
+    def test_scaled_mm_rejects_chunked_output_contraction(self, device, format_name):
+        a, b, scale_a, scale_b, gemm_kwargs, _ = self.makeBlockScaledMm(
+            format_name, 256, 256, 256, device=device
+        )
+
+        def epilogue_fn(acc):
+            halves = acc.reshape(acc.shape[0], 2, -1)
+            return halves[:, 0, :] + halves[:, 1, :]
+
+        def fn(a, b, scale_a, scale_b):
+            return flex_gemm(
+                F.scaled_mm,
+                (a, b, scale_a, scale_b),
+                epilogue_fn,
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "block-scaled GEMMs do not yet support chunked output contractions",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a, b, scale_a, scale_b
+            )
+
     def test_scaled_mm_quantized_output(self, device):
         m = n = 256
         group = 32
