@@ -131,7 +131,7 @@ def precompile_flydsl(
     import torch
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-    updates = {"COMPILE_ONLY": "1"}
+    updates: dict[str, str | None] = {"COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
         updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
     # Cold launches must not observe FlyDSL's process-global compile-only mode.

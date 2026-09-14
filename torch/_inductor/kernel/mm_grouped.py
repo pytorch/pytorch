@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch._dynamo.utils import counters
@@ -915,8 +915,8 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
 # The op takes recipes and swizzles as plain ints, and the pybind enums compare
 # equal to neither ints nor freshly constructed instances of themselves, so the
 # two the lowering can serve are pinned to their integer values here.
-_MXFP8_SCALE_RECIPE = int(ScalingType.BlockWise1x32)
-_NO_SWIZZLE = int(SwizzleType.NO_SWIZZLE)
+_MXFP8_SCALE_RECIPE = cast(int, ScalingType.BlockWise1x32.value)
+_NO_SWIZZLE = cast(int, SwizzleType.NO_SWIZZLE.value)
 
 
 # Inductor has no template or extern choice for most _scaled_grouped_mm_v2
