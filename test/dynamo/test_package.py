@@ -103,6 +103,12 @@ class StaticParamModule(torch.nn.Module):
         return x.sin()
 
 
+# A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
+# global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
+PKG_DYN_ROWS = torch.randn(4, 3)
+torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
+
+
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
@@ -490,6 +496,45 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'",
             ):
                 compiled_fn(*args2)
+
+    def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
+        # install() roots the guards at sys.modules[...].__dict__, and a package
+        # keeps every guard, so the serialized scope holds the global as a
+        # FakeTensor with the traced sizes. A SHAPE_ENV lambda over that scope
+        # agreed with the artifact whatever the module bound: a one-row global
+        # was served the graph built for 2 <= rows. The lambda has to read the
+        # same dict the C++ tree does. Fresh tensors on both arms, since the
+        # loaded TENSOR_MATCH rejects the marked original.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x * 2 + PKG_DYN_ROWS.sum(0)
+
+        x = torch.randn(3)
+        module_dict = sys.modules[__name__].__dict__
+        self.addCleanup(module_dict.__setitem__, "PKG_DYN_ROWS", PKG_DYN_ROWS)
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            module_dict["PKG_DYN_ROWS"] = torch.randn(7, 3)
+            self.assertEqual(fn(x), compiled_fn(x))
+
+            module_dict["PKG_DYN_ROWS"] = torch.randn(1, 3)
+            # The stance message dumps the whole tree, LAMBDA_GUARD line included;
+            # only the failed parts follow verbose_code_parts=.
+            failed_part = r"verbose_code_parts=\[\"2 <= G\['PKG_DYN_ROWS'\]"
+            with self.assertRaisesRegex(RuntimeError, failed_part):
+                compiled_fn(x)
 
     def test_install_survives_stale_cleanup_hooks(self):
         # The first compile installs its generated functions -- and, on every
