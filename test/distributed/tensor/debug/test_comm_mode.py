@@ -7,20 +7,27 @@ import torch.nn as nn
 from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import (
+    DeviceTypeTestBase,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 c10d_functional = torch.ops.c10d_functional
 c10d_ops = torch.ops.c10d
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 
-class TestCommMode(TestCase):
+class TestCommModeGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
@@ -32,15 +39,7 @@ class TestCommMode(TestCase):
         dist.init_process_group(
             backend="fake", rank=1, world_size=self.world_size, store=store
         )
-        self.device_type = device_type
         self.world_pg = dist.distributed_c10d._get_default_group()
-
-    def checksAssert(self, comm_mode, key, expected_value, expected_total_value):
-        comm_counts = comm_mode.get_comm_counts()
-        self.assertEqual(comm_mode.get_total_counts(), expected_total_value)
-        self.assertEqual(comm_counts[key], expected_value)
-
-        return
 
     def test_comm_mode(self):
         world_pg = self.world_pg
@@ -56,11 +55,11 @@ class TestCommMode(TestCase):
                 out = self.model(x)
                 return funcol.all_reduce(out, "sum", world_pg)
 
-        model = WrapperModel(self.device_type)
+        model = WrapperModel("cpu")
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            model(torch.randn(20, 10, device=self.device_type))
+            model(torch.randn(20, 10, device="cpu"))
 
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_mode.get_total_counts(), 3)
@@ -82,11 +81,11 @@ class TestCommMode(TestCase):
                 out = self.model(x)
                 return funcol.all_reduce_coalesced([out], "sum", world_pg)
 
-        model = WrapperModelCoalesced(self.device_type)
+        model = WrapperModelCoalesced("cpu")
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            model(torch.randn(20, 10, device=self.device_type))
+            model(torch.randn(20, 10, device="cpu"))
 
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_mode.get_total_counts(), 3)
@@ -95,7 +94,7 @@ class TestCommMode(TestCase):
         self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 1)
 
     def test_comm_mode_with_dtensor(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh("cpu", list(range(self.world_size)))
 
         def f(x, y):
             return torch.mm(x, y)
@@ -115,12 +114,36 @@ class TestCommMode(TestCase):
         self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
         self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 0)
 
+
+class TestCommMode(DeviceTypeTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def setUp(self):
+        super().setUp()
+        self.world_size = 2
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=1, world_size=self.world_size, store=store
+        )
+        self.world_pg = dist.distributed_c10d._get_default_group()
+
+    def checksAssert(self, comm_mode, key, expected_value, expected_total_value):
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_mode.get_total_counts(), expected_total_value)
+        self.assertEqual(comm_counts[key], expected_value)
+
+        return
+
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_comm_mode_with_c10d(self):
         if not torch.accelerator.is_available():
             return
 
-        inp = torch.rand(2, 8, 16).to(device_type)
+        inp = torch.rand(2, 8, 16).to(self.device_type)
         all_gather_out = inp.new_empty(self.world_size * 2, 8, 16)
 
         comm_mode = CommDebugMode()
@@ -226,6 +249,8 @@ class TestCommMode(TestCase):
 class TestCommModeModuleReuse(TestCase):
     """Tests that do not require a process group."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_comm_mode_repeated_module_forward(self):
         m = torch.nn.Linear(2, 2)
         with CommDebugMode():
@@ -267,6 +292,8 @@ class TestCommModeModuleReuse(TestCase):
         self.assertEqual(len(m.fc1._forward_hooks), 0)
         self.assertEqual(len(m.fc2._forward_hooks), 0)
 
+
+instantiate_device_type_tests(TestCommMode, globals())
 
 if __name__ == "__main__":
     run_tests()
