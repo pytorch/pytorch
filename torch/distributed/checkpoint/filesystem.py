@@ -868,18 +868,19 @@ class FileSystemReader(StorageReader):
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
-        per_file: dict[str, list[ReadItem]] = {}
+        per_file: dict[str, list[tuple[int, ReadItem, _StorageInfo]]] = {}
         for read_item in plan.items:
             item_md: _StorageInfo = self.storage_data[read_item.storage_index]
-            path = item_md.relative_path
-            per_file.setdefault(path, []).append(read_item)
+            per_file.setdefault(item_md.relative_path, []).append(
+                (item_md.offset, read_item, item_md)
+            )
 
         for relative_path, reqs in per_file.items():
             new_path = self.fs.concat_path(self.path, relative_path)
+            reqs.sort(key=lambda entry: entry[0])
             with self.fs.create_stream(new_path, "rb") as stream:
-                # TODO sort by offset and cache the reading
-                for req in reqs:
-                    item_md = self.storage_data[req.storage_index]
+                # TODO cache the reading
+                for _, req, item_md in reqs:
                     file_slice = self._slice_file(stream, item_md)
                     transform_from = self.transforms.transform_load_stream(
                         req,
