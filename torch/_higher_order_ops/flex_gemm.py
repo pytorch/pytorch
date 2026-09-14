@@ -39,15 +39,12 @@ FLEX_GEMM_OP_SPECS = {
     torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1),
     torch.ops.aten.baddbmm.default: FlexGemmOpSpec("baddbmm", 1, 2, bias_index=0),
     torch.ops.aten._scaled_mm_v2.default: FlexGemmOpSpec("scaled_mm", 0, 1),
-    torch.ops.aten._grouped_mm.default: FlexGemmOpSpec("grouped_mm", 0, 1),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
     torch.addmm: torch.ops.aten.addmm.default,
     torch.bmm: torch.ops.aten.bmm.default,
     torch.baddbmm: torch.ops.aten.baddbmm.default,
-    torch.nn.functional.grouped_mm: torch.ops.aten._grouped_mm.default,
-    torch._grouped_mm: torch.ops.aten._grouped_mm.default,
 }
 _SUPPORTED_BACKENDS = {"NVGEMM", "QUACK", "TRITON"}
 
@@ -115,47 +112,23 @@ FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., An
 }
 
 
-def flex_gemm_logsumexp(
-    input: torch.Tensor,
-    dim: int | tuple[int, ...] | list[int],
-    keepdim: bool = False,
-    *,
-    fallback: Callable[..., Any],
-) -> torch.Tensor:
-    """Expose one online max/sum state for a single-dimension logsumexp."""
-    if isinstance(dim, (tuple, list)):
-        if len(dim) != 1:
-            return fallback(input, dim, keepdim)
-        dim = dim[0]
-    from torch._inductor import inductor_prims
-
-    maximum, total = inductor_prims.prepare_softmax_online(input, dim)
-    if not keepdim:
-        maximum = maximum.squeeze(dim)
-        total = total.squeeze(dim)
-    return total.log() + maximum
-
-
 def flex_gemm_body_decomposition_table(
     kernel_options: dict[str, Any],
     decomposition_table: Mapping[torch._ops.OpOverload, Callable[..., Any]],
 ) -> dict[torch._ops.OpOverload, Callable[..., Any]] | None:
-    """Override composite body decompositions used by the QUACK backend."""
-    if kernel_options.get("backend") != "QUACK":
+    """Override composite body decompositions enabled by QUACK fast math."""
+    if (
+        kernel_options.get("backend") != "QUACK"
+        or kernel_options.get("fast_math") is not True
+    ):
         return None
     merged_decompositions = dict(decomposition_table)
-    logsumexp = torch.ops.aten.logsumexp.default
-    if logsumexp in merged_decompositions:
-        merged_decompositions[logsumexp] = partial(
-            flex_gemm_logsumexp, fallback=merged_decompositions[logsumexp]
+    merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
+    gelu = torch.ops.aten.gelu.default
+    if gelu in merged_decompositions:
+        merged_decompositions[gelu] = partial(
+            flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
         )
-    if kernel_options.get("fast_math") is True:
-        merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
-        gelu = torch.ops.aten.gelu.default
-        if gelu in merged_decompositions:
-            merged_decompositions[gelu] = partial(
-                flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
-            )
     return merged_decompositions
 
 
@@ -551,53 +524,6 @@ def flex_gemm_scaled_mm(
     )
 
 
-def flex_gemm_grouped_mm(
-    gemm_op: torch._ops.OpOverload,
-    gemm_args: tuple[Any, ...],
-    epilogue_fn: Callable[[Any], Any],
-    gemm_kwargs: dict[str, Any],
-    kernel_options: dict[str, Any],
-) -> Any:
-    """Normalize the MoE forward grouped GEMM: 2-D A, 3-D B, ``offs`` as a tensor operand.
-
-    ``offs`` moves from ``gemm_kwargs`` into the HOP's tensor operands so Dynamo
-    and the body graph carry it as a tensor rather than a constant.
-    """
-    if len(gemm_args) != 2:
-        raise RuntimeError(
-            "FlexGEMM grouped_mm expects gemm_args=(mat_a, mat_b) and "
-            "gemm_kwargs={'offs': offs}"
-        )
-    mat_a, mat_b = gemm_args
-    options = dict(gemm_kwargs)
-    offs = options.pop("offs", None)
-    if options.pop("bias", None) is not None:
-        raise NotImplementedError("FlexGEMM grouped_mm bias is not supported yet")
-    if options.pop("out_dtype", None) is not None:
-        raise NotImplementedError("FlexGEMM grouped_mm out_dtype is not supported yet")
-    if options:
-        raise RuntimeError(
-            f"unsupported FlexGEMM grouped_mm options: {sorted(options)}"
-        )
-    if (
-        not isinstance(offs, torch.Tensor)
-        or not isinstance(mat_a, torch.Tensor)
-        or not isinstance(mat_b, torch.Tensor)
-        or mat_a.ndim != 2
-        or mat_b.ndim != 3
-    ):
-        raise NotImplementedError(
-            "FlexGEMM grouped_mm supports only the MoE forward form: 2-D A "
-            "[total_m, K], 3-D B [E, K, N] and an int32 offs tensor; 3-D A, the "
-            "2-D/2-D weight-gradient form and offs=None are not supported"
-        )
-
-    def body_fn(*args: Any) -> Any:
-        return epilogue_fn(gemm_op(*args))
-
-    return flex_gemm_hop(gemm_op, body_fn, (mat_a, mat_b, offs), {}, kernel_options)
-
-
 def flex_gemm(
     gemm_op: Callable[..., Any],
     gemm_args: tuple[Any, ...],
@@ -618,23 +544,10 @@ def flex_gemm(
             "FlexGEMM direct aten._scaled_mm_v2 calls are unsupported; "
             "use torch.nn.functional.scaled_mm"
         )
-    if gemm_op in (
-        torch._scaled_grouped_mm,
-        torch.ops.aten._scaled_grouped_mm,
-        torch.ops.aten._scaled_grouped_mm.default,
-    ):
-        raise NotImplementedError(
-            "FlexGEMM scaled grouped GEMMs are not supported yet; "
-            "only bf16 torch.nn.functional.grouped_mm with offs is supported"
-        )
     if gemm_op is torch.nn.functional.scaled_mm:
         return flex_gemm_scaled_mm(gemm_args, epilogue_fn, gemm_kwargs, kernel_options)
 
     gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
-    if gemm_op is torch.ops.aten._grouped_mm.default:
-        return flex_gemm_grouped_mm(
-            gemm_op, gemm_args, epilogue_fn, gemm_kwargs, kernel_options
-        )
 
     def body_fn(*args: Any) -> Any:
         # Keep the traced body positional-only; the HOP carries gemm_kwargs for lowering.
