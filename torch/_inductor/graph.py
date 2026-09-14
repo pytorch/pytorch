@@ -586,6 +586,7 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        self._has_custom_annotations: bool = False
         self.kernel_free_cudagraph: bool = False
 
         # only keeping one node per device for stack trace purposes
@@ -1139,6 +1140,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run(self, *args: Any) -> Any:  # type: ignore[override]
         with dynamo_timed("GraphLowering.run"):
+            self._has_custom_annotations = any(
+                "custom" in n.meta
+                for n in self.module.graph.nodes  # type: ignore[union-attr]
+            )
             return super().run(*args)
 
     def register_operation(self, op: ir.Operation) -> str:
@@ -1913,13 +1918,14 @@ class GraphLowering(torch.fx.Interpreter):
     @staticmethod
     def _get_node_stream(n: torch.fx.Node) -> int | None:
         """Get the user-annotated stream index from FX node metadata."""
-        return n.meta.get("custom", {}).get("stream")
+        custom = n.meta.get("custom")
+        return custom.get("stream") if custom else None
 
     @staticmethod
     def _get_node_mempool(n: torch.fx.Node) -> tuple[int, int] | None:
         """Get the user-annotated CUDA MemPool from FX node metadata."""
-        custom = n.meta.get("custom", {})
-        if "mempool" not in custom:
+        custom = n.meta.get("custom")
+        if not custom or "mempool" not in custom:
             return None
         return custom["mempool"], custom["mempool_device"]
 
@@ -1996,19 +2002,30 @@ class GraphLowering(torch.fx.Interpreter):
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-            self._realize_inputs_at_context_boundaries(n)
-        node_mempool = self._get_node_mempool(n)
-        if node_mempool is not None and self.disable_cudagraphs_reason is None:
-            # User MemPool regions must route allocations to the explicit pool.
-            # CUDA graphs use a private capture pool, so capture would violate
-            # that routing and trip cudagraph memory-pool assertions.
-            self.disable_cudagraphs_reason = (
-                "user CUDA MemPool contexts are not compatible with CUDA graphs"
+            if self._has_custom_annotations:
+                self._realize_inputs_at_context_boundaries(n)
+        if self._has_custom_annotations:
+            node_mempool = self._get_node_mempool(n)
+            if node_mempool is not None and self.disable_cudagraphs_reason is None:
+                # User MemPool regions must route allocations to the explicit pool.
+                # CUDA graphs use a private capture pool, so capture would violate
+                # that routing and trip cudagraph memory-pool assertions.
+                self.disable_cudagraphs_reason = (
+                    "user CUDA MemPool contexts are not compatible with CUDA graphs"
+                )
+            ctx_stream: contextlib.AbstractContextManager[None] = (
+                ir.IRNode.current_stream_idx(self._get_node_stream(n))
             )
+            ctx_pool: contextlib.AbstractContextManager[None] = (
+                ir.IRNode.current_mempool(node_mempool)
+            )
+        else:
+            ctx_stream = contextlib.nullcontext()
+            ctx_pool = contextlib.nullcontext()
         with (
             ir.IRNode.current_origins(origins),
-            ir.IRNode.current_stream_idx(self._get_node_stream(n)),
-            ir.IRNode.current_mempool(node_mempool),
+            ctx_stream,
+            ctx_pool,
             self.set_current_node(n),
             V.set_current_node(n),
         ):
