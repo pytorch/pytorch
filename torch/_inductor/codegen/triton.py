@@ -3361,7 +3361,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ] = {}
         self._host_tma_non_materializable: OrderedSet[str] = OrderedSet()
         self._host_tma_non_materializable_buffers: OrderedSet[str] | None = None
-        self._emitted_device_tma = False
+        self._device_tma_buffers: OrderedSet[str] = OrderedSet()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
@@ -3394,11 +3394,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     @property
     def uses_tma(self) -> bool:
-        return bool(self.host_tma_descriptor_args or self._emitted_device_tma)
+        return bool(self.host_tma_descriptor_args or self.uses_device_tma)
 
     @property
     def uses_device_tma(self) -> bool:
-        return self._emitted_device_tma
+        return any(
+            not is_buffer_removed(name) for name in self._device_tma_buffers
+        )
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
@@ -4429,8 +4431,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             # Device-side TMA: reached for every case except the host-TMA branch
             # above (which returned) -- emit an in-kernel tl.make_tensor_descriptor.
+            # Keep the buffer name so final metadata ignores descriptors whose
+            # DeferredLine was removed during kernel codegen.
             self._reject_if_template_host_tma(var)
-            self._emitted_device_tma = True
+            self._device_tma_buffers.add(name)
 
         else:
             if not check:
@@ -6357,12 +6361,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 f", boundary_check={indexing.boundary_check()!r}",
             )
             # Unlike the regular store path, reduction stores directly format the
-            # descriptor and do not call codegen_block_ptr(). A
-            # TensorDescriptorOptions here is therefore necessarily emitted as an
-            # in-kernel device-TMA descriptor. Record it so codegen_kernel() keeps
-            # tma_min_block_sizes for descriptor stores as well.
+            # descriptor and bypass codegen_block_ptr(). Track the buffer when this
+            # path formats a device descriptor so final metadata preserves TMA
+            # constraints only if its DeferredLine is retained.
             if isinstance(indexing, TensorDescriptorOptions):
-                self._emitted_device_tma = True
+                self._reject_if_template_host_tma(var)
+                self._device_tma_buffers.add(name)
             self.post_loop_store.writeline(DeferredLine(name, store_line))
         else:
             if not isinstance(indexing, IndexingOptions):
@@ -7300,7 +7304,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.has_load_with_contiguous_rdim
                 or self.has_store_with_contiguous_rdim
             )
-        if self.tma_min_block_sizes:
+        if self.uses_tma and self.tma_min_block_sizes:
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
         if self.uses_tma:
             out["uses_tma"] = True

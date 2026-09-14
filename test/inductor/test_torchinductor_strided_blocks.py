@@ -1129,9 +1129,12 @@ class CommonTemplate:
             },
         )
 
-        # Check the code for multiple output dims.
+        # Check the code for multiple output dims and the device-TMA metadata
+        # that constrains the descriptor store's innermost block size.
         self._assert_pointwise_ndims(code, 2)
         self._assert_reduction_ndims(code, 1)
+        self.assertIn("'tma_min_block_sizes': {'XBLOCK': 4}", code)
+        self.assertIn("'uses_device_tma': True", code)
 
     @xfail_if_cuda_tensor_descriptor
     @parametrize(
@@ -2499,8 +2502,9 @@ if GPU_TYPE == "cuda":
     # Known TMA API limitations: these cases also fail for device-side TMA (they
     # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
     # different (still-correct) codegen that breaks the device-specific code asserts.
-    # test_reduction_padded_output_tiling is intentionally not listed: its
-    # device-TMA reduction-store regression is covered as a passing test.
+    # test_reduction_padded_output_tiling is intentionally not listed because its
+    # host-side-TMA variant is a passing regression. The device-TMA variant remains
+    # covered by xfail_if_tensor_descriptor.
     _HOST_TMA_EXPECTED_FAILURES = [
         "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
         "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",
