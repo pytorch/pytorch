@@ -411,11 +411,24 @@ AOT_SUMMED = torch.randn(4, 3)
 AOT_DUPE_A = torch.randn(4, 4)
 AOT_DUPE_B = AOT_DUPE_A
 
+AOT_CPP_SHAPE_GLOBAL = torch.randn(8, 4)
+
 
 def global_rebind_fn(x):
     if AOT_POOL_MODE == "sum":
         return x.sum(1)
     return x.mean(1) * 10.0
+
+
+@contextmanager
+def _set_pool_mode(mode):
+    global AOT_POOL_MODE
+    old = AOT_POOL_MODE
+    AOT_POOL_MODE = mode
+    try:
+        yield
+    finally:
+        AOT_POOL_MODE = old
 
 
 class ParentWithChildModule(torch.nn.Module):
@@ -1566,6 +1579,269 @@ from user code:
 
         self.addCleanup(restore)
 
+    def test_aot_compile_fn_guards_track_rebound_global(self):
+        # Function artifacts get their guard scope from load_compiled_function's
+        # f_globals, and the contract is that dict itself rather than a copy of
+        # it: a global rebound after the load changes the guard's answer on the
+        # next call, so a stale copy would keep serving the graph that matched at
+        # load time.
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pool_mode(mode):
+                expected[mode] = global_rebind_fn(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        # f_globals below is this module's dict, which the capture leaks Dynamo's
+        # generated globals into; hide them for the duration of the test, and
+        # strip what it adds in cleanup. The load seeds nothing here -- the only
+        # kept global guard is rooted at AOT_POOL_MODE, not at an alias or the
+        # builtins-dict key.
+        self._hide_leaked_dynamo_globals()
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        with _set_pool_mode("sum"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f, f_globals=globals())
+            self.assertEqual(loaded(x), expected["sum"])
+        with _set_pool_mode("mean"):
+            with self.assertRaisesRegex(RuntimeError, "AOT_POOL_MODE"):
+                loaded(x)
+
+    def test_load_compiled_function_f_globals_guard_checks_the_tensor_type(self):
+        # A kept TENSOR_MATCH compares the tensor's exact Python type before any
+        # of its metadata, so matching dtype, shape, strides, device and
+        # requires_grad is not enough for a rebind to pass: an nn.Parameter
+        # substituted for the plain tensor the graph was traced with fails the
+        # guard, where the plain tensor it replaces passes. Rebinding it in the
+        # dict after the load is what needs this commit -- the parent built the
+        # guard manager against a snapshot, so only a value already bound when
+        # load_compiled_function ran was ever compared.
+        def fn(x):
+            return x * EPS
+
+        x = torch.randn(3, 4)
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        scope = {"EPS": EPS.clone()}
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+        self.assertEqual(loaded(x), x * EPS)
+
+        param = torch.nn.Parameter(EPS.clone(), requires_grad=False)
+        self.assertEqual(param.dtype, scope["EPS"].dtype)
+        self.assertEqual(param.stride(), scope["EPS"].stride())
+        scope["EPS"] = param
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected type of 'G\['EPS'\]' to be <class 'torch\.Tensor'>, "
+            r"but found <class 'torch\.nn\.parameter\.Parameter'>",
+        ):
+            loaded(x)
+
+    def test_load_compiled_function_f_globals_merges_for_the_bytecode(self):
+        # The bytecode's half of the f_globals contract, which this commit
+        # leaves alone: the dict is merged OVER the globals serialized with the
+        # artifact into a load-time snapshot, so a name it omits still resolves
+        # and a name it binds is what the graph computes with. This passes on
+        # the parent too -- the default filter keeps no global guard, so nothing
+        # here turns on which dict the guards resolve against. It is here
+        # because the other half REPLACES the guard scope, and the two are easy
+        # to conflate.
+        def fn(x):
+            return x * EPS
+
+        x = torch.randn(3, 4)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        with open(self.path(), "rb") as f:
+            omitted = torch.compiler.load_compiled_function(f, f_globals={})
+        self.assertEqual(omitted(x), x * EPS)
+
+        live = torch.tensor(2.0)
+        with open(self.path(), "rb") as f:
+            bound = torch.compiler.load_compiled_function(f, f_globals={"EPS": live})
+        self.assertEqual(bound(x), x * live)
+
+    def test_load_compiled_function_empty_f_globals_is_an_empty_guard_scope(self):
+        # f_globals={} and omitting f_globals are different modes now: the empty
+        # dict is a live scope with nothing in it, so every kept global guard
+        # fails until the caller binds the name in the dict they still hold,
+        # while omitting the argument resolves the guards against the scope
+        # rebuilt from the artifact. Normalizing the empty dict to "no scope"
+        # would make a dict live by reference only while it is non-empty, so a
+        # caller who loads first and populates after would silently get the
+        # rebuilt scope forever, with nothing raising to say so.
+        def fn(x):
+            return x * EPS
+
+        x = torch.randn(3, 4)
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        with open(self.path(), "rb") as f:
+            omitted = torch.compiler.load_compiled_function(f)
+        self.assertEqual(omitted(x), x * EPS)
+
+        scope: dict[str, object] = {}
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+        with self.assertRaisesRegex(RuntimeError, r"KeyError on G\['EPS'\]"):
+            loaded(x)
+        scope["EPS"] = EPS
+        self.assertEqual(loaded(x), x * EPS)
+
+    def test_load_compiled_function_f_globals_governs_a_cpp_shape_guard(self):
+        # The carve-out both public texts state is for the LAMBDA form of a
+        # symbolic-shape guard; captured with enable_cpp_symbolic_shape_guards
+        # the guard goes out as C++ with the global's size as an operand, whose
+        # manager hangs off the live globals dict like any other global guard's.
+        # The C++ compile is not what this observes: the operand managers are
+        # built before it is attempted, so this fails with no compiler too. The
+        # config wraps the capture alone: the load reads what that capture
+        # recorded and never this config.
+        self._hide_leaked_dynamo_globals()
+        # mark_dynamic writes its marking onto the tensor, and this one is a
+        # module global that outlives the test.
+        for name in (
+            "_dynamo_dynamic_indices",
+            "_dynamo_hint_overrides",
+            "_specialize_on",
+            "_has_dynamo_dim_marking",
+        ):
+            self.addCleanup(delattr, AOT_CPP_SHAPE_GLOBAL, name)
+        torch._dynamo.mark_dynamic(AOT_CPP_SHAPE_GLOBAL, 0)
+
+        def fn(x):
+            return x + AOT_CPP_SHAPE_GLOBAL.sum(0)
+
+        x = torch.randn(4)
+        with torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, backend="eager"
+            ).aot_compile(((x,), {}))
+        shape_code_parts = load_guards_state(
+            compiled_fn._artifacts.guards_state
+        ).shape_code_parts
+        self.assertFalse(shape_code_parts.python_fallback)
+        self.assertEqual(
+            [source.name for source in shape_code_parts.shape_env_sources],
+            ["G['AOT_CPP_SHAPE_GLOBAL'].size()[0]"],
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        scope: dict[str, object] = {}
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+        with self.assertRaisesRegex(
+            RuntimeError, r"KeyError on G\['AOT_CPP_SHAPE_GLOBAL'\]"
+        ):
+            loaded(x)
+        scope["AOT_CPP_SHAPE_GLOBAL"] = AOT_CPP_SHAPE_GLOBAL
+        self.assertEqual(loaded(x), x + AOT_CPP_SHAPE_GLOBAL.sum(0))
+
+    def test_load_compiled_function_f_globals_is_seeded_in_place(self):
+        # f_globals is the guard scope now, so what _seed_guard_scope writes for
+        # a kept guard rooted at a Dynamo-minted name lands in the caller's own
+        # dict, with no CleanupHook to take it back out. keep_builtin_guards
+        # keeps the BUILTIN_MATCH rooted at the builtins-dict key, which is what
+        # makes the seeding run at all -- under the default filter no global
+        # guard survives, so nothing is written.
+        def fn(x):
+            if isinstance(x, torch.Tensor):
+                return x + 1
+            return x
+
+        x = torch.randn(3, 3)
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_builtin_guards},
+        ).aot_compile(((x,), {}))
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertTrue(builtins_key)
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        scope: dict[str, object] = {"__name__": "caller_module"}
+        before = set(scope)
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+        self.assertEqual(set(scope) - before, {builtins_key, "__builtins__"})
+        self.assertEqual(loaded(x), fn(x))
+
+    def test_load_compiled_function_f_globals_accepted_rebind_is_not_used(self):
+        # The limitation the docstring and the guide record: the guards read
+        # f_globals live while the bytecode reads the load-time snapshot, so a
+        # rebind a kept TENSOR_MATCH accepts -- it compares metadata, not values
+        # -- passes the check and the graph still computes with the value the
+        # load snapshotted. test_..._guard_checks_the_tensor_type pins the
+        # rejected end; this pins the accepted one, so either fix the message
+        # weighs -- re-rooting the guards at the snapshot, or refreshing it once
+        # a check passes -- has to change this test. Unlike the rejected end, it
+        # answers the same way on the parent, where a rebind was invisible to
+        # the guards too.
+        def fn(x):
+            return x * EPS
+
+        x = torch.randn(3, 4)
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        # The rebind being ACCEPTED has to be a guard's answer rather than an
+        # absent one: both the served value and guard_check returning True also
+        # hold for an artifact that kept no guard on G['EPS'] at all.
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        kept = [str(guard) for guard in guards_state.output_graph.guards]
+        self.assertTrue(any("G['EPS']" in guard for guard in kept), kept)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        load_time = EPS.clone()
+        scope = {"EPS": load_time}
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+        self.assertEqual(loaded(x), x * load_time)
+
+        rebound = torch.tensor(5.0)
+        self.assertNotEqual(rebound.item(), load_time.item())
+        scope["EPS"] = rebound
+        self.assertEqual(loaded(x), x * load_time)
+
     @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
         # A load in a fresh process binds names its own counter is still behind:
@@ -2174,7 +2450,7 @@ from user code:
         builtins.aot_probe = os.getcwd
         try:
             guarded, builtins_key = save(keep_builtin_guards)
-            unguarded, _ = save(drop_the_probe_guard)
+            unguarded, unguarded_key = save(drop_the_probe_guard)
         finally:
             del builtins.aot_probe
 
@@ -2201,6 +2477,24 @@ from user code:
         with self.assertRaises(KeyError) as read_failure:
             loaded(x)
         self.assertEqual(read_failure.exception.args, ("aot_probe",))
+
+        # Through the public wrapper the guards get the caller's dict, so the
+        # re-derive lands there and fn.__globals__ keeps the recording -- the key
+        # the bytecode subscripts. The artifact that just raised therefore serves
+        # here, off a builtin this process no longer has, while the guard reads
+        # the live builtins the caller's dict now holds.
+        torch._dynamo.reset()
+        scope: dict[str, object] = {}
+        loaded = torch.compiler.load_compiled_function(
+            io.BytesIO(unguarded), f_globals=scope
+        )
+        self.assertTrue(loaded.guard_check(x))
+        self.assertEqual(loaded(x)[1], os.getcwd)
+        self.assertIn("aot_probe", loaded.fn.__globals__[unguarded_key])
+        self.assertTrue(
+            scope[unguarded_key] is builtins.__dict__,
+            "the re-derive did not land in the caller's dict",
+        )
 
     def test_load_refuses_a_non_dict_builtins_binding(self):
         # guard_globals is the one dict on this path that comes from outside torch,
@@ -2241,6 +2535,18 @@ from user code:
             r"f_globals\['__builtins__'\] must be a dict or a module, got NoneType",
         ):
             AOTCompiledFunction.deserialize(data, f_globals={"__builtins__": None})
+
+        # load_compiled_function forwards the caller's f_globals as guard_globals,
+        # so one dict arrives by both routes; the message has to name the parameter
+        # the public signature actually has.
+        torch._dynamo.reset()
+        bad_scope: dict[str, object] = {"__builtins__": None}
+        with open(self.path(), "rb") as f:
+            with self.assertRaisesRegex(
+                TypeError,
+                r"f_globals\['__builtins__'\] must be a dict or a module, got NoneType",
+            ):
+                torch.compiler.load_compiled_function(f, f_globals=bad_scope)
 
         torch._dynamo.reset()
         scope: dict[str, object] = {"__builtins__": builtins}
