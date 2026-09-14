@@ -1251,14 +1251,21 @@ class CompilePackage:
             )
 
     def _install_global(
-        self, module: types.ModuleType, name: str, value: object
+        self,
+        module: types.ModuleType,
+        name: str,
+        value: object,
+        *,
+        record_only_if_new: bool = False,
     ) -> None:
         # A pre-reset compile in this process may still own `name` via a
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
+        record = not (record_only_if_new and name in module.__dict__)
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        if record:
+            self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
@@ -1294,9 +1301,19 @@ class CompilePackage:
             )
             with context:
                 module = sys.modules[entry.python_module]
+                # An __import_* alias someone else bound first may be held BY
+                # REFERENCE by a loaded artifact's guards --
+                # AOTCompiledFunction._seed_guard_scope seeds those aliases into
+                # a live module scope and nothing re-seeds them -- so uninstall()
+                # must leave a binding this package did not create alone. The
+                # aliases are the only names install() records that are ever
+                # seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
-                        module, alias, importlib.import_module(module_name)
+                        module,
+                        alias,
+                        importlib.import_module(module_name),
+                        record_only_if_new=True,
                     )
                 target_code = code
                 if entry.install_to_global:
