@@ -168,6 +168,7 @@ from .variables.ctx_manager import (
     WithExitFunctionVariable,
 )
 from .variables.dicts import ConstDictVariable
+from .variables.exception import TracebackVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
@@ -194,7 +195,6 @@ from .variables.misc import (
     CellVariable,
     NullVariable,
     PythonModuleVariable,
-    TracebackVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
