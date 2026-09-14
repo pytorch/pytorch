@@ -3,6 +3,7 @@
 import builtins
 import contextlib
 import copy
+import dataclasses
 import functools
 import importlib
 import inspect
@@ -33,6 +34,8 @@ import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.aot_compile import (
+    _GuardScope,
+    _names_a_missing_global,
     AOTCompiledFunction,
     AOTCompiledModel,
     ModelInput,
@@ -387,6 +390,27 @@ class Transformer(nn.Module):
         return logits
 
 
+# A namespace that belongs to no module, so Dynamo has no import source for it:
+# an inlined frame reading a global from here is guarded through a minted
+# ___unnamed_scope_<id(dict)>_c<n> key rather than through a module alias.
+_UNNAMED_SCOPE_NS = {"__name__": "aot_compile_not_a_registered_module"}
+exec(
+    "AOT_NS_POOL_MODE = 'sum'\n"
+    "def ns_pool_fn(x):\n"
+    "    if AOT_NS_POOL_MODE == 'sum':\n"
+    "        return x.sum(1)\n"
+    "    return x.mean(1)\n",
+    _UNNAMED_SCOPE_NS,
+)
+
+
+ns_pool_fn = _UNNAMED_SCOPE_NS["ns_pool_fn"]
+
+
+def calls_into_an_unnamed_scope(x):
+    return ns_pool_fn(x)
+
+
 class SimpleLinearModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -394,6 +418,15 @@ class SimpleLinearModule(torch.nn.Module):
 
     def forward(self, x):
         return self.linear(x)
+
+
+GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
+
+
+def global_config_fn(x):
+    if GLOBAL_POOLING_CONFIG["pooling"] == "sum":
+        return x.sum(1)
+    return x.mean(1) * 10.0
 
 
 AOT_POOL_MODE = "sum"
@@ -1841,6 +1874,299 @@ from user code:
         self.assertNotEqual(rebound.item(), load_time.item())
         scope["EPS"] = rebound
         self.assertEqual(loaded(x), x * load_time)
+
+    def test_aot_compile_fn_missing_global_hint_names_f_globals(self):
+        # Loaded without f_globals, a function artifact's guards resolve against
+        # the scope rebuilt from the serialized bytecode, which carries the
+        # globals the graph lifted and the module aliases it imports -- and a
+        # global the tracing branch specialized on is neither. Nothing this
+        # module defines can be reached from there, so the failure has to point
+        # at f_globals rather than at a name to define. (No need to unbind
+        # AOT_POOL_MODE here: the guard cannot see this module's globals either
+        # way.)
+        x = torch.randn(4, 8)
+        self._hide_leaked_dynamo_globals()
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertIs(loaded._guard_scope, _GuardScope.RECONSTRUCTED)
+        with self.assertRaises(RuntimeError) as ctx:
+            loaded(x)
+        message = str(ctx.exception)
+        self.assertIn("a complete live scope", message)
+        # The scope that binds the name is the one that DEFINED the function,
+        # which in the cross-process case AOT compile exists for is not the
+        # module doing the loading, so the advice has to name that module's own
+        # vars(mod) rather than the loader's globals() -- and spell the argument,
+        # since a bare vars() is the caller's locals().
+        self.assertIn("vars(mod) for the module mod that defined the function", message)
+        # Not the advice for a live scope the caller could add the name to.
+        self.assertNotIn("define it there", message)
+
+    def test_aot_compile_fn_extra_globals_only_load_is_still_reconstructed(self):
+        # deserialize's positional f_globals is _extra_globals, which
+        # forward_callable MERGES into the scope it rebuilds -- so this load's
+        # guards do read the names the caller passed, and the state is still
+        # RECONSTRUCTED. That is the accurate state, not a gap: the merge copies
+        # the caller's dict, so the supplied-scope advice to define the name in
+        # it would be false here, while the advice this state gives -- load with
+        # an f_globals= that carries the name -- is what the second half proves
+        # works.
+        x = torch.randn(4, 8)
+        self._hide_leaked_dynamo_globals()
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            data = f.read()
+
+        torch._dynamo.reset()
+        partial: dict[str, object] = {"AOT_UNRELATED_NAME": 1}
+        loaded = AOTCompiledFunction.deserialize(data, f_globals=partial)
+        self.assertIs(loaded._guard_scope, _GuardScope.RECONSTRUCTED)
+        # The caller's names really are in the dict the guards read, which is
+        # why the hint cannot say the scope holds only what the graph lifted.
+        self.assertIn("AOT_UNRELATED_NAME", loaded.fn.__globals__)
+        self.assertNotIn("AOT_POOL_MODE", loaded.fn.__globals__)
+        with self.assertRaises(RuntimeError) as ctx:
+            loaded(x)
+        message = str(ctx.exception)
+        self.assertIn("KeyError on G['AOT_POOL_MODE']", message)
+        self.assertIn("missing from the scope rebuilt from the artifact", message)
+        # The clause the parent had here, "which holds only the globals the graph
+        # lifted", was false for this shape.
+        self.assertNotIn("holds only the globals", message)
+        # Binding the name in the dict the caller passed does not reach these
+        # guards, so the supplied-scope wording would misdirect this reader.
+        partial["AOT_POOL_MODE"] = "sum"
+        with self.assertRaises(RuntimeError):
+            loaded(x)
+
+        # What the hint does tell them to do resolves the guard.
+        torch._dynamo.reset()
+        complete = AOTCompiledFunction.deserialize(
+            data, f_globals={"AOT_POOL_MODE": "sum"}
+        )
+        self.assertEqual(complete(x), x.sum(1))
+
+    def test_aot_compile_fn_missing_global_hint_names_the_supplied_scope(self):
+        # With a live scope supplied, the same failure means the opposite of the
+        # reconstructed-scope one above: the caller already passed a scope, and
+        # what is missing is the name in it.
+        x = torch.randn(4, 8)
+        self._hide_leaked_dynamo_globals()
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        g = globals()
+        saved = g.pop("AOT_POOL_MODE")
+        try:
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f, f_globals=g)
+            with self.assertRaises(RuntimeError) as ctx:
+                loaded(x)
+            message = str(ctx.exception)
+            # Assert on a phrase unique to the supplied-scope wording: "define
+            # it there" is in the captured-scope advice too, so asserting on
+            # that alone would pass either way.
+            self.assertIn("the live scope this artifact was loaded against", message)
+            self.assertNotIn("traced in", message)
+        finally:
+            g["AOT_POOL_MODE"] = saved
+
+        # An empty dict is still a scope the caller supplied. The state is
+        # settled on whether f_globals was passed, not on whether it has names
+        # in it, so this caller gets the advice for a scope they can add the
+        # name to rather than being sent to supply the scope they just passed.
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            empty_loaded = torch.compiler.load_compiled_function(f, f_globals={})
+        self.assertIs(empty_loaded._guard_scope, _GuardScope.SUPPLIED)
+        with self.assertRaises(RuntimeError) as ctx:
+            empty_loaded(x)
+        self.assertIn(
+            "the live scope this artifact was loaded against", str(ctx.exception)
+        )
+
+    def test_aot_compile_fn_missing_nested_key_gets_no_missing_global_hint(self):
+        # The global itself resolved and only a key inside it is absent, so
+        # there is no missing global to advise about. Matching the verbose code
+        # part whole is what tells the two apart: any substring match sees the
+        # G['GLOBAL_POOLING_CONFIG'] prefix and fires.
+        x = torch.randn(4, 8)
+        # f_globals below is this module's dict, which the capture leaks Dynamo's
+        # generated globals into; hide them for the duration of the test, and
+        # strip what it adds in cleanup. The load seeds nothing here -- every
+        # kept global guard is rooted at GLOBAL_POOLING_CONFIG, not at an alias
+        # or the builtins-dict key.
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            global_config_fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        g = globals()
+        saved = GLOBAL_POOLING_CONFIG.pop("pooling")
+        try:
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f, f_globals=g)
+            self.assertIs(loaded._guard_scope, _GuardScope.SUPPLIED)
+            with self.assertRaises(RuntimeError) as ctx:
+                loaded(x)
+        finally:
+            GLOBAL_POOLING_CONFIG["pooling"] = saved
+        message = str(ctx.exception)
+        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']['pooling']", message)
+        self.assertNotIn("a guarded global is missing", message)
+
+    def test_aot_compile_fn_missing_global_hint_names_the_tracing_scope(self):
+        # A never-serialized artifact's guards hold the globals they were traced
+        # against BY REFERENCE, and _guard_globals is None there too -- so a state
+        # derived from _guard_globals at the point of failure could not tell this
+        # apart from a load that supplied no scope, and would send the user off to
+        # find a scope carrying a name that is missing from a dict they already
+        # own. The advice is the one a live scope gets, and the second half proves
+        # it is true rather than merely present: the name deleted after capture,
+        # defined again in that same dict, makes the guard resolve.
+        x = torch.randn(4, 8)
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            global_rebind_fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        self.assertIs(compiled_fn._guard_scope, _GuardScope.CAPTURED)
+        self.assertIsNone(compiled_fn._guard_globals)
+
+        g = globals()
+        saved = g.pop("AOT_POOL_MODE")
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                compiled_fn(x)
+            message = str(ctx.exception)
+            self.assertIn("KeyError on G['AOT_POOL_MODE']", message)
+            self.assertIn("the module the compiled function was traced in", message)
+            self.assertNotIn("a complete live scope", message)
+            # The advice continues the last line of str(GuardDebugInfo), which
+            # ends in a newline: appending straight to it starts a line with a
+            # space.
+            self.assertIn(") -- a guarded global is missing", message)
+            g["AOT_POOL_MODE"] = "sum"
+            self.assertEqual(compiled_fn(x), x.sum(1))
+        finally:
+            g["AOT_POOL_MODE"] = saved
+
+    def test_missing_global_hint_skips_a_name_dynamo_minted(self):
+        # The strings are the verbose code part a guard tree reports for a
+        # missing global, as the tests above read it off a real failure.
+        self.assertTrue(_names_a_missing_global("KeyError on G['AOT_POOL_MODE']"))
+        # A name Dynamo minted is not one the caller wrote, so "define it" is
+        # advice they cannot act on: a load seeds each minted name a kept guard
+        # is rooted at, and a KeyError on one reports a gap in that seeding.
+        self.assertFalse(
+            _names_a_missing_global("KeyError on G['__builtins_dict___0']")
+        )
+        self.assertFalse(
+            _names_a_missing_global("KeyError on G['__import_torch_dot_nn']")
+        )
+        # The key an inlined frame whose globals belong to no module is guarded
+        # through: it embeds id() of a dict in the tracing process, so no
+        # module's vars() in a loading process holds it.
+        self.assertFalse(
+            _names_a_missing_global("KeyError on G['___unnamed_scope_140234512_c0']")
+        )
+        # A user name that merely starts with underscores is still theirs.
+        self.assertTrue(_names_a_missing_global("KeyError on G['__my_config']"))
+
+    def test_aot_compile_fn_missing_unnamed_scope_gets_no_missing_global_hint(self):
+        # A load rebuilds no ___unnamed_scope_<id>_c<n> key, so an inlined frame
+        # guarded through one reaches __call__ as exactly the KeyError shape the
+        # hint fires on -- and the name embeds id() of a dict in the tracing
+        # process, so the reconstructed-scope advice, which asks for the defining
+        # module's vars(), names a scope that cannot hold it.
+        x = torch.randn(4, 8)
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            calls_into_an_unnamed_scope,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertIs(loaded._guard_scope, _GuardScope.RECONSTRUCTED)
+        with self.assertRaises(RuntimeError) as ctx:
+            loaded(x)
+        message = str(ctx.exception)
+        self.assertIn("KeyError on G['___unnamed_scope", message)
+        self.assertNotIn("a guarded global is missing", message)
+
+    def test_repr_of_an_artifact_whose_post_init_raised(self):
+        # fn is a field with no default, so leaving it in the generated __repr__
+        # and __eq__ makes both raise AttributeError on an instance
+        # __post_init__ abandoned -- and check_compatibility abandons one on a
+        # version mismatch. Anything rendering frame locals while formatting
+        # that traceback (pytest --showlocals) would then report the
+        # AttributeError instead of the mismatch.
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(4, 8)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+        artifacts = compiled_fn._artifacts
+        stale = dataclasses.replace(
+            artifacts,
+            system_info=dataclasses.replace(
+                artifacts.system_info, torch_version="0.0.0-not-this-one"
+            ),
+        )
+        # Caught by hand rather than with assertRaises: that context manager
+        # hands back an exception whose traceback it has already dropped, and the
+        # instance under construction is only reachable through it.
+        abandoned = None
+        try:
+            AOTCompiledFunction(_artifacts=stale)
+        except RuntimeError as e:
+            self.assertIn("different PyTorch version", str(e))
+            tb = e.__traceback__
+            while tb is not None:
+                if tb.tb_frame.f_code.co_name == "__post_init__":
+                    abandoned = tb.tb_frame.f_locals["self"]
+                tb = tb.tb_next
+        self.assertIsInstance(abandoned, AOTCompiledFunction)
+        self.assertIn("AOTCompiledFunction", repr(abandoned))
+        self.assertEqual(abandoned, abandoned)
 
     @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
