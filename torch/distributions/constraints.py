@@ -714,7 +714,7 @@ class _Stack(Constraint):
     @property
     def event_dim(self) -> int:  # type: ignore[override]
         dim = max(c.event_dim for c in self.cseq)
-        if self.dim + dim < 0:
+        if dim and self.dim + dim < 0:
             dim += 1
         return dim
 
