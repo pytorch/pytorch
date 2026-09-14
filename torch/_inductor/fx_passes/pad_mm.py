@@ -2,6 +2,8 @@ import functools
 import itertools
 import operator
 import typing
+from contextvars import ContextVar
+from dataclasses import dataclass
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -45,6 +47,95 @@ aten = torch.ops.aten
 # Changing it to True will ignore comparing do_bench times
 # between original pattern and padded one.
 _skip_do_bench_times = False
+
+
+@dataclass(frozen=True)
+class PaddingPlan:
+    """The dimensions padded by one shape-padding replacement."""
+
+    pad_m: bool = False
+    pad_k: bool = False
+    pad_n: bool = False
+
+    @property
+    def name(self) -> str:
+        if self.pad_m:
+            return "legacy-all"
+        if self.pad_k and self.pad_n:
+            return "k+n"
+        if self.pad_k:
+            return "k"
+        if self.pad_n:
+            return "n"
+        return "none"
+
+
+NO_PADDING = PaddingPlan()
+K_PADDING = PaddingPlan(pad_k=True)
+N_PADDING = PaddingPlan(pad_n=True)
+K_N_PADDING = PaddingPlan(pad_k=True, pad_n=True)
+LEGACY_ALL_PADDING = PaddingPlan(pad_m=True, pad_k=True, pad_n=True)
+FORCE_PADDING = LEGACY_ALL_PADDING
+
+_PADDING_PLANS_BY_NAME = {
+    plan.name: plan
+    for plan in (NO_PADDING, K_PADDING, N_PADDING, K_N_PADDING, LEGACY_ALL_PADDING)
+}
+
+# Replacement graphs are retraced immediately after their extra_check succeeds.
+# Keep the exact selected plan in compilation-local state so the replacement does
+# not independently reconstruct a different plan.
+_selected_padding_plan: ContextVar[PaddingPlan | None] = ContextVar(
+    "selected_padding_plan", default=None
+)
+
+
+def _consume_selected_padding_plan() -> PaddingPlan:
+    """Return one accepted plan and clear it before tracing graph operations."""
+    plan = _selected_padding_plan.get()
+    _selected_padding_plan.set(None)
+    if plan is None:
+        raise AssertionError("padding replacement traced without a selected plan")
+    return plan
+
+
+def _clear_selected_padding_plan() -> None:
+    _selected_padding_plan.set(None)
+
+
+def _padding_plan_result_encoder_factory(
+    fn: Callable[..., PaddingPlan],
+) -> Callable[..., Callable[[PaddingPlan], str]]:
+    del fn
+
+    def params_to_encoder(
+        *args: object, **kwargs: object
+    ) -> Callable[[PaddingPlan], str]:
+        del args, kwargs
+        return lambda plan: plan.name
+
+    return params_to_encoder
+
+
+def _padding_plan_result_decoder_factory(
+    fn: Callable[..., PaddingPlan],
+) -> Callable[..., Callable[[object], PaddingPlan]]:
+    del fn
+
+    def params_to_decoder(
+        *args: object, **kwargs: object
+    ) -> Callable[[object], PaddingPlan]:
+        del args, kwargs
+
+        def decode(value: object) -> PaddingPlan:
+            # Unknown values and pre-v3 boolean results fail closed.
+            if not isinstance(value, str):
+                return NO_PADDING
+            return _PADDING_PLANS_BY_NAME.get(value, NO_PADDING)
+
+        return decode
+
+    return params_to_decoder
 
 
 def fetch_fake_tensors(match: Match, kwarg_names: Sequence[str]) -> list[Tensor]:
@@ -188,6 +279,57 @@ def get_padded_length(x: int | torch.SymInt, alignment_size: int) -> int:
     return int((x // alignment_size + 1) * alignment_size) - x
 
 
+def get_padding_lengths(
+    mat1: Tensor,
+    mat2: Tensor,
+    op: torch._ops.OpOverloadPacket,
+    plan: PaddingPlan,
+) -> tuple[int, int, int]:
+    """Return (M, K, N) padding for exactly ``plan``."""
+    if op is torch.ops.aten.bmm:
+        m, k, n = mat1.shape[1], mat1.shape[2], mat2.shape[2]
+    else:
+        m, k, n = mat1.shape[0], mat1.shape[1], mat2.shape[1]
+    return (
+        get_padded_length(m, get_alignment_size(mat1)) if plan.pad_m else 0,
+        get_padded_length(k, get_alignment_size(mat1)) if plan.pad_k else 0,
+        get_padded_length(n, get_alignment_size(mat2)) if plan.pad_n else 0,
+    )
+
+
+def get_normal_padding_plans(
+    mat1: Tensor,
+    mat2: Tensor,
+    op: torch._ops.OpOverloadPacket,
+) -> tuple[PaddingPlan, ...]:
+    """Return non-M subsets plus the one legacy all-required-dim plan."""
+    m_pad, k_pad, n_pad = get_padding_lengths(
+        mat1, mat2, op, LEGACY_ALL_PADDING
+    )
+    plans: list[PaddingPlan] = [NO_PADDING]
+    if k_pad:
+        plans.append(K_PADDING)
+    if n_pad:
+        plans.append(N_PADDING)
+    if k_pad and n_pad:
+        plans.append(K_N_PADDING)
+    if m_pad and (k_pad or n_pad):
+        # Keep the old combined candidate without introducing M-only subsets.
+        # Appending it makes exact ties prefer the less invasive non-M plan.
+        plans.append(LEGACY_ALL_PADDING)
+    return tuple(plans)
+
+
+def get_full_non_m_padding_plan(plans: Sequence[PaddingPlan]) -> PaddingPlan:
+    if K_N_PADDING in plans:
+        return K_N_PADDING
+    if K_PADDING in plans:
+        return K_PADDING
+    if N_PADDING in plans:
+        return N_PADDING
+    return NO_PADDING
+
+
 def pad_dim(x: Tensor, padded_length: int, dim: int) -> Tensor:
     if padded_length == 0:
         return x
@@ -211,6 +353,7 @@ def _is_statically_expandable_to(shape: torch.Size, desired: Sequence[Any]) -> b
 
 
 def should_pad_addmm(match: Match) -> bool:
+    _clear_selected_padding_plan()
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
     beta = match.kwargs["beta"]
     if (
@@ -273,9 +416,9 @@ def addmm_replace(
     beta: float = 1.0,
     alpha: float = 1.0,
 ) -> Tensor:
-    k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
-    n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
-    m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
+    m_padded_length, k_padded_length, n_padded_length = get_padding_lengths(
+        mat1, mat2, torch.ops.aten.addmm, _consume_selected_padding_plan()
+    )
     return pad_addmm(
         input,
         mat1,
@@ -326,12 +469,21 @@ def get_pad_cache() -> torch._inductor.codecache.LocalCache:
     return torch._inductor.codecache.LocalCache()
 
 
-def get_cached_should_pad(key: str) -> bool:
-    return get_pad_cache().lookup(key)  # type: ignore[return-value]
+def get_cached_padding_plan(key: str) -> PaddingPlan | None:
+    value = get_pad_cache().lookup(key)
+    if not isinstance(value, str):
+        return None
+    return {
+        "none": NO_PADDING,
+        "k": K_PADDING,
+        "n": N_PADDING,
+        "k+n": K_N_PADDING,
+        "legacy-all": LEGACY_ALL_PADDING,
+    }.get(value)
 
 
-def set_cached_should_pad(key: str, value: bool) -> None:
-    return get_pad_cache().set_value(key, value=value)
+def set_cached_padding_plan(key: str, plan: PaddingPlan) -> None:
+    get_pad_cache().set_value(key, value=plan.name)
 
 
 def get_cached_base_mm_benchmark_time(key: str) -> float:
@@ -342,6 +494,17 @@ def set_cached_base_mm_benchmark_time(key: str, value: float) -> None:
     return get_pad_cache().set_value(key, value=value)
 
 
+def padding_selection_policy() -> tuple[object, float, bool, bool]:
+    """Configuration values that can change the selected padding plan."""
+    options = torch._inductor.config.post_grad_fusion_options
+    return (
+        options.get("pad_aten_mm_pass"),
+        options.get("shape_padding_multiplier", {}).get("value", 1.1),
+        _should_run_pad_autoheuristic(),
+        torch._inductor.config.deterministic,
+    )
+
+
 def should_pad_bench_key(
     match: Match,
     mat1: Tensor,
@@ -350,10 +513,20 @@ def should_pad_bench_key(
     input: Tensor | None = None,
     is_base_time_key: bool = False,
 ) -> str:
-    def tensor_key(t: Tensor) -> tuple[torch.Size, tuple[int, ...], torch.dtype]:
-        return (t.shape, t.stride(), t.dtype)
+    def tensor_key(t: Tensor) -> tuple[object, ...]:
+        return (
+            t.shape,
+            t.stride(),
+            t.dtype,
+            encoders.get_device_identity(t.device),
+        )
 
     fp32_precision = encoders.get_matmul_precision_for_cache(mat1)
+    addmm_scalars = (
+        (match.kwargs.get("beta", 1.0), match.kwargs.get("alpha", 1.0))
+        if op is torch.ops.aten.addmm
+        else None
+    )
 
     def fmt_pad(name: str) -> str | None:
         if is_base_time_key:
@@ -367,8 +540,13 @@ def should_pad_bench_key(
         fmt_pad("mat2"),
         op,
         input if input is None else tensor_key(input),
+        addmm_scalars,
         fp32_precision,
+        None if is_base_time_key else padding_selection_policy(),
     )
+
+    if not is_base_time_key:
+        key = ("padding_plan_v3", *key)
 
     key = str(key)
     if is_base_time_key:
@@ -445,9 +623,7 @@ def is_padded_faster(key: str, ori_time: float, pad_time: float) -> bool:
             "shape_padding_multiplier"
         ].get("value", 1.1)
         counters["inductor"]["shape_padding_multiplier"] += 1
-    padded_is_faster = _skip_do_bench_times or ori_time > pad_time * multiplier
-    set_cached_should_pad(key, padded_is_faster)
-    return padded_is_faster
+    return _skip_do_bench_times or ori_time > pad_time * multiplier
 
 
 def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
@@ -474,13 +650,16 @@ def should_pad(
     op: torch._ops.OpOverloadPacket,
     input: Tensor | None = None,
 ) -> bool:
+    # A prior replacement trace may have failed before consuming its handoff.
+    # Clear at the start so every rejection and exception fails closed.
+    _clear_selected_padding_plan()
     if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
         return False
     if not can_pad(mat1, mat2, op, input):
         return False
 
-    # Force padding when explicitly requested - performance override
     if torch._inductor.config.force_shape_pad:
+        _selected_padding_plan.set(FORCE_PADDING)
         return True
 
     # Small-K/N mm is lowered to a fused pointwise kernel in tuned_mm.
@@ -494,9 +673,11 @@ def should_pad(
         ):
             return False
 
-    # Note that if you're tempted to insert a dynamo_timed call here, this function can
-    # be called enough that the dynamo_timed overhead is not negligible.
-    return _should_pad(match, mat1, mat2, op, input)
+    plan = _should_pad(match, mat1, mat2, op, input)
+    if plan == NO_PADDING:
+        return False
+    _selected_padding_plan.set(plan)
+    return True
 
 
 def get_do_bench() -> Callable[[Callable[[], Any]], float]:
@@ -507,78 +688,162 @@ def get_do_bench() -> Callable[[Callable[[], Any]], float]:
     )
 
 
-@memoizers.should_pad_memoizer.memoize(
-    custom_params_encoder=encoders.should_pad_params_encoder
-)
-def _should_pad(
+def _should_run_pad_autoheuristic() -> bool:
+    return torch._inductor.config.run_autoheuristic("pad_mm")
+
+
+def _realize_tensor(t: Tensor) -> Tensor:
+    if is_fake_tensor(t):
+        size_hints = hint_symbols(t.size())
+        stride_hint = hint_symbols(t.stride())
+        real_size = sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
+        real_t = torch.randn(real_size, dtype=t.dtype, device=t.device)
+        return torch.as_strided(real_t, size_hints, stride_hint)
+    return torch.randn_like(t)
+
+
+def _padding_bench_fn(
+    match: Match,
+    mat1: Tensor,
+    mat2: Tensor,
+    op: torch._ops.OpOverloadPacket,
+    plan: PaddingPlan,
+    input: Tensor | None,
+) -> Callable[[], Any]:
+    m_pad, k_pad, n_pad = get_padding_lengths(mat1, mat2, op, plan)
+    is_bmm = op is torch.ops.aten.bmm
+    mat1_pre_padded = should_exclude_padding_time(match, "mat1")
+    mat2_pre_padded = should_exclude_padding_time(match, "mat2")
+    mat1_pad, mat2_pad = mat1, mat2
+    prepare: list[Callable[[], Any]] = []
+    beta, alpha = (
+        (match.kwargs.get("beta", 1.0), match.kwargs.get("alpha", 1.0))
+        if op is torch.ops.aten.addmm
+        else (1.0, 1.0)
+    )
+
+    if mat1_pre_padded and (m_pad or k_pad):
+        mat1_pad = pad_mat1(
+            mat1, m_padded_length=m_pad, k_padded_length=k_pad, is_bmm=is_bmm
+        )
+        if m_pad:
+            prepare.append(
+                lambda: mat1_pad[:, -m_pad:, :].zero_()
+                if is_bmm
+                else mat1_pad[-m_pad:, :].zero_()
+            )
+        if k_pad:
+            prepare.append(
+                lambda: mat1_pad[:, :, -k_pad:].zero_()
+                if is_bmm
+                else mat1_pad[:, -k_pad:].zero_()
+            )
+
+    if mat2_pre_padded and (k_pad or n_pad):
+        mat2_pad = pad_mat2(
+            mat2, k_padded_length=k_pad, n_padded_length=n_pad, is_bmm=is_bmm
+        )
+        if k_pad:
+            prepare.append(
+                lambda: mat2_pad[:, -k_pad:, :].zero_()
+                if is_bmm
+                else mat2_pad[-k_pad:, :].zero_()
+            )
+        if n_pad:
+            prepare.append(
+                lambda: mat2_pad[:, :, -n_pad:].zero_()
+                if is_bmm
+                else mat2_pad[:, -n_pad:].zero_()
+            )
+
+    def run() -> Any:
+        for fn in prepare:
+            fn()
+        if op is torch.ops.aten.mm:
+            return pad_mm(
+                mat1_pad,
+                mat2_pad,
+                m_pad,
+                k_pad,
+                n_pad,
+                mat1_pre_padded=mat1_pre_padded,
+                mat2_pre_padded=mat2_pre_padded,
+            )
+        if op is torch.ops.aten.bmm:
+            return pad_bmm(
+                mat1_pad,
+                mat2_pad,
+                m_pad,
+                k_pad,
+                n_pad,
+                mat1_pre_padded=mat1_pre_padded,
+                mat2_pre_padded=mat2_pre_padded,
+            )
+        return pad_addmm(
+            input,
+            mat1_pad,
+            mat2_pad,
+            m_pad,
+            k_pad,
+            n_pad,
+            beta=beta,
+            alpha=alpha,
+            mat1_pre_padded=mat1_pre_padded,
+            mat2_pre_padded=mat2_pre_padded,
+        )
+
+    return run
+
+
+def _select_padding_plan_uncached(
     match: Match,
     mat1: Tensor,
     mat2: Tensor,
     op: torch._ops.OpOverloadPacket,
     input: Tensor | None = None,
-) -> bool:
-    """
-    Determines if an operation SHOULD be padded (performance checks).
-    All logic related to whether padding would be performant should be here.
-    """
-    do_bench = get_do_bench()
-
+) -> PaddingPlan:
+    """Choose the fastest profitable normal-mode padding plan."""
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m = mat1.shape[0]
             k = mat1.shape[1]
             n = mat2.shape[1]
-            k_padded_length = get_padded_length(k, get_alignment_size(mat1))
-            n_padded_length = get_padded_length(n, get_alignment_size(mat2))
-            m_padded_length = get_padded_length(m, get_alignment_size(mat1))
         elif op is torch.ops.aten.bmm:
             m = mat1.shape[1]
             k = mat1.shape[2]
             n = mat2.shape[2]
-            k_padded_length = get_padded_length(k, get_alignment_size(mat1))
-            m_padded_length = get_padded_length(m, get_alignment_size(mat1))
-            n_padded_length = get_padded_length(n, get_alignment_size(mat2))
         else:
-            return False
+            return NO_PADDING
 
         # Resolve symbolic dims to concrete hints for heuristic checks below.
         # These are performance decisions, not correctness — optimization_hint is safe.
         m_concrete, k_concrete, n_concrete = hint_symbols((m, k, n))
 
-        # Performance heuristic for bf16 large K scenarios
+        plans = get_normal_padding_plans(mat1, mat2, op)
+        if len(plans) == 1:
+            return NO_PADDING
+
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
             and should_pad_mm_bf16(mat1.dtype, m_concrete, n_concrete, k_concrete)
         ):
-            return True
+            return (
+                LEGACY_ALL_PADDING
+                if LEGACY_ALL_PADDING in plans
+                else get_full_non_m_padding_plan(plans)
+            )
 
         # Check if operation is compute bound (performance check)
         if not is_mm_compute_bound(m_concrete, k_concrete, n_concrete, mat1.dtype):
-            return False
+            return NO_PADDING
 
-        # We don't want to look up the cache for cases that are trivially false
-        # since it does file io
         key = should_pad_bench_key(match, mat1, mat2, op, input)
+        cached_plan = get_cached_padding_plan(key)
+        if cached_plan is not None:
+            return cached_plan
 
-        cached_pad = get_cached_should_pad(key)
-        if cached_pad is not None:
-            return cached_pad
-
-        def realize_tensor(t):
-            if is_fake_tensor(t):
-                size_hints = hint_symbols(t.size())
-                # pyrefly: ignore [bad-argument-type]
-                stride_hint = hint_symbols(t.stride())
-                real_size = (
-                    sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
-                )
-                real_t = torch.randn(real_size, dtype=t.dtype, device=t.device)
-                return torch.as_strided(real_t, size_hints, stride_hint)
-            else:
-                return torch.randn_like(t)
-
-        mat1 = realize_tensor(mat1)
-        mat2 = realize_tensor(mat2)
+        mat1 = _realize_tensor(mat1)
+        mat2 = _realize_tensor(mat2)
 
         # since we key on whether or not the inputs can be memory planned, set cache for the
         # original time which is unaffected by whether or not the input can be planned
@@ -586,113 +851,49 @@ def _should_pad(
             match, mat1, mat2, op, input, is_base_time_key=True
         )
         ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
-        if ori_time is None and op is torch.ops.aten.addmm and input is not None:
-            # realize bias for addmm
-            input = realize_tensor(input)
-
-        mat1_pad = mat1
-        mat2_pad = mat2
-
-        is_bmm = op is torch.ops.aten.bmm
+        if op is torch.ops.aten.addmm and input is not None:
+            input = _realize_tensor(input)
 
         mat1_pre_padded = should_exclude_padding_time(match, "mat1")
-        fns = []
-        if mat1_pre_padded and (m_padded_length or k_padded_length):
-            mat1_pad = pad_mat1(
-                mat1_pad,
-                m_padded_length=m_padded_length,
-                k_padded_length=k_padded_length,
-                is_bmm=is_bmm,
-            )
-
-            def write_pad():
-                if is_bmm:
-                    mat1_pad[:, -m_padded_length:, -k_padded_length:].fill_(0)
-                else:
-                    mat1_pad[-m_padded_length:, -k_padded_length:].fill_(0)
-
-            fns.append(write_pad)
-
         mat2_pre_padded = should_exclude_padding_time(match, "mat2")
-        if mat2_pre_padded and (k_padded_length or n_padded_length):
-            mat2_pad = pad_mat2(
-                mat2_pad,
-                k_padded_length=k_padded_length,
-                n_padded_length=n_padded_length,
-                is_bmm=is_bmm,
-            )
-
-            def write_pad():
-                if is_bmm:
-                    mat2_pad[:, -k_padded_length:, -n_padded_length:].fill_(0)
-                else:
-                    mat2_pad[-k_padded_length:, -n_padded_length:].fill_(0)
-
-            fns.append(write_pad)
-
-        if op is torch.ops.aten.addmm:
-            input_pad = None
-            if input is not None and (input.is_cuda or input.is_xpu):
-                input_pad = torch.randn_like(input)
-            fns.append(
-                lambda: pad_addmm(
-                    input_pad,
-                    mat1_pad,
-                    mat2_pad,
-                    m_padded_length,
-                    k_padded_length,
-                    n_padded_length,
-                    mat1_pre_padded=mat1_pre_padded,
-                    mat2_pre_padded=mat2_pre_padded,
-                )
-            )
-        elif op is torch.ops.aten.mm:
-            fns.append(
-                lambda: pad_mm(
-                    mat1_pad,
-                    mat2_pad,
-                    m_padded_length,
-                    k_padded_length,
-                    n_padded_length,
-                    mat1_pre_padded=mat1_pre_padded,
-                    mat2_pre_padded=mat2_pre_padded,
-                )
-            )
-        else:
-            fns.append(
-                lambda: pad_bmm(
-                    mat1_pad,
-                    mat2_pad,
-                    m_padded_length,
-                    k_padded_length,
-                    n_padded_length,
-                    mat1_pre_padded=mat1_pre_padded,
-                    mat2_pre_padded=mat2_pre_padded,
-                )
-            )
+        do_bench = get_do_bench()
 
         def orig_bench_fn():
             if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
-                op(mat1, mat2)
-            else:
-                op(input, mat1, mat2)
+                return op(mat1, mat2)
+            return op(
+                input,
+                mat1,
+                mat2,
+                beta=match.kwargs.get("beta", 1.0),
+                alpha=match.kwargs.get("alpha", 1.0),
+            )
 
-        def pad_bench_fn():
-            for fn in fns:
-                fn()
+        padded_fns = {
+            plan: _padding_bench_fn(match, mat1, mat2, op, plan, input)
+            for plan in plans[1:]
+        }
 
-        if (
-            torch._inductor.config.run_autoheuristic("pad_mm")
-            and op is torch.ops.aten.mm
-        ):
+        autoheuristic_plan: PaddingPlan | None = None
+        if _should_run_pad_autoheuristic() and op is torch.ops.aten.mm:
+            if len(padded_fns) == 1:
+                autoheuristic_plan = next(iter(padded_fns))
+            elif torch._inductor.config.deterministic:
+                autoheuristic_plan = get_full_non_m_padding_plan(plans)
+
+        if autoheuristic_plan is not None:
+            pad_bench_fn = padded_fns[autoheuristic_plan]
+            plan_m, plan_k, plan_n = get_padding_lengths(
+                mat1, mat2, op, autoheuristic_plan
+            )
             ah_should_pad = run_autoheuristic(
                 mat1,
                 mat2,
                 orig_bench_fn,
                 pad_bench_fn,
-                m_padded_length,
-                k_padded_length,
-                n_padded_length,
+                plan_m,
+                plan_k,
+                plan_n,
                 do_bench,
                 mat1_pre_padded,
                 mat2_pre_padded,
@@ -701,20 +902,43 @@ def _should_pad(
                 key,
             )
             if ah_should_pad is not None:
-                return ah_should_pad
+                selected_plan = (
+                    autoheuristic_plan if ah_should_pad else NO_PADDING
+                )
+                set_cached_padding_plan(key, selected_plan)
+                return selected_plan
 
         # AH didn't make a decision, so if we're in deterministic mode, we should return false
         if torch._inductor.config.deterministic:
-            return False
+            return NO_PADDING
 
         if ori_time is None:
             ori_time = do_bench(orig_bench_fn)
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
 
-        pad_time = do_bench(pad_bench_fn)
-
+        plan_times = {plan: do_bench(fn) for plan, fn in padded_fns.items()}
         counters["inductor"]["pad_mm_bench"] += 1
-        return is_padded_faster(key, ori_time, pad_time)
+        best_plan, best_time = min(plan_times.items(), key=operator.itemgetter(1))
+        selected_plan = (
+            best_plan if is_padded_faster(key, ori_time, best_time) else NO_PADDING
+        )
+        set_cached_padding_plan(key, selected_plan)
+        return selected_plan
+
+
+@memoizers.should_pad_memoizer.memoize(
+    custom_params_encoder=encoders.should_pad_params_encoder,
+    custom_result_encoder=_padding_plan_result_encoder_factory,
+    custom_result_decoder=_padding_plan_result_decoder_factory,
+)
+def _should_pad(
+    match: Match,
+    mat1: Tensor,
+    mat2: Tensor,
+    op: torch._ops.OpOverloadPacket,
+    input: Tensor | None = None,
+) -> PaddingPlan:
+    return _select_padding_plan_uncached(match, mat1, mat2, op, input)
 
 
 def get_context(
@@ -815,8 +1039,6 @@ def run_autoheuristic(
             if ori_time is None:
                 set_cached_base_mm_benchmark_time(ori_time_key, ah_ori_time)
             return is_padded_faster(key, ah_ori_time, ah_pad_time)
-    if ah_should_pad is not None:
-        set_cached_should_pad(key, ah_should_pad)
     return ah_should_pad
 
 
@@ -825,6 +1047,7 @@ def mm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
 
 
 def should_pad_mm(match: Match) -> bool:
+    _clear_selected_padding_plan()
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad(match, mat1, mat2, torch.ops.aten.mm)
 
@@ -881,9 +1104,9 @@ def pad_mm(
 
 
 def mm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
-    k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
-    m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
-    n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
+    m_padded_length, k_padded_length, n_padded_length = get_padding_lengths(
+        mat1, mat2, torch.ops.aten.mm, _consume_selected_padding_plan()
+    )
     return pad_mm(
         mat1,
         mat2,
@@ -898,6 +1121,7 @@ def bmm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
 
 
 def should_pad_bmm(match: Match) -> bool:
+    _clear_selected_padding_plan()
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad(match, mat1, mat2, torch.ops.aten.bmm)
 
@@ -934,9 +1158,9 @@ def pad_bmm(
 
 
 def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
-    k_padded_length = get_padded_length(mat1.shape[2], get_alignment_size(mat1))
-    n_padded_length = get_padded_length(mat2.shape[2], get_alignment_size(mat2))
-    m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
+    m_padded_length, k_padded_length, n_padded_length = get_padding_lengths(
+        mat1, mat2, torch.ops.aten.bmm, _consume_selected_padding_plan()
+    )
     return pad_bmm(
         mat1,
         mat2,

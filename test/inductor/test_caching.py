@@ -2425,6 +2425,57 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
 
     @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_padding_plan_replays_from_disk_cache(self, mock_is_contiguous) -> None:
+        """Every plan, including legacy-all, has a stable persistent encoding."""
+        import torch
+        from torch._inductor.fx_passes.pad_mm import (
+            _padding_plan_result_decoder_factory,
+            _padding_plan_result_encoder_factory,
+            FORCE_PADDING,
+            K_N_PADDING,
+            K_PADDING,
+            NO_PADDING,
+            N_PADDING,
+            PaddingPlan,
+        )
+        from torch._inductor.runtime.caching import encoders
+
+        plans = (NO_PADDING, K_PADDING, N_PADDING, K_N_PADDING, FORCE_PADDING)
+        mock_match = self._create_mock_match()
+        mat1 = torch.randn(8, 16)
+        mat2 = torch.randn(16, 32)
+
+        for index, expected in enumerate(plans):
+            persistent = PersistentMemoizer(sub_dir=f"{self.sub_dir()}-{index}")
+            call_count = 0
+
+            @persistent.memoize(
+                custom_params_encoder=encoders.should_pad_params_encoder,
+                custom_result_encoder=_padding_plan_result_encoder_factory,
+                custom_result_decoder=_padding_plan_result_decoder_factory,
+            )
+            def choose_plan(
+                match: Any,
+                mat1: torch.Tensor,
+                mat2: torch.Tensor,
+                op: Any,
+            ) -> PaddingPlan:
+                nonlocal call_count
+                call_count += 1
+                return expected
+
+            self.assertEqual(
+                choose_plan(mock_match, mat1, mat2, torch.ops.aten.mm), expected
+            )
+            persistent._memoizer._cache = impls._InMemoryCacheImpl()
+            self.assertEqual(
+                choose_plan(mock_match, mat1, mat2, torch.ops.aten.mm), expected
+            )
+            self.assertEqual(call_count, 1)
+
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
+    @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(False)
     def test_should_pad_memoizer_disabled_does_not_cache(
         self, mock_is_contiguous

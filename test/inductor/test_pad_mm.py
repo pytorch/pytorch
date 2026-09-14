@@ -6,10 +6,14 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.pad_mm import (
+    _selected_padding_plan,
     can_pad,
     get_alignment_size,
     get_pad_cache,
     get_padded_length,
+    get_padding_lengths,
+    K_PADDING,
+    N_PADDING,
     should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -23,6 +27,97 @@ class PadMMTest(TestCase):
         super().setUp()
         if not is_big_gpu():
             return self.skipTest("Need a big GPU to run max_autotune=True")
+
+    @fresh_cache()
+    @inductor_config.patch(shape_padding=True, force_shape_pad=False)
+    def test_padding_plan_handoff_across_multiple_sites(self):
+        def fn(a, b, c, d):
+            return a @ b, c @ d
+
+        args = (
+            torch.randn(128, 129, device=GPU_TYPE),
+            torch.randn(129, 128, device=GPU_TYPE),
+            torch.randn(128, 128, device=GPU_TYPE),
+            torch.randn(128, 129, device=GPU_TYPE),
+        )
+        expected = fn(*args)
+        observed_plans = []
+
+        def select_plan(match, mat1, mat2, op, input=None):
+            return K_PADDING if mat1.shape[1] == 129 else N_PADDING
+
+        def record_plan(mat1, mat2, op, plan):
+            observed_plans.append(plan)
+            return get_padding_lengths(mat1, mat2, op, plan)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm._should_pad",
+                side_effect=select_plan,
+            ),
+            unittest.mock.patch(
+                "torch._inductor.kernel.mm_common._use_small_mm_pointwise",
+                return_value=False,
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm.get_padding_lengths",
+                side_effect=record_plan,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(actual, expected)
+        self.assertCountEqual(observed_plans, (K_PADDING, N_PADDING))
+        self.assertIsNone(_selected_padding_plan.get())
+
+    @fresh_cache()
+    @inductor_config.patch(shape_padding=True, force_shape_pad=False)
+    def test_padding_plan_handoff_recovers_after_trace_failure(self):
+        def failing_fn(a, b):
+            return a @ b
+
+        k_args = (
+            torch.randn(128, 129, device=GPU_TYPE),
+            torch.randn(129, 128, device=GPU_TYPE),
+        )
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm._should_pad",
+                return_value=K_PADDING,
+            ),
+            unittest.mock.patch(
+                "torch._inductor.kernel.mm_common._use_small_mm_pointwise",
+                return_value=False,
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm.get_padding_lengths",
+                side_effect=RuntimeError("injected replacement trace failure"),
+            ),
+            self.assertRaisesRegex(Exception, "injected replacement trace failure"),
+        ):
+            torch.compile(failing_fn, fullgraph=True)(*k_args)
+        self.assertIsNone(_selected_padding_plan.get())
+
+        def succeeding_fn(a, b):
+            return a @ b
+
+        n_args = (
+            torch.randn(128, 128, device=GPU_TYPE),
+            torch.randn(128, 129, device=GPU_TYPE),
+        )
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm._should_pad",
+                return_value=N_PADDING,
+            ),
+            unittest.mock.patch(
+                "torch._inductor.kernel.mm_common._use_small_mm_pointwise",
+                return_value=False,
+            ),
+        ):
+            actual = torch.compile(succeeding_fn, fullgraph=True)(*n_args)
+        self.assertEqual(actual, succeeding_fn(*n_args))
+        self.assertIsNone(_selected_padding_plan.get())
 
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
