@@ -538,7 +538,11 @@ class ReduceMod(torch.nn.Module):
         return self._reduce(*operands)
 
 
-class _TestControlFlowMixin(TestCase):
+class _TestControlFlowBase(TestCase):
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
     def check_autograd(self, result, result_exp, params):
         params_flatten = pytree.tree_leaves(params)
         result_flatten = pytree.tree_leaves(result)
@@ -554,12 +558,8 @@ class _TestControlFlowMixin(TestCase):
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
-class TestControlFlow(_TestControlFlowMixin):
+class TestControlFlow(_TestControlFlowBase):
     hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        torch._dynamo.reset()
-        super().setUp()
 
     def test_cond_no_trace(self):
         def true_fn(x):
@@ -3139,12 +3139,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
-class TestControlFlowDevice(_TestControlFlowMixin):
+class TestControlFlowDevice(_TestControlFlowBase):
     hw_classification = HardwareClassification.ACCELERATOR
-
-    def setUp(self):
-        torch._dynamo.reset()
-        super().setUp()
 
     @onlyAccelerator
     def test_cond_gpu(self, device):
