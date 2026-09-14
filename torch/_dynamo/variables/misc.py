@@ -171,7 +171,12 @@ class SuperVariable(VariableTracker):
             TypeSource(self.objvar.source) if self.objvar.source else None
         )
         if issubclass(type_to_use, type):
-            type_to_use = self.objvar.value  # type: ignore[attr-defined]
+            # objvar itself is a type (e.g. `super(Base, cls)` or
+            # `super(Base, list)`); as_python_constant() works uniformly here
+            # since objvar must be a type-representing VariableTracker
+            # (UserDefinedClassVariable, BaseBuiltinVariable, ...), unlike
+            # `.value` which only some of those define.
+            type_to_use = self.objvar.as_python_constant()
             type_to_use_source = self.objvar.source
 
         source = None
@@ -182,10 +187,20 @@ class SuperVariable(VariableTracker):
         except ValueError:
             # Corner case where the typevar is not in the mro of the objvar
             # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
-            return getattr(super(search_type, type_to_use), name), None
+            # Use the original objvar value (not type_to_use, which is always
+            # a type) so the raised TypeError's message matches CPython's
+            # "instance of X" vs "type X" wording.
+            obj_for_check = getattr(self.objvar, "value", type_to_use)
+            try:
+                resolved = getattr(super(search_type, obj_for_check), name)
+            except TypeError as e:
+                raise_type_error(tx, str(e))
+            else:
+                return resolved, None
         # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__
+        # pyrefly: ignore [unbound-name]
         for index in range(start_index, len(search_mro)):
             # Don't call getattr, just check the __dict__ of the class
             if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
