@@ -31,9 +31,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 class SimpleModel(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -48,8 +45,8 @@ class SimpleModel(torch.nn.Module):
         x = F.relu(self.net3(x))
         return x
 
-    def get_input(self):
-        return torch.rand(4, 5, device=device_type)
+    def get_input(self, device):
+        return torch.rand(4, 5, device=device)
 
 
 class SimpleModelUneven(torch.nn.Module):
@@ -68,8 +65,8 @@ class SimpleModelUneven(torch.nn.Module):
         x = F.relu(self.net4(x))
         return x
 
-    def get_input(self):
-        return torch.rand(4, 5, device=device_type)
+    def get_input(self, device):
+        return torch.rand(4, 5, device=device)
 
 
 class TestHSDPCheckpoint(DTensorTestBase):
@@ -110,7 +107,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
         )
 
         # Update the parameters so current model state_dict now be different from state_dict_to_save.
-        model(model.get_input()).sum().backward()
+        model(model.get_input(self.device_type)).sum().backward()
         optim.step()
 
         # At this point, the current state dict is different from state_dict_to_save.
