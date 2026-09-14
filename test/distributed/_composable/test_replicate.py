@@ -87,18 +87,21 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls.device_type())
+        device_type = cls.device_type
+        if callable(device_type):
+            device_type = device_type()
+        return dist.get_default_backend_for_device(device_type)
 
-    def _compare_module(self, mod, replicate_mod):
+    def _compare_module(self, mod, replicate_mod, device):
         local_batch_size = 1
         global_batch_size = self.world_size * local_batch_size
-        input = torch.randn(global_batch_size, 2)
-        target = torch.randn(global_batch_size, 2)
+        input = torch.randn(global_batch_size, 2, device=device)
+        target = torch.randn(global_batch_size, 2, device=device)
 
         def step_model(model, input, target):
             model.train()
             output = model(input)
-            loss = F.mse_loss(output, target.to(output.device))
+            loss = F.mse_loss(output, target)
             loss.backward()
             for param in model.parameters():
                 with torch.no_grad():
@@ -132,7 +135,7 @@ class ReplicateTest(MultiProcContinuousTest):
     def test_replicate_single_module(self, device):
         model = Net().to(device)
         replicate_model = replicate(deepcopy(model))
-        self._compare_module(model, replicate_model)
+        self._compare_module(model, replicate_model, device)
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180127"
@@ -143,7 +146,7 @@ class ReplicateTest(MultiProcContinuousTest):
         replicate(replicate_model.fc1)
         replicate(replicate_model.fc2)
         replicate(replicate_model.fc3)
-        self._compare_module(model, replicate_model)
+        self._compare_module(model, replicate_model, device)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180265")
     def test_replicate_with_kwargs(self, device):
@@ -151,7 +154,7 @@ class ReplicateTest(MultiProcContinuousTest):
         replicate_model = replicate(
             deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
         )
-        self._compare_module(model, replicate_model)
+        self._compare_module(model, replicate_model, device)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176155")
     def test_replicate_wrong_device_id_type(self, device):
@@ -198,8 +201,7 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
         torch.manual_seed(self.rank)
         model = Net().to(device)
         replicate(model, ignored_modules=[model.fc1])
-        # CPU input ensures that replicate can move input to GPU as DDP does.
-        inp = torch.randn(5, 2) * (self.rank + 1)
+        inp = torch.randn(5, 2, device=device) * (self.rank + 1)
         out = model(inp) * 10
         out.sum().backward()
         # FC1 grads should not be synchronized, FC2 and 3 should be.
@@ -223,27 +225,27 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_replicate_device_id(self, device):
         model = Net().to(device)
-        model_cuda = deepcopy(model)
-        model_cuda2 = deepcopy(model_cuda)
+        model_replica1 = deepcopy(model)
+        model_replica2 = deepcopy(model)
         replicate(model, device_id=torch.accelerator.current_device_index())
         # DDP instance is attached in first pre forward
         model(torch.randn(2, 2, device=device))
         replicate_ddp_weakref = replicate.state(model)._ddp_weakref()
-        # Should be None for device training when device_id matches
-        self.assertEqual(None, replicate_ddp_weakref.device_ids)
+        # device_id is an int matching current device, so DDP keeps device_ids=[0]
+        self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
-        replicate(
-            model_cuda, device_id=torch.device(torch.accelerator.current_device_index())
-        )
+        replicate(model_replica1, device_id=torch.device(device))
         # DDP instance is attached in first pre forward
-        model_cuda(torch.randn(2, 2, device=device))
-        replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
+        model_replica1(torch.randn(2, 2, device=device))
+        replicate_ddp_weakref = replicate.state(model_replica1)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
         # Pass in int as device_id
-        replicate(model_cuda2, device_id=int(torch.accelerator.current_device_index()))
+        replicate(
+            model_replica2, device_id=int(torch.accelerator.current_device_index())
+        )
         # DDP instance is attached in first pre forward
-        model_cuda2(torch.randn(2, 2, device=device))
-        replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
+        model_replica2(torch.randn(2, 2, device=device))
+        replicate_ddp_weakref = replicate.state(model_replica2)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
 
@@ -284,11 +286,9 @@ class ReplicateFullyShardInit(ReplicateTest):
             self.assertTrue(isinstance(linear.weight, DTensor))
 
 
-instantiate_device_type_tests(
-    ReplicateTest, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(ReplicateTestNoXPU, globals(), except_for="cpu")
-instantiate_device_type_tests(ReplicateFullyShardInit, globals(), except_for="cpu")
+instantiate_device_type_tests(ReplicateTest, globals(), allow_xpu=True)
+instantiate_device_type_tests(ReplicateTestNoXPU, globals())
+instantiate_device_type_tests(ReplicateFullyShardInit, globals())
 
 if __name__ == "__main__":
     run_tests()
