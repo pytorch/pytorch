@@ -4858,7 +4858,7 @@ with warnings.catch_warnings(record=True) as w:
         calls = ["decorator", "function"]
         device_types_options = [("cpu", "cuda"), "cpu", None]
 
-        for mode, call, device_types in itertools.product(
+        for mode, call, _device_types in itertools.product(
             modes, calls, device_types_options
         ):
             with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:

@@ -3064,7 +3064,7 @@ class ReducerTest(TestCase):
         reducer_bat = self._create_reducer(model_bat, batched_grad_copy=True)
         loss_fn = nn.CrossEntropyLoss()
 
-        for i in range(3):
+        for _ in range(3):
             input = torch.rand([10, 2], dtype=torch.double)
             target = torch.LongTensor([random.randrange(4) for _ in range(10)])
 
@@ -3110,7 +3110,7 @@ class ReducerTest(TestCase):
         )
         loss_fn = nn.CrossEntropyLoss()
 
-        for i in range(3):
+        for _ in range(3):
             input = torch.rand([10, 2], dtype=torch.double)
             target = torch.LongTensor([random.randrange(4) for _ in range(10)])
 
@@ -3169,7 +3169,7 @@ class ReducerTest(TestCase):
         self.assertIsNone(model_bat.fc3.weight.grad)
 
         # Used parameters should have identical grads
-        for (name_ref, p_ref), (name_bat, p_bat) in zip(
+        for (name_ref, p_ref), (_name_bat, p_bat) in zip(
             model_ref.named_parameters(), model_bat.named_parameters()
         ):
             if p_ref.grad is not None:
