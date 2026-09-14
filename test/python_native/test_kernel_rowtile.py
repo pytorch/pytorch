@@ -93,15 +93,25 @@ class TestKernelRowTile(TestCase):
                 widened += 1
                 with self.subTest(n=n, bits=bits):
                     self.assertEqual(
-                        cfg.tpr & (cfg.tpr - 1), 0, "tpr must be a power of two"
+                        cfg.threads_per_row & (cfg.threads_per_row - 1),
+                        0,
+                        "threads_per_row must be a power of two",
                     )
                     self.assertEqual(
-                        cfg.tpr % rt.WARP, 0, "tpr must be a warp multiple"
+                        cfg.threads_per_row % rt.WARP,
+                        0,
+                        "threads_per_row must be a warp multiple",
                     )
-                    self.assertIn(cfg.tpr, rt._TPR_RUNGS)
-                    self.assertLessEqual(cfg.tpr, cfg.nt)
-                    self.assertEqual(cfg.nt % cfg.tpr, 0, "nt must hold whole rows")
-                    self.assertGreater(cfg.tpr, rt.row_config(n, bits).tpr)
+                    self.assertIn(cfg.threads_per_row, rt._THREADS_PER_ROW_RUNGS)
+                    self.assertLessEqual(cfg.threads_per_row, cfg.threads_per_block)
+                    self.assertEqual(
+                        cfg.threads_per_block % cfg.threads_per_row,
+                        0,
+                        "threads_per_block must hold whole rows",
+                    )
+                    self.assertGreater(
+                        cfg.threads_per_row, rt.row_config(n, bits).threads_per_row
+                    )
         self.assertGreater(
             widened, 0, "nothing was widened -- the sweep has gone stale"
         )
@@ -206,7 +216,7 @@ class TestKernelRowTile(TestCase):
         return T.SumOps(acc=cutlass.Float32)
 
     def test_narrow_row_one_thread_per_row(self):
-        # tpr=1 assigns each row to one thread without lane merging.
+        # threads_per_row=1 assigns each row to one thread without lane merging.
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile, traits as T
@@ -217,7 +227,7 @@ class TestKernelRowTile(TestCase):
             "narrow",
             x,
             [torch.float32],
-            tpr=1,
+            threads_per_row=1,
             use_tma=False,
         )
         self.assertEqual(out, x.sum(dim=1), atol=1e-3, rtol=1e-3)
@@ -237,7 +247,7 @@ class TestKernelRowTile(TestCase):
             "narrow_tma",
             x,
             [torch.int32],
-            tpr=1,
+            threads_per_row=1,
             use_tma=True,
         )
         self.assertEqual(idx, x.argmax(dim=1).to(torch.int32))
@@ -280,7 +290,11 @@ class TestKernelRowTile(TestCase):
                 # fp32 vec=gcd(N, 4), so these loads are one or two elements wide.
                 self.assertLess(rt.tile.vec_size(n, 4), 4)
                 (out,) = rt.reduce_row_tile(
-                    self._sum_trait(), f"narrow_vec{n}", x, [torch.float32], tpr=1
+                    self._sum_trait(),
+                    f"narrow_vec{n}",
+                    x,
+                    [torch.float32],
+                    threads_per_row=1,
                 )
                 self.assertEqual(
                     out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
@@ -295,7 +309,11 @@ class TestKernelRowTile(TestCase):
                 x = torch.randn(m, n, device="cuda")
                 with self.subTest(m=m, n=n):
                     (out,) = rt.reduce_row_tile(
-                        self._sum_trait(), f"ragged_m{n}", x, [torch.float32], tpr=1
+                        self._sum_trait(),
+                        f"ragged_m{n}",
+                        x,
+                        [torch.float32],
+                        threads_per_row=1,
                     )
                     self.assertEqual(
                         out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
@@ -309,7 +327,12 @@ class TestKernelRowTile(TestCase):
         self.assertTrue(rt.tma_ok(n, 4, 1 << 20), "shape no longer takes the TMA path")
         first = torch.randn(4096, n, device="cuda")
         (a,) = rt.reduce_row_tile(
-            self._sum_trait(), "tma_rebind", first, [torch.float32], tpr=1, use_tma=True
+            self._sum_trait(),
+            "tma_rebind",
+            first,
+            [torch.float32],
+            threads_per_row=1,
+            use_tma=True,
         )
         self.assertEqual(a, first.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
         second = torch.randn(4097, n, device="cuda")  # new pointer AND a new M
@@ -318,13 +341,13 @@ class TestKernelRowTile(TestCase):
             "tma_rebind",
             second,
             [torch.float32],
-            tpr=1,
+            threads_per_row=1,
             use_tma=True,
         )
         self.assertEqual(b, second.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
 
     def test_one_thread_per_row_is_trait_agnostic(self):
-        # No lane merge lets tpr=1 serve three-field and two-output traits.
+        # No lane merge lets one thread serve three-field and two-output traits.
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
@@ -335,7 +358,7 @@ class TestKernelRowTile(TestCase):
             "tpr1_welford",
             x,
             [torch.float32],
-            tpr=1,
+            threads_per_row=1,
         )
         self.assertEqual(var, x.var(dim=1), atol=1e-4, rtol=1e-4)
         lo, hi = rt.reduce_row_tile(
@@ -344,7 +367,7 @@ class TestKernelRowTile(TestCase):
             x,
             [torch.float32, torch.float32],
             nouts=2,
-            tpr=1,
+            threads_per_row=1,
         )
         want = torch.aminmax(x, dim=1)
         self.assertEqual(lo, want.min)
@@ -365,7 +388,7 @@ class TestKernelRowTile(TestCase):
                 "tma_nonpo2",
                 x,
                 [torch.float32],
-                tpr=1,
+                threads_per_row=1,
                 use_tma=True,
             )
 
@@ -423,9 +446,18 @@ class TestKernelRowTile(TestCase):
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.ones(8, 384, device="cuda")
         with self.assertRaisesRegex(ValueError, "power-of-two"):
-            rt.reduce_row_tile(trait, "nw3", x, [torch.float32], tpr=96, nt=96)
+            rt.reduce_row_tile(
+                trait,
+                "nw3",
+                x,
+                [torch.float32],
+                threads_per_row=96,
+                threads_per_block=96,
+            )
         # The neighbouring power-of-two width is served, and correctly.
-        (got,) = rt.reduce_row_tile(trait, "nw2", x, [torch.float32], tpr=64, nt=64)
+        (got,) = rt.reduce_row_tile(
+            trait, "nw2", x, [torch.float32], threads_per_row=64, threads_per_block=64
+        )
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
 
 
