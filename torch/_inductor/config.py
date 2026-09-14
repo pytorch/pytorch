@@ -53,6 +53,21 @@ def autotune_at_compile_time_default() -> bool | None:
     return get_tristate_env("TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME")
 
 
+def lite_mode_default(lite_value: bool, default: bool) -> bool:
+    """Default for a knob that lite_mode_options overrides.
+
+    TORCHINDUCTOR_LITE_MODE=1 installs the same bundle as
+    torch.compile(mode="lite"), so an existing test list can be re-run under
+    all-fallback mode without editing the tests, and so the setting reaches
+    model-generation subprocesses (e.g. test/cpp/aoti_inference). Keep this a
+    function rather than a module-level bool: a bool would be picked up as a
+    settable config entry that silently does nothing after import.
+    """
+    if os.environ.get("TORCHINDUCTOR_LITE_MODE") == "1":
+        return lite_value
+    return default
+
+
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
@@ -257,7 +272,7 @@ pick_loop_orders = True
 inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
-allow_buffer_reuse = True
+allow_buffer_reuse = lite_mode_default(False, True)
 
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
@@ -456,7 +471,7 @@ reorder_for_compute_comm_overlap_passes: list[
 reorder_prefetch_limit: int | None = None
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = True
+reorder_for_peak_memory = lite_mode_default(False, True)
 reorder_for_peak_memory_debug = False
 
 # In some cases, when all the nodes that can be scheduled are quite large,
@@ -741,21 +756,21 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # Different from default inductor mode that fuses all nodes, this config enables an
 # opt-in mode that only fuse for user-specified nodes. The motivation is to provide
 # guaranteed numeric correctness and give full control to users.
-fallback_by_default: bool = False
+fallback_by_default: bool = lite_mode_default(True, False)
 
 
 # This config allows selective decomposition of certain operators in the graph.
 # Currently the only use case is to patch the same-name config in functorch, for
 # inductor lite mode. See more details in [Note: Selective Decomposition]
-selective_decompose: bool = False
+selective_decompose: bool = lite_mode_default(True, False)
 
 
 # Use dead code elimination
-use_dce: bool = True
+use_dce: bool = lite_mode_default(False, True)
 
 
 # Use fx graph passes
-use_pre_grad_passes: bool = True
+use_pre_grad_passes: bool = lite_mode_default(False, True)
 
 # "early": pre-grad passes run before cache lookup (every compile).
 # "late": pre-grad passes run after cache lookup (only on cache miss);
@@ -765,8 +780,8 @@ use_pre_grad_passes: bool = True
 pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
 
 
-use_joint_graph_passes: bool = True
-use_post_grad_passes: bool = True
+use_joint_graph_passes: bool = lite_mode_default(False, True)
+use_post_grad_passes: bool = lite_mode_default(False, True)
 
 
 cutedsl_enable_autotuning: bool = (
@@ -1502,6 +1517,41 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: int | None = None if is_fbcode() else decide_compile_threads()
 
+
+def decide_compile_worker_mode() -> str:
+    """
+    Decide whether to use threads or processes for compilation workers.
+
+    Returns one of: "auto", "process", "thread"
+    - "auto": Automatically detect if Python is free-threaded (nogil) and use
+              threads if available, otherwise use processes
+    - "process": Force multiprocessing (current behavior, compatible with all Python)
+    - "thread": Force threading (requires free-threaded Python build)
+
+    Precedence:
+    1. TORCH_COMPILE_WORKER_MODE environment variable
+    2. Default to "process" for safe multiprocessing
+    """
+    mode = os.environ.get("TORCH_COMPILE_WORKER_MODE", "process")
+    valid_modes = ("auto", "process", "thread")
+    if mode not in valid_modes:
+        import logging
+
+        log = logging.getLogger(__name__)
+        log.warning(
+            "Invalid TORCH_COMPILE_WORKER_MODE='%s'. "
+            "Valid options: %s. Defaulting to 'process'.",
+            mode,
+            ", ".join(sorted(valid_modes)),
+        )
+        mode = "process"
+    return mode
+
+
+# Controls whether compilation workers use threads or processes.
+# Options: "auto" (detect nogil), "process" (force multiprocessing), "thread" (force threading)
+compile_worker_mode: str = decide_compile_worker_mode()
+
 # Whether to quiesce the Triton-compile subprocess pool at the end of each compilation.
 quiesce_async_compile_pool: bool = Config(
     justknob="pytorch/inductor:quiesce_async_compile_pool",
@@ -2031,7 +2081,7 @@ class triton:
 
     # reorder nodes to minimize the number of graph partitions while
     # not incurring large memory overhead
-    reorder_for_reducing_graph_partitions: bool = True
+    reorder_for_reducing_graph_partitions: bool = lite_mode_default(False, True)
 
     # Memory budget multiplier for cudagraph partition reordering.
     # When reordering nodes to minimize partitions, the reordering is only
@@ -2208,6 +2258,12 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
+    # Per-row scalar accumulators for large CUDA inner reduction loops that hold
+    # an online softmax.
+    scalar_accumulators: bool = (
+        os.environ.get("TORCHINDUCTOR_SCALAR_ACCUMULATORS", "1") == "1"
+    )
+
     # Generate code using the tl.make_block_ptr() API for loads/stores. Block
     # pointers were removed from the Triton frontend in triton-lang/triton#10833,
     # so this flag is honored only where the installed Triton still provides the
@@ -2260,8 +2316,8 @@ class triton:
     )
     # Host-side TMA: build TensorDescriptors on the host and pass them as kernel
     # args instead of creating them device-side inside the kernel. Selects the
-    # descriptor flavor only; requires use_tensor_descriptor and
-    # assume_aligned_inputs to also be enabled (no effect otherwise).
+    # descriptor flavor only. Pointwise/reduction kernels additionally require
+    # use_tensor_descriptor and assume_aligned_inputs; GEMM templates do not.
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
 
     # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
@@ -2321,9 +2377,13 @@ class triton:
         == "1"
     )
 
-    # Fuse staged reduction pipelines, including dependent cross-axis reductions
-    # and lane-resolution pointwise epilogues.
-    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
+    # Fuse staged reduction pipelines, including block reductions and
+    # lane-resolution pointwise epilogues.
+    nested_reduction: bool = Config(
+        justknob="pytorch/inductor:nested_reduction",
+        env_name_force="TORCHINDUCTOR_NESTED_REDUCTION",
+        default=True,
+    )
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
@@ -2451,6 +2511,11 @@ class aot_inductor:
     # AOTI_RUNTIME_CHECK_INPUTS=1, avoiding errors from the [2+, ...] lowerbound
     # restriction when backed_size_oblivious is off.
     check_lowerbound: bool = True
+
+    # Whether to check upperbound constraints on dynamic shapes during runtime.
+    # The upperbound is inferred from the lowering inputs and the dynamic shape
+    # spec, so it can be tighter than the traffic the model can actually serve.
+    check_upperbound: bool = True
 
     # dump an aoti minifier if program errors
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
@@ -3057,6 +3122,7 @@ _cache_config_ignore_prefix: list[str] = [
     # it has no effect on compiled output, so including it would change the
     # config hash and needlessly invalidate every cache entry
     "compile_worker_watchdog_interval_seconds",
+    "compile_worker_mode",
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
