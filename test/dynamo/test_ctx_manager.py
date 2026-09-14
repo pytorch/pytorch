@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import inspect
 import sys
 import unittest
 from collections import defaultdict
@@ -321,6 +322,71 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled.device.type, device_type)
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
+
+    def test_autocast_ctor_signature_is_pinned(self):
+        # builder.py and ctx_manager.py each hard-code this parameter list, in
+        # attribute-name and parameter-name form respectively; a new or reordered
+        # constructor parameter has to be reflected in both.
+        self.assertEqual(
+            list(inspect.signature(torch.amp.autocast_mode.autocast).parameters),
+            ["device_type", "dtype", "enabled", "cache_enabled"],
+        )
+
+    def test_autocast_object_guarded_by_value_not_identity(self):
+        # A user-held autocast object reaches the trace as four specialized
+        # values (device, dtype, enabled, cache_enabled), so those are what the
+        # graph depends on. Guarding the object by id() instead is both too
+        # strong -- a second object configured identically cannot reuse the
+        # graph -- and unserializable, which is what makes a precompiled
+        # artifact drop the guard entirely.
+        class MyModule(torch.nn.Module):
+            def __init__(self, ctx):
+                super().__init__()
+                self.ctx = ctx
+                # Unlike an nn.Linear weight, this tensor does not require grad, so
+                # the autocast cache cannot retain a stale bf16 cast across tests.
+                self.w = torch.randn(4, 4)
+
+            def forward(self, x):
+                with self.ctx:
+                    return x @ self.w
+
+        module = MyModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(module, backend=cnts)
+        x = torch.randn(4, 4)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # A DIFFERENT object with the same settings: same graph, no recompile.
+        # An id() guard would miss here and recompile.
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # A different setting is a different graph.
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.float16)
+        self.assertEqual(compiled(x).dtype, torch.float16)
+        self.assertEqual(cnts.frame_count, 2)
+
+        # Mutating in place must also invalidate the graph.
+        module.ctx._enabled = False
+        self.assertEqual(compiled(x).dtype, torch.float32)
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_autocast_object_from_constant_source(self):
+        @torch._dynamo.assume_constant_result
+        def get_ctx():
+            return torch.amp.autocast("cpu", dtype=torch.bfloat16)
+
+        weight = torch.randn(4, 4)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            with get_ctx():
+                return x @ weight
+
+        self.assertEqual(fn(torch.randn(4, 4)).dtype, torch.bfloat16)
 
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
@@ -722,6 +788,7 @@ class GraphModule(torch.nn.Module):
             torch.set_autocast_enabled("cpu", True)
             torch.set_autocast_dtype("cpu", torch.bfloat16)
             torch.set_autocast_cache_enabled(True)
+            torch.autocast_increment_nesting()
             x = x @ y
             torch.autocast_decrement_nesting()
             torch.clear_autocast_cache()
@@ -731,6 +798,8 @@ class GraphModule(torch.nn.Module):
         prev_enabled = torch.is_autocast_enabled("cpu")
         prev_dtype = torch.get_autocast_dtype("cpu")
         prev_cache = torch.is_autocast_cache_enabled()
+        nesting_before = torch.autocast_increment_nesting() - 1
+        torch.autocast_decrement_nesting()
 
         try:
             opt_f = torch.compile(f, backend="eager", fullgraph=True)
@@ -741,6 +810,9 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(out, opt_out)
             self.assertEqual(out.dtype, opt_out.dtype)
             self.assertFalse(torch.is_autocast_enabled("cpu"))
+            nesting_after = torch.autocast_increment_nesting() - 1
+            torch.autocast_decrement_nesting()
+            self.assertEqual(nesting_after, nesting_before)
         finally:
             torch.set_autocast_enabled("cpu", prev_enabled)
             torch.set_autocast_dtype("cpu", prev_dtype)
