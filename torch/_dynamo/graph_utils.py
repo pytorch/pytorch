@@ -84,6 +84,11 @@ def _detect_cycles(
 # type has one (there is no .mps() or .hpu()).
 _DEVICE_NAMING_METHODS = ("cpu", "cuda", "xpu", "ipu", "mtia")
 
+# The device types SystemInfo.check_compatibility checks a host for; every other
+# recorded string skips that check. Defined here because package.py imports
+# this module.
+_CHECK_GPUS = ("cuda", "xpu")
+
 
 def _graph_device_types(
     graph: Graph | None, _seen: set[Graph] | None = None
@@ -187,9 +192,7 @@ def _collapse_device_types(device_types: frozenset[str]) -> str:
     accelerators one that `SystemInfo.check_compatibility` checks wins, since
     any other name skips the load check; the rest tie alphabetically.
     """
-    from .package import SystemInfo  # package.py imports this module
-
-    for device_type in SystemInfo.CHECK_GPUS:
+    for device_type in _CHECK_GPUS:
         if device_type in device_types:
             return device_type
     return next((d for d in sorted(device_types) if d != "cpu"), "cpu")

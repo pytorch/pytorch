@@ -32,7 +32,11 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_types
+from torch._dynamo.graph_utils import (
+    _CHECK_GPUS,
+    _collapse_device_types,
+    _graph_device_types,
+)
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -754,7 +758,7 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
-    CHECK_GPUS = ("cuda", "xpu")
+    CHECK_GPUS = _CHECK_GPUS
 
     @classmethod
     def current(cls) -> "SystemInfo":
@@ -1061,6 +1065,11 @@ class CompilePackage:
                         function_names=list(code.function_names),
                         import_sources=dict(code.import_sources),
                     )
+            # The codes come back, so the device they recorded must too, or one
+            # recompile after a reload re-saves the entry narrowed to what that
+            # frame alone named. The collapse is a maximum, so its string seeds
+            # the union without loss.
+            self._device_types = frozenset((dynamo.device_type,))
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__

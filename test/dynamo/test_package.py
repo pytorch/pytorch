@@ -4,10 +4,12 @@ import functools
 import gc
 import importlib
 import os
+import pickle
 import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -190,6 +192,35 @@ class TestPackage(torch._inductor.test_case.TestCase):
         names = [n for code in entry.codes for n in code.function_names]
         self.assertTrue(any("resume" in n for n in names))
         self.assertEqual(entry.device_type, "cuda")
+
+    def test_package_keeps_a_loaded_device_a_recompile_does_not_name(self):
+        # A package rebuilt from a saved entry keeps the entry's codes, so its
+        # union has to start from the device those codes recorded: started at
+        # frozenset(), one cpu-only recompile after a reload re-snapshotted the
+        # entry as "cpu" and the cuda code still in it lost its GPU load check.
+        # The graphs are fake and never run; is_available is patched so
+        # check_versions accepts the cuda entry on a host without one.
+        with FakeTensorMode():
+            cuda = torch.empty(2, device="cuda")
+            cpu = torch.empty(2)
+
+        def fn(x):
+            return x + 1
+
+        cuda_graph = torch.fx.Graph()
+        cuda_graph.placeholder("x").meta["val"] = cuda
+        cpu_graph = torch.fx.Graph()
+        cpu_graph.placeholder("x").meta["val"] = cpu
+
+        package = CompilePackage(fn)
+        package.update_device_type(cuda_graph)
+        saved = pickle.loads(pickle.dumps(package.cache_entry()))
+        self.assertEqual(saved.device_type, "cuda")
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            package = CompilePackage(fn, dynamo=saved)
+        self.assertEqual(package.cache_entry().device_type, "cuda")
+        package.update_device_type(cpu_graph)
+        self.assertEqual(package.cache_entry().device_type, "cuda")
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
