@@ -601,6 +601,33 @@ class TestPyCodeCache(TestCase):
                 sys.modules.pop(module_name, None)
             PyCodeCache.cache_clear()
 
+    def test_load_by_key_path_can_bypass_module_cache(self):
+        try:
+            PyCodeCache.cache_clear()
+            key, path = PyCodeCache.write("values = []\n")
+
+            first = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                set_sys_modules=False,
+                cache_module=False,
+            )
+            second = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                set_sys_modules=False,
+                cache_module=False,
+            )
+
+            first.values.append(1)
+            self.assertEqual(first.values, [1])
+            self.assertEqual(second.values, [])
+            self.assertNotIn(path, PyCodeCache.modules_no_attr)
+            self.assertNotIn(first, PyCodeCache.modules)
+            self.assertNotIn(second, PyCodeCache.modules)
+        finally:
+            PyCodeCache.cache_clear()
+
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
         with tempfile.TemporaryDirectory() as tmpdir:
