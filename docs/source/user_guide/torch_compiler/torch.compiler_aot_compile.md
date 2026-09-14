@@ -111,8 +111,9 @@ result.sum().backward()
 print(model.linear.weight.grad)
 ```
 
-A module can also be compiled for several calls at once by a private, unstable
-path, gated on `torch._dynamo.config.enable_aot_compile`:
+**Private, unstable -- may change or disappear without notice.** A module can
+also be compiled for several calls at once, gated on
+`torch._dynamo.config.enable_aot_compile`:
 `torch.compile(model, fullgraph=True)._aot_compile(inputs)` takes a list of
 `torch._dynamo.aot_compile.ModelInput`, compiles one graph per input and
 replaces the wrapper's `forward` with a dispatcher over their guards. It serves
@@ -139,8 +140,9 @@ original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
 - `disable_guard_check()` -- Disable runtime guard validation (advanced use).
-  The compiled function then runs whatever it is called with, without
-  evaluating its guards.
+  On this function path the compiled function then runs whatever it is called
+  with, without evaluating its guards; module dispatch over several compiled
+  inputs still evaluates them, as described above.
 
 **Requirements:**
 
