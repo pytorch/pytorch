@@ -302,6 +302,11 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
+        grad_dtypes = {p.sharded_param.grad_dtype for p in trainable_params}
+        if len(trainable_params) > 0 and len(grad_dtypes) != 1:
+            raise AssertionError(
+                f"FSDP expects uniform grad_dtype but got {grad_dtypes}"
+            )
 
     def lazy_init(self):
         # Lazy init should be idempotent
