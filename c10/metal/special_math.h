@@ -3,6 +3,7 @@
 #include <c10/metal/expm1f.h>
 #include <c10/metal/igamma.h>
 #include <c10/metal/utils.h>
+#include <c10/util/ndtri.h>
 #include <metal_stdlib>
 
 namespace c10 {
@@ -2187,6 +2188,14 @@ inline float laguerre_polynomial_l_forward(T x, int64_t n) {
 
   return r;
 } // laguerre_polynomial_l_forward(T x, int64_t n)
+
+// calc_ndtri is shared with the CPU, see c10/util/ndtri.h. Evaluate it in
+// float: the Cephes coefficients carry more significant digits than half or
+// bfloat can hold.
+template <typename T>
+inline float ndtri(T y0) {
+  return ::c10::detail::calc_ndtri(static_cast<float>(y0));
+}
 
 /* The next function is taken from http://ab-initio.mit.edu/faddeeva */
 
