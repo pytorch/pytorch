@@ -428,7 +428,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The end CUDA event of NCCL operator tracking this work item.
     std::shared_ptr<at::cuda::CUDAEvent> ncclEndEvent_;
 
+    // The external completion event for waits outside the original capture.
+    // Recording and waiting graphs retain it independently of this work item.
     std::shared_ptr<at::cuda::CUDAEvent> capturedEndEvent_;
+
+    // The capture ID used to identify waits within the original capture.
     c10::cuda::CaptureId_t captureId_ = 0;
 
     // The NCCL communicator used for this work item.
