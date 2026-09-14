@@ -17,10 +17,11 @@ from torch.distributed.elastic.control_plane import (
     worker_main,
 )
 from torch.monitor import _WaitCounter
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     MI200_ARCH,
-    requires_cuda,
     run_tests,
     skipIfRocmArch,
     TestCase,
@@ -60,6 +61,8 @@ def local_worker_server() -> None:
 
 
 class WorkerServerTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_worker_server(self) -> None:
         with local_worker_server() as pool:
             resp = pool.request("GET", "/")
@@ -83,83 +86,6 @@ class WorkerServerTest(TestCase):
             resp = pool.request("POST", "/handler/nonexistent")
             self.assertEqual(resp.status, 404)
             self.assertIn(b"Handler nonexistent not found:", resp.data)
-
-    @requires_cuda
-    def test_dump_nccl_trace_pickle(self) -> None:
-        with local_worker_server() as pool:
-            resp = pool.request("POST", "/handler/dump_nccl_trace_pickle")
-            self.assertEqual(resp.status, 200)
-            out = pickle.loads(resp.data)
-            self.assertIsInstance(out, dict)
-            self.assertIn("version", out)
-
-    @requires_cuda
-    def test_dump_nccl_trace_pickle_with_params(self) -> None:
-        with local_worker_server() as pool:
-            # bad key - not lower case
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_pickle?includeCollectives=true"
-            )
-            self.assertEqual(resp.status, 400)
-            # unknown key
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_pickle?unknownkey=true"
-            )
-            self.assertEqual(resp.status, 400)
-            # bad value - not a bool
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=notabool"
-            )
-            self.assertEqual(resp.status, 400)
-            # bad value - value not lowercase
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=True"
-            )
-            self.assertEqual(resp.status, 400)
-            # good key and value
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=true"
-            )
-            self.assertEqual(resp.status, 200)
-            # multiple good keys and values
-            resp = pool.request(
-                "POST",
-                "/handler/dump_nccl_trace_pickle?includecollectives=true&includestacktraces=false&onlyactive=true",
-            )
-            self.assertEqual(resp.status, 200)
-
-    @requires_cuda
-    def test_dump_nccl_trace_pickle_with_json(self) -> None:
-        with local_worker_server() as pool:
-            # bad key - not lower case
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_json?includeCollectives=true"
-            )
-            self.assertEqual(resp.status, 400)
-            # unknown key
-            resp = pool.request("POST", "/handler/dump_nccl_trace_json?unknownkey=true")
-            self.assertEqual(resp.status, 400)
-            # bad value - not a bool
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_json?includecollectives=notabool"
-            )
-            self.assertEqual(resp.status, 400)
-            # bad value - value not lowercase
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_json?includecollectives=True"
-            )
-            self.assertEqual(resp.status, 400)
-            # good key and value
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_json?includecollectives=true"
-            )
-            self.assertEqual(resp.status, 200)
-            # multiple good keys and values
-            resp = pool.request(
-                "POST",
-                "/handler/dump_nccl_trace_json?includecollectives=true&onlyactive=true",
-            )
-            self.assertEqual(resp.status, 200)
 
     def test_fr_dump_file_without_rank(self) -> None:
         with local_worker_server() as pool:
@@ -315,6 +241,87 @@ class WorkerServerTest(TestCase):
             # Just verify they exist and are non-negative
             self.assertGreaterEqual(counter_data["total_time_us"], 0)
             self.assertGreaterEqual(counter_data["max_time_us"], 0)
+
+
+class WorkerServerNcclTraceTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_dump_nccl_trace_pickle(self, device) -> None:
+        with local_worker_server() as pool:
+            resp = pool.request("POST", "/handler/dump_nccl_trace_pickle")
+            self.assertEqual(resp.status, 200)
+            out = pickle.loads(resp.data)
+            self.assertIsInstance(out, dict)
+            self.assertIn("version", out)
+
+    def test_dump_nccl_trace_pickle_with_params(self, device) -> None:
+        with local_worker_server() as pool:
+            # bad key - not lower case
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includeCollectives=true"
+            )
+            self.assertEqual(resp.status, 400)
+            # unknown key
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?unknownkey=true"
+            )
+            self.assertEqual(resp.status, 400)
+            # bad value - not a bool
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=notabool"
+            )
+            self.assertEqual(resp.status, 400)
+            # bad value - value not lowercase
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=True"
+            )
+            self.assertEqual(resp.status, 400)
+            # good key and value
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=true"
+            )
+            self.assertEqual(resp.status, 200)
+            # multiple good keys and values
+            resp = pool.request(
+                "POST",
+                "/handler/dump_nccl_trace_pickle?includecollectives=true&includestacktraces=false&onlyactive=true",
+            )
+            self.assertEqual(resp.status, 200)
+
+    def test_dump_nccl_trace_pickle_with_json(self, device) -> None:
+        with local_worker_server() as pool:
+            # bad key - not lower case
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includeCollectives=true"
+            )
+            self.assertEqual(resp.status, 400)
+            # unknown key
+            resp = pool.request("POST", "/handler/dump_nccl_trace_json?unknownkey=true")
+            self.assertEqual(resp.status, 400)
+            # bad value - not a bool
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=notabool"
+            )
+            self.assertEqual(resp.status, 400)
+            # bad value - value not lowercase
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=True"
+            )
+            self.assertEqual(resp.status, 400)
+            # good key and value
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=true"
+            )
+            self.assertEqual(resp.status, 200)
+            # multiple good keys and values
+            resp = pool.request(
+                "POST",
+                "/handler/dump_nccl_trace_json?includecollectives=true&onlyactive=true",
+            )
+            self.assertEqual(resp.status, 200)
+
+
+instantiate_device_type_tests(WorkerServerNcclTraceTest, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
