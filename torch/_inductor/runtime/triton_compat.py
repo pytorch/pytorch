@@ -98,6 +98,13 @@ if triton is not None:
         class IntelGPUError(Exception):  # type: ignore[no-redef]
             pass
 
+    try:
+        from triton.compiler.errors import CompilationError
+    except ImportError:
+
+        class CompilationError(Exception):  # type: ignore[no-redef]
+            pass
+
     builtins_use_semantic_kwarg = (
         "_semantic" in inspect.signature(triton.language.core.view).parameters
     )
@@ -114,6 +121,9 @@ else:
         pass
 
     class IntelGPUError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class CompilationError(Exception):  # type: ignore[no-redef]
         pass
 
     Config = object
@@ -163,6 +173,7 @@ __all__ = [
     "KernelInterface",
     "PTXASError",
     "IntelGPUError",
+    "CompilationError",
     "ASTSource",
     "GPUTarget",
     "tl",
