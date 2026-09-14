@@ -3594,6 +3594,27 @@ class TestReductions(TestCase):
         test_reduction(torch.cumprod, False)
         test_reduction(torch.logcumsumexp, False, takes_dtype=False)
 
+    @ops(filter(lambda op: op.name == 'sum', reduction_ops),
+         dtypes=OpDTypes.none)
+    @skipIfMPS
+    def test_reduce_dtype_real_to_complex(self, device, dtype, op):
+        """Test backward of reduction ops with real->complex dtype
+        conversion (Issue #192719)."""
+        x = torch.randn(3, 3, dtype=torch.float, requires_grad=True, device=device)
+
+        for complex_dtype in (torch.complex64, torch.complex128):
+            # Without dim
+            out = op(x, dtype=complex_dtype)
+            grad, = torch.autograd.grad([out], [x])
+            self.assertEqual(grad.dtype, torch.float)
+
+            # With dim
+            gi = torch.randn(out.shape, dtype=complex_dtype, device=device)
+            grad, = torch.autograd.grad(
+                [op(x, dim=0, dtype=complex_dtype)], [x], gi,
+            )
+            self.assertEqual(grad.dtype, torch.float)
+
     @ops(reference_masked_ops)
     def test_reference_masked(self, device, dtype, op):
         """Test masked reduction operations on strided-only tensors using
