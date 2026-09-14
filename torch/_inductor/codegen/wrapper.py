@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
 import dataclasses
@@ -395,17 +396,26 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     symbols_included = OrderedSet([kernel.__name__])
 
     def traverse(cur_kernel):
+        # Walk the source Triton will compile to find loaded names because
+        # JITFunction.src may differ from the underlying function bytecode.
+        source_loads = OrderedSet(
+            node.id
+            for node in ast.walk(ast.parse(cur_kernel.src))
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+        )
         # here we extract the unqualified names (i.e., not attributes and
-        # without prepended module name) loaded in the kernel code, which
-        # are matched with the co_names and __globals__ below to codegen
-        # the respective imports necessary for the kernel compilation
-        unqualified_loads = OrderedSet(
+        # without prepended module name) loaded in the kernel bytecode and
+        # combine them with names loaded from the source. These are matched with
+        # the co_names and __globals__ below to codegen the respective imports
+        # necessary for the kernel compilation
+        unqualified_loads = source_loads | OrderedSet(
             inst.argval
             for inst in dis.Bytecode(cur_kernel.fn)
             if inst.opname == "LOAD_GLOBAL"
         )
         global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
-        for symbol_name in cur_kernel.fn.__code__.co_names:
+        referenced_names = OrderedSet(cur_kernel.fn.__code__.co_names) | source_loads
+        for symbol_name in referenced_names:
             if symbol_name in symbols_included:
                 continue
             if symbol_name in cur_kernel.fn.__globals__:
