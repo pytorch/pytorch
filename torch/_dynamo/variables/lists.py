@@ -129,7 +129,7 @@ class BaseListVariable(VariableTracker):
     _index_not_found_msg = "tuple.index(x): x not in tuple"
 
     @staticmethod
-    def cls_for_instance(obj: Any) -> type["BaseListVariable"]:
+    def cls_for_instance(obj: object) -> type["BaseListVariable"]:
         return BaseListVariable.cls_for(type(obj))
 
     @staticmethod
