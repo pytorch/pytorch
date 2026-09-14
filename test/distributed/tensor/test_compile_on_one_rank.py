@@ -1077,7 +1077,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # test_inductor_compiles_under_coor does not catch this: _coor_inductor_fn
         # is a factory plus a reduction, which only produces inductor-generated
         # kernels and never reaches the template path.
-        from torch._inductor.utils import run_and_get_code
+        from torch._inductor import utils as inductor_utils
 
         torch._dynamo.reset()
         compiled = torch.compile(
@@ -1086,7 +1086,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # The metadata path is dtype-independent; float32 keeps it covered on pre-SM80.
         a = torch.randn(256, 256, device="cuda")
         b = torch.randn(256, 256, device="cuda")
-        _, codes = run_and_get_code(compiled, a, b)
+        with patch.object(inductor_utils, "is_big_gpu", return_value=True):
+            _, codes = inductor_utils.run_and_get_code(compiled, a, b)
         code = "\n".join(codes)
         self.assertIn("triton_tem_fused", code)
         self._assert_no_baked_device(code)
