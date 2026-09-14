@@ -6,8 +6,9 @@ from unittest.mock import patch
 import torch
 from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor.placement_types import Replicate
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
 )
@@ -16,15 +17,17 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 
 
 class TestDynamic(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_gpu
     @with_comms
     @parametrize("fake_tensor_cache_enabled", [False, True])
-    def test_embedding(self, fake_tensor_cache_enabled):
+    def test_embedding(self, device, fake_tensor_cache_enabled):
+        device_type = torch.device(device).type
         with patch.object(
             torch._dynamo.config, "fake_tensor_cache_enabled", fake_tensor_cache_enabled
         ):
@@ -38,7 +41,7 @@ class TestDynamic(DTensorTestBase):
                 torch.rand(
                     [num_embeddings, embedding_dim],
                     dtype=torch.float32,
-                    device=GPU_TYPE,
+                    device=device_type,
                     requires_grad=True,
                 ),
                 device_mesh,
@@ -51,7 +54,11 @@ class TestDynamic(DTensorTestBase):
                 return emb
 
             arg0 = torch.randint(
-                low=0, high=100, size=(2, 512), dtype=torch.int64, device=GPU_TYPE
+                low=0,
+                high=100,
+                size=(2, 512),
+                dtype=torch.int64,
+                device=device_type,
             )
             arg0 = DTensor.from_local(arg0, device_mesh, placements)
 
@@ -59,17 +66,22 @@ class TestDynamic(DTensorTestBase):
             _out = compiled_forward(arg0)
 
 
-instantiate_parametrized_tests(TestDynamic)
-
 TestDynamicWithLocalTensor = create_local_tensor_test_class(
     TestDynamic,
     # LocalTensorMode is a non-infra dispatch mode that causes Dynamo to skip
     # frames, which is incompatible with fullgraph=True.
-    skipped_tests=[
-        "test_embedding_fake_tensor_cache_enabled_False",
-        "test_embedding_fake_tensor_cache_enabled_True",
-    ],
+    skipped_tests=["test_embedding"],
 )
+instantiate_device_type_tests(
+    TestDynamic, globals(), except_for=["cpu"], allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestDynamicWithLocalTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
