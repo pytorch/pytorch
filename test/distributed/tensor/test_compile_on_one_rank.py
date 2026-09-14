@@ -779,6 +779,66 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_device_context_under_coor(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(x):
+            with torch.cuda.device(x.device):
+                return torch.ones(1, device="cuda")
+
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.zeros(1, device="cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_device_context_preserves_type_under_coor(self):
+        def f(x):
+            ctx = torch.cuda.device(x.device)
+            return x + (1 if isinstance(ctx, torch.cuda.device) else 2)
+
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+        def make_context(x):
+            return torch.cuda.device(x.device)
+
+        ctx = torch.compile(make_context, backend="eager", fullgraph=True)(x)
+        self.assertIsInstance(ctx, torch.cuda.device)
+
+        def make_context_across_graph_break(x):
+            ctx = torch.cuda.device(x.device)
+            torch._dynamo.graph_break()
+            return ctx
+
+        ctx = torch.compile(make_context_across_graph_break, backend="eager")(x)
+        self.assertIsInstance(ctx, torch.cuda.device)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_device_context_restores_device_across_graph_break(self):
+        def f(x):
+            with torch.cuda.device(x.device):
+                torch._dynamo.graph_break()
+                torch.cuda.set_device(1)
+                return x + 1
+
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager")
+        with torch.cuda.device(0):
+            x = torch.zeros(1, device="cuda:0")
+            self.assertEqual(compiled(x), x + 1)
+            self.assertEqual(torch.cuda.current_device(), 0)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_index_predicate_is_data_dependent_under_coor(self):
