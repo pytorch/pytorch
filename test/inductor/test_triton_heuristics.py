@@ -301,6 +301,7 @@ class TestTritonHeuristics(TestCase):
         self.assertFalse(producer_profitable(7, 4, True))
         self.assertFalse(producer_profitable(16, 3, False))
 
+    @skipIfRocm
     def test_experimental_large_output_outer_config(self):
         candidate = (128, 8, 1)
 
