@@ -26,7 +26,44 @@ typedef struct {
 // static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-static int64_t current_isolate_recompiles_id = -1;
+
+// The flags below all describe "the Dynamo region this thread is currently
+// inside". Python save/restores each of them around a compiled call, so a
+// process-wide copy lets one thread's region redirect or disable another
+// thread's, and lets interleaved save/restore pairs leak a value permanently.
+#if defined(_MSC_VER)
+#define THP_THREAD_LOCAL __declspec(thread)
+#else
+#define THP_THREAD_LOCAL __thread
+#endif
+
+static THP_THREAD_LOCAL int64_t current_isolate_recompiles_id = -1;
+
+static THP_THREAD_LOCAL bool skip_guard_eval_unsafe = false;
+
+// -1 means inactive, >= 0 means active with that many compiled frames.
+static THP_THREAD_LOCAL int fullgraph_compiled_frame_count = -1;
+
+// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
+// compilation will error (via get_fail_callback) instead of being silently
+// skipped.
+static THP_THREAD_LOCAL bool fullgraph_error_on_nested_compile = false;
+
+bool get_skip_guard_eval_unsafe(void) {
+  return skip_guard_eval_unsafe;
+}
+
+int get_fullgraph_compiled_frame_count(void) {
+  return fullgraph_compiled_frame_count;
+}
+
+void bump_fullgraph_compiled_frame_count(void) {
+  fullgraph_compiled_frame_count++;
+}
+
+bool get_fullgraph_error_on_nested_compile(void) {
+  return fullgraph_error_on_nested_compile;
+}
 
 static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -673,8 +710,8 @@ static PyObject* set_skip_guard_eval_unsafe(
     PyErr_SetString(PyExc_TypeError, "expected True/False");
     return NULL;
   }
-  bool old_skip_guard_eval_unsafe = is_skip_guard_eval_unsafe;
-  is_skip_guard_eval_unsafe = Py_IsTrue(skip_guard_unsafe_flag);
+  bool old_skip_guard_eval_unsafe = skip_guard_eval_unsafe;
+  skip_guard_eval_unsafe = Py_IsTrue(skip_guard_unsafe_flag);
   if (old_skip_guard_eval_unsafe) {
     Py_RETURN_TRUE;
   }
@@ -762,16 +799,6 @@ static int clear_state(PyObject* module) {
   }
   return -1;
 }
-
-bool is_skip_guard_eval_unsafe = false;
-
-// -1 means inactive, >= 0 means active with that many compiled frames.
-int fullgraph_compiled_frame_count = -1;
-
-// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
-// compilation will error (via get_fail_callback) instead of being silently
-// skipped.
-bool fullgraph_error_on_nested_compile = false;
 
 // Set the fullgraph compiled frame counter and return the old value.
 // If setting to >= 0 (activating) and already active, no-op.
