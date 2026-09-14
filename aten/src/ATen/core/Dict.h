@@ -86,6 +86,8 @@ public:
   ~DictEntryRef() = default;
 
 private:
+  DictEntryRef() = default;
+
   // allow copying and moving, but only our friends (i.e. the Dict class) can do
   // it. Copying/moving this reference wrapper would be too ambiguous to allow it
   // in the public API.
@@ -104,7 +106,7 @@ private:
 template<class Key, class Value, class Iterator>
 class DictIterator final {
 public:
-   // C++17 friendly std::iterator implementation
+  using iterator_concept = std::forward_iterator_tag;
   using iterator_category = std::forward_iterator_tag;
   using value_type = DictEntryRef<Key, Value, Iterator>;
   using difference_type = std::ptrdiff_t;
