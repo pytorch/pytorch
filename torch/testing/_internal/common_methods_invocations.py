@@ -16714,11 +16714,6 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            # torch-xpu-ops/issues/5020
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', "test_dispatch_symbolic_meta_outplace",
-                         device_type='xpu'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', "test_dispatch_meta_outplace",
-                         device_type='xpu'),
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',

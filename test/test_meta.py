@@ -913,6 +913,15 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
 }
 
+meta_dispatch_device_expected_failures['xpu'] = {
+    # The log_sigmoid_forward buffer output is device dependent: CPU returns
+    # exp(-|x|) for the backward pass while CUDA and XPU recompute it and
+    # return an empty tensor. A meta tensor has no device, so the decomp
+    # cannot pick the right shape. Same divergence as the 'cuda' entry above.
+    aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
+    aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
+}
+
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
 
