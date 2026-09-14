@@ -72,8 +72,17 @@ def _report_drops(dropped: list[dict], touched: dict[str, set[int]]) -> None:
     for d in dropped:
         path = d.get("path")
         reason = d.get("reason", "unknown")
-        where = f"{path}:{d['line']}" if d.get("line") is not None else str(path)
-        print(f"  - {where} — {reason}", file=sys.stderr)
+        if path is None:
+            where = "(finding with no usable path)"
+        elif d.get("line") is not None:
+            where = f"{path}:{d['line']}"
+        else:
+            where = str(path)
+        # `keys` names which fields were rejected; without it the model is
+        # told only "unexpected_keys" and cannot tell which one to drop.
+        keys = d.get("keys")
+        detail = f" ({', '.join(map(str, keys))})" if keys else ""
+        print(f"  - {where} — {reason}{detail}", file=sys.stderr)
         if reason == "line_not_in_diff" and path in touched:
             print(
                 f"      `line` must be a line number in the file at the head commit.\n"
@@ -134,7 +143,7 @@ def main() -> int:
     raw = obj.get("findings")
     if isinstance(raw, list):
         try:
-            _, dropped_first = sanitize_findings(raw, touched)
+            _, dropped_first, _ = sanitize_findings(raw, touched)
         except (ValueError, TypeError):
             dropped_first = []  # a shape problem; `build()` below names it properly
         if dropped_first:
