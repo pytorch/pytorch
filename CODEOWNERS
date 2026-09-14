@@ -126,6 +126,10 @@
 # /test/expect/TestSparseCompressedDeviceXPU.test_print_SparseBSR_xpu.expect
 # /test/expect/TestSparseCompressedDeviceXPU.test_print_SparseCSC_xpu.expect
 # /test/expect/TestSparseCompressedDeviceXPU.test_print_SparseCSR_xpu.expect
+# /test/expect/TestSparseCompressedDeviceMPS.test_print_SparseBSC_mps.expect
+# /test/expect/TestSparseCompressedDeviceMPS.test_print_SparseBSR_mps.expect
+# /test/expect/TestSparseCompressedDeviceMPS.test_print_SparseCSC_mps.expect
+# /test/expect/TestSparseCompressedDeviceMPS.test_print_SparseCSR_mps.expect
 # /test/expect/TestSparseMPS.test_print_coalesced_mps_float32.expect
 # /test/expect/TestSparseMPS.test_print_uncoalesced_mps_float32.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseBSC_float64.expect
