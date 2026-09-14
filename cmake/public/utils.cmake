@@ -358,7 +358,6 @@ function(torch_compile_options libname)
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
-        ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
         /bigobj>
@@ -391,11 +390,8 @@ function(torch_compile_options libname)
       else()
         # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
         list(APPEND private_compile_options -Wno-deprecated-copy)
-        # NVCC + clang18  reports spurious deprecated deprecated literal operator declaration when there were none
-        # I.e. failures look like torch/headeronly/util/complex.h:334:40: error: identifier '_if' preceded by whitespace in a literal operator declaration is deprecated
-        # but if one to look at the source code, there are no space there
+        # NVCC inserts whitespace into literal operators, triggering a spurious Clang warning.
         list(APPEND private_compile_options -Wno-deprecated-literal-operator)
-
       endif()
       list(APPEND private_compile_options -Wmove)
     else()
@@ -434,9 +430,6 @@ function(torch_compile_options libname)
     foreach(option IN LISTS private_compile_options)
       if(CMAKE_CUDA_HOST_COMPILER_ID STREQUAL "GNU")
         if("${option}" STREQUAL "-Wextra-semi")
-          continue()
-        endif()
-        if("${option}" STREQUAL "-Wunused-private-field")
           continue()
         endif()
       endif()
@@ -568,5 +561,61 @@ function(target_link_options_if_supported tgt flag)
     target_link_options("${tgt}" PRIVATE "LINKER:${flag}")
   else()
     message(WARNING "Attempted to use unsupported link option : ${flag}.")
+  endif()
+endfunction()
+
+##############################################################################
+# Apply binary layout optimization to ${tgt}. This includes using an
+# optimized symbol order (USE_PRIORITIZED_TEXT_FOR_LD) and post-link
+# optimization using LLVM BOLT (USE_LLVM_BOLT).
+#
+# When USE_LLVM_BOLT is enabled, original libraries are moved to the
+# prebolt/ subdirectory and bolted libraries are written in their place.
+# Pass the target followed by profile names in priority order:
+# torch_optimize_layout_if_enabled(<target> [<profile>...])
+# Falls back to lib<target>.yaml if specified profiles don't exist.
+function(torch_optimize_layout_if_enabled tgt)
+  if(USE_PRIORITIZED_TEXT_FOR_LD)
+    if(CMAKE_LINKER_TYPE STREQUAL "LLD")
+      target_link_options("${tgt}" PRIVATE "LINKER:--no-warn-symbol-ordering")
+      target_link_options("${tgt}" PRIVATE "LINKER:--symbol-ordering-file=${LINKER_SCRIPT_FILE_IN}")
+    else()
+      add_dependencies("${tgt}" generate_linker_script)
+      target_link_options("${tgt}" PRIVATE "LINKER:-T${LINKER_SCRIPT_FILE_OUT}")
+    endif()
+  endif()
+
+  if(USE_LLVM_BOLT)
+    # BOLT needs --emit-relocs. This flag increases the binary size so we
+    # scope it to bolt optimized targets rather than applying globally.
+    target_link_options_if_supported(${tgt} "--emit-relocs")
+    find_file(
+      _bolt_profile
+      NAMES ${ARGN} "lib${tgt}.yaml"
+      PATHS "${LLVM_BOLT_PROFILES_DIR}"
+      NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
+      NO_CACHE
+      REQUIRED
+    )
+    message(STATUS "Using BOLT profile for ${tgt}: ${_bolt_profile}")
+    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_bolt_profile}")
+    set(_logfile "${CMAKE_BINARY_DIR}/logs/llvm-bolt-lib${tgt}.txt")
+    set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
+    add_custom_command(
+      TARGET ${tgt} POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_logfile}>"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_prebolt}>"
+      COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
+      COMMAND "${LLVM_BOLT_EXECUTABLE}" "${_prebolt}"
+              -o "$<TARGET_FILE:${tgt}>"
+              "-data=${_bolt_profile}" "-log-file=${_logfile}"
+              -lite -infer-stale-profile
+              -reorder-blocks=ext-tsp -reorder-functions=cdsort
+              -split-functions -split-all-cold -split-eh -dyno-stats
+              --update-debug-sections
+      COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
+      VERBATIM
+    )
   endif()
 endfunction()

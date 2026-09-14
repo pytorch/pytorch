@@ -925,7 +925,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cuda(co
 
   if (grad_bias.defined()) {
     grad_bias.resize_({weight.size(1)});
-    grad_bias.zero_();
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
@@ -998,7 +997,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cuda(
 
   if (grad_bias.defined()) {
     grad_bias.resize_({weight.size(1)});
-    grad_bias.zero_();
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {

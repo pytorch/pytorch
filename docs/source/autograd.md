@@ -430,6 +430,10 @@ to avoid a reference cycle when the saved tensor is a graph output; see
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.autograd.graph.node_creation_hook
+```
+
+```{eval-rst}
 .. autoclass:: torch.autograd.graph.allow_mutation_on_saved_tensors
 ```
 
@@ -439,6 +443,10 @@ to avoid a reference cycle when the saved tensor is a graph output; see
 
 ```{eval-rst}
 .. autofunction:: torch.autograd.graph.get_gradient_edge
+```
+
+```{eval-rst}
+.. autofunction:: torch.autograd.graph.queue_callback
 ```
 
 ```{eval-rst}

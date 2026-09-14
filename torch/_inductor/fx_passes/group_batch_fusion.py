@@ -22,7 +22,7 @@ from ..pattern_matcher import (
     MatchResult,
     stable_topological_sort,
 )
-from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
+from ..utils import is_bf16x9_matmul, OPTIMUS_EXCLUDE_POST_GRAD
 
 
 try:
@@ -301,7 +301,12 @@ class PostGradBatchLinearFusion(BatchFusion):
 @register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
+        input_value = node.args[1].meta["val"]  # type: ignore[union-attr]
+        # fbgemm.gmm has no precision argument and bypasses ATen/cuBLAS.
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
+            return False
+        input_shape = input_value.shape
         weight_shape = node.args[2].meta["val"].shape  # type: ignore[union-attr]
         return (
             node.kwargs.get("beta", DEFAULT_BETA) == DEFAULT_BETA
@@ -316,7 +321,10 @@ class GroupLinearFusion(GroupFusion):
         )
 
     def _mm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[0].meta["val"].shape  # type: ignore[union-attr]
+        input_value = node.args[0].meta["val"]  # type: ignore[union-attr]
+        if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
+            return False
+        input_shape = input_value.shape
         weight_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
         return (
             len(input_shape) == 2
@@ -413,8 +421,9 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         if CallFunctionVarArgs(self.op).match(
             node
         ) and self._pointwise_node_can_be_fused(node):
-            alpha = node.kwargs.get("alpha", DEFAULT_ALPHA)
-            rounding_mode = node.kwargs.get("rounding_mode", None)
+            # NOTE: fuse() propagates subset[0].kwargs verbatim onto the
+            # fused node, so the group key must encode everything that is
+            # copied; key on node.kwargs rather than individual fields.
             input, other = node.args
             shape = list(input.meta["val"].shape)  # type: ignore[union-attr]
             if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
@@ -437,8 +446,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
                 str(shape),
                 str(input.meta["val"].dtype),  # type: ignore[union-attr]
                 str(other.meta["val"].dtype),  # type: ignore[union-attr]
-                str(alpha),
-                str(rounding_mode),
+                str(node.kwargs),
                 str(parent),
             )
         else:
@@ -447,7 +455,9 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_inputs, batch_others = [], []
-        alpha = subset[0].kwargs.get("alpha", DEFAULT_ALPHA)
+        # Safe because match() keys the group on str(node.kwargs): every
+        # node in the subset shares the same kwargs.
+        kwargs = subset[0].kwargs
         batch_inputs_meta, batch_others_meta = [], []
 
         for node in subset:
@@ -470,17 +480,19 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
                 args=(stack_inputs, stack_others),
-                kwargs={"alpha": alpha} if self.op == aten.add.Tensor else {},
+                kwargs=kwargs,
             )
-            batch_op.meta["val"] = self.op(stack_inputs_meta, stack_others_meta)
-            for i, original_add in enumerate(subset):
+            batch_op.meta["val"] = self.op(
+                stack_inputs_meta, stack_others_meta, **kwargs
+            )
+            for i, original_node in enumerate(subset):
                 with graph.inserting_after(batch_op):  # type: ignore[operator]
-                    new_add = graph.call_function(  # type: ignore[operator]
+                    new_node = graph.call_function(  # type: ignore[operator]
                         torch.ops.aten.select, args=((batch_op, 0, i))
                     )
-                original_add.replace_all_uses_with(new_add)
-                new_add.meta.update(original_add.meta)
-                graph.erase_node(original_add)  # type: ignore[operator]
+                original_node.replace_all_uses_with(new_node)
+                new_node.meta.update(original_node.meta)
+                graph.erase_node(original_node)  # type: ignore[operator]
         counters["inductor"][
             "batch_aten_" + self.op.__name__.lower().split(".")[0]
         ] += 1
@@ -1326,6 +1338,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             child = next(iter(node.users.keys()))
             group_key = (
                 str(input.meta["example_value"].shape)
+                + str(node.args[1:])
                 + str(node.kwargs)
                 + str(child.target)
             )
@@ -1340,6 +1353,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
+        args = subset[0].args[1:]
         kwargs = subset[0].kwargs
 
         for node in subset:
@@ -1355,11 +1369,11 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             update_stack_example_value(stack_inputs, batch_inputs_metadata)
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
-                args=(stack_inputs,),
+                args=(stack_inputs, *args),
                 kwargs=kwargs,
             )
             batch_op.meta["example_value"] = self.op(
-                stack_inputs.meta["example_value"], **kwargs
+                stack_inputs.meta["example_value"], *args, **kwargs
             )
             unbind_op = graph.call_function(  # type: ignore[operator]
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}

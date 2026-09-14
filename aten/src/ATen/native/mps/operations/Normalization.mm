@@ -949,12 +949,19 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   const Tensor& weight = *weight_maybe_owned;
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
-  auto bias_contig = bias.expect_contiguous();
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
   auto X = input.expect_contiguous();
-  auto gamma = weight.expect_contiguous();
+  // The Metal kernels bind gamma/beta at the input dtype, so mixed-dtype
+  // affine params (e.g. fp32 gamma/beta with an fp16 input, the
+  // keep-LayerNorm-in-fp32 recipe) must be cast, not reinterpreted.
+  const Tensor weight_cast =
+      weight.defined() && weight.scalar_type() != input.scalar_type() ? weight.to(input.scalar_type()) : weight;
+  const Tensor bias_cast =
+      bias.defined() && bias.scalar_type() != input.scalar_type() ? bias.to(input.scalar_type()) : bias;
+  auto bias_contig = bias_cast.expect_contiguous();
+  auto gamma = weight_cast.expect_contiguous();
   auto mean = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
   auto rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
 
@@ -1155,18 +1162,24 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
       for (const auto i : c10::irange(num_normalized_dims))
         bn_gamma_shape[i + 2] = input_shape[i + num_channel_dims];
 
-      std::string key = fmt::format("layer_norm_backward_mps:{}:{}:{}:{}:{}",
+      std::string key = fmt::format("layer_norm_backward_mps:{}:{}:{}:{}:{}:{}:{}",
                                     has_weight,
                                     getArrayRefString(normalized_shape),
                                     getArrayRefString((*X).sizes()),
                                     c10::Join(",", grad_input_mask),
-                                    getMPSTypeString(*X));
+                                    getMPSTypeString(*X),
+                                    has_weight ? getMPSTypeString(*gamma) : "",
+                                    bias.defined() ? getMPSTypeString(*beta) : "");
       auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
         MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *X);
         MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *dOut);
         MPSGraphTensor* weightTensor = nil;
         if (has_weight)
           weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, *gamma);
+        // Compute in the input dtype; MPSGraph rejects mixed-dtype arithmetic
+        // (fp32 gamma with an fp16 input asserts inside the MLIR verifier).
+        MPSGraphTensor* weightComputeTensor =
+            has_weight ? castMPSTensor(mpsGraph, weightTensor, getMPSDataType(*X)) : nil;
 
         // Mean and inv std tensors to be saved and returned
         MPSGraphTensor* meanTensor = mpsGraphRankedPlaceHolder(mpsGraph, mean);
@@ -1200,7 +1213,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
           MPSGraphTensor* bnGradOutputTensor = [mpsGraph reshapeTensor:gradOutputTensor withShape:bn_shape name:nil];
           // Do this at the end
           if (has_weight) {
-            MPSGraphTensor* bnGammaTensor = [mpsGraph reshapeTensor:weightTensor withShape:bn_gamma_shape name:nil];
+            MPSGraphTensor* bnGammaTensor = [mpsGraph reshapeTensor:weightComputeTensor
+                                                          withShape:bn_gamma_shape
+                                                               name:nil];
             bnGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:bnGradOutputTensor
                                                            secondaryTensor:bnGammaTensor
                                                                       name:nil];
@@ -1272,11 +1287,17 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
           gradInputTensor = [mpsGraph reshapeTensor:gradient withShape:input_shape name:nil];
         }
 
+        // Gradients are computed in the input dtype; return them in the
+        // affine params' dtype like CPU does.
         if (grad_input_mask[1]) {
-          gradWeightTensor = [mpsGraph reshapeTensor:gradWeightTensor withShape:gamma_shape name:nil];
+          gradWeightTensor = [mpsGraph reshapeTensor:castMPSTensor(mpsGraph, gradWeightTensor, getMPSDataType(*gamma))
+                                           withShape:gamma_shape
+                                                name:nil];
         }
         if (grad_input_mask[2]) {
-          gradBiasTensor = [mpsGraph reshapeTensor:gradBiasTensor withShape:gamma_shape name:nil];
+          gradBiasTensor = [mpsGraph reshapeTensor:castMPSTensor(mpsGraph, gradBiasTensor, getMPSDataType(*beta))
+                                         withShape:gamma_shape
+                                              name:nil];
         }
 
         newCachedGraph->gradOutputTensor_ = gradOutputTensor;

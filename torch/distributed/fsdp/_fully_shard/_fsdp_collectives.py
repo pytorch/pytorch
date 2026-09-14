@@ -180,7 +180,7 @@ class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
         group: dist.ProcessGroup,
         op: _ReduceOp,
         async_op: bool = False,
-    ) -> dist.Work:
+    ) -> dist.Work | None:
         return dist.reduce_scatter_single(
             output=output_tensor,
             input=input_tensor,
@@ -201,7 +201,7 @@ class ProcessGroupAllocReduceScatter(ProcessGroupAllocMixin, ReduceScatter):
         group: dist.ProcessGroup,
         op: _ReduceOp,
         async_op: bool = False,
-    ) -> dist.Work:
+    ) -> dist.Work | None:
         return dist.reduce_scatter_single(
             output=output_tensor,
             input=input_tensor,
@@ -625,7 +625,7 @@ def foreach_reduce(
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # account for a possible gradient_divide_factor.
-            if gradient_divide_factor is not None:
+            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
                 reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
             else:
                 reduce_output.copy_(reduce_scatter_input)
