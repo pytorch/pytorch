@@ -4458,7 +4458,7 @@ instantiate_device_type_tests(
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-class TestProfilerEventsParityCudaOnly(TestCase):
+class TestProfilerEventsParityCUDA(TestCase):
     """Structured-metadata parity tests keyed on CUPTI-specific trace
     categories/fields (cuda_runtime, cbid, cid, ...) that have no
     cross-backend equivalent."""
@@ -4677,7 +4677,7 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 
 
 instantiate_device_type_tests(
-    TestProfilerEventsParityCudaOnly, globals(), only_for=("cuda",)
+    TestProfilerEventsParityCUDA, globals(), only_for=("cuda",)
 )
 
 
@@ -4821,7 +4821,7 @@ instantiate_device_type_tests(
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestPythonChromeTraceExportCudaOnly(TestCase):
+class TestPythonChromeTraceExportCUDA(TestCase):
     """Python streaming exporter checks keyed on CUDA-specific data (CUDA runtime/
     driver versions, CUDA graph annotations) that have no cross-backend equivalent."""
 
@@ -4988,7 +4988,7 @@ class _StubResults:
         return self._activities
 
 
-class TestChromeTraceInlineAnnotations(TestCase):
+class TestChromeTraceInlineAnnotationsCUDA(TestCase):
     """Inline CUDA-graph annotations, driven through stub activities so the branches
     are covered without a capture or a live profiler."""
 
