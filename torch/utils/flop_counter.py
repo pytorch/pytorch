@@ -114,6 +114,37 @@ except ImportError:
     _JITFunction = NoneType
 
 
+def _warn_if_privateuse1_missing_triton() -> None:
+    """Warn (once) if a registered PrivateUse1 backend needs triton for its
+    Inductor codegen but triton isn't importable.
+
+    This is deliberately deferred to first ``FlopCounterMode`` use rather than
+    checked at module import time: a PrivateUse1 backend (e.g. ``torch_npu``)
+    is often registered by an ``import`` that happens after this module is
+    first loaded (directly or transitively, e.g. via
+    ``torch/_inductor/fx_utils.py``), so an import-time check can permanently
+    miss it.
+    """
+    from torch._logging import warning_once
+
+    backend_name = torch._C._get_privateuse1_backend_name()
+    if backend_name == "privateuseone":
+        return
+
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    try:
+        triton_capable = get_interface_for_device(backend_name).is_triton_capable()
+    except NotImplementedError:
+        # Backend renamed itself but never registered a DeviceInterface: we
+        # can't ask it, so warn conservatively (a false positive here is a
+        # harmless log line; a false negative silently breaks flop counting).
+        triton_capable = True
+
+    if triton_capable:
+        warning_once(log, "triton not found; flop counting will not work for triton kernels")
+
+
 aten = torch.ops.aten
 
 def get_shape(i):
@@ -918,6 +949,8 @@ class FlopCounterMode:
             display: bool = True,
             custom_mapping: dict[Any, Any] | None = None) -> None:
         super().__init__()
+        if _JITFunction is NoneType:
+            _warn_if_privateuse1_missing_triton()
         self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
