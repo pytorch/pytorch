@@ -3,6 +3,7 @@
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def my_custom_function(x):
@@ -10,6 +11,8 @@ def my_custom_function(x):
 
 
 class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_bool_recompile(self):
         def fn(x, y, c):
             if c:

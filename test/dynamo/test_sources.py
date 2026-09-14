@@ -10,6 +10,7 @@ from torch._dynamo.source import (
     is_from_local_source,
     LocalSource,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class CausalLMOutputWithPast:
@@ -17,6 +18,8 @@ class CausalLMOutputWithPast:
 
 
 class SourceTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_is_local(self):
         x_src = LocalSource("x")
         y_src = GlobalSource("y")
