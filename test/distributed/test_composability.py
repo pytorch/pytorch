@@ -284,20 +284,20 @@ class ComposabilityTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
-    @parametrize("defer_reduce_grad_wait", [False, True])
     @parametrize(
-        "ScheduleClass",
+        "ScheduleClass,defer_reduce_grad_wait",
         [
-            Schedule1F1B,
-            ScheduleInterleaved1F1B,
-            ScheduleLoopedBFS,
-            ScheduleInterleavedZeroBubble,
+            (Schedule1F1B, False),
+            (ScheduleInterleaved1F1B, False),
+            (ScheduleInterleaved1F1B, True),
+            (ScheduleLoopedBFS, False),
+            (ScheduleLoopedBFS, True),
+            (ScheduleInterleavedZeroBubble, False),
+            (ScheduleInterleavedZeroBubble, True),
         ],
     )
     def test_pp_fsdp(self, dp_type, defer_reduce_grad_wait, ScheduleClass):
         if TEST_WITH_ROCM:
-            return
-        if defer_reduce_grad_wait and issubclass(ScheduleClass, PipelineScheduleSingle):
             return
 
         torch.get_device_module(device_type).set_device(self.device)
@@ -355,9 +355,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             apply_dp,
             loss_fn,
             schedule_kwargs=(
-                {}
-                if issubclass(ScheduleClass, PipelineScheduleSingle)
-                else {"defer_reduce_grad_wait": defer_reduce_grad_wait}
+                {"defer_reduce_grad_wait": True} if defer_reduce_grad_wait else {}
             ),
         )
 
