@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Literal
-from typing_extensions import deprecated
+from typing import Generic, Literal
+from typing_extensions import TypeVarTuple, Unpack, deprecated
 
 import torch
 from torch import Tensor
@@ -51,8 +51,10 @@ convolution_notes = {
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`.""",
 }
 
+_Ts = TypeVarTuple("Ts")
 
-class _ConvNd(Module):
+
+class _ConvNd(Module, Generic[Unpack[_Ts]]):
     __constants__ = [
         "stride",
         "padding",
@@ -73,12 +75,12 @@ class _ConvNd(Module):
     in_channels: int
     _reversed_padding_repeated_twice: list[int]
     out_channels: int
-    kernel_size: tuple[int, ...]
-    stride: tuple[int, ...]
-    padding: str | tuple[int, ...]
-    dilation: tuple[int, ...]
+    kernel_size: tuple[Unpack[_Ts]]
+    stride: tuple[Unpack[_Ts]]
+    padding: str | tuple[Unpack[_Ts]]
+    dilation: tuple[Unpack[_Ts]]
     transposed: bool
-    output_padding: tuple[int, ...]
+    output_padding: tuple[Unpack[_Ts]]
     groups: int
     padding_mode: Literal["zeros", "reflect", "replicate", "circular"]
     weight: Tensor
@@ -88,12 +90,12 @@ class _ConvNd(Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: tuple[int, ...],
-        stride: tuple[int, ...],
-        padding: str | tuple[int, ...],
-        dilation: tuple[int, ...],
+        kernel_size: tuple[Unpack[_Ts]],
+        stride: tuple[Unpack[_Ts]],
+        padding: str | tuple[Unpack[_Ts]],
+        dilation: tuple[Unpack[_Ts]],
         transposed: bool,
-        output_padding: tuple[int, ...],
+        output_padding: tuple[Unpack[_Ts]],
         groups: int,
         bias: bool,
         padding_mode: Literal["zeros", "reflect", "replicate", "circular"],
@@ -222,7 +224,7 @@ class _ConvNd(Module):
             self.padding_mode = "zeros"
 
 
-class Conv1d(_ConvNd):
+class Conv1d(_ConvNd[int]):
     __doc__ = (
         r"""Applies a 1D convolution over an input signal composed of several input
     planes.
@@ -385,7 +387,7 @@ class Conv1d(_ConvNd):
         return self._conv_forward(input, self.weight, self.bias)
 
 
-class Conv2d(_ConvNd):
+class Conv2d(_ConvNd[int, int]):
     __doc__ = (
         r"""Applies a 2D convolution over an input signal composed of several input
     planes.
@@ -565,7 +567,7 @@ class Conv2d(_ConvNd):
         return self._conv_forward(input, self.weight, self.bias)
 
 
-class Conv3d(_ConvNd):
+class Conv3d(_ConvNd[int, int, int]):
     __doc__ = (
         r"""Applies a 3D convolution over an input signal composed of several input
     planes.
