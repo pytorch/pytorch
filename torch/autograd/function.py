@@ -94,6 +94,10 @@ class FunctionCtx:
             A later producer may replace the engine's buffer, making a retained
             tensor stale.
 
+            After receiving a non-``None`` buffer, the custom backward must not
+            call ``backward`` or ``grad`` before returning. Reentrant engine
+            execution can run another producer while the buffer is still exposed.
+
             All producers that use or subsequently update an exposed buffer must
             execute on the same device, autograd engine thread, and stream. PyTorch
             diagnoses engine-visible violations. A custom function that launches

@@ -23,6 +23,7 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
@@ -107,6 +108,9 @@ static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
 static thread_local int current_depth = 0;
+
+// Whether the current node call has exposed an input gradient buffer.
+static thread_local bool input_grad_buffer_exposed = false;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total
 // nested
@@ -465,6 +469,7 @@ variable_list get_current_input_grad_buffers(Node* node) {
         : next.function->stream();
     result[i] = input_buffer.get_for_direct_accumulation(
         next.input_nr, opt_producer_stream, opt_consumer_stream);
+    input_grad_buffer_exposed |= result[i].defined();
   }
   return result;
 }
@@ -1114,6 +1119,12 @@ static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputBuffer) {
+  const bool previous_input_grad_buffer_exposed =
+      std::exchange(input_grad_buffer_exposed, false);
+  auto restore_input_grad_buffer_exposure =
+      c10::make_scope_exit([previous_input_grad_buffer_exposed]() {
+        input_grad_buffer_exposed = previous_input_grad_buffer_exposed;
+      });
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
@@ -1425,6 +1436,10 @@ auto Engine::execute(
     bool create_graph,
     bool accumulate_grad,
     const edge_list& outputs) -> variable_list {
+  TORCH_CHECK(
+      !input_grad_buffer_exposed,
+      "Calling backward or grad reentrantly after accessing a non-None "
+      "ctx.input_grad_buffers entry is not supported");
   validate_outputs(
       root_edges,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)

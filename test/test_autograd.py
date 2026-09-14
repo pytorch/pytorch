@@ -18598,6 +18598,27 @@ class TestInputGradBuffers(TestCase):
         with self.assertRaisesRegex(RuntimeError, "while autograd is executing"):
             out.grad_fn.input_grad_buffers
 
+    @onlyCUDA
+    def test_reentrant_backward_after_exposure_errors(self, device):
+        nested_input = torch.ones((), device=device, requires_grad=True)
+        nested_output = nested_input * 2
+
+        def reenter(buffers, _grad_input):
+            self.assertIsNotNone(buffers[0])
+            nested_output.backward()
+
+        x = torch.ones((), requires_grad=True)
+        last = _InputGradBufferProducer.apply(x, 1, False, None)
+        direct = _InputGradBufferProducer.apply(x, 2, True, reenter)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        grad_outputs = tuple(torch.ones_like(out) for out in (last, direct, first))
+
+        with self.assertRaisesRegex(RuntimeError, "input_grad_buffers"):
+            torch.autograd.backward((last, direct, first), grad_outputs)
+
+        # The exposure state must be restored when backward raises.
+        torch.ones((), requires_grad=True).backward()
+
     @parametrize("mode", ("grad", "create_graph", "anomaly", "post_hook"))
     def test_unsupported_execution_modes_error(self, device, mode):
         class Producer(Function):
