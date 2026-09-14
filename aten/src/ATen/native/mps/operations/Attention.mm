@@ -87,13 +87,13 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
   auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
   @autoreleasepool {
-    auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
-        std::to_string(attn_mask.has_value()) + ":" + std::to_string(scale_factor);
+    auto mkey = __func__ + getTensorsStringKey({query, key, value}, true, /*exclude_shape=*/true) + ":" +
+        std::to_string(is_causal) + ":" + std::to_string(attn_mask.has_value()) + ":" + std::to_string(scale_factor);
     auto cachedGraph =
         LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&, q_ = query, k_ = key, v_ = value](auto mpsGraph, auto graph) {
-          auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
-          auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, k_);
-          auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, v_);
+          auto qTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(q_));
+          auto kTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(k_));
+          auto vTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(v_));
           auto kT = [mpsGraph transposeTensor:kTensor dimension:2 withDimension:3 name:nil];
           auto scaleTensor = [mpsGraph constantWithScalar:scale_factor
                                                     shape:getMPSShape({1})
@@ -113,33 +113,55 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
           maskedMM = [mpsGraph multiplicationWithPrimaryTensor:maskedMM secondaryTensor:scaleTensor name:nil];
 
           if (is_causal) {
-            auto causalMask = [mpsGraph constantWithScalar:1.0f
-                                                     shape:getMPSShape({qSize, maxSeqLength})
-                                                  dataType:MPSDataTypeBool];
-            causalMask = [mpsGraph bandPartWithTensor:causalMask numLower:-1 numUpper:0 name:nil];
-            auto minusInf = [mpsGraph constantWithScalar:-1e20 shape:maskedMM.shape dataType:maskedMM.dataType];
+            // Build the causal mask dynamically from maskedMM's runtime shape instead
+            // of concrete constants, so the same compiled graph (unranked placeholders
+            // above) serves any sequence length via ShapeShifter. Only the trailing
+            // two (qSize, maxSeqLength) dims are needed for the mask itself: bandPart
+            // operates on the last two dims regardless of leading batch/head dims, and
+            // selectWithPredicateTensor broadcasts a smaller predicate/false-tensor
+            // against maskedMM's full shape, so building at the full (batchSize,
+            // num_head, ...) shape here would multiply the mask-materialization cost
+            // by batchSize * num_head for no benefit.
+            auto onesTensor = [mpsGraph constantWithScalar:1.0f dataType:MPSDataTypeBool];
+            auto shapeTensor = [mpsGraph shapeOfTensor:maskedMM name:nil];
+            auto maskShapeTensor = [mpsGraph sliceTensor:shapeTensor dimension:0 start:-2 length:2 name:nil];
+            auto onesLike = [mpsGraph broadcastTensor:onesTensor toShapeTensor:maskShapeTensor name:nil];
+            auto causalMask = [mpsGraph bandPartWithTensor:onesLike numLower:-1 numUpper:0 name:nil];
+            auto minusInf = [mpsGraph constantWithScalar:-1e20 dataType:maskedMM.dataType];
+            auto minusInfLike = [mpsGraph broadcastTensor:minusInf toShapeTensor:maskShapeTensor name:nil];
             maskedMM = [mpsGraph selectWithPredicateTensor:causalMask
                                        truePredicateTensor:maskedMM
-                                      falsePredicateTensor:minusInf
+                                      falsePredicateTensor:minusInfLike
                                                       name:nil];
           } else if (attn_mask) {
-            graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
+            // attn_mask's rank is intentionally NOT part of mkey (only
+            // attn_mask.has_value() is), unlike query/key/value where exclude_shape=true
+            // still encodes rank precisely because a cache hit at the wrong rank would
+            // feed mismatched dimensions into an unranked placeholder. This is safe only
+            // because every caller into this function normalizes attn_mask to rank 4 via
+            // ensure_4d before reaching here (see _scaled_dot_product_attention_math_mps
+            // below); it is not enforced at this call site.
+            TORCH_INTERNAL_ASSERT(attn_mask->dim() == query.dim());
+            graph->maskTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(*attn_mask));
             maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM
                                            secondaryTensor:castMPSTensor(mpsGraph, graph->maskTensor, maskedMM.dataType)
                                                       name:nil];
           }
 
+          auto maskedMMShape = [mpsGraph shapeOfTensor:maskedMM name:nil];
+          auto negInfTensor = [mpsGraph constantWithScalar:-INFINITY dataType:maskedMM.dataType];
+          auto negInfLike = [mpsGraph broadcastTensor:negInfTensor toShapeTensor:maskedMMShape name:nil];
           // Account for case where all values were masked causing division by 0 in softmax (issue:#156707)
           // Overwrites expected NANs in sm with zeros.
-          auto negInfTensor = [mpsGraph constantWithScalar:-INFINITY shape:maskedMM.shape dataType:maskedMM.dataType];
-          auto elem_neg_inf = [mpsGraph equalWithPrimaryTensor:maskedMM secondaryTensor:negInfTensor name:nil];
+          auto elem_neg_inf = [mpsGraph equalWithPrimaryTensor:maskedMM secondaryTensor:negInfLike name:nil];
           auto all_neg_infs_along_axis = [mpsGraph reductionAndWithTensor:elem_neg_inf axis:3 name:nil];
-          auto zero_mask = [mpsGraph broadcastTensor:all_neg_infs_along_axis toShape:maskedMM.shape name:nil];
-          auto zeroTensor = [mpsGraph constantWithScalar:0.0 shape:maskedMM.shape dataType:maskedMM.dataType];
+          auto zero_mask = [mpsGraph broadcastTensor:all_neg_infs_along_axis toShapeTensor:maskedMMShape name:nil];
+          auto zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:maskedMM.dataType];
+          auto zeroLike = [mpsGraph broadcastTensor:zeroTensor toShapeTensor:maskedMMShape name:nil];
 
           auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
           MPSGraphTensor* correctedSM = [mpsGraph selectWithPredicateTensor:zero_mask
-                                                        truePredicateTensor:zeroTensor
+                                                        truePredicateTensor:zeroLike
                                                        falsePredicateTensor:sm
                                                                        name:nil];
 
