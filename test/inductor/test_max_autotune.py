@@ -40,6 +40,7 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
     use_pipelined_autotuning,
 )
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import override_template_heuristics
@@ -706,6 +707,61 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(len(ws_sizes) > 0, "No workspace benchmark requests created")
         for size in ws_sizes:
             self.assertEqual(size, expected_bytes)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "test_configs.max_mm_configs": 2,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_benchmark_request_does_not_release_shared_module(self):
+        """A BenchmarkRequest must not release a module someone else still holds.
+
+        generate_and_load caches the generated template module in PyCodeCache and
+        keeps it alive for the whole compile. When a TritonBenchmarkRequest for the
+        same path was handed that very module, its cleanup_run_fn() released the
+        shared CachingAutotuner -- clearing launchers and compile_results, with
+        configs already set to None by _precompile_worker -- so the next precompile()
+        of that autotuner died with NoTritonConfigsError. Concurrent compile threads
+        autotuning identical code hit this; one holder is enough to show it.
+        """
+        captured = []
+        orig_init = TritonBenchmarkRequest.__init__
+
+        def spy_init(self, *args, **kwargs):
+            orig_init(self, *args, **kwargs)
+            captured.append(self)
+
+        a = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+
+        with (
+            fresh_cache(),
+            patch.object(TritonBenchmarkRequest, "__init__", spy_init),
+        ):
+            torch._dynamo.reset()
+            torch.compile(torch.mm, mode="max-autotune-no-cudagraphs")(a, b)
+            self.assertTrue(captured, "No triton benchmark requests created")
+
+            for bmreq in captured:
+                PyCodeCache.cache_clear()
+                mod = PyCodeCache.load_by_key_path(
+                    bmreq.module_cache_key, bmreq.module_path, set_sys_modules=False
+                )
+                kernel = getattr(mod, bmreq.kernel_name)
+                try:
+                    bmreq.precompile()
+                except Exception:
+                    # This choice cannot compile on this GPU; it says nothing
+                    # about module sharing, so move on to the next one.
+                    continue
+                break
+            else:
+                self.skipTest("No triton benchmark request precompiled successfully")
+
+            kernel.precompile()
+            self.assertTrue(kernel.launchers)
 
     @unittest.skipIf(
         not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"

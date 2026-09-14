@@ -325,7 +325,11 @@ class FunctionPicklerBase(pickle.Pickler):
         # not for a local function), so the caller prunes any it does not need.
         # `evaluate` asks for the VALUE format instead, for a caller that has to
         # serialize the values and cannot carry a proxy; that read raises for a
-        # name that does not resolve.
+        # name that does not resolve. Either format can raise -- FORWARDREF only
+        # when the annotation does real work outside a name lookup (formatting a
+        # proxy in an f-string, `()[0]`), which the guards.py caller explains --
+        # and both are left raising here: whether the set can be dropped is the
+        # caller's question, and each caller logs the drop it takes.
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -484,6 +488,9 @@ def load_guard_manager(
     target_code: types.CodeType,
     runtime_global_scope: Any,
 ) -> "GuardManagerWrapper":
+    # An EMPTY runtime_global_scope is a scope and not the absence of one: a
+    # global guard then fails on a name it lacks, rather than falling back to the
+    # globals serialized with the artifact, which only None selects.
     from .output_graph import OutputGraphCommon
 
     return torch._dynamo.guards.CheckFunctionManager(
