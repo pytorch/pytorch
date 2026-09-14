@@ -6399,7 +6399,7 @@ class TestSDPAXpuOnly(NNTestCase):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
         size = SdpaShape(2, 8, 128, 64)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-        if dropout > 0.0 or dtype not in [torch.float32, torch.bfloat16, torch.float16]:
+        if dtype not in [torch.float32, torch.bfloat16, torch.float16]:
             if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.MATH.value:
                 raise AssertionError("expected MATH backend")
         else:
