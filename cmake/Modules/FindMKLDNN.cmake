@@ -54,7 +54,9 @@ IF(NOT MKLDNN_FOUND)
     set(_xpu_mkldnn_build_dir "${_xpu_mkldnn_prefix}/src/xpu_mkldnn_proj-build")
     set(_xpu_mkldnn_lib "${_xpu_mkldnn_build_dir}/src/${DNNL_LIB_NAME}")
 
-    if(EXISTS "${_xpu_mkldnn_lib}" AND IS_DIRECTORY "${_xpu_mkldnn_src_dir}/include")
+    if(EXISTS "${_xpu_mkldnn_lib}"
+        AND IS_DIRECTORY "${_xpu_mkldnn_src_dir}/include"
+        AND IS_DIRECTORY "${_xpu_mkldnn_build_dir}/include")
       message(STATUS "Reusing existing oneDNN XPU build: ${_xpu_mkldnn_lib}")
       add_custom_target(xpu_mkldnn_proj)
       set(XPU_MKLDNN_LIBRARIES "${_xpu_mkldnn_lib}")
@@ -72,7 +74,7 @@ IF(NOT MKLDNN_FOUND)
       ExternalProject_Add(xpu_mkldnn_proj
         GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
         GIT_TAG v3.12.3
-        PREFIX ${XPU_MKLDNN_DIR_PREFIX}
+        PREFIX "${_xpu_mkldnn_prefix}"
         BUILD_IN_SOURCE 0
         CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
         -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
