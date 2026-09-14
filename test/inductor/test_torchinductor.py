@@ -19417,7 +19417,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         expected = f(x)
         actual, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), x)
-        self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+        self.assertEqual(expected, actual, atol=1e-2, rtol=1e-3)
         code = source_codes[0]
         self.assertIn("ReductionHint.OUTER_NO_SPLIT", code)
         self.assertEqual(code.count("@triton_heuristics.reduction("), 1)
@@ -19450,7 +19450,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual, source_codes = run_and_get_code(
             torch.compile(f, fullgraph=True), x, y, stats
         )
-        self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+        self.assertEqual(expected, actual, atol=1e-2, rtol=1e-3)
         code = source_codes[0]
         self.assertNotIn("ReductionHint.OUTER_NO_SPLIT", code)
         self.assertGreaterEqual(code.count("ReductionHint.OUTER"), 2)
@@ -19467,7 +19467,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual_simple, simple_source_codes = run_and_get_code(
             torch.compile(simple, fullgraph=True), x
         )
-        self.assertEqual(expected_simple, actual_simple, atol=0.125, rtol=0.01)
+        self.assertEqual(expected_simple, actual_simple, atol=1e-2, rtol=1e-3)
         simple_code = simple_source_codes[0]
         self.assertIn("ReductionHint.OUTER_NO_SPLIT", simple_code)
         self.assertEqual(simple_code.count("@triton_heuristics.reduction("), 1)
