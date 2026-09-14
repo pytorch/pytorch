@@ -5676,6 +5676,7 @@ exit(2)
                 torch.optim.NAdam,
                 torch.optim.RAdam,
                 torch.optim.Adadelta,
+                torch.optim.Adagrad,
                 torch.optim.RMSprop,
                 torch.optim.Rprop,
             ),
