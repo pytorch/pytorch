@@ -10,6 +10,7 @@ import pytest
 import transformers
 
 import torch
+from torch._higher_order_ops import while_loop
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as torch_pytree
@@ -219,6 +220,41 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             (torch.tensor([10.0, 20.0, 30.0]),),
         )
         onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_onnx_export_while_loop_traced_by_dynamo(self):
+        # The `while_loop` wrapper is traced by dynamo, which produces a cond
+        # subgraph with a single (non-tuple) output. https://github.com/pytorch/pytorch/issues/192040
+        class Model(torch.nn.Module):
+            def cond_fn(self, iter_count, x):
+                return iter_count.sum() > 0
+
+            def body_fn(self, iter_count, x):
+                return iter_count - 1, x * 2
+
+            def forward(self, init_iter, init_x):
+                return while_loop(self.cond_fn, self.body_fn, (init_iter, init_x))
+
+        onnx_program = self.export(Model(), (torch.tensor([3]), torch.ones(3)))
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(
+            onnx_program, args=(torch.tensor([0]), torch.ones(3))
+        )
+
+    def test_onnx_export_while_loop_from_exported_program(self):
+        class Model(torch.nn.Module):
+            def forward(self, init_iter, init_x):
+                def cond_fn(iter_count, x):
+                    return iter_count.sum() > 0
+
+                def body_fn(iter_count, x):
+                    return iter_count - 1, x * 2
+
+                return while_loop(cond_fn, body_fn, (init_iter, init_x))
+
+        args = (torch.tensor([3]), torch.ones(3))
+        exported_program = torch.export.export(Model(), args)
+        onnx_program = self.export(exported_program, args)
+        onnx_testing.assert_onnx_program(onnx_program, strategy=None)
 
     def test_empty(self):
         class EmptyModel(torch.nn.Module):
