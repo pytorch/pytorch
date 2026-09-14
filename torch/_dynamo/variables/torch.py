@@ -328,6 +328,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
         torch.jit.is_scripting: False,
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
+        torch._C._is_tracing: False,
         torch.fx._symbolic_trace.is_fx_tracing: False,
         torch.fx._symbolic_trace.is_fx_symbolic_tracing: False,
         torch.onnx.is_in_onnx_export: False,
@@ -674,7 +675,7 @@ class BaseTorchVariable(VariableTracker):
             # interaction with Kineto is not a valid usecase. So, this is ok.
             return True
 
-        return getattr(self.value, "__module__", None) == "math"
+        return getattr(self.value, "__module__", None) in ("math", "cmath")
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
@@ -2814,7 +2815,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device.index),
                 {},
             )
             return ConstantVariable.create(None)

@@ -27,7 +27,11 @@ from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfHpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfHpu,
+)
 
 
 try:
@@ -2263,6 +2267,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
 
+    @parametrize("specialize", [False, True])
+    def test_compile_module_with_compiled_no_grad_method(self, specialize):
+        class Mod(torch.nn.Module):
+            @torch.compile(backend="eager", fullgraph=True)
+            @torch.no_grad()
+            def foo(self, x):
+                return x.sin() + 1
+
+            def forward(self, x):
+                y = x
+                # Keep the call inside a loop to match the original nested compile repro.
+                for _ in range(1):
+                    y = self.foo(x)
+                return y
+
+        mod = Mod()
+        if specialize:
+            mod.torchdynamo_force_dynamic = False
+        x = torch.randn(4, requires_grad=True)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+
+        ref = mod(x)
+        res = opt_mod(x)
+
+        self.assertEqual(ref, res)
+        self.assertFalse(res.requires_grad)
+
     def test_composition_with_opt_mod(self):
         class InnerModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -3901,6 +3932,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager", fullgraph=True)(x)
         self.assertEqual(eager, compiled)
 
+
+instantiate_parametrized_tests(OptimizedModuleTest)
 
 instantiate_device_type_tests(
     NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True
