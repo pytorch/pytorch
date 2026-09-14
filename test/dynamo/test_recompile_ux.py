@@ -20,10 +20,24 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
+from torch.utils._pytree import GetAttrKey, register_pytree_node
 
 
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
+class _AttrPytree:
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+
+register_pytree_node(
+    _AttrPytree,
+    lambda value: ([value.tensor], None),
+    lambda values, _context: _AttrPytree(values[0]),
+    flatten_with_keys_fn=lambda value: ([(GetAttrKey("tensor"), value.tensor)], None),
 )
 
 
@@ -66,6 +80,40 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_model(x, i)
 
         self.assertTrue(triggered)
+
+    def test_aot_eager_then_compile_tracks_attr_pytree_dynamism(self):
+        def model(features):
+            return features.tensor.sin()
+
+        compile_counter = torch._dynamo.testing.CompileCounter()
+        compiled_model = torch.compile(model, backend=compile_counter)
+
+        with (
+            torch._dynamo.config.patch(delayed_compile_use_native_pgo=True),
+            torch.compiler.set_stance("aot_eager_then_compile"),
+        ):
+            compiled_model(_AttrPytree(torch.randn(2)))
+            compiled_model(_AttrPytree(torch.randn(3)))
+
+        compiled_model(_AttrPytree(torch.randn(4)))
+        self.assertEqual(compile_counter.frame_count, 1)
+
+    def test_aot_eager_then_compile_recompiles_static_frame(self):
+        def model(features):
+            return features.sin()
+
+        compile_counter = torch._dynamo.testing.CompileCounter()
+        compiled_model = torch.compile(model, backend=compile_counter)
+
+        with (
+            torch._dynamo.config.patch(delayed_compile_use_native_pgo=True),
+            torch.compiler.set_stance("aot_eager_then_compile"),
+        ):
+            compiled_model(torch.randn(2))
+            compiled_model(torch.randn(2))
+
+        compiled_model(torch.randn(2))
+        self.assertEqual(compile_counter.frame_count, 1)
 
     def test_loop_torture(self):
         def loop_torture(input, iters):

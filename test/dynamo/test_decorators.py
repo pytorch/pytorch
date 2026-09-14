@@ -1841,6 +1841,43 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Would have been 4 without stance
         self.assertEqual(cnts.op_count, 2)
 
+    def test_set_stance_aot_eager_then_compile_uses_native_pgo(self):
+        symbolic_inputs = []
+
+        def backend(gm, example_inputs):
+            symbolic_inputs.append(
+                any(
+                    isinstance(example, torch.SymInt)
+                    or (
+                        isinstance(example, torch.Tensor)
+                        and any(isinstance(dim, torch.SymInt) for dim in example.shape)
+                    )
+                    for example in example_inputs
+                )
+            )
+            return gm.forward
+
+        @torch.compile(backend=backend)
+        def fn(x):
+            x = torch.sin(x)
+            torch._dynamo.graph_break()
+            return torch.cos(x)
+
+        with (
+            torch._dynamo.config.patch(
+                automatic_dynamic_shapes=True,
+                automatic_dynamic_local_pgo=False,
+                automatic_dynamic_remote_pgo=False,
+                delayed_compile_use_native_pgo=True,
+            ),
+            torch.compiler.set_stance("aot_eager_then_compile"),
+        ):
+            for size in (2, 3, 4):
+                x = torch.randn(size)
+                self.assertEqual(fn(x), torch.cos(torch.sin(x)))
+
+        self.assertEqual(symbolic_inputs, [True, True])
+
     def test_mark_static_nn_module(self):
         @torch._dynamo.mark_static
         class Mock(torch.nn.Module):
