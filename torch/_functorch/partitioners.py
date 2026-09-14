@@ -660,7 +660,7 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "output":
             pass
     output_values = []
-    for x, x_desc in zip(outputs, outputs_descs):
+    for x, _x_desc in zip(outputs, outputs_descs):
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
