@@ -335,6 +335,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 )
 
+
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim):
         super().__init__()
@@ -343,6 +344,7 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         return self.linear2(F.relu(self.linear1(x)))
+
 
 def main():
     dist.init_process_group(backend="nccl")
@@ -383,6 +385,7 @@ def main():
             print(f"step {step}: loss = {loss.item():.4f}")
 
     dist.destroy_process_group()
+
 
 if __name__ == "__main__":
     main()
