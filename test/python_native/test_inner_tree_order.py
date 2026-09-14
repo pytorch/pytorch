@@ -388,7 +388,7 @@ class TestInnerTreeOrder(TestCase):
                         continue
                     for b, tm in enumerate(plan.tms):
                         checked += 1
-                        if tm.vec * tm.loads * tm.tpr != tm.N:
+                        if tm.vec * tm.loads * tm.threads_per_row != tm.N:
                             continue  # not exact: takes the predicated path either way
                         base = plan.batches[b][0] if b < len(plan.batches) else 0
                         paired += plan.shape == "split" or bool(base)
