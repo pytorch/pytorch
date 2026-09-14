@@ -560,17 +560,21 @@ class MemPool(torch._C._XPUMemPool):
             define how memory gets allocated in the pool. If :attr:`allocator`
             is ``None`` (default), memory allocation follows the default/
             current configuration of the XPUCachingAllocator.
-        use_on_oom(bool): a bool that indicates if this pool can be used
-            as a last resort if a memory allocation outside of the pool fails due
-            to Out Of Memory. This is ``False`` by default.
+        use_on_oom(bool, optional): a bool that indicates if this pool may be used as a last
+            resort when an allocation outside the pool fails with OOM.
+            Defaults to ``False``.
+        no_split (bool, optional): if ``True``, cached segments in this pool are
+            never split to serve smaller allocations. Defaults to ``False``.
     """
 
     def __init__(
         self,
         allocator: torch._C._xpu_XPUAllocator | None = None,
         use_on_oom: bool = False,
+        no_split: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom)
+        # pyrefly: ignore [bad-argument-count]
+        super().__init__(allocator, True, use_on_oom, no_split)
 
     @property
     def id(self) -> tuple[int, int]:
