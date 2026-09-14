@@ -87,6 +87,9 @@ class CustomNewSetTests(_BaseSetTests):
             self = super().__new__(cls, arg)
             return self
 
+    class GrandchildSetWithNew(CustomSetWithNew):
+        pass
+
     @make_dynamo_test
     def test_set_subclass_new_via_super(self):
         s = self.CustomSetWithNew([1, 2])
@@ -110,6 +113,28 @@ class CustomNewSetTests(_BaseSetTests):
     def test_frozenset_new_exact_type(self):
         s = frozenset.__new__(frozenset)
         self.assertTrue(s == frozenset())
+
+    @make_dynamo_test
+    def test_set_new_ignores_kwargs(self):
+        # set.__new__ (tp_new) silently ignores extra args/kwargs -- only
+        # set.__init__ (called separately) actually populates the set.
+        s = set.__new__(set, [1, 2], extra="ignored")
+        self.assertTrue(s == set())
+
+    @make_dynamo_test
+    def test_frozenset_new_rejects_kwargs(self):
+        self.assertRaises(
+            TypeError, lambda: frozenset.__new__(frozenset, [1, 2], extra=1)
+        )
+
+    @make_dynamo_test
+    def test_set_subclass_new_via_super_multilevel(self):
+        # A second level of subclassing still routes through the same
+        # set.__new__ (tp_new) machinery.
+        s = self.GrandchildSetWithNew([1, 2])
+        self.assertTrue(type(s) is self.GrandchildSetWithNew)
+        self.assertTrue(set(s) == {1, 2})
+        self.assertTrue(s.newarg is None)
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
