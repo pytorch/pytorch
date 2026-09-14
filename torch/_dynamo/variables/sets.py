@@ -37,7 +37,7 @@ from ..utils import (
     tracked_repr,
     unpack_iterable,
 )
-from .base import Member, Method, ValueMutationNew, VariableTracker
+from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 
@@ -85,9 +85,15 @@ class BaseSetVariable(VariableTracker):
     subclass of set, and neither is dict_keys (see #192874). This base holds
     every operation that is valid on an immutable set-like collection.
     SetVariable (mutable Python ``set``) adds the mutating operations on top.
-    FrozensetVariable inherits only this base, so a traced frozenset is no
-    longer matched by isinstance checks against SetVariable. DictKeySetVariable
-    still derives from SetVariable; that row of #192874 is not addressed here.
+    FrozensetVariable and DictKeySetVariable inherit only this base, so a
+    traced frozenset or dict_keys is not matched by isinstance checks against
+    SetVariable.
+
+    Only ``isdisjoint`` is registered in ``tp_methods`` here: that is the whole
+    named surface of ``collections.abc.Set``, and of ``dict_keys``. The other
+    read-only methods (``union``, ``copy``, ...) are implemented here but
+    registered by SetVariable and FrozensetVariable, the same way CPython's
+    ``set_methods`` and ``frozenset_methods`` tables share one implementation.
     """
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
@@ -512,12 +518,24 @@ class BaseSetVariable(VariableTracker):
             if not issubclass(other_type, (set, frozenset)):
                 return ConstantVariable.create(NotImplemented)
 
-        # Accessing set_items directly is correct: CPython's set_richcompare
+        return self._richcompare_items(
+            tx,
+            self.set_items,
+            other.set_items,  # type: ignore[attr-defined]
+            op,
+        )
+
+    def _richcompare_items(
+        self,
+        tx: "InstructionTranslatorBase",
+        self_items: set["HashableTracker"],
+        other_items: set["HashableTracker"],
+        op: str,
+    ) -> VariableTracker:
+        # Accessing the item sets directly is correct: CPython's set_richcompare
         # operates on the internal C struct (PySet_GET_SIZE, set_next,
         # set_contains_entry) -- it never calls __len__ or __contains__.
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2093-L2130
-        self_items = self.set_items
-        other_items = other.set_items  # type: ignore[attr-defined]
         if op == "__eq__":
             # len check + issubset: same length and subset implies equality.
             if len(self_items) != len(other_items):
@@ -535,13 +553,6 @@ class BaseSetVariable(VariableTracker):
 
     tp_methods = {
         "isdisjoint": Method(isdisjoint),
-        "intersection": Method(intersection),
-        "union": Method(union),
-        "difference": Method(difference),
-        "symmetric_difference": Method(symmetric_difference),
-        "issubset": Method(issubset),
-        "issuperset": Method(issuperset),
-        "copy": Method(copy),
     }
 
 
@@ -776,6 +787,13 @@ class SetVariable(BaseSetVariable):
         return self
 
     tp_methods = {
+        "intersection": Method(BaseSetVariable.intersection),
+        "union": Method(BaseSetVariable.union),
+        "difference": Method(BaseSetVariable.difference),
+        "symmetric_difference": Method(BaseSetVariable.symmetric_difference),
+        "issubset": Method(BaseSetVariable.issubset),
+        "issuperset": Method(BaseSetVariable.issuperset),
+        "copy": Method(BaseSetVariable.copy),
         "add": Method(add),
         "pop": Method(pop),
         "intersection_update": Method(intersection_update),
@@ -857,7 +875,7 @@ class OrderedSetVariable(SetVariable):
 
         return ConstDictVariable(self.items, mutation_type=ValueMutationNew())  # type: ignore[bad-argument-type]
 
-    tp_members = {"_dict": Member(_get_internal_dict, None)}
+    tp_members = {"_dict": Member(_get_internal_dict, readonly_setter)}
 
     def debug_repr(self) -> str:
         if not self.items:
@@ -1019,6 +1037,9 @@ class FrozensetVariable(BaseSetVariable):
         "difference": Method(difference),
         "intersection": Method(intersection),
         "symmetric_difference": Method(symmetric_difference),
+        "union": Method(BaseSetVariable.union),
+        "issubset": Method(BaseSetVariable.issubset),
+        "issuperset": Method(BaseSetVariable.issuperset),
     }
 
     def tp_init_impl(
@@ -1050,7 +1071,15 @@ class FrozensetVariable(BaseSetVariable):
         return hash(frozenset(raw_hashes)), is_fake
 
 
-class DictKeySetVariable(SetVariable):
+class DictKeySetVariable(BaseSetVariable):
+    """A ``dict_keys`` view passed into the compiled region.
+
+    ``dict_keys`` is a ``collections.abc.Set``, not a ``set``: it has no named
+    set method other than ``isdisjoint``, and its number slots (``dictviews_or``
+    and friends) accept any iterable rather than requiring another set.
+    ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4667-L4790
+    """
+
     def debug_repr(self) -> str:
         if not self.items:
             return "dict_keys([])"
@@ -1080,3 +1109,90 @@ class DictKeySetVariable(SetVariable):
         return dict.fromkeys(
             {k.vt.as_python_constant() for k in self.set_items}, None
         ).keys()
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        # dictview_repr in Objects/dictobject.c: the type name around a list repr.
+        items = ", ".join(tracked_repr(tx, k.vt) for k in self.items)
+        return VariableTracker.build(tx, f"dict_keys([{items}])")
+
+    def is_hashable(self) -> bool:
+        return False
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
+
+    def _dictview_binop(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        name: str,
+        reverse: bool,
+    ) -> VariableTracker:
+        # dictviews_or/_and/_sub/_xor build a set from the left operand and
+        # update it with the right, so either side may be any iterable and the
+        # result is always a plain set.
+        left, right = (other, self) if reverse else (self, other)
+        return self._as_set_variable(tx, left).call_method(tx, name, [right], {})
+
+    @staticmethod
+    def _as_set_variable(
+        tx: "InstructionTranslatorBase", vt: VariableTracker
+    ) -> "SetVariable":
+        from .dicts import ConstDictVariable
+
+        if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
+            items: list[Any] = list(vt.items.keys())
+        else:
+            items = unpack_iterable(tx, vt)
+        return SetVariable(items, mutation_type=ValueMutationNew())
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._dictview_binop(tx, other, "union", reverse)
+
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._dictview_binop(tx, other, "intersection", reverse)
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._dictview_binop(tx, other, "difference", reverse)
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._dictview_binop(tx, other, "symmetric_difference", reverse)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """dictview_richcompare, for the operands this VT can read directly.
+
+        Anything else returns NotImplemented so the reflected operation runs,
+        which is what already handles a `DictKeysVariable` on the right.
+        https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4623
+        """
+        if not isinstance(other, BaseSetVariable):
+            return ConstantVariable.create(NotImplemented)
+
+        return self._richcompare_items(
+            tx, set(self.items.keys()), set(other.items.keys()), op
+        )
