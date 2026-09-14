@@ -589,6 +589,8 @@ def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
     # its G['NAME'] operands from the same scope, and none of them reaches
     # global_scope -- shape_env_sources is filled from the cpp code parts alone
     # -- so they are recovered from the lambda's own text.
+    # A filter that drops SHAPE_ENV drops them too: the builder records
+    # shape_code_parts on the save pass only, which runs over the kept guards.
     names = set(guards_state.output_graph.global_scope)
     shape_code_parts = guards_state.shape_code_parts
     if shape_code_parts is not None and shape_code_parts.python_fallback:
