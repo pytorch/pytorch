@@ -349,14 +349,16 @@ class TestBinaryUfuncsDevice(TestCase):
             ):
                 exact_dtype = False
 
-            if dtype is torch.bfloat16 and expected.dtype == np.float32:
-                # Ref: https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_utils.py#L1149
+            if expected.dtype == np.float32 and dtype is torch.bfloat16:
+                # A scipy reference has no reduced-type loop, so it widens and
+                # the comparison must absorb the rounding back down.
                 self.assertEqualHelper(
                     actual,
                     expected,
                     msg,
                     dtype=dtype,
                     exact_dtype=exact_dtype,
+                    equal_nan=equal_nan,
                     rtol=16e-3,
                     atol=1e-5,
                 )
@@ -4830,6 +4832,41 @@ class TestBinaryUfuncsDevice(TestCase):
         y = make_arg([-2.5, -1.0])
         torch.special.xlog1py(x, y).sum().backward()
         self.assertEqual(x.grad, zeros)
+
+    # The other reference tests never pair a zero x against a NaN y (the
+    # samples with a zero hold no NaN, and vice versa), which is exactly the
+    # case the vectorized kernel's isnan term exists for. The tensor here is
+    # long enough that the vector body actually runs, not just the scalar tail.
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @onlyNativeDeviceTypes
+    # scipy computes in float32, so the reduced types need extra slack.
+    @precisionOverride({torch.float16: 1e-1, torch.bfloat16: 1e-1})
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    def test_xlogy_xlog1py_special_values(self, device, dtype):
+        special = [0.0, -0.0, 1.0, 0.5, -1.0, float("nan"), float("inf"), float("-inf")]
+        # Every pairing of the special values, then enough ordinary pairs that
+        # several vector bodies and a scalar tail both run.
+        pairs = list(product(special, repeat=2))
+        filler = torch.linspace(-2, 2, 101, dtype=torch.float64, device=device)
+        pairs += [(a, b) for a, b in zip(filler.tolist(), filler.roll(37).tolist())]
+        xs = [a for a, _ in pairs]
+        ys = [b for _, b in pairs]
+        x = torch.tensor(xs, dtype=dtype, device=device)
+        y = torch.tensor(ys, dtype=dtype, device=device)
+        # numpy has no bfloat16, so only it needs a manual upcast here.
+        lhs = x.detach().cpu()
+        if dtype is torch.bfloat16:
+            lhs = lhs.float()
+        for torch_fn, np_fn in (
+            (torch.xlogy, scipy.special.xlogy),
+            (torch.special.xlog1py, scipy.special.xlog1py),
+        ):
+            self.compare_with_numpy(
+                partial(torch_fn, x),
+                partial(np_fn, lhs.numpy()),
+                y,
+                exact_dtype=False,
+            )
 
     def test_xlogy_xlog1py_scalar_type_promotion(self, device):
         # Test that python numbers don't participate in type promotion at the same
