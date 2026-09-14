@@ -78,10 +78,14 @@ AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
 # when a later mint tries that exact name -- same prefix, at the index the
 # counter is on -- which is what a test pre-binding the next minted name needs;
 # an __import_* leftover reaches no counter, and is listed because it is
-# indistinguishable from the alias a load has to bind.
+# indistinguishable from the alias a load has to bind; a ___unnamed_scope_* one,
+# minted by install_global_by_id off id() and compile id rather than a counter,
+# is listed for the same reason, bound to the live dict it stands in for the key
+# a load has to seed.
 _MINTED_PREFIXES = (
     "__import_",
     "__builtins_dict__",
+    "___unnamed_scope",
     "__compiled_fn",
     "__resume_at",
     "__comprehension_",
@@ -396,22 +400,38 @@ class Transformer(nn.Module):
 # A namespace that belongs to no module, so Dynamo has no import source for it:
 # an inlined frame reading a global from here is guarded through a minted
 # ___unnamed_scope_<id(dict)>_c<n> key rather than through a module alias.
-_UNNAMED_SCOPE_NS = {"__name__": "aot_compile_not_a_registered_module"}
+_UNNAMED_SCOPE_NS = {
+    "__name__": "aot_compile_not_a_registered_module",
+    # A tensor, so a graph reading it LIFTS it and records the minted key in
+    # used_globals, where the str above is only specialized on.
+    "AOT_NS_SCALE": torch.full((8,), 2.0),
+}
 exec(
     "AOT_NS_POOL_MODE = 'sum'\n"
     "def ns_pool_fn(x):\n"
     "    if AOT_NS_POOL_MODE == 'sum':\n"
     "        return x.sum(1)\n"
-    "    return x.mean(1)\n",
+    "    return x.mean(1)\n"
+    "def ns_scale_fn(x):\n"
+    "    return x * AOT_NS_SCALE\n",
     _UNNAMED_SCOPE_NS,
 )
 
 
 ns_pool_fn = _UNNAMED_SCOPE_NS["ns_pool_fn"]
+ns_scale_fn = _UNNAMED_SCOPE_NS["ns_scale_fn"]
 
 
 def calls_into_an_unnamed_scope(x):
     return ns_pool_fn(x)
+
+
+class UnnamedScopeModule(torch.nn.Module):
+    # One global reached through the unnamed scope's minted key and one, EPS,
+    # a kept guard's own source IS, so a load has to seed the first and read
+    # the second live.
+    def forward(self, x):
+        return ns_scale_fn(x) + EPS
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -1970,6 +1990,47 @@ from user code:
         self.assertEqual(actual.dtype, torch.float32)
         self.assertEqual(actual, x * EPS + saved_param)
         self.assertNotEqual(actual.tolist(), (x * saved_eps + saved_param).tolist())
+
+    def test_aot_compile_module_unnamed_scope_key_is_seeded_from_the_artifact(self):
+        # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict in the tracing
+        # process, so the live scope a module load resolves never carries it,
+        # and the guard rooted there failed every call where the parent's
+        # rebuilt scope, built from used_globals, answered. The load now seeds
+        # that recording -- the same object the bytecode reads -- and the other
+        # guarded global keeps its live read.
+        global EPS
+
+        self.addCleanup(globals().__setitem__, "EPS", EPS)
+        x = torch.randn(4, 8)
+        model = torch.compile(
+            UnnamedScopeModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        output_graph = load_guards_state(captured._artifacts.guards_state).output_graph
+        (key,) = [n for n in output_graph.global_scope if "___unnamed_scope" in n]
+        # Armed: the graph lifted AOT_NS_SCALE, so the artifact carries the dict.
+        self.assertIn(key, captured._artifacts.runtime_env.used_globals)
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        # The capture bound the key to the live dict here; a loading process
+        # never has it, and the seeding must not replace a binding it finds.
+        self.assertIs(globals()[key], _UNNAMED_SCOPE_NS)
+        reloaded = AOTCompiledModel.deserialize(UnnamedScopeModule(), data)
+        self.assertEqual(reloaded(x), x * 2.0 + EPS)
+        self.assertIs(globals()[key], _UNNAMED_SCOPE_NS)
+        self._hide_leaked_dynamo_globals()
+        self.assertNotIn(key, globals())
+
+        EPS = torch.tensor(3.0)
+        reloaded = AOTCompiledModel.deserialize(UnnamedScopeModule(), data)
+        self.assertEqual(reloaded(x), x * 2.0 + EPS)
+        (result,) = reloaded.compiled_results
+        self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
+        self.assertIs(globals()[key], result._artifacts.runtime_env.used_globals[key])
 
     def test_aot_compile_module_sub_path_global_is_not_read_live(self):
         # A guard rooted at a SUB-PATH of a global certifies that path, not the
