@@ -1,0 +1,32 @@
+# CPython interpreter internals (allocator, GC, interned objects) never freed
+# before process exit, not PyTorch leaks. Matched by the interpreter/venv
+# path (contains "python3.") rather than "python" alone, since the latter
+# also matches PyTorch's own libtorch_python.so and would mask real leaks.
+leak:python3.
+leak:PyMem_RawMalloc
+leak:PyObject_Malloc
+leak:unicodeobject
+leak:obmalloc
+leak:gcmodule
+leak:listobject
+leak:bytesobject
+leak:torch::jit::tensorexpr::TensorExprKernel::preAllocIntermediateBufs
+leak:optree
+leak:torch::tensors::initialize_aten_types
+# pybind11's own function/method registration bookkeeping (make_function_record,
+# initialize_generic, strdup_guard, ...), allocated once per bound API and
+# never freed by design. Third-party namespace PyTorch doesn't write code in,
+# so this can't mask a real PyTorch-authored leak.
+leak:pybind11::
+# GCC/binutils toolchain subprocess internals never freed before exit, not
+# PyTorch leaks (cc1, collect2, ld.bfd, libbfd, ...)
+leak:/usr/lib/gcc/
+leak:x86_64-linux-gnu-gcc
+leak:ld.bfd
+leak:libbfd
+# OpenSSL's lazily-initialized global state, never freed without OPENSSL_cleanup()
+leak:libcrypto.so
+# pybind11 registration in JIT-built test extensions; unsymbolized, match
+# by .so name instead.
+leak:cpp_frontend_extension
+leak:pybind11_enum_test
