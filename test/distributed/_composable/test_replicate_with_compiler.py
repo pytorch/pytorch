@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 DIM = 2000
@@ -96,10 +97,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         checkpoint: bool = False,
         device: str | torch.device,
     ):
+        device = torch.device(device).type
         self.create_pg(device)
         torch._dynamo.config.optimize_ddp = "python_reducer"
         torch.manual_seed(123)
-        if device == "xpu":
+        if torch.device(device).type == "xpu":
             torch.use_deterministic_algorithms(True, warn_only=True)
         model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
@@ -181,7 +183,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 
 class ReplicateTestCPU(ReplicateTest):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
+
+    @property
+    def world_size(self) -> int:
+        return 2
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/160597")
     def test_compile_cpu(self):
@@ -339,11 +345,10 @@ class ReplicateTestCPU(ReplicateTest):
         fc.run(code)
 
 
-
-
 class ReplicateTestGPU(ReplicateTest):
     hw_classification = HardwareClassification.CUDA
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
@@ -351,6 +356,7 @@ class ReplicateTestGPU(ReplicateTest):
     def test_compile_gpu(self, device):
         self._test_compile(no_sync=False, checkpoint=False, device=device)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
@@ -358,6 +364,7 @@ class ReplicateTestGPU(ReplicateTest):
     def test_compile_gpu_ac(self, device):
         self._test_compile(no_sync=False, checkpoint=True, device=device)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self, device):
         major, _ = torch.cuda.get_device_capability()
@@ -374,6 +381,7 @@ class ReplicateTestGPU(ReplicateTest):
 
         self._test_compile(no_sync=False, setup_func=setup, device=device)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self, device):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
@@ -388,14 +396,13 @@ class ReplicateTestGPU(ReplicateTest):
             no_sync=False, setup_func=setup, no_inductor=True, device=device
         )
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self, device):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device)
 
 
-instantiate_device_type_tests(
-    ReplicateTestGPU, globals(), only_for="cuda", allow_xpu=True
-)
+instantiate_device_type_tests(ReplicateTestGPU, globals(), only_for="cuda")
 
 
 class DDP_TP_Test(InductorTestCase):
@@ -405,7 +412,7 @@ class DDP_TP_Test(InductorTestCase):
         super().setUp()
         self.rank = 0
         self.world_size = 4
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
 
         store = FakeStore()
         dist.init_process_group(
@@ -422,6 +429,7 @@ class DDP_TP_Test(InductorTestCase):
         "Temporarily disabled due to SymInt error: `unhashable type: non-nested SymInt`"
     )
     def test_ddp_tp(self, device):
+        device = torch.device(device).type
         ref_model = Net()
         compiled_replicate_model = deepcopy(ref_model)
         mesh_2d = init_device_mesh(
@@ -461,6 +469,8 @@ class DDP_TP_Test(InductorTestCase):
         #     ref_model.parameters(), compiled_replicate_model.parameters()
         # ):
         #     self.assertEqual(p1.grad, p2.grad)
+
+
 instantiate_device_type_tests(DDP_TP_Test, globals(), only_for="cuda")
 
 
