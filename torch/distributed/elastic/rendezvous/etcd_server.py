@@ -1,30 +1,41 @@
-#!/usr/bin/env python3
-# mypy: allow-untyped-defs
+def find_free_port():
+    """
+    Find a free port and binds a temporary socket to it so that the port can be "reserved" until used.
 
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-import atexit
-import logging
-import os
-import shlex
-import shutil
-import socket
-import subprocess
-import tempfile
-import time
-from typing import TextIO
+    .. note:: the returned socket must be closed before using the port,
+              otherwise an ``address already in use`` error will happen.
+              The socket should be held and closed as close to the
+              consumer of the port as possible since otherwise, there
+              is a greater chance of race-condition where a different
+              process may see the port as being free and take it.
 
+    Returns: a socket bound to the reserved free port
 
-try:
-    import etcd  # type: ignore[import]
-except ModuleNotFoundError:
-    pass
+    Usage::
 
+    sock = find_free_port()
+    port = sock.getsockname()[1]
+    sock.close()
+    use_port(port)
+    """
+    addrs = socket.getaddrinfo(
+        host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+    )
 
-logger = logging.getLogger(__name__)
+    for addr in addrs:
+        family, type, proto, _, _ = addr
+        s = None
+        try:
+            s = socket.socket(family, type, proto)
+            s.bind(("localhost", 0))
+            s.listen(0)
+            return s
+        except OSError as e:
+            if s is not None:
+                s.close()
+            print(f"Socket creation attempt failed: {e}")
+            continue
+    raise RuntimeError("Failed to create a socket")
 
 
 def find_free_port():
@@ -53,14 +64,17 @@ def find_free_port():
 
     for addr in addrs:
         family, type, proto, _, _ = addr
+        s = None
         try:
             s = socket.socket(family, type, proto)
             s.bind(("localhost", 0))
             s.listen(0)
             return s
         except OSError as e:
-            s.close()  # type: ignore[possibly-undefined]
+            if s is not None:
+                s.close()
             print(f"Socket creation attempt failed: {e}")
+            continue
     raise RuntimeError("Failed to create a socket")
 
 
