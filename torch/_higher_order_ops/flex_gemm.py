@@ -10,7 +10,6 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.utils import (
-    autograd_not_implemented,
     potential_input_alias_or_mutation,
     reenter_make_fx,
     register_fake,
@@ -115,47 +114,23 @@ FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., An
 }
 
 
-def flex_gemm_logsumexp(
-    input: torch.Tensor,
-    dim: int | tuple[int, ...] | list[int],
-    keepdim: bool = False,
-    *,
-    fallback: Callable[..., Any],
-) -> torch.Tensor:
-    """Expose one online max/sum state for a single-dimension logsumexp."""
-    if isinstance(dim, (tuple, list)):
-        if len(dim) != 1:
-            return fallback(input, dim, keepdim)
-        dim = dim[0]
-    from torch._inductor import inductor_prims
-
-    maximum, total = inductor_prims.prepare_softmax_online(input, dim)
-    if not keepdim:
-        maximum = maximum.squeeze(dim)
-        total = total.squeeze(dim)
-    return total.log() + maximum
-
-
 def flex_gemm_body_decomposition_table(
     kernel_options: dict[str, Any],
     decomposition_table: Mapping[torch._ops.OpOverload, Callable[..., Any]],
 ) -> dict[torch._ops.OpOverload, Callable[..., Any]] | None:
-    """Override composite body decompositions used by the QUACK backend."""
-    if kernel_options.get("backend") != "QUACK":
+    """Override composite body decompositions enabled by QUACK fast math."""
+    if (
+        kernel_options.get("backend") != "QUACK"
+        or kernel_options.get("fast_math") is not True
+    ):
         return None
     merged_decompositions = dict(decomposition_table)
-    logsumexp = torch.ops.aten.logsumexp.default
-    if logsumexp in merged_decompositions:
-        merged_decompositions[logsumexp] = partial(
-            flex_gemm_logsumexp, fallback=merged_decompositions[logsumexp]
+    merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
+    gelu = torch.ops.aten.gelu.default
+    if gelu in merged_decompositions:
+        merged_decompositions[gelu] = partial(
+            flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
         )
-    if kernel_options.get("fast_math") is True:
-        merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
-        gelu = torch.ops.aten.gelu.default
-        if gelu in merged_decompositions:
-            merged_decompositions[gelu] = partial(
-                flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
-            )
     return merged_decompositions
 
 
@@ -648,9 +623,56 @@ def flex_gemm_dense(gemm_op, body_fn, args, kwargs, kernel_options):
     return body_fn(*args)
 
 
-flex_gemm_hop.py_autograd_impl(
-    autograd_not_implemented(flex_gemm_hop, deferred_error=True)
-)
+@torch.library.custom_op("flex_gemm::autograd_not_implemented", mutates_args=())
+def flex_gemm_autograd_not_implemented(
+    grad: torch.Tensor, like: torch.Tensor
+) -> torch.Tensor:
+    raise NotImplementedError(
+        "Autograd not implemented for flex_gemm; wrap the call in a "
+        "torch.autograd.Function with an explicit backward"
+    )
+
+
+@flex_gemm_autograd_not_implemented.register_fake
+def _flex_gemm_autograd_not_implemented_fake(
+    grad: torch.Tensor, like: torch.Tensor
+) -> torch.Tensor:
+    return torch.empty_like(like)
+
+
+class FlexGemmNoAutograd(torch.autograd.Function):
+    """Attach the HOP outputs to the differentiable inputs; backward raises when run.
+
+    ``autograd_not_implemented(deferred_error=True)`` detaches the outputs, so under
+    AOTAutograd the inputs look unused and compiled backward silently yields None
+    grads. Raising directly in ``backward`` would fail at trace time instead, so the
+    raise goes through a custom op (fake impl succeeds) that consumes the incoming
+    gradient, which also keeps the partitioner from hoisting it into the forward.
+    """
+
+    @staticmethod
+    def forward(ctx, result, *grad_args):
+        ctx.save_for_backward(*grad_args)
+        return result
+
+    @staticmethod
+    def backward(ctx, *grads):
+        return None, *(
+            flex_gemm_autograd_not_implemented(grads[0], like)
+            for like in ctx.saved_tensors
+        )
+
+
+@flex_gemm_hop.py_autograd_impl
+def flex_gemm_autograd(gemm_op, body_fn, args, kwargs, kernel_options):
+    with torch._C._AutoDispatchBelowAutograd():
+        result = flex_gemm_hop(gemm_op, body_fn, args, kwargs, kernel_options)
+    grad_args = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
+    if not torch.is_grad_enabled() or not grad_args:
+        return result
+    flat_result, spec = pytree.tree_flatten(result)
+    outputs = FlexGemmNoAutograd.apply(tuple(flat_result), *grad_args)
+    return pytree.tree_unflatten(outputs, spec)
 
 
 @register_fake(flex_gemm_hop)
