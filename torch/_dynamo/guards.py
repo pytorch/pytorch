@@ -5497,7 +5497,9 @@ class CheckFunctionManager:
 
         self.guard_manager.finalize()
 
-        globals_for_guard_fn = {"G": builder.scope["G"]}
+        # The dict the guards are rooted at, so a fail reason evaluated here reads
+        # what the guards read; on the eager path this is the frame's globals.
+        globals_for_guard_fn = {"G": builder.runtime_global_scope}
         # Guard manager construction is complete. Ensure we did not miss to
         # insert a guard in cpp guard manager.
         if len(code_parts) != 0:
