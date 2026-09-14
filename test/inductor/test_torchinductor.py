@@ -19461,10 +19461,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertNotIn("ReductionHint.OUTER_NO_SPLIT", code)
         self.assertGreaterEqual(code.count("ReductionHint.OUTER"), 2)
         # The first stage may preserve the logical output as a 2D tile rather
-        # than flattening it.  Check the split reduction extents instead of a
-        # wrapper allocation's exact textual shape.
-        self.assertIn("r0_numel = 132", code)
-        self.assertIn("r0_numel = 40", code)
+        # than flattening it.  Check the device-dependent split extents instead
+        # of a wrapper allocation's exact textual shape.
+        from torch._inductor.ir import Reduction
+
+        split = Reduction._experimental_large_output_outer_split_factor(
+            5247,
+            96 * 128,
+            torch.cuda.get_device_properties(self.device).multi_processor_count,
+        )
+        self.assertGreater(split, 1)
+        self.assertIn(f"r0_numel = {math.ceil(5247 / split)}", code)
+        self.assertIn(f"r0_numel = {split}", code)
 
         def simple(x):
             return x.float().sum(dim=0)
