@@ -1696,10 +1696,6 @@ class AOTCompiledModel:
         )
         missing_global: AOTCompiledFunction | None = None
         withheld = False
-        # Whether an entry line below quotes a rejection: the re-check is a third
-        # evaluation, and where it raises or accepts instead, the qualifier on
-        # post-throw rejections would describe a line the report never printed.
-        rejected = False
         for i, result in enumerate(self.compiled_results):
             if not result._guard_check_enabled:
                 # Nobody asked about this result's guards, so quoting them would
@@ -1745,7 +1741,6 @@ class AOTCompiledModel:
                     "tree>"
                 )
                 continue
-            rejected = True
             if not reason.verbose_code_parts:
                 # A failing accessor can report no parts at all (a set index past
                 # the end of a shorter set answers GuardDebugInfo(false, 0)), so
@@ -1796,25 +1791,28 @@ class AOTCompiledModel:
                 "belong to the process that compiles the artifacts, which need "
                 "not be the one that loaded them."
             )
-        if raised and not withheld and not answered_first and (rejected or not covered):
-            # Not with an opted-out entry reported, whose withheld line has
-            # already said what happened; not for the empty artifact above, which
-            # has no raise to describe; and not where dispatch rejected but the
-            # re-check quoted no rejection, since there is no line to qualify.
-            if rejected:
-                # The ModelInput line above stands on post-throw rejections only.
-                tail = (
-                    "every rejection above followed a raise from the same tree, "
-                    "so it can be about the relational guard state a C++ throw "
-                    "leaves stale rather than about this call."
-                )
-            else:
-                # No tree whose guards were asked about ever got as far as
-                # rejecting the call, so adding a ModelInput cannot help.
-                tail = (
-                    "the reasons above are those raises, not guards this call failed."
-                )
-            lines.append(f"Every guard tree raised while checking this call; {tail}")
+        if covered and not answered_first:
+            # Every rejection dispatch got out of an enabled tree followed a throw
+            # from the same tree -- the answer the veto above declines to act on
+            # -- so the ModelInput line stands on those alone. Keyed on what
+            # dispatch recorded, not on the entry lines: the re-check is a third
+            # evaluation and may have printed a raise or an accept instead, and a
+            # withheld line says only why the opt-out was withheld.
+            lines.append(
+                "The ModelInput advice above rests only on rejections dispatch "
+                "took after the same tree had raised, so they can be about the "
+                "relational guard state a C++ throw leaves stale rather than "
+                "about this call."
+            )
+        elif raised and not withheld and not covered:
+            # No tree whose guards were asked about ever got as far as rejecting
+            # the call, so adding a ModelInput cannot help. Not with an opted-out
+            # entry reported, whose withheld line has already said what happened,
+            # and not for the empty artifact above, which has no raise to describe.
+            lines.append(
+                "Every guard tree raised while checking this call; the reasons "
+                "above are those raises, not guards this call failed."
+            )
         return "\n".join(lines)
 
     def serialize(self) -> bytes:
