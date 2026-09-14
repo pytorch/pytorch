@@ -13,7 +13,11 @@ if __name__ == '__main__':
 # This is how we include tests located in test/jit/...
 # They are included here so that they are invoked when you call `test_jit.py`,
 # do not run these test files directly.
-from jit.test_tracer import TestTracer, TestMixTracingScripting  # noqa: F401
+from jit.test_tracer import (  # noqa: F401
+    TestJitTraceTimingHelper,
+    TestMixTracingScripting,
+    TestTracer,
+)
 from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
