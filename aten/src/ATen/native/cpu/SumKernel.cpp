@@ -453,8 +453,8 @@ void vectorized_inner_sum(
 
     alignas(64) std::array<acc_t, vacc_t::size()> partials{};
     vec_acc.store(partials.data());
-    for (const auto k : c10::irange(partials.size())) {
-      final_acc += partials[k];
+    for (const auto& partial : partials) {
+      final_acc += partial;
     }
     store<StorePolicy>(data[0], out_stride, j, final_acc);
   }
