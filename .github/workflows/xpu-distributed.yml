@@ -42,9 +42,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.xe.xpu.dist" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.xe.xpu.dist" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.xe.xpu.dist" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.xe.xpu.dist" },
         ]}
     secrets: inherit
 
