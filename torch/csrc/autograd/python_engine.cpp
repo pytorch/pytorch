@@ -387,6 +387,7 @@ static PyObject* THPEngine_run_backward(
 static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   HANDLE_TH_ERRORS
   auto& engine = python::PythonEngine::get_python_engine();
+  TORCH_CHECK(PyCallable_Check(_callback), "queue_callback expects a callable");
   std::shared_ptr<PyObject> callback(_callback, [](PyObject* obj) {
     pybind11::gil_scoped_acquire gil;
     Py_DECREF(obj);
