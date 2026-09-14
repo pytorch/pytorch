@@ -3298,7 +3298,9 @@ class eager_numerics:
         os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
     )
 
-    disable_ftz: bool = False
+    # A10G Triton-pin diagnostic control. This environment variable is only
+    # set by the draft investigation workflow.
+    disable_ftz: bool = os.environ.get("A10G_BISECT_MODE") == "no_ftz"
 
     # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
     # Triton bundles its own libdevice.10.bc which may use different polynomial
@@ -3310,7 +3312,9 @@ class eager_numerics:
     # different uint8 encoded value (see gh-178045).
     # This can be enabled directly; Inductor also enables it while
     # emulate_precision_casts is active.
-    use_pytorch_libdevice: bool = False
+    use_pytorch_libdevice: bool = (
+        os.environ.get("A10G_BISECT_MODE") == "pytorch_libdevice"
+    )
 
 
 # Mode to emulate PyTorch eager numerics when doing lower precision compute
