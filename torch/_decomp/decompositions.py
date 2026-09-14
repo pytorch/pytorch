@@ -3572,6 +3572,13 @@ def uniform(
     high: bool | int | float = 1.0,
     generator: torch.Generator | None = None,
 ):
+    # uniform_impl_ only dispatches over floating types, so eager rejects everything
+    # else. Without this the traced path samples [0, 1) and truncates to the integral
+    # dtype, which is a constant.
+    torch._check_not_implemented(
+        x.dtype.is_floating_point or x.dtype.is_complex,
+        lambda: f"\"check_uniform_bounds\" not implemented for '{x.dtype}'",
+    )
     return prims._uniform_helper(
         x.shape,
         stride=x.stride(),
