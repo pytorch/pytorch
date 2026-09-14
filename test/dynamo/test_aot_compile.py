@@ -1928,7 +1928,8 @@ from user code:
         dtypes = (torch.float32, torch.float64, torch.int64, torch.bfloat16)
         xs = [torch.ones(3, 3, dtype=dtype) for dtype in dtypes]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._binds_alike())
+        compiled = model.forward
+        self.assertTrue(compiled._binds_alike(tuple(compiled.compiled_results)))
         binds = []
         bind = AOTCompiledFunction.prepare_f_locals
 
@@ -1957,7 +1958,7 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         model._aot_compile([ModelInput(args=(x.double(),), kwargs={}, contexts=[])])
         combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
         self.assertEqual(combined(x.double()), x.double() * 3)
         self.assertEqual(combined(x), x * 2)
 
@@ -1968,11 +1969,11 @@ from user code:
         mod, x = ScaleModule(), torch.randn(3, 3)
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
-        self.assertTrue(combined._binds_alike())
+        self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
         # Bound from [0], mode reads 1 and [1]'s `mode == 0` guard rejects it.
         self.assertEqual(combined(x.double()), x.double() * 2)
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_judges_a_replaced_result_on_its_own_binding(self):
         # [1] is compiled for mode=1 but defaults mode to 0, so a call leaving
@@ -1982,12 +1983,38 @@ from user code:
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         results = [aot_compile_forward(mod, triples, t) for t in (x, x.double())]
         combined = AOTCompiledModel(mod, results)
-        self.assertTrue(combined._binds_alike())
+        self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results[1] = aot_compile_forward(mod, doubles, x.double(), 1)
         self.assertEqual(combined(x.double(), 1), x.double() * 3)
         with self.assertRaises(RuntimeError):
             combined(x.double())
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+
+    def test_module_dispatch_judges_only_the_results_a_call_began_with(self):
+        # The same replacement, made while the call is in flight: [0]'s check()
+        # appends [1], compiled for mode=1 but defaulting mode to 0. A scan that
+        # read the live list would reach [1] on this call and judge it on the
+        # binding decided over [0] alone, where mode reads 1, and serve x * 3 for
+        # a call eager answers x * 2. The call judges the results it began with
+        # and the next call decides over both.
+        mod, x = ScaleModule(), torch.randn(3, 3)
+        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
+        first = aot_compile_forward(mod, triples, x)
+        later = aot_compile_forward(mod, doubles, x.double(), 1)
+        combined = AOTCompiledModel(mod, [first])
+        manager = first._live_guard_manager()
+        check = manager.check
+
+        def appending_check(f_locals):
+            combined.compiled_results[1:] = [later]
+            return check(f_locals)
+
+        with patch.object(manager, "check", appending_check):
+            with self.assertRaises(RuntimeError):
+                combined(x.double())
+        self.assertIs(combined.compiled_results[1], later)
+        self.assertEqual(combined(x.double(), 1), x.double() * 3)
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_never_pairs_new_contents_with_a_stale_verdict(self):
         # A call entering while another thread is still deciding over the
@@ -1998,7 +2025,7 @@ from user code:
         mod, x = ScaleModule(), torch.randn(3, 3)
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
-        self.assertTrue(combined._binds_alike())
+        self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
         entered, release = threading.Event(), threading.Event()
         binding_key = torch._dynamo.aot_compile._binding_key
@@ -2009,7 +2036,9 @@ from user code:
                 release.wait()
             return binding_key(artifacts)
 
-        decider = threading.Thread(target=combined._binds_alike)
+        decider = threading.Thread(
+            target=combined._binds_alike, args=(tuple(combined.compiled_results),)
+        )
         self.addCleanup(decider.join)
         self.addCleanup(release.set)
         with patch("torch._dynamo.aot_compile._binding_key", held):
@@ -2019,7 +2048,7 @@ from user code:
             self.assertEqual(combined(x.double()), x.double() * 2)
             release.set()
             decider.join()
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_serves_a_call_the_guard_tree_accepts(self):
         # A first check() can reject a call the same tree accepts on its next
@@ -2145,13 +2174,14 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._binds_alike())
+        compiled = model.forward
+        self.assertTrue(compiled._binds_alike(tuple(compiled.compiled_results)))
         for x in xs:
             self.assertEqual(model(x), x * 2)
         # Each result unpickles on its own, so the loaded results hold distinct
         # default objects and bind per result: a false negative, not a false share.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
-        self.assertFalse(loaded._binds_alike())
+        self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
             self.assertEqual(loaded(x), x * 2)
 
@@ -2165,7 +2195,8 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._binds_alike())
+        compiled = model.forward
+        self.assertTrue(compiled._binds_alike(tuple(compiled.compiled_results)))
         for x in xs:
             self.assertEqual(model(x), x * 3)
         other = torch.nn.Module()
@@ -2174,13 +2205,13 @@ from user code:
         model2._aot_compile([ModelInput(args=(xs[1],), kwargs={}, contexts=[])])
         results = model.forward.compiled_results[:1] + model2.forward.compiled_results
         combined = AOTCompiledModel(mod, results)
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
         self.assertEqual(combined(xs[0]), xs[0] * 3)
         self.assertEqual(combined(xs[1]), xs[1] * 5)
         # Loading gives each result a cell of its own, so a round trip binds per
         # result too.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
-        self.assertFalse(loaded._binds_alike())
+        self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
             self.assertEqual(loaded(x), x * 3)
 

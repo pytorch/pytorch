@@ -1401,14 +1401,13 @@ class AOTCompiledModel:
         default=(), init=False, compare=False, repr=False
     )
 
-    def _binds_alike(self) -> bool:
+    def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
         # By identity, not ==: the dataclass __eq__ would reach the Signature
         # compare _binding_key exists to avoid. Measured at 0.27us for four
         # results, call included, against 0.81us for one check().
-        results, prior = self.compiled_results, self._decided_over
+        prior = self._decided_over
         if len(results) == len(prior) and all(map(operator.is_, results, prior)):
             return self._shared_binding
-        results = tuple(results)
         key = _binding_key(results[0]._artifacts) if results else None
         shared = key is not None and all(
             _binding_key(result._artifacts) == key for result in results[1:]
@@ -1421,17 +1420,20 @@ class AOTCompiledModel:
         return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # compiled_results is public, so read it once: every stage below judges
+        # the results this call began with, on the binding decided over them.
+        results = tuple(self.compiled_results)
         # Bound ahead of every guard, so a call the signature cannot bind still
         # surfaces as bind_locals' TypeError, as the plain module call would; a
         # bind costs more than a check(), so results that share one bind once.
         shared = (
-            self.compiled_results[0].prepare_f_locals(self.model, *args, **kwargs)
-            if self._binds_alike()
+            results[0].prepare_f_locals(self.model, *args, **kwargs)
+            if self._binds_alike(results)
             else None
         )
         bound: list[dict[str, object]] = []
         # Guard evaluation ignores _guard_check_enabled, so scan every result.
-        for result in self.compiled_results:
+        for result in results:
             f_locals = shared
             if f_locals is None:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
@@ -1442,16 +1444,16 @@ class AOTCompiledModel:
                 return result.fn(self.model, *args, **kwargs)
         # A check() can reject from the dict-tag fast path without running the
         # tree; a second check() then evaluates it in full, opted-out results too.
-        for i, result in enumerate(self.compiled_results):
+        for i, result in enumerate(results):
             if result._live_guard_manager().check(bound[i]):
                 return result.fn(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
         # only after both passes above have failed to find a real match.
-        for result in self.compiled_results:
+        for result in results:
             if not result._guard_check_enabled:
                 return result.fn(self.model, *args, **kwargs)
         # All guards failed, just run one of them and throw the guard check error.
-        return self.compiled_results[0](self.model, *args, **kwargs)
+        return results[0](self.model, *args, **kwargs)
 
     def serialize(self) -> bytes:
         # Nothing threads external_data down this path (_save_aot_compiled_module
