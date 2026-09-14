@@ -4,6 +4,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/util/Exception.h>
 
 namespace at {
 namespace vec {
@@ -510,16 +511,16 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> operator<(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<ComplexDbl> operator<=(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<ComplexDbl> operator>(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<ComplexDbl> operator>=(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexDbl> eq(const Vectorized<ComplexDbl>& other) const {
