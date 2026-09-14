@@ -739,6 +739,37 @@ if HAS_CUDA_AND_TRITON:
                     "skipping cudagraphs due to graph with symbolic shapes inputs"
                 ).run(utils_log_stream.getvalue())
 
+        @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_skip_extern_with_dynamic_input_static_output(self):
+            """Extern kernels consuming dynamic-shaped inputs but producing
+            static-shaped outputs (e.g. median on a dynamic tensor) must be
+            partitioned out when cudagraph_skip_dynamic_graphs is True."""
+
+            @torch.compile(mode="reduce-overhead", fullgraph=True)
+            def foo(rows, weight):
+                return torch.median(rows) * (weight @ weight).relu()
+
+            scheduler_log_stream, scheduler_ctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            weight = torch.randn(64, 64, device="cuda")
+            with scheduler_ctx():
+                for n in (10, 13, 16):
+                    rows = torch.randn(n, 64, device="cuda")
+                    torch._dynamo.mark_dynamic(rows, 0)
+                    result = foo(rows, weight)
+                    expected = torch.median(rows) * (weight @ weight).relu()
+                    self.assertEqual(result, expected)
+
+            log_output = scheduler_log_stream.getvalue()
+            # median should be partitioned out as dynamic
+            FileCheck().check("reason=dynamic shape ops").check(
+                "aten.median"
+            ).run(log_output)
+            # The static mm should be cudagraphable
+            FileCheck().check("cudagraphable").run(log_output)
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
