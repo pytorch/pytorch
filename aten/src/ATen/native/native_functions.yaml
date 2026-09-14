@@ -6937,8 +6937,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: sub_out
-    MPS: sub_out_mps
+    CPU, CUDA, MPS, XPU: sub_out
     MTIA: sub_out_mtia
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sub_out_sparse
   tags: pointwise
@@ -7146,6 +7145,23 @@
     CPU: _scaled_mm_cpu_v2_out
     CUDA: _scaled_mm_cuda_v2_out
     XPU: _scaled_mm_xpu_v2_out
+  tags: needs_exact_strides
+
+- func: _scaled_addmm(Tensor self, Tensor mat1, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, int[] contraction_dim=[], *, Scalar beta=1, Scalar alpha=1, bool use_fast_accum=False) -> Tensor
+  structured_delegate: _scaled_addmm.out
+  variants: function
+  tags: needs_exact_strides
+
+- func: _scaled_addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, int[] contraction_dim=[], *, Scalar beta=1, Scalar alpha=1, bool use_fast_accum=False) -> Tensor(a!)
+  structured_delegate: _scaled_addmm.out
+  variants: function
+  tags: needs_exact_strides
+
+- func: _scaled_addmm.out(Tensor self, Tensor mat1, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, int[] contraction_dim=[], *, Scalar beta=1, Scalar alpha=1, bool use_fast_accum=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  dispatch:
+    CUDA: _scaled_addmm_cuda_out
   tags: needs_exact_strides
 
 - func: _scaled_grouped_mm(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? offs=None, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
@@ -13520,6 +13536,7 @@
   variants: method
   dispatch:
     CUDA: record_stream_cuda
+    MPS: record_stream_mps
     XPU: record_stream_xpu
 
 - func: isposinf(Tensor self) -> Tensor
@@ -15352,6 +15369,12 @@
 - func: _cudnn_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None, Tensor? seqused_k=None, Tensor? block_table=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CUDA: _cudnn_attention_forward
+  tags: nondeterministic_seeded
+
+- func: _cudnn_attention_forward_no_dropout_inplace(Tensor(a!) out, Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, bool is_causal=False, *, float? scale=None, Tensor? seqused_k=None, Tensor? block_table=None) -> Tensor logsumexp
+  variants: function
+  dispatch:
+    CUDA: _cudnn_attention_forward_no_dropout_inplace
   tags: nondeterministic_seeded
 
 - func: _cudnn_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor attn_bias, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, *, float? scale=None) -> (Tensor, Tensor, Tensor)
