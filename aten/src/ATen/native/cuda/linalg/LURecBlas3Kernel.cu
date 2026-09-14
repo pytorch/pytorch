@@ -1032,8 +1032,8 @@ ldl_diagonal_panel_fused_kernel(
     curr_step += pivot_rank;
   }
 
-  // Panel is processed -- update curr_step in the global memory
   if (tid == 0) {
+    // Panel is processed -- update curr_step in the global memory
     *dcurr_step = curr_step;
   }
 }
