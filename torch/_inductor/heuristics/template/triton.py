@@ -21,9 +21,11 @@ from ... import config
 from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
+    blackwell_ws_persistent_device_tma_k128_ue8m0_scaling_template,
     blackwell_ws_persistent_tma_mm_template,
     get_scaling_options,
     get_tile_size,
+    k128_ue8m0_sw_scaled_mm_template,
     mm_template,
     persistent_mm_template,
     persistent_tdm_mm_template,
@@ -3684,6 +3686,99 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
     def __init__(self) -> None:
         super().__init__()
         self.mm_configs = self.blackwell_scaled_persistent_mm_configs
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_device_tma_k128_ue8m0_scaling_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="scaled_mm",
+)
+class CUDAScaledBlackwellK128UE8M0TemplateConfigHeuristic(
+    BlackwellTMATemplateConfigMixin, BaseScaledMMConfigMixin, CUDAConfigHeuristic
+):
+    """K128 UE8M0 Blackwell persistent TMA template heuristic."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.should_scale_configs = False
+        # Native block-scaled MMAv5 fixes BLOCK_M=128; BLOCK_N and BLOCK_K must be
+        # multiples of 128 so the TMA-loaded scale tiles are whole 32x4x4 blocks.
+        self.mm_configs = [
+            BlackwellGPUGemmConfig(
+                block_m=c.block_m,
+                block_n=c.block_n,
+                block_k=c.block_k,
+                num_stages=c.num_stages,
+                num_warps=c.num_warps,
+                group_m=8,
+                epilogue_subtile=2,
+                warp_specialize=True,
+                flatten=True,
+            )
+            for c in [
+                GemmConfig(128, 256, 128, 4, 8),
+                GemmConfig(128, 256, 128, 3, 8),
+                GemmConfig(128, 256, 256, 2, 8),
+                GemmConfig(128, 128, 128, 6, 8),
+                GemmConfig(128, 128, 128, 5, 8),
+                GemmConfig(128, 128, 128, 5, 4),
+                GemmConfig(128, 128, 128, 4, 4),
+                GemmConfig(128, 128, 256, 3, 4),
+            ]
+        ]
+        self.exhaustive_configs = self._generate_exhaustive_configs()
+
+    # pyrefly: ignore [bad-override]
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        configs = [
+            c
+            for c in configs
+            if c.block_k % 128 == 0 and c.block_m == 128 and c.block_n % 128 == 0
+        ]
+        return super()._filter_configs(configs)
+
+
+@register_template_heuristic(
+    k128_ue8m0_sw_scaled_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="scaled_mm",
+)
+class CUDAScaledK128UE8M0SoftwareScalingTemplateConfigHeuristic(
+    MMTemplateConfigMixin, CUDAConfigHeuristic
+):
+    """Small-tile K128 UE8M0 template heuristic: fp8 tl.dot plus register scaling.
+
+    Built on the plain MM mixin rather than BaseScaledMMConfigMixin because the
+    scaled-MM mixin's scale checks assume the fp32 recipes' layouts, not the
+    K-block-major UE8M0 codes this template reads. The MM mixin already emits
+    ACC_TYPE (fp32 for the bf16 output this path requires).
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # One K128 scale per K tile, so BLOCK_K starts at 128 and only shrinks
+        # (to a divisor of 128) when K itself is small.
+        self.mm_configs = [
+            GemmConfig(16, 32, 128, 3, 4),
+            GemmConfig(16, 32, 128, 5, 2),
+            GemmConfig(16, 64, 128, 3, 4),
+            GemmConfig(32, 32, 128, 5, 4),
+            GemmConfig(32, 64, 128, 4, 4),
+            GemmConfig(32, 128, 128, 3, 4),
+            GemmConfig(64, 32, 128, 3, 4),
+            GemmConfig(64, 64, 128, 3, 4),
+            GemmConfig(64, 64, 128, 4, 8),
+            GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 64, 128, 3, 4),
+            GemmConfig(128, 128, 128, 3, 4),
+        ]
+
+    # pyrefly: ignore [bad-override]
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        configs = [c for c in configs if 128 % c.block_k == 0]
+        return super()._filter_configs(configs)
 
 
 @register_template_heuristic(
