@@ -418,6 +418,4 @@ if is_fbcode():
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    # nativert has not been supported on XPU yet.
-    if not torch.xpu.is_available():
-        run_tests()
+    run_tests()
