@@ -89,7 +89,7 @@ FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
 
-_UnshardLookahead = Literal["default", "auto"] | tuple[int, ...]
+_UnshardLookahead = Literal["full", "auto"] | tuple[int, ...]
 
 
 # Targets (e.g. labels) are always split along the batch dim (0). Use
@@ -1896,13 +1896,13 @@ def _resolve_unshard_lookahead(
     max_active_stages: int,
 ) -> tuple[int, ...]:
     """Resolve one all-gather prefetch distance per pipeline rank."""
-    if unshard_lookahead == "default":
+    if unshard_lookahead == "full":
         return (max_active_stages,) * num_pp_ranks
     if unshard_lookahead == "auto":
         return tuple(min(rank + 2, max_active_stages) for rank in range(num_pp_ranks))
     if not isinstance(unshard_lookahead, tuple):
         raise ValueError(
-            "unshard_lookahead must be 'default', 'auto', or a tuple of "
+            "unshard_lookahead must be 'full', 'auto', or a tuple of "
             f"{num_pp_ranks} integers, got {unshard_lookahead!r}"
         )
     if len(unshard_lookahead) != num_pp_ranks:
@@ -2830,7 +2830,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
         self._max_active_stages: int = kwargs.pop("max_active_stages", 3)
         self._unshard_lookahead: _UnshardLookahead = kwargs.pop(
-            "unshard_lookahead", "default"
+            "unshard_lookahead", "full"
         )
         self._reuse_recv_buffers: bool = kwargs.pop("reuse_recv_buffers", False)
         super().__init__(*args, **kwargs)
@@ -2904,7 +2904,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
         self.pipeline_order_with_comms: dict[int, list[_Action]] = {}
         if format == "compute_comms":
-            if self._unshard_lookahead != "default":
+            if self._unshard_lookahead != "full":
                 raise ValueError(
                     "unshard_lookahead cannot be applied to an already-lowered "
                     "compute_comms schedule"
@@ -3353,7 +3353,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: _UnshardLookahead = "default",
+        unshard_lookahead: _UnshardLookahead = "full",
     ):
         super().__init__(
             stages=stages,
@@ -3596,7 +3596,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: _UnshardLookahead = "default",
+        unshard_lookahead: _UnshardLookahead = "full",
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3711,7 +3711,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: _UnshardLookahead = "default",
+        unshard_lookahead: _UnshardLookahead = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3914,7 +3914,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: _UnshardLookahead = "default",
+        unshard_lookahead: _UnshardLookahead = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -4106,7 +4106,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
-        unshard_lookahead: _UnshardLookahead = "default",
+        unshard_lookahead: _UnshardLookahead = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)

@@ -1013,7 +1013,7 @@ class TestSchedulePlan(TestCase):
         self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
 
     @staticmethod
-    def _interleaved_schedule(*, unshard_lookahead="default"):
+    def _interleaved_schedule(*, unshard_lookahead="full"):
         stages = [
             MockPipelineStage(group_size=4, group_rank=3, num_stages=16)
             for _ in range(4)
@@ -1035,7 +1035,7 @@ class TestSchedulePlan(TestCase):
                 break
         return count
 
-    def test_unshard_lookahead_default_preserves_residency_window(self):
+    def test_unshard_lookahead_full_preserves_residency_window(self):
         schedule = self._interleaved_schedule()
         self.assertEqual(
             [
@@ -1076,6 +1076,7 @@ class TestSchedulePlan(TestCase):
             None,
             True,
             2,
+            "default",
             "adaptive",
             [1, 2, 3, 4],
             (1, 2, 3),
@@ -1117,7 +1118,7 @@ class TestSchedulePlan(TestCase):
                 unshard_lookahead=lookahead,
             )
 
-        default = build("default")
+        full = build("full")
         p2p = (SEND_F, SEND_B, RECV_F, RECV_B)
 
         for lookahead in ((1,) * group_size, "auto"):
@@ -1125,14 +1126,14 @@ class TestSchedulePlan(TestCase):
             for rank in range(group_size):
                 with self.subTest(lookahead=lookahead, rank=rank):
                     staggered_actions = staggered.pipeline_order_with_comms[rank]
-                    default_actions = default.pipeline_order_with_comms[rank]
+                    full_actions = full.pipeline_order_with_comms[rank]
                     self.assertEqual(
                         sum(a.computation_type == UNSHARD for a in staggered_actions),
-                        sum(a.computation_type == UNSHARD for a in default_actions),
+                        sum(a.computation_type == UNSHARD for a in full_actions),
                     )
                     self.assertEqual(
                         sum(a.computation_type == RESHARD for a in staggered_actions),
-                        sum(a.computation_type == RESHARD for a in default_actions),
+                        sum(a.computation_type == RESHARD for a in full_actions),
                     )
                     self.assertEqual(
                         [
@@ -1143,7 +1144,7 @@ class TestSchedulePlan(TestCase):
                         ],
                         [
                             a
-                            for a in default_actions
+                            for a in full_actions
                             if a.computation_type != UNSHARD
                             and a.computation_type not in p2p
                         ],
@@ -1156,9 +1157,7 @@ class TestSchedulePlan(TestCase):
                             for kind in p2p
                         },
                         {
-                            kind: sum(
-                                a.computation_type == kind for a in default_actions
-                            )
+                            kind: sum(a.computation_type == kind for a in full_actions)
                             for kind in p2p
                         },
                     )
