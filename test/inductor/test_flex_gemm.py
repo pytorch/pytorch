@@ -1536,19 +1536,21 @@ class FlexGemmTestCase(TestCase):
         w = self.makeTensor(len(seqlens), self.N, self.K, device=device)
         return x, w.transpose(-2, -1), offs
 
-    def makeBlockScaledMm(self, format_name, m, n, k, *, global_scales=None):
+    def makeBlockScaledMm(
+        self, format_name, m, n, k, *, global_scales=None, device="cuda"
+    ):
         """Quantize random A (m, k) / B (k, n); return (a, b, scale_a, scale_b, gemm_kwargs, reference)."""
         import torch.nn.functional as F
         from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
 
         global_a, global_b = (None, None) if global_scales is None else global_scales
         a = BlockScaledOperand.quantize(
-            torch.randn(m, k, device="cuda", dtype=torch.bfloat16),
+            torch.randn(m, k, device=device, dtype=torch.bfloat16),
             format_name,
             per_tensor_scale=global_a,
         )
         b = BlockScaledOperand.quantize(
-            torch.randn(k, n, device="cuda", dtype=torch.bfloat16) / math.sqrt(k),
+            torch.randn(k, n, device=device, dtype=torch.bfloat16) / math.sqrt(k),
             format_name,
             dim=-2,
             per_tensor_scale=global_b,
@@ -3034,332 +3036,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    @parametrize(
-        "case",
-        (
-            ("mxfp8_e4m3", False),
-            ("nvfp4", False),
-            ("mxfp8_e4m3", True),
-        ),
-        name_fn=lambda case: f"{case[0]}_tuned_{case[1]}",
-    )
-    def test_scaled_mm_compiled_matches_reference(self, case):
-        import torch.nn.functional as F
-
-        format_name, tuned = case
-        n = 256
-        a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
-            format_name, 256, n, 256
-        )
-
-        def epilogue_fn(acc, row):
-            shifted = (acc + row).relu()
-            return shifted, shifted * 0.5
-
-        def fn(a_data, b_data, a_scale, b_scale, row):
-            return flex_gemm(
-                F.scaled_mm,
-                (a_data, b_data, a_scale, b_scale),
-                lambda acc: epilogue_fn(acc, row),
-                gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK", "tuned": tuned},
-            )
-
-        row = torch.randn(1, n, device="cuda", dtype=torch.bfloat16)
-        expected = epilogue_fn(base, row)
-        tune_context = self.limitEpiModAutotune() if tuned else contextlib.nullcontext()
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        with tune_context:
-            actual, (code,) = run_and_get_code(
-                compiled,
-                a.qdata,
-                b.qdata,
-                scale_a,
-                scale_b,
-                row,
-            )
-            warm = compiled(a.qdata, b.qdata, scale_a, scale_b, row)
-
-        self.assertEqual(actual, expected, rtol=0.02, atol=0.2)
-        self.assertEqual(warm, actual, rtol=0, atol=0)
-        self.assertIn(f"blockscaled_format={format_name!r}", code)
-        self.assertIn("config=((", code)
-        self.assertNotIn("aten._scaled_mm_v2", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    @parametrize(
-        "case",
-        ((False, (1,)), (True, ()), (True, (1, 1))),
-        name_fn=lambda case: f"shared_{case[0]}_rank_{len(case[1])}",
-    )
-    def test_nvfp4_scaled_mm_global_scales(self, case):
-        import torch.nn.functional as F
-
-        shared_global_scale, shape = case
-        global_a = torch.full(shape, 0.5, device="cuda", dtype=torch.float32)
-        global_b = (
-            global_a
-            if shared_global_scale
-            else torch.full(shape, 1.5, device="cuda", dtype=torch.float32)
-        )
-        a, b, scale_a, scale_b, gemm_kwargs, base = self.makeBlockScaledMm(
-            "nvfp4", 256, 256, 256, global_scales=(global_a, global_b)
-        )
-
-        def epilogue_fn(acc):
-            return (acc + 0.125).relu()
-
-        def fn(a_data, b_data, a_scale, b_scale, g, other_g=None):
-            # Share one FX node, not just two aliased arguments at the call site.
-            b_global = g if shared_global_scale else other_g
-            return flex_gemm(
-                F.scaled_mm,
-                (a_data, b_data, [a_scale, g], [b_scale, b_global]),
-                epilogue_fn,
-                gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        expected = epilogue_fn(base)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a.qdata,
-            b.qdata,
-            scale_a[0],
-            scale_b[0],
-            *((global_a,) if shared_global_scale else (global_a, global_b)),
-        )
-
-        self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
-        self.assertIn("((acc * operand0) * operand1)", code)
-        self.assertIn("epilogue_arg_kinds=('scalar', 'scalar')", code)
-        self.assertNotIn("operand2", code)
-        self.assertNotIn("aten._scaled_mm_v2", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    @parametrize(
-        "case",
-        (("mxfp8_e4m3", False), ("mxfp8_e4m3", True), ("nvfp4", False)),
-        name_fn=lambda case: f"{case[0]}_local_reduce_{case[1]}",
-    )
-    def test_scaled_mm_output_contraction_and_local_reduce(self, case):
-        import torch.nn.functional as F
-        from torch._vendor.quack.gemm_config import GemmConfig
-
-        format_name, local_reduce = case
-        m = 256
-        group = 16
-        global_scales = (
-            tuple(torch.tensor([value], device="cuda") for value in (0.5, 1.5))
-            if format_name == "nvfp4"
-            else None
-        )
-        a, b, scale_a, scale_b, gemm_kwargs, base = self.makeBlockScaledMm(
-            format_name, m, 256, 256, global_scales=global_scales
-        )
-        config = dataclasses.asdict(
-            GemmConfig(
-                tile_m=256,
-                tile_n=256,
-                pingpong=False,
-                is_dynamic_persistent=True,
-                cluster_m=2,
-                cluster_n=1,
-                swap_ab=False,
-                device_capacity=10,
-            )
-        )
-
-        def epilogue_fn(acc):
-            if local_reduce:
-                grouped = acc.float().view(m, -1, group)
-                return acc.relu(), nvfp4_e4m3_scale(grouped.abs().amax(-1))
-            pairs = acc.float().view(m, -1, 2)
-            return (pairs[..., 0] - pairs[..., 1]).to(acc.dtype)
-
-        def fn(a_data, b_data, a_scale, b_scale):
-            return flex_gemm(
-                F.scaled_mm,
-                (a_data, b_data, a_scale, b_scale),
-                epilogue_fn,
-                gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK", "config": config},
-            )
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a.qdata,
-            b.qdata,
-            scale_a,
-            scale_b,
-        )
-        expected = epilogue_fn(base)
-        if local_reduce:
-            self.assertEqual(actual[0], expected[0], rtol=0.03, atol=0.3)
-            self.assertEqual(
-                actual[1].float(), expected[1].float(), rtol=0.125, atol=0.0625
-            )
-            self.assertIn("local_reduce=FlexGemmRuntimeLocalReducePlan", code)
-        else:
-            self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
-            self.assertIn("OutputContraction(group=2", code)
-        if global_scales is not None:
-            self.assertIn("((acc * operand0) * operand1)", code)
-            self.assertIn("epilogue_arg_kinds=('scalar', 'scalar')", code)
-            self.assertNotIn("operand2", code)
-        self.assertNotIn("aten._scaled_mm_v2", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    def test_scaled_mm_quantized_output(self):
-        import torch.nn.functional as F
-        from torch._higher_order_ops.flex_gemm import to_blocked
-        from torch._vendor.quack.blockscaled.utils import unpack_scale_blocked_to_2d
-        from torch._vendor.quack.gemm_config import GemmConfig
-
-        m = n = 256
-        group = 32
-        a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
-            "mxfp8_e4m3", m, n, 256
-        )
-        config = dataclasses.asdict(
-            GemmConfig(
-                tile_m=256,
-                tile_n=256,
-                pingpong=False,
-                is_dynamic_persistent=True,
-                cluster_m=2,
-                cluster_n=1,
-                swap_ab=False,
-                device_capacity=10,
-            )
-        )
-
-        def epilogue_fn(acc):
-            grouped = acc.float().view(m, -1, group)
-            scale = mx_e8m0_scale(grouped.abs().amax(-1, keepdim=True))
-            quantized = (
-                (grouped * scale.float().reciprocal())
-                .view_as(acc)
-                .clamp(-448.0, 448.0)
-                .to(torch.float8_e4m3fn)
-            )
-            return quantized, to_blocked(scale.squeeze(-1))
-
-        def fn(a_data, b_data, a_scale, b_scale):
-            return flex_gemm(
-                F.scaled_mm,
-                (a_data, b_data, a_scale, b_scale),
-                epilogue_fn,
-                gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK", "config": config},
-            )
-
-        expected, expected_scale = epilogue_fn(base)
-        (actual, actual_scale), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a.qdata,
-            b.qdata,
-            scale_a,
-            scale_b,
-        )
-
-        scale_shape = (1, (m + 127) // 128, (n // group + 3) // 4, 32, 4, 4)
-        actual_dense_scale = unpack_scale_blocked_to_2d(
-            actual_scale.view(scale_shape), m, n // group
-        ).squeeze(0)
-        expected_dense_scale = unpack_scale_blocked_to_2d(
-            expected_scale.view(scale_shape), m, n // group
-        ).squeeze(0)
-        actual_dequant = actual.float() * actual_dense_scale.float().repeat_interleave(
-            group, -1
-        )
-        expected_dequant = (
-            expected.float() * expected_dense_scale.float().repeat_interleave(group, -1)
-        )
-
-        torch.testing.assert_close(
-            actual_dequant, expected_dequant, rtol=0.05, atol=0.5
-        )
-        self.assertMxScaleCode(code)
-        self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
-        self.assertNotIn("aten._scaled_mm_v2", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    def test_scaled_mm_dynamic_m(self):
-        import torch.nn.functional as F
-        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
-
-        n = k = 256
-        b = BlockScaledOperand.quantize(
-            torch.randn(k, n, device="cuda", dtype=torch.bfloat16) / math.sqrt(k),
-            "mxfp8_e4m3",
-            dim=-2,
-        )
-        scale_b = b.scale.flatten()
-        recipe = F.ScalingType.BlockWise1x32
-        swizzle = F.SwizzleType.SWIZZLE_32_4_4
-        gemm_kwargs = {
-            "scale_recipe_a": recipe,
-            "scale_recipe_b": recipe,
-            "swizzle_a": swizzle,
-            "swizzle_b": swizzle,
-            "output_dtype": torch.bfloat16,
-        }
-
-        def epilogue_fn(acc):
-            return (acc + 0.25).relu()
-
-        def fn(a_data, a_scale):
-            return flex_gemm(
-                F.scaled_mm,
-                (a_data, b.qdata, a_scale, scale_b),
-                epilogue_fn,
-                gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        for index, m in enumerate((128, 256)):
-            a = BlockScaledOperand.quantize(
-                torch.randn(m, k, device="cuda", dtype=torch.bfloat16),
-                "mxfp8_e4m3",
-            )
-            scale_a = a.scale.flatten()
-            if index == 0:
-                torch._dynamo.mark_dynamic(a.qdata, 0)
-                torch._dynamo.mark_dynamic(scale_a, 0)
-            actual = compiled(a.qdata, scale_a)
-            expected = epilogue_fn(
-                F.scaled_mm(
-                    a.qdata,
-                    b.qdata,
-                    scale_a,
-                    recipe,
-                    scale_b,
-                    recipe,
-                    swizzle,
-                    swizzle,
-                    output_dtype=torch.bfloat16,
-                )
-            )
-            torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.2)
-
     @parametrize(
         "case",
         (
@@ -3463,8 +3139,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         if case == "argument_count":
             args = args[:3]
         with (
-            mock.patch(
-                "torch._higher_order_ops.flex_gemm.flex_gemm_hop",
+            mock.patch.object(
+                importlib.import_module("torch._higher_order_ops.flex_gemm"),
+                "flex_gemm_hop",
                 side_effect=AssertionError("invalid input reached HOP dispatch"),
             ),
             self.assertRaises(error) as raised,
@@ -9195,6 +8872,392 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
 
 @skipIfNoCuteDSL
+@unittest.skipIf(
+    not SM100OrLater or SM120OrLater,
+    "QuACK block-scaled GEMM requires SM100/SM110",
+)
+class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
+    def blockScaledConfig(self):
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        return dataclasses.asdict(
+            GemmConfig(
+                tile_m=256,
+                tile_n=256,
+                pingpong=False,
+                is_dynamic_persistent=True,
+                cluster_m=2,
+                cluster_n=1,
+                swap_ab=False,
+                device_capacity=10,
+            )
+        )
+
+    @parametrize(
+        "case",
+        (
+            ("mxfp8_e4m3", False),
+            ("nvfp4", False),
+            ("mxfp8_e4m3", True),
+        ),
+        name_fn=lambda case: f"{case[0]}_tuned_{case[1]}",
+    )
+    def test_scaled_mm_compiled_matches_reference(self, device, case):
+        import torch.nn.functional as F
+
+        format_name, tuned = case
+        n = 256
+        a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
+            format_name, 256, n, 256, device=device
+        )
+
+        def epilogue_fn(acc, row):
+            shifted = (acc + row).relu()
+            return shifted, shifted * 0.5
+
+        def fn(a_data, b_data, a_scale, b_scale, row):
+            return flex_gemm(
+                F.scaled_mm,
+                (a_data, b_data, a_scale, b_scale),
+                lambda acc: epilogue_fn(acc, row),
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK", "tuned": tuned},
+            )
+
+        row = torch.randn(1, n, device=device, dtype=torch.bfloat16)
+        expected = epilogue_fn(base, row)
+        tune_context = self.limitEpiModAutotune() if tuned else contextlib.nullcontext()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        inputs = (a.qdata, b.qdata, scale_a, scale_b, row)
+        with tune_context:
+            actual, (code,) = run_and_get_code(compiled, *inputs)
+            warm = compiled(*inputs)
+
+        self.assertEqual(actual, expected, rtol=0.02, atol=0.2)
+        self.assertEqual(warm, actual, rtol=0, atol=0)
+        self.assertIn(f"blockscaled_format={format_name!r}", code)
+        self.assertIn("config=((", code)
+        self.assertNotIn("aten._scaled_mm_v2", code)
+
+    @parametrize(
+        "case",
+        ((False, (1,)), (True, ()), (True, (1, 1))),
+        name_fn=lambda case: f"shared_{case[0]}_rank_{len(case[1])}",
+    )
+    def test_nvfp4_scaled_mm_global_scales(self, device, case):
+        import torch.nn.functional as F
+
+        shared_global_scale, shape = case
+        global_a = torch.full(shape, 0.5, device=device, dtype=torch.float32)
+        global_b = (
+            global_a
+            if shared_global_scale
+            else torch.full(shape, 1.5, device=device, dtype=torch.float32)
+        )
+        a, b, scale_a, scale_b, gemm_kwargs, base = self.makeBlockScaledMm(
+            "nvfp4", 256, 256, 256, global_scales=(global_a, global_b), device=device
+        )
+
+        def epilogue_fn(acc):
+            return (acc + 0.125).relu()
+
+        def fn(a_data, b_data, a_scale, b_scale, g, other_g=None):
+            # Share one FX node, not just two aliased arguments at the call site.
+            b_global = g if shared_global_scale else other_g
+            return flex_gemm(
+                F.scaled_mm,
+                (a_data, b_data, [a_scale, g], [b_scale, b_global]),
+                epilogue_fn,
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        expected = epilogue_fn(base)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a.qdata,
+            b.qdata,
+            scale_a[0],
+            scale_b[0],
+            *((global_a,) if shared_global_scale else (global_a, global_b)),
+        )
+
+        self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
+        self.assertIn("((acc * operand0) * operand1)", code)
+        self.assertIn("epilogue_arg_kinds=('scalar', 'scalar')", code)
+        self.assertNotIn("operand2", code)
+        self.assertNotIn("aten._scaled_mm_v2", code)
+
+    @parametrize(
+        "case",
+        (("mxfp8_e4m3", False), ("mxfp8_e4m3", True), ("nvfp4", False)),
+        name_fn=lambda case: f"{case[0]}_local_reduce_{case[1]}",
+    )
+    def test_scaled_mm_output_contraction_and_local_reduce(self, device, case):
+        import torch.nn.functional as F
+
+        format_name, local_reduce = case
+        m = 256
+        group = 16
+        global_scales = (
+            tuple(torch.tensor([value], device=device) for value in (0.5, 1.5))
+            if format_name == "nvfp4"
+            else None
+        )
+        a, b, scale_a, scale_b, gemm_kwargs, base = self.makeBlockScaledMm(
+            format_name, m, 256, 256, global_scales=global_scales, device=device
+        )
+        config = self.blockScaledConfig()
+
+        def epilogue_fn(acc):
+            if local_reduce:
+                grouped = acc.float().view(m, -1, group)
+                return acc.relu(), nvfp4_e4m3_scale(grouped.abs().amax(-1))
+            pairs = acc.float().view(m, -1, 2)
+            return (pairs[..., 0] - pairs[..., 1]).to(acc.dtype)
+
+        def fn(a_data, b_data, a_scale, b_scale):
+            return flex_gemm(
+                F.scaled_mm,
+                (a_data, b_data, a_scale, b_scale),
+                epilogue_fn,
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a.qdata,
+            b.qdata,
+            scale_a,
+            scale_b,
+        )
+        expected = epilogue_fn(base)
+        if local_reduce:
+            self.assertEqual(actual[0], expected[0], rtol=0.03, atol=0.3)
+            self.assertEqual(
+                actual[1].float(), expected[1].float(), rtol=0.125, atol=0.0625
+            )
+            self.assertIn("local_reduce=FlexGemmRuntimeLocalReducePlan", code)
+        else:
+            self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
+            self.assertIn("OutputContraction(group=2", code)
+        if global_scales is not None:
+            self.assertIn("((acc * operand0) * operand1)", code)
+            self.assertIn("epilogue_arg_kinds=('scalar', 'scalar')", code)
+            self.assertNotIn("operand2", code)
+        self.assertNotIn("aten._scaled_mm_v2", code)
+
+    def test_scaled_mm_quantized_output(self, device):
+        import torch.nn.functional as F
+        from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.blockscaled.utils import unpack_scale_blocked_to_2d
+
+        m = n = 256
+        group = 32
+        a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
+            "mxfp8_e4m3", m, n, 256, device=device
+        )
+        config = self.blockScaledConfig()
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(m, -1, group)
+            scale = mx_e8m0_scale(grouped.abs().amax(-1, keepdim=True))
+            quantized = (
+                (grouped * scale.float().reciprocal())
+                .view_as(acc)
+                .clamp(-448.0, 448.0)
+                .to(torch.float8_e4m3fn)
+            )
+            return quantized, to_blocked(scale.squeeze(-1))
+
+        def fn(a_data, b_data, a_scale, b_scale):
+            return flex_gemm(
+                F.scaled_mm,
+                (a_data, b_data, a_scale, b_scale),
+                epilogue_fn,
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        expected, expected_scale = epilogue_fn(base)
+        (actual, actual_scale), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a.qdata,
+            b.qdata,
+            scale_a,
+            scale_b,
+        )
+
+        scale_shape = (1, (m + 127) // 128, (n // group + 3) // 4, 32, 4, 4)
+        actual_dense_scale = unpack_scale_blocked_to_2d(
+            actual_scale.view(scale_shape), m, n // group
+        ).squeeze(0)
+        expected_dense_scale = unpack_scale_blocked_to_2d(
+            expected_scale.view(scale_shape), m, n // group
+        ).squeeze(0)
+        actual_dequant = actual.float() * actual_dense_scale.float().repeat_interleave(
+            group, -1
+        )
+        expected_dequant = (
+            expected.float() * expected_dense_scale.float().repeat_interleave(group, -1)
+        )
+
+        torch.testing.assert_close(
+            actual_dequant, expected_dequant, rtol=0.05, atol=0.5
+        )
+        self.assertMxScaleCode(code)
+        self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
+        self.assertNotIn("aten._scaled_mm_v2", code)
+
+    def test_scaled_mm_dynamic_m(self, device):
+        import torch.nn.functional as F
+        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
+
+        n = k = 256
+        b = BlockScaledOperand.quantize(
+            torch.randn(k, n, device=device, dtype=torch.bfloat16) / math.sqrt(k),
+            "mxfp8_e4m3",
+            dim=-2,
+        )
+        scale_b = b.scale.flatten()
+        recipe = F.ScalingType.BlockWise1x32
+        swizzle = F.SwizzleType.SWIZZLE_32_4_4
+        gemm_kwargs = {
+            "scale_recipe_a": recipe,
+            "scale_recipe_b": recipe,
+            "swizzle_a": swizzle,
+            "swizzle_b": swizzle,
+            "output_dtype": torch.bfloat16,
+        }
+
+        def epilogue_fn(acc):
+            return (acc + 0.25).relu()
+
+        def fn(a_data, a_scale):
+            return flex_gemm(
+                F.scaled_mm,
+                (a_data, b.qdata, a_scale, scale_b),
+                epilogue_fn,
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for index, m in enumerate((128, 256)):
+            a = BlockScaledOperand.quantize(
+                torch.randn(m, k, device=device, dtype=torch.bfloat16),
+                "mxfp8_e4m3",
+            )
+            scale_a = a.scale.flatten()
+            if index == 0:
+                torch._dynamo.mark_dynamic(a.qdata, 0)
+                torch._dynamo.mark_dynamic(scale_a, 0)
+            actual = compiled(a.qdata, scale_a)
+            expected = epilogue_fn(
+                F.scaled_mm(a.qdata, b.qdata, scale_a, scale_b=scale_b, **gemm_kwargs)
+            )
+            torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.2)
+
+    @parametrize("case", (("mx", 32), ("nvfp4", 16)), name_fn=lambda case: case[0])
+    def test_mm_quant_blocked_output_feeds_scaled_mm(self, device, case):
+        import torch.nn.functional as F
+        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+
+        format_name, group = case
+        m = hidden = output = k = 256
+        scale_fn = mx_e8m0_scale if format_name == "mx" else nvfp4_e4m3_scale
+        recipe = (
+            F.ScalingType.BlockWise1x32
+            if format_name == "mx"
+            else F.ScalingType.BlockWise1x16
+        )
+
+        def quantize(x):
+            grouped = x.float().view(x.shape[0], -1, group)
+            scale = scale_fn(grouped.abs().amax(-1, keepdim=True))
+            normalized = grouped * scale.float().reciprocal()
+            if format_name == "mx":
+                quantized = (
+                    normalized.view_as(x).clamp(-448.0, 448.0).to(torch.float8_e4m3fn)
+                )
+            else:
+                quantized = nvfp4_pack(normalized.view(x.shape[0], -1, 2))
+            scale = scale.squeeze(-1)
+            return quantized, scale, to_blocked(scale)
+
+        def epilogue_fn(acc):
+            quantized, _, blocked_scale = quantize(acc)
+            return quantized, blocked_scale
+
+        def scaled_mm(activation, weight, activation_scale, weight_scale):
+            if format_name == "nvfp4":
+                activation = activation.view(torch.float4_e2m1fn_x2)
+            return F.scaled_mm(
+                activation,
+                weight.t(),
+                scale_a=activation_scale,
+                scale_recipe_a=recipe,
+                scale_b=weight_scale,
+                scale_recipe_b=recipe,
+                swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        config = self.blockScaledConfig()
+
+        def fn(a, b, weight, weight_scale):
+            activation, activation_scale = flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+            return scaled_mm(activation, weight, activation_scale, weight_scale)
+
+        a = torch.eye(m, k, device=device, dtype=torch.bfloat16)
+        rows = torch.arange(k, device=device)[:, None]
+        cols = torch.arange(hidden, device=device)[None, :]
+        if format_name == "mx":
+            exponent = (rows // 128) * 2 + ((cols // group) // 4) - 2
+        else:
+            exponent = ((rows + cols) % 7) - 3
+        b = (2.0**exponent).to(torch.bfloat16)
+        weight_hp = torch.randn(output, hidden, device=device, dtype=torch.bfloat16)
+        weight, weight_scale, weight_blocked = quantize(weight_hp)
+        if format_name == "nvfp4":
+            weight = weight.view(torch.float4_e2m1fn_x2)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            weight,
+            weight_blocked,
+        )
+        activation, activation_scale, activation_blocked = quantize(a @ b)
+        if format_name == "mx":
+            activation_dequant = (
+                activation.float()
+                * activation_scale.float().repeat_interleave(group, dim=-1)
+            )
+            weight_dequant = weight.float() * weight_scale.float().repeat_interleave(
+                group, dim=-1
+            )
+            expected = (activation_dequant @ weight_dequant.t()).to(torch.bfloat16)
+            self.assertEqual(actual, expected, rtol=0.02, atol=1.0)
+        else:
+            expected = scaled_mm(activation, weight, activation_blocked, weight_blocked)
+            self.assertEqual(actual, expected, rtol=0, atol=0)
+            self.assertIn("OutputContraction(group=2", code)
+        self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
+        self.assertIn("_scaled_mm", code)
+
+
+instantiate_device_type_tests(TestFlexGemmScaledMmDevice, globals(), only_for="cuda")
+
+
+@skipIfNoCuteDSL
 @unittest.skipIf(not SM100OrLater, "SM100+ required")
 class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
     def test_mm_tuple_aux_local_m_reduce_contiguous_transpose(self, device):
@@ -10386,175 +10449,6 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             f"empty_strided_cuda(({m}, {hidden}), ({hidden}, 1), torch.bfloat16)",
             code,
         )
-
-    @unittest.skipIf(SM120OrLater, "SM100 config required")
-    def test_mm_mx_quant_blocked_output_feeds_scaled_mm(self, device):
-        import torch.nn.functional as F
-        from torch._higher_order_ops.flex_gemm import to_blocked
-        from torch._vendor.quack.gemm_config import GemmConfig
-
-        m = hidden = output = k = 256
-        group = 32
-
-        def quantize(x):
-            grouped = x.float().view(x.shape[0], -1, group)
-            scale = mx_e8m0_scale(grouped.abs().amax(-1, keepdim=True))
-            quantized = (grouped * scale.float().reciprocal()).view_as(x)
-            scale = scale.squeeze(-1)
-            return (
-                quantized.clamp(-448.0, 448.0).to(torch.float8_e4m3fn),
-                scale,
-                to_blocked(scale),
-            )
-
-        def epilogue_fn(acc):
-            quantized, _, blocked_scale = quantize(acc)
-            return quantized, blocked_scale
-
-        config = dataclasses.asdict(
-            GemmConfig(
-                tile_m=256,
-                tile_n=256,
-                pingpong=False,
-                is_dynamic_persistent=True,
-                cluster_m=2,
-                cluster_n=1,
-                swap_ab=False,
-                device_capacity=10,
-            )
-        )
-
-        def fn(a, b, weight, weight_scale):
-            activation, activation_scale = flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK", "config": config},
-            )
-            return F.scaled_mm(
-                activation,
-                weight.t(),
-                scale_a=activation_scale,
-                scale_recipe_a=F.ScalingType.BlockWise1x32,
-                scale_b=weight_scale,
-                scale_recipe_b=F.ScalingType.BlockWise1x32,
-                swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
-                swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
-                output_dtype=torch.bfloat16,
-            )
-
-        a = torch.eye(m, k, device=device, dtype=torch.bfloat16)
-        rows = torch.arange(k, device=device)[:, None]
-        cols = torch.arange(hidden, device=device)[None, :]
-        exponent = (rows // 128) * 2 + ((cols // group) // 4) - 2
-        b = (2.0**exponent).to(torch.bfloat16)
-        weight_hp = torch.randn(output, hidden, device=device, dtype=torch.bfloat16)
-        weight, weight_scale, weight_scale_blocked = quantize(weight_hp)
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a,
-            b,
-            weight,
-            weight_scale_blocked,
-        )
-        activation, activation_scale, _ = quantize(a @ b)
-        activation_dequant = (
-            activation.float()
-            * activation_scale.float().repeat_interleave(group, dim=-1)
-        )
-        weight_dequant = weight.float() * weight_scale.float().repeat_interleave(
-            group, dim=-1
-        )
-        expected = (activation_dequant @ weight_dequant.t()).to(torch.bfloat16)
-        torch.testing.assert_close(actual, expected, rtol=0.02, atol=1.0)
-        self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
-        self.assertIn("_scaled_mm", code)
-
-    @unittest.skipIf(SM120OrLater, "SM100 config required")
-    def test_mm_nvfp4_quant_blocked_output_feeds_scaled_mm(self, device):
-        import torch.nn.functional as F
-        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
-        from torch._vendor.quack.gemm_config import GemmConfig
-
-        m = hidden = output = k = 256
-        group = 16
-
-        def quantize(x):
-            grouped = x.float().view(x.shape[0], -1, group)
-            scale = nvfp4_e4m3_scale(grouped.abs().amax(-1, keepdim=True))
-            normalized = grouped * scale.float().reciprocal()
-            packed = nvfp4_pack(normalized.view(x.shape[0], -1, 2))
-            scale = scale.squeeze(-1)
-            return packed, scale, to_blocked(scale)
-
-        def epilogue_fn(acc):
-            packed, _, blocked_scale = quantize(acc)
-            return packed, blocked_scale
-
-        config = dataclasses.asdict(
-            GemmConfig(
-                tile_m=256,
-                tile_n=256,
-                pingpong=False,
-                is_dynamic_persistent=True,
-                cluster_m=2,
-                cluster_n=1,
-                swap_ab=False,
-                device_capacity=10,
-            )
-        )
-
-        def fn(a, b, weight, weight_scale):
-            activation_storage, activation_scale = flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK", "config": config},
-            )
-            return F.scaled_mm(
-                activation_storage.view(torch.float4_e2m1fn_x2),
-                weight.t(),
-                scale_a=activation_scale,
-                scale_recipe_a=F.ScalingType.BlockWise1x16,
-                scale_b=weight_scale,
-                scale_recipe_b=F.ScalingType.BlockWise1x16,
-                swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
-                swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
-                output_dtype=torch.bfloat16,
-            )
-
-        a = torch.eye(m, k, device=device, dtype=torch.bfloat16)
-        rows = torch.arange(k, device=device)[:, None]
-        cols = torch.arange(hidden, device=device)[None, :]
-        b = (2.0 ** (((rows + cols) % 7) - 3)).to(torch.bfloat16)
-        weight_hp = torch.randn(output, hidden, device=device, dtype=torch.bfloat16)
-        weight_storage, _, weight_scale = quantize(weight_hp)
-        weight = weight_storage.view(torch.float4_e2m1fn_x2)
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a,
-            b,
-            weight,
-            weight_scale,
-        )
-        activation_storage, _, activation_scale = quantize(a @ b)
-        expected = F.scaled_mm(
-            activation_storage.view(torch.float4_e2m1fn_x2),
-            weight.t(),
-            scale_a=activation_scale,
-            scale_recipe_a=F.ScalingType.BlockWise1x16,
-            scale_b=weight_scale,
-            scale_recipe_b=F.ScalingType.BlockWise1x16,
-            swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
-            swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
-            output_dtype=torch.bfloat16,
-        )
-        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
-        self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
-        self.assertIn("_scaled_mm", code)
-        self.assertIn("OutputContraction(group=2", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_tuple_aux_blocked_output_zero_fills_padding(self, device):
