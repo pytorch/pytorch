@@ -19,6 +19,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
+from ._fsdp_collectives import SymmMemReduceScatter
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -425,17 +426,29 @@ class FSDPModule:
     def finalize_gradient_accumulation(
         self, *, async_op: bool = False
     ) -> GradientReductionHandle | None:
-        """Finish gradient accumulation on the calling thread.
+        r"""Finalize an accumulation window on the calling thread.
 
-        Call this after backward passes run with
-        ``set_is_last_backward(False)`` and
-        ``set_reshard_after_backward(False)``. Earlier backward passes may use
-        ``set_requires_gradient_sync(False)``. The final backward may enable
-        synchronization to overlap reduction with its remaining computation.
+        Call this once after all backward passes in an accumulation window when
+        ``set_is_last_backward(False)`` disables automatic finalization.
+        Earlier backward passes may use ``set_requires_gradient_sync(False)``.
+        The final backward may enable synchronization to start reduction before
+        this call. If reduction remains deferred, this method launches it. To
+        retain unsharded parameters until this call, use
+        ``set_reshard_after_backward(False)``.
+
+        This method is not needed when the final backward runs with
+        ``set_is_last_backward(True)`` because FSDP finalizes automatically. It
+        temporarily enables gradient synchronization, resharding, and
+        last-backward handling, then restores their original settings.
 
         The autograd final callback runs on the autograd thread, where its
         stream waits cannot be CUDA graph captured. This method runs the work
         on the calling thread and is safe to call during CUDA graph capture.
+
+        HSDP accumulation that disables only all-reduce is not supported.
+        Enable all-reduce on the final backward pass instead.
+        Symmetric-memory reduce-scatter may serialize asynchronous finalization
+        because it supports only one retained input buffer.
 
         Args:
             async_op (bool): If ``True``, return a
@@ -443,9 +456,6 @@ class FSDPModule:
                 reduction. The caller must call :meth:`wait` before using the
                 gradients or starting more work on this FSDP module. If
                 ``False``, wait before returning.
-
-        HSDP accumulation that disables only all-reduce is not supported.
-        Enable all-reduce on the final backward pass instead.
         """
         state = self._get_fsdp_state()
         if state._is_root is None:
@@ -474,26 +484,30 @@ class FSDPModule:
                 "with all-reduce disabled. Enable all-reduce on the final backward pass"
             )
         is_last_backward = state._state_ctx.is_last_backward
+        max_input_buffers = state._comm_ctx.reduce_scatter_max_input_buffers
         try:
             self.set_requires_gradient_sync(True)
             self.set_reshard_after_backward(True)
             self.set_is_last_backward(True)
-            max_input_buffers = state._comm_ctx.reduce_scatter_max_input_buffers
-            num_pending_reductions = sum(
-                group._deferred_gradient_reduction for group in param_groups
-            )
-            state._comm_ctx.reduce_scatter_max_input_buffers = max(
-                max_input_buffers,
-                len(state._comm_ctx.reduce_scatter_states) + num_pending_reductions,
-            )
-            try:
-                state._root_post_backward_final_callback(
-                    finalize_gradient_accumulation=True,
-                    wait_for_gradient_reduction=False,
+            if not any(
+                isinstance(group._reduce_scatter_comm, SymmMemReduceScatter)
+                for group in param_groups
+            ):
+                # Retain all pending buffers so current-stream waits do not
+                # serialize finalization.
+                num_pending_reductions = sum(
+                    group._deferred_gradient_reduction for group in param_groups
                 )
-            finally:
-                state._comm_ctx.reduce_scatter_max_input_buffers = max_input_buffers
+                state._comm_ctx.reduce_scatter_max_input_buffers = max(
+                    max_input_buffers,
+                    len(state._comm_ctx.reduce_scatter_states) + num_pending_reductions,
+                )
+            state._root_post_backward_final_callback(
+                finalize_gradient_accumulation=True,
+                wait_for_gradient_reduction=False,
+            )
         finally:
+            state._comm_ctx.reduce_scatter_max_input_buffers = max_input_buffers
             for group, group_settings in zip(param_groups, settings):
                 (
                     group.reduce_grads,
