@@ -54,10 +54,6 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
   # If building shared library, set dllimport/dllexport proper.
   target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
-  # Enable hidden visibility if compiler supports it.
-  if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-    target_compile_options(c10 PRIVATE "-fvisibility=hidden")
-  endif()
 
   option(C10_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
   if(C10_USE_IWYU)
