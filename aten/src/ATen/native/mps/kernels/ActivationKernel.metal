@@ -275,8 +275,8 @@ struct gelu_functor {
   template <typename T>
   inline T operator()(const T x) {
     const float xf = float(x);
-    return static_cast<T>(
-        0.5f * xf * (1.0f + ::c10::metal::erf(xf * M_SQRT1_2_F)));
+    // 1 + erf(x) = erfc(-x)
+    return static_cast<T>(0.5f * xf * ::c10::metal::erfc(-xf * M_SQRT1_2_F));
   }
 };
 
@@ -304,7 +304,8 @@ struct gelu_backward_functor {
   inline T operator()(const T grad, const T self) {
     const float xf = float(self);
     constexpr float kPdfCoeff = M_2_SQRTPI_F * M_SQRT1_2_F * 0.5f;
-    const float cdf = 0.5f * (1.0f + ::c10::metal::erf(xf * M_SQRT1_2_F));
+    // 1 + erf(x) = erfc(-x)
+    const float cdf = 0.5f * ::c10::metal::erfc(-xf * M_SQRT1_2_F);
     const float pdf = kPdfCoeff * ::metal::exp(-0.5f * xf * xf);
     return static_cast<T>(float(grad) * (cdf + xf * pdf));
   }
