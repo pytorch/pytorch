@@ -7463,8 +7463,8 @@ def meta_scaled_mm_v2(
     contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
-    # Shape inference only; per-recipe scale validation lives in the C++
-    # TORCH_META_FUNC (validate_scaled_mm_v2_inputs) and runs in eager. This
+    # Per-recipe scale validation lives in the C++ TORCH_META_FUNC
+    # (validate_scaled_mm_v2_inputs) and runs in eager. This
     # Python meta exists because the structured C++ meta sizes its output via
     # IntArrayRef, which specializes symbolic dims under fake-tensor tracing
     # (breaking mark_dynamic and unbacked symints). Same pattern as meta_mm.
@@ -7472,19 +7472,19 @@ def meta_scaled_mm_v2(
         self.dim() == 2 and mat2.dim() == 2,
         lambda: f"Inputs must be 2D but got self.dim()={self.dim()} and mat2.dim()={mat2.dim()}",
     )
-    if contraction_dim:
-        torch._check(
-            self.size(contraction_dim[0]) == mat2.size(contraction_dim[1]),
-            lambda: (
-                f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape}) "
-                f"with contraction dims mat_a: {contraction_dim[0]}, mat_b: {contraction_dim[1]}"
-            ),
-        )
-    else:
-        torch._check(
-            self.size(1) == mat2.size(0),
-            lambda: f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape})",
-        )
+    torch._check(
+        not contraction_dim
+        or (
+            len(contraction_dim) == 2
+            and contraction_dim[0] in (1, -1)
+            and contraction_dim[1] in (0, -2)
+        ),
+        lambda: "torch._scaled_mm_v2 only supports contraction_dim=(1, 0)",
+    )
+    torch._check(
+        self.size(1) == mat2.size(0),
+        lambda: f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape})",
+    )
     torch._check(
         bias is None or bias.numel() == mat2.size(1),
         lambda: f"Bias must be size {mat2.size(1)} but got {bias.numel()}",  # type: ignore[union-attr]
