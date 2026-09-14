@@ -10,9 +10,9 @@
 namespace c10::cuda::CUDAGraphMemory {
 
 struct CaptureRegistration {
-  CaptureId_t capture_id;
+  CaptureId_t capture_id{};
   MempoolId_t mempool_id;
-  cudaStream_t primary_stream;
+  cudaStream_t primary_stream{};
   std::optional<CaptureId_t> parent_capture_id;
   std::optional<cudaStream_t> parent_dependency_stream;
 };
