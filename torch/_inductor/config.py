@@ -1968,8 +1968,8 @@ class triton:
     Config specific to codegen/triton.py
     """
 
-    # Select a bounded two-stage OUTER plan directly for eligible Blackwell
-    # leading-dimension reductions.
+    # With max-autotune, select a bounded two-stage OUTER plan directly for
+    # eligible Blackwell leading-dimension reductions.
     enable_experimental_large_output_outer_reductions = (
         os.environ.get(
             "TORCHINDUCTOR_ENABLE_EXPERIMENTAL_LARGE_OUTPUT_OUTER_REDUCTIONS", "0"
