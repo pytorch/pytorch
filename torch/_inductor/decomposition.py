@@ -833,7 +833,11 @@ def view_copy_default(
     self: torch.Tensor,
     size: list[int | torch.SymInt],
 ) -> torch.Tensor:
-    return aten.view(self, size).clone()
+    # Clone the input first so that zero-stride / expanded tensors are
+    # materialized to contiguous before the view, which always succeeds on a
+    # contiguous tensor. This matches eager view_copy, which falls back to
+    # reshape (a copy) when the view is infeasible due to incompatible strides.
+    return self.clone(memory_format=torch.contiguous_format).view(size)
 
 
 @register_decomposition([aten.view_copy.dtype])
