@@ -151,7 +151,9 @@ class ComposabilityTest(MultiProcContinuousTest):
         apply_dp,
         loss_fn,
         scale_grads=True,
+        schedule_kwargs=None,
     ):
+        schedule_kwargs = schedule_kwargs or {}
         if issubclass(ScheduleClass, PipelineScheduleSingle):
             pipeline_stage, offset = self._build_pp_stage(
                 pp_group,
@@ -169,6 +171,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
                 scale_grads=scale_grads,
+                **schedule_kwargs,
             )
         else:
             n_virtual = 2
@@ -192,6 +195,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
                 scale_grads=scale_grads,
+                **schedule_kwargs,
             )
         return pipeline_schedule, partial_models, offsets
 
@@ -281,15 +285,18 @@ class ComposabilityTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     @parametrize(
-        "ScheduleClass",
+        "ScheduleClass,defer_reduce_grad_wait",
         [
-            Schedule1F1B,
-            ScheduleInterleaved1F1B,
-            ScheduleLoopedBFS,
-            ScheduleInterleavedZeroBubble,
+            (Schedule1F1B, False),
+            (ScheduleInterleaved1F1B, False),
+            (ScheduleInterleaved1F1B, True),
+            (ScheduleLoopedBFS, False),
+            (ScheduleLoopedBFS, True),
+            (ScheduleInterleavedZeroBubble, False),
+            (ScheduleInterleavedZeroBubble, True),
         ],
     )
-    def test_pp_fsdp(self, dp_type, ScheduleClass):
+    def test_pp_fsdp(self, dp_type, defer_reduce_grad_wait, ScheduleClass):
         if TEST_WITH_ROCM:
             return
 
@@ -347,6 +354,9 @@ class ComposabilityTest(MultiProcContinuousTest):
             total_layers,
             apply_dp,
             loss_fn,
+            schedule_kwargs=(
+                {"defer_reduce_grad_wait": True} if defer_reduce_grad_wait else {}
+            ),
         )
 
         # Run the pipeline
@@ -390,7 +400,8 @@ class ComposabilityTest(MultiProcContinuousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
-    def test_pp_fsdp_outer_gradient_accumulation(self):
+    @parametrize("defer_reduce_grad_wait", [False, True])
+    def test_pp_fsdp_outer_gradient_accumulation(self, defer_reduce_grad_wait):
         if TEST_WITH_ROCM:
             return
 
@@ -423,6 +434,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 n_microbatches=n_microbatches,
                 loss_fn=loss_fn,
                 scale_grads=False,
+                defer_reduce_grad_wait=defer_reduce_grad_wait,
             )
             actions = [
                 _Action(0, _ComputationType.FORWARD, i) for i in range(n_microbatches)
@@ -458,6 +470,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 finalize_gradients=finalize_gradients,
             )
             assert_unsharded(model, not finalize_gradients)
+            self.assertIsNone(schedule._stages[0]._gradient_reduction_handle)
 
         self.assertNotIn(0, schedule.unsharded_stages)
         ref_schedule = make_schedule(ref_model, total_microbatches)
