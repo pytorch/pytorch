@@ -1558,6 +1558,19 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
+def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
+    # What prepare_f_locals reads, with defaults and cells by identity (id, since
+    # the artifacts keep them alive). Signature equality is unusable here:
+    # Parameter.__eq__ takes bool() of `default == default`, which raises for a
+    # tensor default.
+    env, params = artifacts.runtime_env, artifacts.signature.parameters.values()
+    return (
+        [(p.name, p.kind, id(p.default)) for p in params],
+        env.bytecode.co_freevars,
+        [id(cell) for cell in env.closure or ()],
+    )
+
+
 @dataclass
 class AOTCompiledModel:
     # Represents a single forward function of a model along with dispatch
@@ -1570,28 +1583,17 @@ class AOTCompiledModel:
     _warned: set[tuple[int, str]] = dataclasses.field(
         default_factory=set, init=False, compare=False, repr=False
     )
-    # Whether one bind of a call serves every result: every result carries an
-    # equal signature and the same closure cells, as every artifact
-    # aot_compile_module produces does. Decided once here rather than per call
-    # because comparing two equal Signatures costs about what a bind does.
+    # Whether one bind of a call serves every result, as it does for every
+    # artifact aot_compile_module produces. Decided once here rather than per
+    # call because the comparison costs about what a bind does.
     _shared_binding: bool = dataclasses.field(init=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._shared_binding = True
-        if not self.compiled_results:
-            return
-        first = self.compiled_results[0]._artifacts
-        cells = first.runtime_env.closure or ()
-        for result in self.compiled_results[1:]:
-            artifacts = result._artifacts
-            other = artifacts.runtime_env.closure or ()
-            if (
-                artifacts.signature != first.signature
-                or len(other) != len(cells)
-                or any(a is not b for a, b in zip(cells, other))
-            ):
-                self._shared_binding = False
-                return
+        results = self.compiled_results
+        key = _binding_key(results[0]._artifacts) if results else None
+        self._shared_binding = key is not None and all(
+            _binding_key(result._artifacts) == key for result in results[1:]
+        )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         # Guard evaluation ignores _guard_check_enabled, which only the last
@@ -1610,7 +1612,14 @@ class AOTCompiledModel:
         # Binding this call costs more than a whole check() does, and the passes
         # below and the report ask the same results about the same call, so it
         # is bound once per call where the results share a binding, once per
-        # result where they do not, and reused.
+        # result where they do not, and reused. The shared bind happens ahead of
+        # every guard, so a call the signature cannot bind still surfaces as
+        # bind_locals' TypeError, as the plain module call would.
+        shared = (
+            self.compiled_results[0].prepare_f_locals(self.model, *args, **kwargs)
+            if self._shared_binding
+            else None
+        )
         bound: dict[int, dict[str, object]] = {}
 
         def accepts(i: int, result: AOTCompiledFunction) -> bool:
@@ -1619,8 +1628,8 @@ class AOTCompiledModel:
             # module call would, rather than as a tree that did not match.
             f_locals = bound.get(i)
             if f_locals is None:
-                if i and self._shared_binding:
-                    f_locals = bound[0]
+                if shared is not None:
+                    f_locals = shared
                 else:
                     f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
                 bound[i] = f_locals
@@ -1847,8 +1856,12 @@ class AOTCompiledModel:
             forward: str | None = f"{type(self.model).__name__}.forward"
             # deserialize resolves the scope from model.forward only when the
             # caller passed no guard_globals=, so that forward names the dict
-            # the guards hold only while it still resolves to it.
-            resolved, _ = _resolve_guard_scope(self.model)
+            # the guards hold only while it still resolves to it. Only the
+            # SUPPLIED wording reads forward, and resolving it runs get_traced_fn
+            # over user code, so the other two scopes do not ask.
+            resolved: dict[str, Any] | None = None
+            if missing_global._guard_scope is _GuardScope.SUPPLIED:
+                resolved, _ = _resolve_guard_scope(self.model)
             if resolved is None or resolved is not missing_global._guard_globals:
                 forward = None
             lines.append(missing_global._missing_global_hint(forward=forward))
