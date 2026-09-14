@@ -11,7 +11,8 @@ from torch.distributed.tensor import (
     Shard,
     zeros,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -69,6 +70,8 @@ class MyTestModule(torch.nn.Module):
 
 
 class DTensorPlanner(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def create_dtensor_model(
         self,
         tensor_to_shard: torch.tensor,
@@ -259,6 +262,11 @@ class DTensorPlanner(DTensorTestBase):
                 self.assertEqual(1, v["extra_state"])
                 self.assertEqual(torch.tensor([0.0]), v["extra_state_tensor"])
 
+
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    DTensorPlanner, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
