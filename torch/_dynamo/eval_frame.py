@@ -191,6 +191,7 @@ else:
 StanceStr = Literal[
     "default",
     "eager_then_compile",
+    "dynamo_eager_then_compile",
     "aot_eager_then_compile",
     "force_eager",
     "eager_on_recompile",
@@ -329,6 +330,10 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
         if callback not in (False, None):
             return _create_delayed_compile_callback(callback, _stance.stance)
         return callback
+    elif _stance.stance == "dynamo_eager_then_compile":
+        if callback not in (False, None):
+            return _create_delayed_compile_callback(callback, _stance.stance)
+        return callback
     elif _stance.stance == "aot_eager_then_compile":
         if callback not in (False, None):
             return _create_delayed_compile_callback(callback, _stance.stance)
@@ -450,10 +455,19 @@ def _create_delayed_compile_callback(
 
         # "eager_then_compile" never traces its first invocation, so native PGO
         # has nothing to observe there; it always uses the legacy snapshot diff.
-        if stance == "aot_eager_then_compile" and config.delayed_compile_use_native_pgo:
+        if stance == "dynamo_eager_then_compile" or (
+            stance == "aot_eager_then_compile" and config.delayed_compile_use_native_pgo
+        ):
             phase = _get_delayed_compile_phase(frame)
             if phase == 1:
-                if stance == "aot_eager_then_compile":
+                if stance == "dynamo_eager_then_compile":
+                    result = _create_wrapped_callback(get_compiler_fn("eager"))(
+                        *args, **kwargs
+                    )
+                    if result.guarded_code is not None:
+                        _record_delayed_compile_cache_code(frame.f_code)
+                    return result
+                elif stance == "aot_eager_then_compile":
                     aot_eager_fn = functools.partial(
                         get_compiler_fn("aot_eager"),
                         bw_compiler=_aot_eager_safe_backward_compiler,
@@ -1340,7 +1354,9 @@ class _TorchDynamoContext:
                 # balanced even if the inner finally itself raises (e.g. the
                 # fullgraph "found no compiled frames" error).
                 torch._C._dynamo_save_local_dispatch_key_set()
-                delayed_compile_cache_scope = (
+                delayed_compile_cache_scope = _stance.stance == (
+                    "dynamo_eager_then_compile"
+                ) or (
                     _stance.stance == "aot_eager_then_compile"
                     and config.delayed_compile_use_native_pgo
                 )

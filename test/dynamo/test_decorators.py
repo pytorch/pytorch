@@ -1841,7 +1841,15 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Would have been 4 without stance
         self.assertEqual(cnts.op_count, 2)
 
-    def test_set_stance_aot_eager_then_compile_uses_native_pgo(self):
+    @parametrize(
+        "stance",
+        (
+            "eager_then_compile",
+            "aot_eager_then_compile",
+            "dynamo_eager_then_compile",
+        ),
+    )
+    def test_set_stance_delayed_compile_infers_dynamism(self, stance):
         symbolic_inputs = []
 
         def backend(gm, example_inputs):
@@ -1870,7 +1878,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 automatic_dynamic_remote_pgo=False,
                 delayed_compile_use_native_pgo=True,
             ),
-            torch.compiler.set_stance("aot_eager_then_compile"),
+            torch.compiler.set_stance(stance),
         ):
             for size in (2, 3, 4):
                 x = torch.randn(size)

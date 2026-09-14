@@ -436,6 +436,9 @@ def set_stance(
               subsequent calls. This is beneficial for dynamic shapes as it allows inferring
               dynamism from the first two invocations instead of wasting a static compile on
               the first invocation.
+            - "dynamo_eager_then_compile": Capture the first invocation with Dynamo and run
+              the resulting graph eagerly, then compile on subsequent calls. This records
+              nested input shape observations without invoking AOTAutograd for the first call.
             - "aot_eager_then_compile": Run the first invocation with AOT eager to get memory
               benefits from activation checkpointing, then compile on subsequent calls. Like
               eager_then_compile, this improves handling of dynamic shapes by avoiding an
