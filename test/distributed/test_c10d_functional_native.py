@@ -968,7 +968,7 @@ class CollectiveReinplaceTestCPU(TestCase):
         super().tearDown()
 
     @fresh_cache()
-    @parametrize("collective", ("single", "coalesced"))
+    @parametrize("collective", ("single", "coalesced", "coalesced_wait_tensor"))
     @parametrize("collective_first", (False, True))
     def test_scatter_collective_result_does_not_alias_input(
         self, collective, collective_first
@@ -983,6 +983,8 @@ class CollectiveReinplaceTestCPU(TestCase):
             reduced = torch.ops._c10d_functional.all_reduce_coalesced.default(
                 [tensor], "sum", "0"
             )
+            if collective == "coalesced_wait_tensor":
+                return torch.ops._c10d_functional.wait_tensor.default(reduced[0])
             return torch.ops._c10d_functional.wait_tensors.default(reduced)[0]
 
         def fn(x, diag):

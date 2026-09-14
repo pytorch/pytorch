@@ -425,17 +425,25 @@ def _result_escapes_graph(
 ) -> bool:
     """Whether node's result, or an alias of it, is returned from the graph."""
     aliases = OrderedSet([node])
-    stack = [node]
-    while stack:
-        cur = stack.pop()
-        for user in cur.users:
-            if user.op == "output":
-                return True
-            if user in aliases:
-                continue
-            if _carries_alias(user, aliases, mutated_args_by_op):
-                aliases.add(user)
-                stack.append(user)
+    pending = OrderedSet(node.users)
+    if not pending:
+        return False
+    nodes = iter(node.graph.nodes)
+    for cur in nodes:
+        if cur is node:
+            break
+    # All alias sources must be known before visiting a container's getitems.
+    for user in nodes:
+        if user not in pending:
+            continue
+        pending.remove(user)
+        if user.op == "output":
+            return any(arg in aliases for arg in _flat_node_args(user))
+        if _carries_alias(user, aliases, mutated_args_by_op):
+            aliases.add(user)
+            pending.update(user.users)
+        if not pending:
+            return False
     return False
 
 

@@ -95,6 +95,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     e4m3_type,
     expectedFailureXPU,
+    instantiate_device_type_tests,
     largeTensorTest,
 )
 from torch.testing._internal.common_dtype import (
@@ -20166,6 +20167,52 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.zeros(10, 256, device=self.device),))
 
     # end of class CommonTemplate - add new tests here
+
+
+class TestScatterReinplacing(TestCase):
+    @unittest.skipUnless(torch.distributed.is_available(), "requires distributed")
+    @parametrize("view_count", (1, 2))
+    @parametrize("return_alias", (False, True))
+    def test_reconverging_wait_aliases(self, device, view_count, return_alias):
+        def fn(x, diag):
+            independent = x + 1
+            updated = torch.diagonal_scatter(x, diag)
+            first = updated.transpose(0, 1)
+            second = first if view_count == 1 else first[:2]
+            waited = torch.ops._c10d_functional.wait_tensors.default(
+                [updated, second, independent]
+            )
+            x.copy_(updated)
+            return waited[1 if return_alias else 2]
+
+        def make_inputs():
+            return (
+                torch.arange(16.0, device=device).reshape(4, 4),
+                torch.full((4,), -1.0, device=device),
+            )
+
+        eager_args = make_inputs()
+        expected = fn(*eager_args)
+        compiled_args = make_inputs()
+        out = torch.compile(fn, fullgraph=True)(*compiled_args)
+
+        x = compiled_args[0]
+        self.assertEqual(out, expected)
+        self.assertEqual(x, eager_args[0])
+        self.assertNotEqual(
+            out.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
+        x_after_call = x.clone()
+        out.add_(100)
+        self.assertEqual(x, x_after_call)
+        if not return_alias:
+            # The independent add and diagonal update need no scatter clone.
+            assertGeneratedKernelCountEqual(self, 2)
+
+
+instantiate_device_type_tests(
+    TestScatterReinplacing, globals(), only_for=("cpu", "cuda")
+)
 
 
 @dataclasses.dataclass
