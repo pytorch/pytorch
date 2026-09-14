@@ -1759,9 +1759,12 @@ def _dynamo_dist_per_rank_init(
                 # rdvz_file instead to avoid colliding with concurrent runs.
                 os.environ["MASTER_ADDR"] = "localhost"
                 os.environ["MASTER_PORT"] = "6789"
+                store = None
+            else:
+                store = c10d.FileStore(rdvz_file, world_size)
             c10d.init_process_group(
                 backend=backend,
-                store=c10d.FileStore(rdvz_file, world_size) if rdvz_file else None,
+                store=store,
                 rank=rank,
                 world_size=world_size,
             )
