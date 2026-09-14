@@ -89,21 +89,21 @@ Below is a simple example of migrating an existing kernel that uses `TORCH_LIBRA
 
 namespace myops {
 
-// Simple kernel that adds a scalar value to each element of a tensor
-at::Tensor add_scalar(const at::Tensor& input, double scalar) {
+// Simple kernel that adds two tensors
+at::Tensor add_tensors(const at::Tensor& input, const at::Tensor& other) {
   TORCH_CHECK(input.scalar_type() == at::kFloat, "Input must be float32");
 
-  return input.add(scalar);
+  return input.add(other);
 }
 
 // Register the operator
 TORCH_LIBRARY(myops, m) {
-  m.def("add_scalar(Tensor input, float scalar) -> Tensor");
+  m.def("add_tensors(Tensor input, Tensor other) -> Tensor");
 }
 
 // Register the implementation
 TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
-  m.impl("add_scalar", &add_scalar);
+  m.impl("add_tensors", &add_tensors);
 }
 
 } // namespace myops
@@ -124,8 +124,10 @@ TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
 
 namespace myops {
 
-// Simple kernel that adds a scalar value to each element of a tensor
-torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scalar) {
+// Simple kernel that adds two tensors
+torch::stable::Tensor add_tensors(
+    const torch::stable::Tensor& input,
+    const torch::stable::Tensor& other) {
   // (2) use STD_TORCH_CHECK instead of TORCH_CHECK
   STD_TORCH_CHECK(
       // (3) use torch::headeronly::kFloat instead of at:kFloat
@@ -133,18 +135,18 @@ torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scal
       "Input must be float32");
 
   // (4) Use stable ops namespace instead of input.add
-  return torch::stable::add(input, scalar);
+  return torch::stable::add(input, other);
 }
 
 // (5) Register the operator using STABLE_TORCH_LIBRARY
 STABLE_TORCH_LIBRARY(myops, m) {
-  m.def("add_scalar(Tensor input, float scalar) -> Tensor");
+  m.def("add_tensors(Tensor input, Tensor other) -> Tensor");
 }
 
 // (6) Register the implementation using STABLE_TORCH_LIBRARY_IMPL
 //     Use TORCH_BOX to automatically handle boxing/unboxing
 STABLE_TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
-  m.impl("add_scalar", TORCH_BOX(&add_scalar));
+  m.impl("add_tensors", TORCH_BOX(&add_tensors));
 }
 
 } // namespace myops
