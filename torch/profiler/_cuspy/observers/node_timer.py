@@ -16,7 +16,9 @@ MEMCPY is on too). Every kind here times the same 4
 fields (START, END, GRAPH_NODE_ID, STREAM_ID) -- plus SOURCE_GRAPH_NODE_ID when every
 selected kind has one (``records.SOURCE_GRAPH_NODE_FIELD``) -- so all records are one size
 and Cuspy decodes them via its vectorized stride + kind-dispatch path; this observer
-just buffers the raw columns (the cost is in Cuspy's decode, not here).
+just buffers the raw columns (the cost is in Cuspy's decode, not here). Source ids are
+therefore all-or-nothing: selecting MEMCPY2, which has no such field, gives up source
+keying for the kernels in the same batch too (they still resolve by exec node id).
 
 Durations are keyed by graph_node_id alone, kind-agnostic: each CUDA-graph node
 is a single op, so its kind is unambiguous. Eager (non-graph) activities report
