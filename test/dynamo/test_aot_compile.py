@@ -2119,6 +2119,9 @@ from user code:
         # and [1] rejected the call, which an input covering it would fix.
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
+        # [1]'s rejection followed no raise, so the advice rests on a trusted
+        # answer and carries no post-throw caveat.
+        self.assertNotIn("advice above rests only on rejections", message)
         # One line per input, not a multi-line GuardDebugInfo repr per input.
         # Counted rather than read off the report's total, which an advice line
         # moves without changing what an entry looks like.
@@ -2604,9 +2607,10 @@ from user code:
         # tolerated: pass 1 raised, pass 2 rejected, the report accepted. The
         # line has to describe what dispatch did without claiming a count it
         # never took -- the raise itself survives only in the chain. And the
-        # footer qualifying post-throw rejections keys on the lines the report
-        # printed, not on what dispatch recorded: this report quotes no
-        # rejection, so there is nothing for it to qualify.
+        # caveat beside the ModelInput advice keys on what dispatch recorded,
+        # not on the lines the report printed: the one rejection dispatch got
+        # followed the raise, so the advice carries it although this report
+        # quotes no rejection.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -2643,13 +2647,14 @@ from user code:
         self.assertNotIn("twice", message)
         self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
         self.assertIn("Add a ModelInput", message)
+        self.assertIn("advice above rests only on rejections", message)
         self.assertNotIn("Every guard tree raised", message)
 
-    def test_no_match_message_qualifies_no_rejection_when_the_re_check_raises(self):
+    def test_no_match_message_qualifies_the_advice_when_the_re_check_raises(self):
         # The other line the re-check can put where dispatch saw a rejection: it
-        # raised. The report's only entry line is then a raise, so a footer
-        # saying every rejection above followed a raise would describe a line
-        # that is not there, and the raise it quotes is the re-check's own.
+        # raised. The report's only entry line is then that raise, the re-check's
+        # own, and the caveat beside the ModelInput advice is still emitted: it
+        # is about the rejection dispatch acted on, not about that line.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -2682,6 +2687,7 @@ from user code:
         self.assertIn(raised, lines)
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
+        self.assertIn("advice above rests only on rejections", message)
         self.assertNotIn("Every guard tree raised", message)
         self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
 
@@ -3006,9 +3012,8 @@ from user code:
         self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
         self.assertNotIn("Add a ModelInput", message)
         # The withheld line above has already said what happened to [1], so the
-        # every-tree-raised footer must not be emitted as well: with a plain
-        # `else:` in place of `elif not withheld:` the report contradicts
-        # itself.
+        # every-tree-raised footer must not be emitted as well: with `not
+        # withheld` dropped from its gate the report contradicts itself.
         self.assertNotIn("Every guard tree raised", message)
         chained = []
         # Start at the cause: the report itself quotes the raise in [0]'s line,
@@ -3258,6 +3263,9 @@ from user code:
         self.assertIn(withheld, message)
         self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
         self.assertIn("Add a ModelInput", message)
+        # The withheld line says why [1] was withheld, not that [0]'s rejection
+        # followed its raise; the advice standing on that rejection says so.
+        self.assertIn("advice above rests only on rejections", message)
         self.assertEqual(str(ctx.exception.__cause__), "guard tree is unhappy")
         # One line per input: the opt-out is described once, and reaching the
         # re-check for it would add a second line about the guards nobody asked
@@ -3384,6 +3392,7 @@ from user code:
         # about what the raise left behind -- with the restore removed, [0]'s line
         # reads "GLOBAL_STATE changed: torch_function" and the advice is to add a
         # ModelInput, both of them artifacts of our own leak.
+        self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
@@ -3449,6 +3458,8 @@ from user code:
         # stops a __torch_function__ subclass from dispatching afterwards. This
         # path propagates the throw rather than serving over it, so the state is
         # put back on the way out.
+        self._hide_leaked_dynamo_globals()
+
         def fn(x):
             return x * 2
 
@@ -3476,6 +3487,8 @@ from user code:
         # throws on the way to raising, so a state left disabled would travel out
         # with the message. Stubbed as in the report's counterpart: the trees that
         # leak this way throw on the first check and never reach the second.
+        self._hide_leaked_dynamo_globals()
+
         def fn(x):
             return x * 2
 
@@ -3561,6 +3574,8 @@ from user code:
         # The function path's guard check, which propagates whatever the tree
         # produced: an interrupt travels out either way, so the state is all this
         # pins.
+        self._hide_leaked_dynamo_globals()
+
         def fn(x):
             return x * 2
 
@@ -3588,6 +3603,8 @@ from user code:
     ):
         # And its second evaluation, the one that runs only to explain a
         # rejection.
+        self._hide_leaked_dynamo_globals()
+
         def fn(x):
             return x * 2
 
@@ -3625,7 +3642,7 @@ from user code:
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
         )
 
-        class RejectsThenRaises:
+        class RejectsThenRaises(NeverReChecked):
             def __init__(self):
                 self.checks = 0
 
@@ -3640,10 +3657,16 @@ from user code:
         with self.assertRaises(RuntimeError) as ctx:
             model(torch.randn(3, 3))
         message = str(ctx.exception)
+        lines = message.splitlines()
         self.assertEqual(stub.checks, 2)
         raised = "[0] <guard check raised RuntimeError: the second pass is unhappy>"
-        self.assertIn(f"  {raised}", message.splitlines())
+        self.assertIn(f"  {raised}", lines)
+        # One entry line: this tree's last evaluation raised, so the report must
+        # not re-check it, and NeverReChecked's line is what a re-check adds.
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
         self.assertIn("Add a ModelInput", message)
+        # The rejection came BEFORE the raise, so the advice carries no caveat.
+        self.assertNotIn("advice above rests only on rejections", message)
         self.assertNotIn("Every guard tree raised", message)
 
     def test_no_match_message_qualifies_a_rejection_that_followed_a_raise(self):
@@ -3683,12 +3706,15 @@ from user code:
         self.assertIn("  [0] stub guard rejected", message.splitlines())
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
-        followed = "every rejection above followed a raise from the same tree"
-        footer = f"Every guard tree raised while checking this call; {followed}"
-        self.assertIn(footer, message)
+        caveat = (
+            "The ModelInput advice above rests only on rejections dispatch took "
+            "after the same tree had raised, so they can be about the relational "
+            "guard state a C++ throw leaves stale rather than about this call."
+        )
+        self.assertIn(caveat, message.splitlines())
         # Not the wording for a report whose every line IS a raise: this one
         # quotes a guard.
-        self.assertNotIn("those raises", message)
+        self.assertNotIn("Every guard tree raised", message)
 
     def test_aot_compile_module_second_pass_warns_that_it_served_over_a_raise(self):
         # The second serving path that has to record a swallowed raise: nothing
@@ -3856,8 +3882,9 @@ from user code:
             with self.assertRaises(RuntimeError) as ctx:
                 combined(x.half())
         # Both passes and the report ran on both results, each from its own one
-        # binding: one bind per result, in index order.
-        self.assertEqual(binds, list(combined.compiled_results))
+        # binding: one bind per result, in index order, and the same objects.
+        results = combined.compiled_results
+        self.assertEqual([id(b) for b in binds], [id(r) for r in results])
         lines = str(ctx.exception).splitlines()
         self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
 
@@ -3898,6 +3925,7 @@ from user code:
     def test_aot_compile_module_ordinary_dispatch_warns_about_nothing(self):
         # The swallowed-raise warning is about a raise, so an ordinary dispatch
         # that walks past a non-matching input to a matching one is silent.
+        self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
             [
