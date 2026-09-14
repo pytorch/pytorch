@@ -6,6 +6,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import builtins
 import io
 import os
 import shutil
@@ -16,9 +17,10 @@ import unittest
 from concurrent.futures import wait
 from concurrent.futures._base import ALL_COMPLETED
 from concurrent.futures.thread import ThreadPoolExecutor
+from threading import Event
 from unittest import mock
 
-from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+from torch.distributed.elastic.multiprocessing.tail_log import tail_logfile, TailLog
 
 
 def write(max: int, sleep: float, file: str):
@@ -84,6 +86,98 @@ class TailLogTest(unittest.TestCase):
             {f"[writer{i}]": set(range(max)) for i in range(nprocs)}, actual
         )
         self.assertTrue(tail.stopped())
+
+    def test_tail_logfile_created_while_producer_finishes(self):
+        """
+        The producer may create the log file in the window between the tailer's
+        existence check and its check of the finished event. The file still has
+        to be tailed rather than dropped.
+        """
+        file = os.path.join(self.test_dir, "0_stdout.log")
+        finished = Event()
+        dst = io.StringIO()
+
+        real_exists = os.path.exists
+        raced = False
+
+        def exists_then_finish(path):
+            nonlocal raced
+            result = real_exists(path)
+            if path == file and not raced:
+                raced = True
+                # the producer writes the file and exits inside the window
+                with open(file, "w") as producer:
+                    producer.write("0\n")
+                finished.set()
+            return result
+
+        with mock.patch(
+            "torch.distributed.elastic.multiprocessing.tail_log.os.path.exists",
+            side_effect=exists_then_finish,
+        ):
+            tail_logfile(
+                header="[writer0]:",
+                file=file,
+                dst=dst,
+                finished=finished,
+                interval_sec=0.001,
+                log_line_filter=lambda _: True,
+            )
+
+        self.assertEqual("[writer0]:0\n", dst.getvalue())
+
+    def test_tail_logfile_producer_finishes_at_eof(self):
+        """
+        The producer may append its last lines and set the finished event in the
+        window between the tailer reading EOF and the tailer checking the event.
+        Those lines still have to be tailed. See issue 143823.
+        """
+        file = os.path.join(self.test_dir, "0_stdout.log")
+        with open(file, "w") as producer:
+            producer.write("0\n")
+
+        finished = Event()
+        dst = io.StringIO()
+        real_open = builtins.open
+
+        class LateWriteFile:
+            def __init__(self, fp):
+                self._fp = fp
+                self._raced = False
+
+            def readline(self):
+                line = self._fp.readline()
+                if not line and not self._raced:
+                    self._raced = True
+                    # the producer appends its last line and exits inside the
+                    # window between this read and the finished check
+                    with real_open(file, "a") as producer:
+                        producer.write("1\n")
+                    finished.set()
+                return line
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                self._fp.close()
+                return False
+
+        def open_late_write_file(path, *args, **kwargs):
+            opened = real_open(path, *args, **kwargs)
+            return LateWriteFile(opened) if path == file else opened
+
+        with mock.patch("builtins.open", side_effect=open_late_write_file):
+            tail_logfile(
+                header="[writer0]:",
+                file=file,
+                dst=dst,
+                finished=finished,
+                interval_sec=0.001,
+                log_line_filter=lambda _: True,
+            )
+
+        self.assertEqual("[writer0]:0\n[writer0]:1\n", dst.getvalue())
 
     def test_tail_write_to_dst_file(self):
         """
