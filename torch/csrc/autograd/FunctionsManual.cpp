@@ -7578,7 +7578,7 @@ Tensor logsumexp_jvp(
   //     that only have one differentiable input, because that means self_t are
   //     never zerotensors
   TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
-  if (areAnyTensorSubclassLike({self_p, self_t})) {
+  if (areAnyTensorSubclassLike({self_p, self_t}) || self_p_exp.requires_grad()) {
     auto result = (self_p_exp * self_t).sum(dim, keepdim);
     result /= sumexp_p;
     return result;
