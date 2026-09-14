@@ -27,12 +27,15 @@
     torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
 
-#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
-  do {                                \
-    bool ok = EXPR;                   \
-    if (!ok) {                        \
-      throw std::runtime_error(MSG);  \
-    }                                 \
+// The condition is tested directly rather than through a `bool` local so that
+// AOTI_RUNTIME_CHECK(false, ...) can end a non-void function without tripping
+// -Wreturn-type.
+#define AOTI_RUNTIME_CHECK(EXPR, MSG)                                     \
+  do {                                                                    \
+    if (!(EXPR)) {                                                        \
+      /* @allow-raw-throw: this macro is the aoti_runtime check itself */ \
+      throw std::runtime_error(MSG);                                      \
+    }                                                                     \
   } while (0)
 
 using AOTIRuntimeError = int32_t;
