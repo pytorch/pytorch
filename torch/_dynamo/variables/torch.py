@@ -27,6 +27,7 @@ traceable graph nodes while preserving correct semantics and handling edge cases
 
 import enum
 import functools
+import importlib
 import inspect
 import logging
 import math
@@ -38,6 +39,8 @@ from typing_extensions import TypeIs
 
 import torch._C
 import torch._refs
+
+torch._utils = importlib.import_module("torch._utils")
 import torch.fx
 import torch.nn
 import torch.utils._pytree as _pytree
