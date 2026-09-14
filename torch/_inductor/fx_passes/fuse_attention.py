@@ -977,6 +977,16 @@ def _sfdp_params_check(match):
             _warn_tf32_disabled()
         return False
 
+    # The pattern's trailing matmul decomposes to bmm followed by a view, and
+    # the matcher keeps walking through further views, so the matched region can
+    # end at a caller's reshape of the attention output rather than at the
+    # output itself. The replacement is rank-preserving - patterns that permute
+    # reproduce the permute - so a match whose output has a different rank than
+    # `query` would have its shape silently changed by the rewrite.
+    out_val = match.output_node().meta.get("val")
+    if isinstance(out_val, torch.Tensor) and out_val.dim() != query.dim():
+        return False
+
     add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
     # Has attn_mask add.
     if len(add_mask_node) > 0:
