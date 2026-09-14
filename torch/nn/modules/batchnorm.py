@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import warnings
 from typing import Any
 
 import torch
@@ -922,8 +923,35 @@ class SyncBatchNorm(_BatchNorm):
             >>> sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module, process_group)
 
         """
+        lossy_types: dict[str, None] = {}
+        module_output = cls._convert_sync_batchnorm(module, process_group, lossy_types)
+        if lossy_types:
+            warnings.warn(
+                f"convert_sync_batchnorm rebuilt {', '.join(lossy_types)} as a plain "
+                "SyncBatchNorm, keeping only the BatchNorm attributes, parameters "
+                "and buffers. Behavior that the type itself provides (an overridden "
+                "forward, lazy initialization hooks, any other subclass state) does "
+                "not survive the rebuild, so the converted model may compute a "
+                "different function. Provide a custom conversion if that behavior "
+                "must be preserved.",
+                stacklevel=2,
+            )
+        return module_output
+
+    @classmethod
+    def _convert_sync_batchnorm(cls, module, process_group, lossy_types):
         module_output = module
         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            # Only the types below round-trip faithfully. A lazy BN that has
+            # already initialized has swapped its __class__ to BatchNorm{1,2,3}d,
+            # so it is matched here.
+            if type(module) not in (
+                torch.nn.BatchNorm1d,
+                torch.nn.BatchNorm2d,
+                torch.nn.BatchNorm3d,
+                torch.nn.SyncBatchNorm,
+            ):
+                lossy_types[type(module).__name__] = None
             module_output = torch.nn.SyncBatchNorm(
                 module.num_features,
                 module.eps,
@@ -945,7 +973,8 @@ class SyncBatchNorm(_BatchNorm):
                 module_output.qconfig = module.qconfig
         for name, child in module.named_children():
             module_output.add_module(
-                name, cls.convert_sync_batchnorm(child, process_group)
+                name,
+                cls._convert_sync_batchnorm(child, process_group, lossy_types),
             )
         del module
         return module_output
