@@ -1018,8 +1018,6 @@ class FlexGemmEpilogueEmitter:
         self.alpha = alpha
         self.beta = beta
         self.fast_math = fast_math
-        if not 0 <= mainloop_scale_count <= len(self.operand_names):
-            raise RuntimeError("invalid FlexGEMM main-loop scale operand count")
         self.mainloop_scale_count = mainloop_scale_count
         self.kernel = GemmEpilogueCuteDSLKernel()
         self.params = ["acc"]
