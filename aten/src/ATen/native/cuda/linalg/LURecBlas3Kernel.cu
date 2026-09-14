@@ -894,14 +894,13 @@ std::tuple<typename c10::scalar_value_type<scalar_t>::type, int> find_pivot_row(
   __shared__ real_t sdata[NWARPS];
   __shared__ int sidx[NWARPS];
 
-  auto* A = dA + LinOff(row_offset, col_offset, lda);
   auto tid = threadIdx.x;
 
   auto my_max = static_cast<real_t>(-1);
   auto my_idx = -1;
   for (int i = row_offset + tid; i < n; i += BS) {
     if (i != exclude_idx) {
-      auto v = ldl::abs(A[LinOff(i, col_offset, lda)]);
+      auto v = ldl::abs(dA[LinOff(i, col_offset, lda)]);
       AGGREGATE_ARGMAX(my_max, my_idx, v, i);
     }
   }
@@ -1093,7 +1092,7 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
       // 1. Panel factorization
       ldl_diagonal_panel(
         dLD, n, lda,
-        MAX_LDL_NB, curr_step, dcurr_step,
+        std::min(n - curr_step, MAX_LDL_NB), curr_step, dcurr_step,
         dipiv, dinfo
       );
 

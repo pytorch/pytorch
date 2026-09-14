@@ -56,6 +56,7 @@ struct MagmaInitializer {
 namespace at::native {
 
 void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos);
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian);
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
@@ -577,6 +578,10 @@ void ldl_factor_kernel(
     const Tensor& info,
     bool upper,
     bool hermitian) {
+  // DEBUG: dispatch unconditionally for now!
+  ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+  return;
+
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
