@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <c10/util/Exception.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <torch/headeronly/cpu/vec/vec_half.h>
 
@@ -65,7 +65,7 @@ static inline void transpose_pad_2x32_block(
     _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + 32), d1);
   }
 #else
-  TORCH_CHECK(
+  STD_TORCH_CHECK(
       false,
       "transpose_pad_2x32_block is only supported when avx512 is supported")
 #endif
@@ -110,7 +110,8 @@ static inline void pack_vnni2(
     }
   }
 #else
-  TORCH_CHECK(false, "pack_vnni2 is only supported when avx512 is supported")
+  STD_TORCH_CHECK(
+      false, "pack_vnni2 is only supported when avx512 is supported")
 #endif
 }
 
