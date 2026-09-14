@@ -967,7 +967,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        if not all(V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining):
+        # is_size_one_or_false rather than guarding_hint_or_throw: a leftover
+        # extent can be an unbacked size-like symbol, and guarding_hint_or_throw
+        # raises GuardOnDataDependentSymNode on those. That escapes the
+        # `except CantSplit` in is_compatible and Scheduler.speedup_by_fusion and
+        # hard-fails the whole compile. Treating "cannot prove it is 1" as
+        # not-splittable keeps every exit from this function a CantSplit.
+        if not all(sv.is_size_one_or_false(s) for s in remaining):
             # Non-unit leftover extents mean the node's iteration space does not
             # tile onto the kernel groups -- e.g. fusing an epilogue whose row
             # count is a strict sub-multiple of a template's tiling ([s, N] into

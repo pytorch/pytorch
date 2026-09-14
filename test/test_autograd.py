@@ -2554,13 +2554,19 @@ class TestAutograd(TestCase):
         view.register_hook(fn0)
         view2.register_hook(fn1)
         view.mul_(2)
-        # We need to explicitly trigger an update to view to update its grad_fn
-        view2.grad_fn
         view2.register_hook(fn2)
         (view + view2).sum().backward()
-        # The hooks originally registered to view are not fired, one must explicitly
-        # trigger an update to the view's grad_fn, and then register a new hook
+        # Hooks registered before the inplace operation are not fired, but registering
+        # a new hook refreshes the view's grad_fn and attaches it to the new node.
         self.assertEqual(count[0], 1)
+
+    def test_tensor_hooks_inplace_through_view_alias(self):
+        leaf = torch.ones(2, requires_grad=True)
+        view = leaf.clone().view(2)
+        view[:].add_(1)
+        view.register_hook(lambda grad: grad * 2)
+        view.sum().backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
 
     def test_retain_grad_cycle(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -11804,6 +11810,21 @@ for shape in [(1,), ()]:
             out = torch.sin(a)
             with self.assertRaisesRegex(CustomError, "unpack"):
                 out.backward()
+
+    def test_saved_tensor_hooks_pack_error_then_data_access(self):
+        # register_hooks sets hooks_ before running pack_hook, so a raising
+        # pack_hook leaves the SavedVariable with hooks but no packed data.
+        a = torch.randn(5, requires_grad=True)
+        y = a * a
+
+        def bad_pack(t):
+            raise ValueError("boom")
+
+        with self.assertRaisesRegex(ValueError, "boom"):
+            y.grad_fn._raw_saved_self.register_hooks(bad_pack, lambda x: x)
+
+        with self.assertRaisesRegex(RuntimeError, "pack hook raised"):
+            y.grad_fn._raw_saved_self.data
 
     def test_saved_tensor_hooks_custom_function_intermediates(self):
         class Func(torch.autograd.Function):
