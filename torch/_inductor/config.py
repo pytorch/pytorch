@@ -1517,6 +1517,41 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: int | None = None if is_fbcode() else decide_compile_threads()
 
+
+def decide_compile_worker_mode() -> str:
+    """
+    Decide whether to use threads or processes for compilation workers.
+
+    Returns one of: "auto", "process", "thread"
+    - "auto": Automatically detect if Python is free-threaded (nogil) and use
+              threads if available, otherwise use processes
+    - "process": Force multiprocessing (current behavior, compatible with all Python)
+    - "thread": Force threading (requires free-threaded Python build)
+
+    Precedence:
+    1. TORCH_COMPILE_WORKER_MODE environment variable
+    2. Default to "process" for safe multiprocessing
+    """
+    mode = os.environ.get("TORCH_COMPILE_WORKER_MODE", "process")
+    valid_modes = ("auto", "process", "thread")
+    if mode not in valid_modes:
+        import logging
+
+        log = logging.getLogger(__name__)
+        log.warning(
+            "Invalid TORCH_COMPILE_WORKER_MODE='%s'. "
+            "Valid options: %s. Defaulting to 'process'.",
+            mode,
+            ", ".join(sorted(valid_modes)),
+        )
+        mode = "process"
+    return mode
+
+
+# Controls whether compilation workers use threads or processes.
+# Options: "auto" (detect nogil), "process" (force multiprocessing), "thread" (force threading)
+compile_worker_mode: str = decide_compile_worker_mode()
+
 # Whether to quiesce the Triton-compile subprocess pool at the end of each compilation.
 quiesce_async_compile_pool: bool = Config(
     justknob="pytorch/inductor:quiesce_async_compile_pool",
@@ -2223,10 +2258,10 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
-    # Use scalar accumulators for online softmax in non-persistent CUDA
-    # reduction loops.
-    scalar_online_softmax_accumulators: bool = (
-        os.environ.get("TORCHINDUCTOR_SCALAR_ONLINE_SOFTMAX_ACCUMULATORS", "1") == "1"
+    # Per-row scalar accumulators for large CUDA inner reduction loops that hold
+    # an online softmax.
+    scalar_accumulators: bool = (
+        os.environ.get("TORCHINDUCTOR_SCALAR_ACCUMULATORS", "1") == "1"
     )
 
     # Generate code using the tl.make_block_ptr() API for loads/stores. Block
