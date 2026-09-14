@@ -1530,6 +1530,38 @@ function test_unpickle_protocol5_dict_with_values() {
   assertEqual(result.a, 42, 'dict value parsed correctly');
 }
 
+function test_summarized_band_decimated_for_long_trace() {
+  console.log('test_summarized_band_decimated_for_long_trace');
+  // A long trace gives the whole-trace summarized band one point per action,
+  // which can exceed Chrome's ~2M-point polygon limit and render as nothing.
+  // With max_entries=0 every block is summarized, so the band gets one point
+  // per alloc. Verify the band is decimated below the point budget while its
+  // peak (the final, monotonically-largest value) is preserved exactly.
+  const N = 120000;
+  const S = 1024;
+  const traces = [];
+  for (let i = 0; i < N; i++) {
+    traces.push({ action: 'alloc', addr: 0x100000 + i * S, size: S, frames: [], stream: 0 });
+  }
+  const snapshot = makeSnapshot({ traces });
+  const result = process_alloc_data(snapshot, 0, false, 0, false);
+
+  for (const d of result.allocations_over_time) {
+    assert(d.timesteps.length <= 100002, `series ${d.elem} within point budget`);
+    assertEqual(d.offsets.length, d.timesteps.length, `series ${d.elem} offsets aligned`);
+    if (Array.isArray(d.size)) {
+      assertEqual(d.size.length, d.timesteps.length, `series ${d.elem} size aligned`);
+    }
+  }
+  const summ = result.summarized_mem;
+  assert(summ.timesteps.length < N, 'summarized band was decimated');
+  assertEqual(summ.size.at(-1), N * S, 'peak summarized value preserved');
+  let max_summ = 0;
+  for (const v of summ.size) if (v > max_summ) max_summ = v;
+  assertEqual(max_summ, N * S, 'max summarized value preserved');
+  assertEqual(result.max_at_time.length, N, 'max_at_time is not decimated');
+}
+
 // ============================================================
 // Run all tests
 // ============================================================
@@ -1586,6 +1618,7 @@ test_unpickle_protocol4_still_works();
 test_unpickle_protocol6_rejected();
 test_unpickle_bytearray8();
 test_unpickle_protocol5_dict_with_values();
+test_summarized_band_decimated_for_long_trace();
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
