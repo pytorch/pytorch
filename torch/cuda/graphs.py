@@ -1317,6 +1317,25 @@ class graph:
             maybe_stamp_capture_root,
         )
 
+        # Which key space this graph's annotations stay in (see
+        # CUDAGraph._maybe_remap_annotations). Rejected before anything is registered or
+        # captured, so an unsupported driver surfaces before any annotation is recorded
+        # against a key nothing will ever look up -- and leaves nothing armed behind, so
+        # retrying the capture with key_by="exec" works.
+        key_by = self._annotation_config["key_by"]
+        if self._enable_annotations and key_by == "source":
+            from torch.cuda._graph_annotations import source_node_ids_available
+
+            if not source_node_ids_available():
+                raise RuntimeError(
+                    "annotation_config={'key_by': 'source'} keeps annotations keyed to the "
+                    "capture graph, which needs a consumer reading CUPTI's sourceGraphNodeId "
+                    "(CUPTI >= 13.4) and a CUDA driver >= 13.4 or an equivalent cuda-compat. "
+                    "Use 'exec' to have them rekeyed to the exec graph instead."
+                )
+        self.cuda_graph._annotation_key_by = key_by
+        _set_annotation_key_by(key_by)
+
         backend = "edge_walk"
         requested = self._annotation_config["backend"]
         if self._enable_annotations and requested != "edge_walk":
@@ -1344,24 +1363,6 @@ class graph:
                     "Cuspy able to subscribe; use 'auto' to fall back to the "
                     "dependent-edge walk instead."
                 )
-
-        # Which key space this graph's annotations stay in (see
-        # CUDAGraph._maybe_remap_annotations). Rejected up front rather than at instantiate,
-        # so an unsupported driver surfaces before any annotation is recorded against a key
-        # nothing will ever look up.
-        key_by = self._annotation_config["key_by"]
-        if self._enable_annotations and key_by == "source":
-            from torch.cuda._graph_annotations import source_node_ids_available
-
-            if not source_node_ids_available():
-                raise RuntimeError(
-                    "annotation_config={'key_by': 'source'} keeps annotations keyed to the "
-                    "capture graph, which needs a consumer reading CUPTI's sourceGraphNodeId "
-                    "(CUPTI >= 13.4) and a CUDA driver >= 13.4 or an equivalent cuda-compat. "
-                    "Use 'exec' to have them rekeyed to the exec graph instead."
-                )
-        self.cuda_graph._annotation_key_by = key_by
-        _set_annotation_key_by(key_by)
 
         # Scope annotation recording to this capture: the capture-root stamp and
         # mark_kernels both gate on this flag, and __exit__ always clears it. It has to be
