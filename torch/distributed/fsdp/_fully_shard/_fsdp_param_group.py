@@ -578,6 +578,14 @@ class FSDPParamGroup:
             if not is_bw():
                 self.reshard()
                 self._record_post_forward()
+                # Per-phase CPU-offload stashing: move the sharded param home
+                # to CPU (free device memory in the fwd->bwd window) or keep it
+                # on the compute device, per ``offload_after_forward``.
+                cpu_device = torch.device("cpu")
+                for fsdp_param in self.fsdp_params:
+                    fsdp_param._ensure_sharded_param_device(
+                        cpu_device if fsdp_param.offload_after_forward else self.device
+                    )
             self._training_state = TrainingState.IDLE
             return output
 
@@ -620,6 +628,14 @@ class FSDPParamGroup:
                 and self._training_state == TrainingState.FORWARD  # partial path taken
             )
             self._training_state = TrainingState.POST_BACKWARD
+            # Per-phase CPU-offload: when keeping the sharded param on device after
+            # backward (offload_after_backward=False), promote it to device BEFORE
+            # the gradient is assigned in foreach_reduce, so the (device) sharded
+            # grad lands on a (device) sharded param. It stays on device through the
+            # optimizer step and is stashed back to CPU after the next forward.
+            for fsdp_param in self.fsdp_params:
+                if not fsdp_param.offload_after_backward:
+                    fsdp_param._ensure_sharded_param_device(self.device)
             with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
                 for fsdp_param in self.fsdp_params:
                     fsdp_param.accumulate_unsharded_grad_if_needed()
@@ -1075,7 +1091,8 @@ class FSDPParamGroup:
         fsdp_params_not_on_cpu = [
             fsdp_param
             for fsdp_param in self.fsdp_params
-            if fsdp_param.sharded_param.device.type != "cpu"
+            if fsdp_param.offload_after_backward
+            and fsdp_param.sharded_param.device.type != "cpu"
         ]
         if fsdp_params_not_on_cpu:
             raise RuntimeError(
