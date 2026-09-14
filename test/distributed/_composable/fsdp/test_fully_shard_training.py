@@ -37,6 +37,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
     ShardPlacementResult,
+    TrainingState,
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -1789,11 +1790,13 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         self.assertIsInstance(handle, GradientReductionHandle)
         state = model._get_fsdp_state()
         self.assertTrue(state._state_ctx.gradient_reduction_pending)
-        self.assertGreater(len(state._comm_ctx.reduce_scatter_states), 0)
-        with self.assertRaisesRegex(RuntimeError, "must be waited on"):
+        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 2)
+        with self.assertRaisesRegex(RuntimeError, "before finalizing"):
             model.finalize_gradient_accumulation(async_op=True)
-        with self.assertRaisesRegex(RuntimeError, "must be waited on"):
+        with self.assertRaisesRegex(RuntimeError, "before forward"):
             model(inputs[0])
+        self.assertEqual(state._training_state, TrainingState.IDLE)
+        self.assertIsNone(state._state_ctx.iter_forward_root)
 
         handle.wait()
         handle.wait()
@@ -1807,6 +1810,34 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             self.assertIsInstance(param, DTensor)
             self.assertIsNotNone(param.grad)
             self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_finalize_gradient_accumulation_async_grouped_forward(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        fully_shard([model[0], model[1]], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        input_tensor = torch.randn(4, 8, device=device_type.type)
+        model.set_is_last_backward(False)
+        model.set_reshard_after_backward(False)
+        model.set_requires_gradient_sync(False)
+        model(input_tensor).sum().backward()
+
+        handle = model.finalize_gradient_accumulation(async_op=True)
+        grouped_state = model[0]._get_fsdp_state()
+        with self.assertRaisesRegex(RuntimeError, "before forward"):
+            model[0](input_tensor)
+        self.assertEqual(grouped_state._training_state, TrainingState.IDLE)
+        self.assertEqual(grouped_state._modules_to_run_forward, set())
+        self.assertIsNone(grouped_state._state_ctx.iter_forward_root)
+
+        handle.wait()
+        output = model(input_tensor)
+        self.assertEqual(output.shape, input_tensor.shape)
 
     @skip_if_lt_x_gpu(4, allow_cpu=True)
     def test_finalize_gradient_accumulation_rejects_partial_all_reduce(self):
