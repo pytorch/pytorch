@@ -402,6 +402,50 @@ TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   remove(file_name);
 }
 
+TEST(PytorchStreamWriterAndReader, SerializationIdIsInsertionOrderIndependent) {
+  // Regression for #184219: two writers that write the same set of records
+  // in different orders should produce the same serialization_id. The id is
+  // computed from a hash of the record names which used to iterate
+  // ``files_written_`` (an ``unordered_set``) directly and could therfore
+  // differ across machines / std lib implementations.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 32> data1;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 32> data2;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 32> data3;
+  for (auto i : c10::irange(data1.size())) {
+    data1[i] = static_cast<char>(i);
+    data2[i] = static_cast<char>(data1.size() - i);
+    data3[i] = static_cast<char>((i * 7) % 128);
+  }
+
+  std::ostringstream oss1;
+  PyTorchStreamWriter writer1([&](const void* b, size_t n) -> size_t {
+    oss1.write(static_cast<const char*>(b), n);
+    return oss1 ? n : 0;
+  });
+  writer1.writeRecord("alpha.bin", data1.data(), data1.size());
+  writer1.writeRecord("beta.bin", data2.data(), data2.size());
+  writer1.writeRecord("gamma.bin", data3.data(), data3.size());
+  writer1.writeEndOfFile();
+  auto id1 = writer1.serializationId();
+
+  std::ostringstream oss2;
+  PyTorchStreamWriter writer2([&](const void* b, size_t n) -> size_t {
+    oss2.write(static_cast<const char*>(b), n);
+    return oss2 ? n : 0;
+  });
+  // Same records, opposite insertion order.
+  writer2.writeRecord("gamma.bin", data3.data(), data3.size());
+  writer2.writeRecord("beta.bin", data2.data(), data2.size());
+  writer2.writeRecord("alpha.bin", data1.data(), data1.size());
+  writer2.writeEndOfFile();
+  auto id2 = writer2.serializationId();
+
+  EXPECT_EQ(id1, id2);
+}
+
 TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
   std::map<std::string, std::map<std::string, std::string>> logs;
 
