@@ -2815,7 +2815,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device.index),
                 {},
             )
             return ConstantVariable.create(None)
