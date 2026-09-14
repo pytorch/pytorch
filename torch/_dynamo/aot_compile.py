@@ -71,6 +71,20 @@ _UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
 _MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", _UNNAMED_SCOPE_PREFIX)
 
 
+def _picklable_unnamed_scope(scope: dict[str, Any]) -> dict[str, Any]:
+    # exec inserts the LIVE builtins dict under __builtins__ into a namespace
+    # that lacks one, and used_globals records an inlined frame's unnamed scope
+    # whole. By value that is every builtin plus whatever extension modules
+    # stash there (pybind11 < 2.13 on CPython < 3.12 keeps its internals in a
+    # PyCapsule), while nothing at load reads it: the artifact only subscripts
+    # the dict. Send the guards pickler's stand-in, which loads as the live one.
+    from .guards import _live_builtins
+
+    if scope.get("__builtins__") is not builtins.__dict__:
+        return scope
+    return {**scope, "__builtins__": _live_builtins}
+
+
 def _names_a_missing_global(text: str) -> bool:
     # Matched whole, against one verbose code part: matching a substring of the
     # GuardDebugInfo string would also fire for the nested-key failure above.
@@ -880,9 +894,16 @@ class AOTCompiledFunction:
     ) -> AOTCompileSaveResult:
         state = fn._artifacts.__dict__.copy()
         state["guard_manager"] = None
+        runtime_env = state["runtime_env"]
         state["runtime_env"] = dataclasses.replace(
-            state["runtime_env"],
-            bytecode=SerializedCode.from_code_object(state["runtime_env"].bytecode),
+            runtime_env,
+            bytecode=SerializedCode.from_code_object(runtime_env.bytecode),
+            used_globals={
+                name: _picklable_unnamed_scope(value)
+                if name.startswith(_UNNAMED_SCOPE_PREFIX) and isinstance(value, dict)
+                else value
+                for name, value in runtime_env.used_globals.items()
+            },
         )
         compiled_fn = state["compiled_fn"]
         # The backend pickles itself here, deliberately outside the handler
