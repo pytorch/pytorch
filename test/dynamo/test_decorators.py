@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
+from torch._dynamo import external_utils
 from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
@@ -28,6 +29,11 @@ from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTe
 
 def my_custom_function(x):
     return x + 1
+
+
+@torch._dynamo.assume_constant_result
+def tensor_constant_result():
+    return torch.tensor([4.0])
 
 
 class DecoratorTests(PytreeRegisteringTestCase):
@@ -1669,6 +1675,117 @@ class DecoratorTests(PytreeRegisteringTestCase):
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn, backend="eager")(x, y))
+
+    def test_assume_constant_result_tensor_output_with_attr_mutation(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.tensor = torch.tensor([1.0])
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.tensor.sum() == 1.0
+
+            def forward(self, x):
+                # Keep this mutation to exercise the reconstruction path from
+                # https://github.com/pytorch/pytorch/issues/159457.
+                self.device_prop = x.device
+                return x * 2 if self.check() else x * 3
+
+        mod = Mod()
+        x = torch.randn(2)
+        ref = mod(x)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(mod, backend=cnt)
+        self.assertEqual(ref, opt_mod(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_assume_constant_result_tensor_output_module_level(self):
+        def fn(x):
+            y = x + 1
+            constant = tensor_constant_result()
+            torch._dynamo.graph_break()
+            return y.sin(), constant
+
+        x = torch.randn(2)
+        expected = ((x + 1).sin(), torch.tensor([4.0]))
+        # debug_force_nested_calls compiles external_utils.wrap_inline as the
+        # top frame, so installed globals belong to that wrapper's scope.
+        scope = (
+            external_utils.__dict__
+            if torch._dynamo.config.debug_force_nested_calls
+            else tensor_constant_result.__globals__
+        )
+        prefix = f"{tensor_constant_result.__name__}_"
+        globals_before = set(scope)
+
+        with self.assertRaisesRegex(Unsupported, "graph_break") as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertFalse(
+            any(name.startswith(prefix) for name in set(scope) - globals_before)
+        )
+        torch._dynamo.reset()
+
+        def post_trace_fn(x):
+            return x + tensor_constant_result()
+
+        hook_called = False
+
+        def fail_hook(_code, _out_code):
+            nonlocal hook_called
+            hook_called = True
+            raise cm.exception
+
+        handle = torch._dynamo.convert_frame.register_bytecode_hook(fail_hook)
+        try:
+            torch.compile(post_trace_fn, backend="eager")(x)
+        finally:
+            handle.remove()
+        self.assertTrue(hook_called)
+        self.assertFalse(
+            any(name.startswith(prefix) for name in set(scope) - globals_before)
+        )
+        torch._dynamo.reset()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+
+        self.assertEqual(expected, opt_fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+        installed_globals = {
+            name for name in set(scope) - globals_before if name.startswith(prefix)
+        }
+        # The explicit graph break discards the first trace attempt. Only the
+        # winning attempt's tensor global should remain installed.
+        self.assertEqual(len(installed_globals), 1)
+
+    def test_assume_constant_result_tensor_output_specialized_module(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.tensor = torch.tensor([1.0])
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.tensor.sum() == 1.0
+
+        mod = Mod()
+        # Exercise NNModuleVariable.call_method(constant=True).
+        mod.torchdynamo_force_dynamic = False
+
+        def fn(x):
+            y = x + 1
+            constant = mod.check()
+            torch._dynamo.graph_break()
+            return y.sin(), constant
+
+        x = torch.randn(2)
+        expected = ((x + 1).sin(), torch.tensor(True))
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        self.assertEqual(expected, torch.compile(fn, backend=cnt)(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_justknobs_check(self):
         def fn(x, y):
