@@ -532,6 +532,16 @@ _HOOK_REGISTRARS = {
 }
 
 
+# Not the identity: an identity weight makes "read the serialized weight" and
+# "dropped the matmul" produce the same tensor.
+AOT_HERMETIC_WEIGHT = torch.eye(3) * 3
+
+
+class HermeticModule(torch.nn.Module):
+    def forward(self, x):
+        return x @ AOT_HERMETIC_WEIGHT
+
+
 GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
 
 
@@ -574,6 +584,13 @@ AOT_DUPE_A = torch.randn(4, 4)
 AOT_DUPE_B = AOT_DUPE_A
 
 AOT_CPP_SHAPE_GLOBAL = torch.randn(8, 4)
+
+
+class GlobalRebindModule(torch.nn.Module):
+    def forward(self, x):
+        if AOT_POOL_MODE == "sum":
+            return x.sum(1)
+        return x.mean(1) * 10.0
 
 
 def global_rebind_fn(x):
@@ -1812,6 +1829,107 @@ from user code:
 
         self._check_module_global_guard_dispatch(make_mod, _set_pooling)
 
+    def test_aot_compile_module_reload_reads_the_live_global(self):
+        # A module artifact's bytecode reads a guarded global's LIVE value as of
+        # the load, not the value serialized at capture -- narrower than a
+        # function artifact loaded with an f_globals, which merges the whole
+        # dict. The load feeds the scope resolved from model.forward to the
+        # guards and substitutes name by name, skipping the recorded
+        # __builtins_dict___N key whether or not a guard reads it.
+        # keep_global_guards is what makes that guard exist at all -- the default
+        # aot_compile filter drops every global guard, which would leave nothing
+        # guarding AOT_HERMETIC_WEIGHT. That scope is this module's dict, which
+        # the capture leaks Dynamo's generated names into, and the load seeds
+        # nothing into it: the only kept global guard is rooted at
+        # AOT_HERMETIC_WEIGHT, not at an import alias or the builtins-dict key.
+        global AOT_HERMETIC_WEIGHT
+
+        self._hide_leaked_dynamo_globals()
+        mod = HermeticModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(3, 3)
+        captured = mod(x)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = AOT_HERMETIC_WEIGHT
+        try:
+            # Shape and dtype survive the rebind, so the kept TENSOR_MATCH
+            # passes either way: what makes the call follow the rebind is that
+            # the snapshot the bytecode reads is taken at load, so it picks up a
+            # rebind that happened before the load rather than serving the
+            # capture-time product.
+            AOT_HERMETIC_WEIGHT = saved * 2
+            live = HermeticModule()(x)
+            self.assertNotEqual(captured.tolist(), live.tolist())
+            reloaded = torch.compile(
+                HermeticModule(),
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), live)
+            # A rebind after the load: the call still answers with the
+            # load-time value.
+            AOT_HERMETIC_WEIGHT = saved * 3
+            self.assertEqual(reloaded(x), live)
+            # A rebind the graph cannot serve is refused rather than served.
+            AOT_HERMETIC_WEIGHT = saved.to(torch.float64)
+            with self.assertRaisesRegex(
+                RuntimeError, r"G\['AOT_HERMETIC_WEIGHT'\].*dtype mismatch"
+            ):
+                reloaded(x)
+        finally:
+            AOT_HERMETIC_WEIGHT = saved
+
+    def test_aot_compile_module_guards_track_rebound_global(self):
+        # The other half of the contract. Guards resolve against the loading
+        # process's scope dict itself, so a global rebound after the artifact is
+        # loaded redirects dispatch. A copy taken at load time would go on
+        # serving whichever graph matched then, with no error and a wrong answer.
+        # The graph specialized on this global rather than lifting it, so the
+        # bytecode never reads it: the load-time snapshot carries a copy of the
+        # name, but only the guards consult its value.
+        #
+        # _set_pool_mode REBINDS the global, which is what makes the helper's
+        # post-load checks pin the by-reference read. The helper's other callers
+        # pass _set_pooling, which mutates a container in place, and a copy of
+        # the scope shows that just as well.
+        from torch._dynamo.source import get_global_source_name
+
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(
+            GlobalRebindModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(4, 8),), kwargs={}, contexts=[])]
+        )
+        (captured,) = model.forward.compiled_results
+        output_graph = load_guards_state(captured._artifacts.guards_state).output_graph
+        sources = [guard.originating_source for guard in output_graph.guards]
+        roots = {get_global_source_name(source) for source in sources}
+        self.assertIn("AOT_POOL_MODE", roots)
+        self.assertIn("AOT_POOL_MODE", output_graph.global_scope)
+        # Two halves: used_globals says the graph did not lift it, external_refs
+        # that no LOAD_GLOBAL in the bytecode reads it. Not co_names, which keeps
+        # the traced function's whole name table whether an instruction uses it.
+        runtime_env = captured._artifacts.runtime_env
+        self.assertNotIn("AOT_POOL_MODE", runtime_env.used_globals)
+        self.assertNotIn("AOT_POOL_MODE", runtime_env.external_refs)
+
+        torch._dynamo.reset()
+        self._check_module_global_guard_dispatch(GlobalRebindModule, _set_pool_mode)
+
     @parametrize(
         "hooks",
         sorted(_HOOK_REGISTRARS),
@@ -1884,6 +2002,64 @@ from user code:
         self.assertIn("has forward pre-hooks, forward hooks registered", joined)
         self.assertIn("has backward pre-hooks, backward hooks registered", joined)
         self.assertIn("overrides __call__", joined)
+
+    def test_aot_compile_module_after_load_hook_is_silently_dropped(self):
+        # The residue of the warning above: a hook registered after the load is
+        # dropped with no warning at all, and this pins what that silence costs
+        # -- a wrong answer rather than an error.
+        self._hide_leaked_dynamo_globals()
+        x = torch.randn(3)
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        mod = ScaleModule()
+        reloaded = torch.compile(mod, fullgraph=True, backend="eager")
+        reloaded._load_aot_compiled_module(data)
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            mod.register_forward_hook(lambda m, i, o: o * 100)
+            served = reloaded(x)
+        self.assertEqual(served, ScaleModule()(x))
+        # The very module the artifact holds now answers differently in eager.
+        self.assertNotEqual(served.tolist(), mod(x).tolist())
+
+    def test_aot_compile_module_hook_warning_fires_once(self):
+        # Dropped hooks are a property of the model, not of a ModelInput, so the
+        # paragraph must not repeat once per compiled result:
+        # _warn_dropped_module_dispatch runs ahead of the per-ModelInput loop on
+        # the capture path and once per deserialize on the load path. The
+        # parametrized test_aot_compile_module_warns_on_dropped_hooks above
+        # asserts one record per path with a single ModelInput, which cannot tell
+        # once per model from once per ModelInput, so this one captures two and
+        # asserts the compiled-result count beside the count of warnings.
+        self._hide_leaked_dynamo_globals()
+
+        def make_mod():
+            mod = ScaleModule()
+            mod.register_forward_hook(lambda m, i, o: o * 100)
+            return mod
+
+        def hook_warnings(logs):
+            hooked = "forward hooks registered"
+            return [r for r in logs.records if hooked in r.getMessage()]
+
+        inputs = [
+            ModelInput(args=(torch.randn(n),), kwargs={}, contexts=[]) for n in (3, 4)
+        ]
+        model = torch.compile(make_mod(), fullgraph=True, backend="eager")
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            model._aot_compile(inputs)
+        self.assertEqual(len(model.forward.compiled_results), 2)
+        self.assertEqual(len(hook_warnings(logs)), 1, logs.output)
+
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded = torch.compile(make_mod(), fullgraph=True, backend="eager")
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            reloaded._load_aot_compiled_module(data)
+        self.assertEqual(len(reloaded.forward.compiled_results), 2)
+        self.assertEqual(len(hook_warnings(logs)), 1, logs.output)
 
     def test_aot_compile_module_warns_on_custom_call(self):
         # The other thing tracing model.forward skips. No hook dict records it,
