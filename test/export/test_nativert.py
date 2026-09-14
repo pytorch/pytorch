@@ -20,7 +20,11 @@ from torch.testing._internal.common_device_type import (
     skipGPUIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, parametrize
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils import _pytree as pytree
 
@@ -269,6 +273,8 @@ def _pytree_model(device):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestNativeRTDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # nativert's placement layer accepts only CPU/CUDA/meta/MTIA
     # (torch/nativert/executor/PlacementUtils.cpp), and registers an AOTI runner
     # for CPU and CUDA only.
@@ -370,6 +376,8 @@ class TestNativeRTDevice(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestSelectScalarOverload(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_floor_divide_default_scalar(self) -> None:
         # PT2 export lowers `x // 10` to aten.floor_divide.default with a scalar
         # Int argument (the #90923 Scalar->Tensor broadcast).  Its default
