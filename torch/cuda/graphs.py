@@ -761,9 +761,10 @@ class CUDAGraph(_CUDAGraph):
         self._recorded_exec_ids = set()
         self._arm_retained()
         # Reset-only state: scrubbed here because the object is reused after
-        # reset(); on death these ints die with the object.
+        # reset(); on death it dies with the object.
         self._capture_graph_id = None
         self._remapped_exec_id = None
+        self._annotated_body_graph_ids = set()
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:
