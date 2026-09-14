@@ -444,12 +444,12 @@ namespace {
               output_arg{ output, "output", 2 };
     checkAllSameGPU(__func__, {input_arg, output_arg});
 
-    TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+    TORCH_CHECK_VALUE(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
     int64_t ndim = input.dim();
-    TORCH_CHECK((ndim == 3 || ndim == 4),
+    TORCH_CHECK_VALUE((ndim == 3 || ndim == 4),
       "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
     for (const auto i : {-2, -1}) {
-      TORCH_CHECK(input.size(i) > 0,
+      TORCH_CHECK_VALUE(input.size(i) > 0,
         "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i + ndim, " being "
         "empty");
@@ -459,7 +459,7 @@ namespace {
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
-        TORCH_CHECK(input.ndimension() == 4,
+        TORCH_CHECK_VALUE(input.ndimension() == 4,
                     "adaptive_avg_pool2d(): Expected 4D tensor, but got ",
                     input.sizes());
 
@@ -614,15 +614,20 @@ namespace {
               input_arg{ input, "input", 3 };
 
     adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
-    TORCH_CHECK(input.dim() == gradOutput_.dim(),
+    TORCH_CHECK_VALUE(input.dim() == gradOutput_.dim(),
       __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
+    for (const auto i : c10::irange(input.dim() - 2)) {
+      TORCH_CHECK_VALUE(input.size(i) == gradOutput_.size(i),
+        __func__, ": input and gradOutput_ must have the same size at dim ", i,
+        ", but got ", input.size(i), " and ", gradOutput_.size(i));
+    }
 
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
-        TORCH_CHECK(input.ndimension() == 4,
+        TORCH_CHECK_VALUE(input.ndimension() == 4,
                     "adaptive_avg_pool2d_backward_cuda(): Expected 4D tensor, but got ", input.ndimension());
 
         int sizeB = input.size(0);
