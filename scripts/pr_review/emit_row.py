@@ -7,8 +7,9 @@ readable:
   * ``started`` — written by the prepare job before any model call. It exists so
     that a run which is cancelled, times out, or dies on the runner still leaves
     a trace.
-  * a terminal row — written by the publish job under ``if: always()``, carrying
-    the real outcome.
+  * a terminal row — usually written by the publish job under ``if: always()``,
+    carrying the real outcome. The prepare job writes one itself when it finds
+    the request superseded, since publish never runs in that case.
 
 That gives three distinguishable states, which a single row cannot express:
 
@@ -92,8 +93,10 @@ def as_float(value: object, default: float = 0.0) -> float:
 
 
 def safe_model(value: object) -> str:
+    # fullmatch, not match: `$` also matches before a final newline, so
+    # `.match` accepted "claude\n" and a 128-char name plus one at 129.
     text = value if isinstance(value, str) else ""
-    return text if _MODEL_CHARS.match(text) else ""
+    return text if _MODEL_CHARS.fullmatch(text) else ""
 
 
 def base_row(phase: str) -> dict:
