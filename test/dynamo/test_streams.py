@@ -2731,6 +2731,24 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    def test_synchronize_indexless_device_uses_current_device(self):
+        def f(x):
+            torch.cuda.synchronize(torch.device("cuda"))
+            return x + 1
+
+        torch._dynamo.reset()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            compiled(x)
+            with patch.object(torch.accelerator, "synchronize") as synchronize:
+                compiled(x)
+
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(synchronize.call_args.args, (torch.device("cuda"),))
+
     def test_wait_stream_anchors_following_record(self) -> None:
         """A record_event on the WAITING stream after a wait_stream must chain to
         the wait_stream (which runs on that stream), not float above it as a bare
