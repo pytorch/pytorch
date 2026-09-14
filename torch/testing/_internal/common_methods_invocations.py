@@ -3178,6 +3178,10 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
     elif op_info.name == 'aminmax':
         yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': (max_values, min_values)}),
                          error_regex=err_msg_aminmax2)
+        # The two outputs are written independently, so they must not alias.
+        shared = torch.empty(L, dtype=torch.float32, device=device)
+        yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': (shared, shared)}),
+                         error_regex="must not overlap")
 
     # Error Inputs for functions to raise an error on specified zero'd dimension as reduction dim
     err_msg3 = "reduction"

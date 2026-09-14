@@ -5,6 +5,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -373,6 +374,18 @@ TORCH_META_FUNC(aminmax)
       ", but got ",
       max.dtype(),
       " instead");
+  if (min.defined() && max.defined()) {
+    // The two outputs are written independently, so overlapping storage makes
+    // whichever write lands last clobber the other, silently.
+    // Only Partial and Full are rejected. TooHard covers non-dense outputs and
+    // symbolic shapes, where overlap cannot be proven either way; requiring No
+    // there would reject non-contiguous out= tensors that do not overlap.
+    const auto overlap = at::get_overlap_status(min, max);
+    TORCH_CHECK(
+        overlap != at::MemOverlapStatus::Partial &&
+            overlap != at::MemOverlapStatus::Full,
+        "aminmax(): the `min` and `max` out= tensors must not overlap.");
+  }
 
   DimVector shape;
   if (dim_opt.has_value()) {
