@@ -1285,7 +1285,14 @@ def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
 def pixel_shuffle(self: Tensor, upscale_factor: int):
     torch._check(
         self.dim() >= 3,
-        lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
+        lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim()} dimension(s)",
+    )
+    upscale_factor_squared = upscale_factor * upscale_factor
+    torch._check(
+        self.shape[-3] % upscale_factor_squared == 0,
+        lambda: f"pixel_shuffle expects its input's 'channel' dimension to be divisible by the "
+        f"square of upscale_factor, but input.size(-3)={self.shape[-3]} is not divisible by "
+        f"{upscale_factor_squared}",
     )
     batch = self.shape[:-3]
     C_out = self.shape[-3] // upscale_factor**2
@@ -1313,7 +1320,17 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
 def pixel_unshuffle(self: Tensor, downscale_factor: int):
     torch._check(
         self.dim() >= 3,
-        lambda: f"pixel_unshuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
+        lambda: f"pixel_unshuffle expects input to have at least 3 dimensions, but got input with {self.dim()} dimension(s)",
+    )
+    torch._check(
+        self.shape[-2] % downscale_factor == 0,
+        lambda: f"pixel_unshuffle expects height to be divisible by downscale_factor, but "
+        f"input.size(-2)={self.shape[-2]} is not divisible by {downscale_factor}",
+    )
+    torch._check(
+        self.shape[-1] % downscale_factor == 0,
+        lambda: f"pixel_unshuffle expects width to be divisible by downscale_factor, but "
+        f"input.size(-1)={self.shape[-1]} is not divisible by {downscale_factor}",
     )
     batch = self.shape[:-3]
     C_out = self.shape[-3] * downscale_factor**2

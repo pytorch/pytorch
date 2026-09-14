@@ -3259,6 +3259,48 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(grad_output, grad_output_clone)
 
 
+    def test_pixel_shuffle_unshuffle_decomp_shape_validation(self):
+        """The decompositions must reject bad shapes with eager's messages.
+
+        Without these checks the bad shape reaches view()/reshape() and surfaces
+        as an internal "shape [...] is invalid for input of size N" error, which
+        says nothing about which argument was wrong.
+        """
+        from torch._refs.nn.functional import (
+            pixel_shuffle as pixel_shuffle_decomp,
+            pixel_unshuffle as pixel_unshuffle_decomp,
+        )
+
+        # channel dim not divisible by upscale_factor ** 2
+        x = torch.randn(1, 5, 4, 4)
+        msg = "channel' dimension to be divisible by the square of upscale_factor"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.pixel_shuffle(x, 2)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pixel_shuffle_decomp(x, 2)
+
+        # height / width not divisible by downscale_factor
+        y = torch.randn(1, 4, 5, 5)
+        msg = "height to be divisible by downscale_factor"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.pixel_unshuffle(y, 2)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pixel_unshuffle_decomp(y, 2)
+
+        z = torch.randn(1, 4, 4, 5)
+        msg = "width to be divisible by downscale_factor"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.pixel_unshuffle(z, 2)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pixel_unshuffle_decomp(z, 2)
+
+        # the dimension count must be reported as a number, not a bound method
+        w = torch.randn(4, 4)
+        with self.assertRaisesRegex(RuntimeError, r"input with 2 dimension\(s\)"):
+            pixel_shuffle_decomp(w, 2)
+        with self.assertRaisesRegex(RuntimeError, r"input with 2 dimension\(s\)"):
+            pixel_unshuffle_decomp(w, 2)
+
     def test_pixel_shuffle_unshuffle(self):
         def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
                                                  upscale_factor=None):
