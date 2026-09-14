@@ -534,6 +534,20 @@ class ModeBranchGlobalModule(torch.nn.Module):
         return x * 2
 
 
+class TensorDefaultModule(torch.nn.Module):
+    # A tensor default makes inspect.Signature equality raise (Parameter.__eq__
+    # takes bool() of `default == default`), whether or not the body reads it.
+    def forward(self, x, mask=torch.ones(3)):
+        return x * 2
+
+
+def make_scaling_forward(scale):
+    def forward(self, x):
+        return x * scale
+
+    return forward
+
+
 AOT_POOL_MODE = "sum"
 
 # Two globals bound to the SAME tensor: make_dupe_guard refuses to relate a local
@@ -2000,6 +2014,90 @@ from user code:
         # The second evaluation is the re-check reading [1]'s global again; the
         # last resort would have served [0] without one.
         self.assertEqual(compares, 2)
+
+    def test_module_dispatch_serves_an_opted_out_result_from_any_position(self):
+        # With [0] still checked and [1] opted out, a call neither guards is
+        # served by [1]: the fall-through this dispatch replaced re-entered
+        # compiled_results[0] alone and raised its guard error.
+        mod = ModeBranchGlobalModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile(
+            [
+                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
+                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
+            ]
+        )
+        model.forward.compiled_results[1].disable_guard_check()
+        self.assertEqual(model(x, 2), x * AOT_BRANCH_SCALE)
+
+    def test_module_dispatch_rechecks_before_honouring_an_opt_out(self):
+        # [0] opted out, [1] checked and falsely rejected once: the re-check
+        # finds [1]'s real match before the last resort can hand the call to [0].
+        mod = ModeBranchGlobalModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(3, 3)
+        model._aot_compile(
+            [
+                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
+                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
+            ]
+        )
+        model.forward.compiled_results[0].disable_guard_check()
+        g = globals()
+        probe = CountedKey("AOT_BRANCH_SCALE", misses=1)
+        saved = g.pop("AOT_BRANCH_SCALE")
+        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
+        self.addCleanup(g.pop, probe, None)
+        g[probe] = saved
+        out = model(x, 1)
+        compares = probe.compares
+        self.assertEqual(out, x * saved)
+        self.assertEqual(compares, 2)
+
+    def test_module_dispatch_shares_a_binding_past_a_tensor_default(self):
+        # Every result's signature carries the same default object, so the
+        # results share a binding; deciding that through Signature equality
+        # raised `Boolean value of Tensor with more than one value is ambiguous`
+        # from the constructor, for _aot_compile and deserialize alike.
+        mod = TensorDefaultModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
+        self.assertTrue(model.forward._shared_binding)
+        for x in xs:
+            self.assertEqual(model(x), x * 2)
+        loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
+        for x in xs:
+            self.assertEqual(loaded(x), x * 2)
+
+    def test_module_dispatch_shares_a_binding_across_closure_cells(self):
+        # A forward closing over a cell shares a binding only while every
+        # result holds the SAME cell, which results of one _aot_compile do and
+        # results assembled from two modules -- same signature, same freevar
+        # name, different cell -- do not.
+        mod = torch.nn.Module()
+        mod.forward = types.MethodType(make_scaling_forward(3.0), mod)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
+        self.assertTrue(model.forward._shared_binding)
+        for x in xs:
+            self.assertEqual(model(x), x * 3)
+        other = torch.nn.Module()
+        other.forward = types.MethodType(make_scaling_forward(5.0), other)
+        model2 = torch.compile(other, fullgraph=True, backend="eager")
+        model2._aot_compile([ModelInput(args=(xs[1],), kwargs={}, contexts=[])])
+        results = model.forward.compiled_results[:1] + model2.forward.compiled_results
+        combined = AOTCompiledModel(mod, results)
+        self.assertFalse(combined._shared_binding)
+        self.assertEqual(combined(xs[0]), xs[0] * 3)
+        self.assertEqual(combined(xs[1]), xs[1] * 5)
 
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
