@@ -55,6 +55,31 @@ class TestRmsNormJit(TestCase):
         tol = {torch.float16: 3e-3, torch.bfloat16: 3e-2, torch.float32: 2e-4}[dtype]
         self.assertEqual(actual, expected, atol=tol, rtol=tol)
 
+    @dtypes(torch.float32)
+    def test_autograd_and_cuda_graph(self, device, dtype):
+        x = torch.randn(37, 1024, device=device, dtype=dtype, requires_grad=True)
+        w = torch.randn(1024, device=device, dtype=dtype, requires_grad=True)
+        dy = torch.randn_like(x)
+
+        def run():
+            y = torch.nn.functional.rms_norm(x, [1024], w, 1e-5)
+            return y, torch.autograd.grad(y, (x, w), dy)
+
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = run()
+        expected = (expected[0].detach(), expected[1])
+        with jit_only():
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                run()
+            torch.cuda.current_stream().wait_stream(stream)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                actual = run()
+            graph.replay()
+        self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
+
 
 instantiate_device_type_tests(TestRmsNormJit, globals(), only_for="cuda")
 
