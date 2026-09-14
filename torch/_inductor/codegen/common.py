@@ -16,6 +16,7 @@ import threading
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
+from textwrap import dedent
 from typing import Any, cast, ClassVar, Generic, NamedTuple, TYPE_CHECKING
 from typing_extensions import Self, TypeVar
 
@@ -402,6 +403,14 @@ class DeviceOpOverrides:
     def cpp_device_ptr(self) -> str:
         raise NotImplementedError
 
+    def aten_device_type(self) -> str:
+        """Return the C++ ATen DeviceType expression for this device.
+
+        The returned value must use the ``at::k...`` form, for example
+        ``at::kPrivateUse1``.
+        """
+        raise NotImplementedError
+
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
@@ -410,6 +419,28 @@ class DeviceOpOverrides:
     ) -> tuple[list[str], str] | None:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
+
+
+class NoOpDeviceOpOverrides(DeviceOpOverrides):
+    def import_get_raw_stream_as(self, name: str) -> str:
+        return dedent(
+            """
+            def get_raw_stream(_):
+                return 0
+            """
+        )
+
+    def cpp_kernel_type(self) -> str:
+        return "void*"
+
+    def set_device(self, device_idx: DeviceIdx) -> str:
+        return "pass"
+
+    def synchronize(self) -> str:
+        return "pass"
+
+    def device_guard(self, device_idx: DeviceIdx) -> str:
+        return "torch._ops.contextlib.nullcontext()"
 
 
 # Thread-safe lazy initialization for device op overrides
@@ -546,12 +577,15 @@ def get_custom_backend_config_for_device(device: str) -> ConfigModule | None:
     return custom_backend_codegen_configs.get(device)
 
 
+# Prevents a hook that re-enters init_backend_registration from firing itself again.
+_privateuse1_backend_init_in_progress = False
+
+
 @functools.cache
-def init_backend_registration() -> None:
-    """
-    Register the backend for different devices, including the scheduling
-    for kernel code generation and the host side wrapper code generation.
-    """
+def _init_builtin_backend_registration() -> None:
+    # The built-in devices are never unregistered, so this only needs to run
+    # once per process; the privateuse1 probe in init_backend_registration
+    # below re-runs on every call.
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_gpu import CppWrapperGpu
@@ -646,18 +680,48 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+
+def init_backend_registration() -> None:
+    """
+    Register the backend for different devices, including the scheduling
+    for kernel code generation and the host side wrapper code generation.
+    """
+    global _privateuse1_backend_init_in_progress
+    _init_builtin_backend_registration()
+
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
         private_backend != "privateuseone"
         and get_scheduling_for_device(private_backend) is None
     ):
-        from torch.utils.backend_registration import _get_custom_mod_func
+        device_mod = getattr(torch, private_backend, None)
+        backend_init = getattr(device_mod, "_inductor_backend_init", None)
+        if backend_init is not None:
+            # Vendor hook: runs the full inductor integration and must call
+            # register_backend_for_device itself. Serialized on the compile
+            # lock so a concurrent first compile waits for the in-flight hook
+            # instead of observing a half-registered device.
+            from torch._dynamo.convert_frame import compile_lock
 
-        try:
-            device_scheduling = _get_custom_mod_func("Scheduling")
-            wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
-            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
-            fx_wrapper_codegen = _get_custom_mod_func("WrapperFxCodegen")
+            with compile_lock:
+                # Re-check under the lock: another thread may have finished
+                # registration while we waited, and a hook that re-enters
+                # this function (the lock is re-entrant) must not fire
+                # itself again.
+                if get_scheduling_for_device(private_backend) is not None:
+                    return
+                if _privateuse1_backend_init_in_progress:
+                    return
+                _privateuse1_backend_init_in_progress = True
+                try:
+                    backend_init()
+                finally:
+                    _privateuse1_backend_init_in_progress = False
+        else:
+            device_scheduling = getattr(device_mod, "Scheduling", None)
+            wrapper_codegen = getattr(device_mod, "PythonWrapperCodegen", None)
+            cpp_wrapper_codegen = getattr(device_mod, "CppWrapperCodegen", None)
+            fx_wrapper_codegen = getattr(device_mod, "WrapperFxCodegen", None)
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,
@@ -666,8 +730,6 @@ def init_backend_registration() -> None:
                     cpp_wrapper_codegen,
                     fx_wrapper_codegen,
                 )
-        except RuntimeError:
-            pass
 
 
 def index_prevent_reordering(
@@ -699,14 +761,16 @@ def _initialize_device_op_overrides():
         if _device_op_overrides_initialized:
             return
 
-        from . import mps_device_op_overrides  # noqa: F401
-        from .cpu_device_op_overrides import CpuDeviceOpOverrides
+        from . import (
+            cpu_device_op_overrides,  # noqa: F401
+            mps_device_op_overrides,  # noqa: F401
+        )
         from .cuda import device_op_overrides  # noqa: F401
         from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
         # TPU uses Pallas for codegen and only needs no-op overrides
-        register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+        register_device_op_overrides("tpu", NoOpDeviceOpOverrides())
 
         _device_op_overrides_initialized = True
 

@@ -17,7 +17,11 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.export.graph_signature import CustomObjArgument
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
@@ -139,6 +143,8 @@ class GraphBuilder:
 
 
 class TestLift(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         load_torchbind_test_lib()
@@ -362,6 +368,8 @@ class TestLift(TestCase):
 
 
 class ConstantAttrMapTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         load_torchbind_test_lib()

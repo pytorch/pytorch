@@ -87,9 +87,7 @@ void CaptureTracker::recordAllocation(
       block, *context.tracked_capture_id);
 }
 
-void CaptureTracker::recordFree(
-    const void* block,
-    cudaStream_t free_stream) {
+void CaptureTracker::recordFree(const void* block, cudaStream_t free_stream) {
   TORCH_INTERNAL_ASSERT(hasActiveCaptures());
   auto allocation_it = block_allocation_captures_.find(block);
   if (allocation_it == block_allocation_captures_.end()) {
@@ -114,11 +112,15 @@ bool CaptureTracker::isFreeInAllocationCaptureOrAncestor(
       return true;
     }
     auto allocation_capture_it = capture_tree_.find(allocation_capture_id);
-    if (allocation_capture_it == capture_tree_.end() ||
-        !allocation_capture_it->second.parent_capture_id.has_value()) {
+    if (allocation_capture_it == capture_tree_.end()) {
       return false;
     }
-    allocation_capture_id = *allocation_capture_it->second.parent_capture_id;
+    const auto parent_capture_id =
+        allocation_capture_it->second.parent_capture_id;
+    if (!parent_capture_id.has_value()) {
+      return false;
+    }
+    allocation_capture_id = *parent_capture_id;
   }
 }
 
