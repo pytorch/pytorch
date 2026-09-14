@@ -5373,6 +5373,12 @@ If :attr:`bins` is a 1D tensor, it specifies the sequence of bin edges
 including the rightmost edge. It should contain at least 2 elements
 and its elements should be increasing.
 
+.. note::
+    For a nonempty CUDA input, when :attr:`bins` is an integer and :attr:`range`
+    is omitted, inferring the range synchronizes the device with the CPU and is
+    not supported during CUDA graph capture. Specify :attr:`range` or pass a
+    tensor of bin edges to avoid this synchronization.
+
 Args:
     {input}
     bins: int or 1D Tensor. If int, defines the number of equal-width bins. If tensor,
@@ -5443,6 +5449,12 @@ corresponding dimension. The :attr:`range` argument can be provided to manually
 specify the leftmost and rightmost bin edges in each dimension.
 
 If :attr:`bins` is an int, it specifies the number of equal-width bins for all dimensions.
+
+.. note::
+    For a nonempty CUDA input, when :attr:`bins` is an integer or a sequence of
+    integers and :attr:`range` is omitted, inferring the range synchronizes the
+    device with the CPU and is not supported during CUDA graph capture. Specify
+    :attr:`range` or pass tensors of bin edges to avoid this synchronization.
 
 .. note::
     See also :func:`torch.histogram`, which specifically computes 1D histograms.
