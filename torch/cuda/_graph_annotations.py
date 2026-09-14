@@ -326,7 +326,9 @@ def _cupti_version() -> int | None:
         return None
     try:
         return pylibcupti().get_version()
-    except (OSError, RuntimeError):
+    except (AttributeError, OSError, RuntimeError):
+        # AttributeError included because binding the wrapper's prototypes touches symbols
+        # an old libcupti may not export -- the very case this probe exists to catch.
         return None
 
 
