@@ -4162,6 +4162,26 @@ class TestBufferProtocol(TestCase):
         self.assertEqual(tensor.numel(), 2)
         self.assertSequenceEqual(tensor, [255, 255])
 
+    def test_misaligned_offset(self):
+        # An offset that leaves the data pointer misaligned for the requested
+        # dtype must be rejected: the tensor is in bounds, but the typed load in
+        # c10::LoadImpl assumes natural alignment and reads shifted bytes.
+        buffer = np.zeros(4, dtype=np.complex128)
+        with self.assertRaisesRegex(ValueError,
+                                    r"is not aligned to the required alignment"):
+            torch.frombuffer(buffer, dtype=torch.complex128, count=1, offset=6)
+
+    def test_offset_aligned_below_element_size(self):
+        # complex128 has sizeof 16 but alignof 8, so an 8 byte offset is
+        # naturally aligned and must keep working.
+        buffer = np.zeros(4, dtype=np.complex128)
+        buffer[1] = complex(2, 3)
+        tensor = torch.frombuffer(buffer, dtype=torch.complex128, count=1, offset=16)
+        self.assertEqual(tensor.numel(), 1)
+        self.assertEqual(tensor[0], complex(2, 3))
+        aligned = torch.frombuffer(buffer, dtype=torch.complex128, count=1, offset=8)
+        self.assertEqual(aligned.numel(), 1)
+
 class TestFromBlob(TestCase):
     def _make_data(self, dtype, numel):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
