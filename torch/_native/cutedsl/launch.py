@@ -26,6 +26,17 @@ def fake_compact(dtype, shape, *, stride_order=None, align=None):
     )
 
 
+def supported_alignment(tensor, maximum: int) -> int:
+    """Return the largest power-of-two alignment up to `maximum` supported by `tensor`."""
+    # const_data_ptr avoids materializing COW storage.
+    with torch._C.DisableTorchFunctionSubclass():
+        ptr = tensor.const_data_ptr()
+    alignment = maximum
+    while alignment > tensor.element_size() and ptr % alignment:
+        alignment //= 2
+    return alignment
+
+
 def read_only(t):
     """Export an input through const_data_ptr() without materializing COW storage.
     Outputs must remain writable. Non-DLPack operations are rejected, so wrap only
