@@ -85,6 +85,19 @@ HAS_GPU_AND_TRITON = HAS_GPU
 GPU_TYPE = get_gpu_type()
 
 
+def running_on_tdm_device() -> bool:
+    """Return whether the active ROCm device and Triton support gfx1250 TDM."""
+    if not torch.version.hip or not HAS_CUDA_AND_TRITON:
+        return False
+    try:
+        from torch._inductor.utils import _gfx1250_device_prereqs
+
+        device = torch.device("cuda", torch.cuda.current_device())
+        return _gfx1250_device_prereqs(device)
+    except Exception:
+        return False
+
+
 def _is_multigpu(gpu: str) -> bool:
     # Resolve through the DeviceInterface registry: GPU_TYPES may include
     # out-of-tree backends with no torch.<gpu> module (getattr would raise)
