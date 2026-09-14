@@ -14,8 +14,13 @@ from typing import get_args
 from unittest import mock
 
 import torch
+import torch.nn.functional as F
 from torch._higher_order_ops import flex_gemm
-from torch._higher_order_ops.flex_gemm import _SUPPORTED_FLEX_GEMM_OP_NAMES
+from torch._higher_order_ops.flex_gemm import (
+    _SUPPORTED_FLEX_GEMM_OP_NAMES,
+    nvfp4_pack,
+    to_blocked,
+)
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config as inductor_config
 from torch._inductor.exc import InductorError
@@ -1596,7 +1601,6 @@ class FlexGemmTestCase(TestCase):
         self, format_name, m, n, k, *, global_scales=None, device="cuda"
     ):
         """Return quantized tensors, scales, public options, and a native GEMM reference."""
-        import torch.nn.functional as F
 
         global_a, global_b = (None, None) if global_scales is None else global_scales
         a = torch.randn(m, k, device=device, dtype=torch.bfloat16)
@@ -3170,18 +3174,31 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_scaled_mm_eager_rejects_invalid_inputs(self, case):
-        import torch.nn.functional as F
-
         case, error = case
-        a = torch.empty(256, 256, dtype=torch.float8_e4m3fn)
+        nvfp4 = case in ("global_dtype", "global_shape")
+        dtype, scale_dtype, k, scale_size = (
+            (torch.float4_e2m1fn_x2, torch.float8_e4m3fn, 128, 4096)
+            if nvfp4
+            else (torch.float8_e4m3fn, torch.float8_e8m0fnu, 256, 2048)
+        )
+        a = torch.empty(256, k, dtype=dtype)
         b = torch.empty_like(a).t()
-        scale_a = [torch.empty(2048, dtype=torch.float8_e8m0fnu)]
+        scale_a = [torch.empty(scale_size, dtype=scale_dtype)]
         scale_b = [torch.empty_like(scale_a[0])]
+        recipes = [
+            F.ScalingType.BlockWise1x16 if nvfp4 else F.ScalingType.BlockWise1x32
+        ]
+        swizzles = [F.SwizzleType.SWIZZLE_32_4_4]
+        if nvfp4:
+            scale_a.append(torch.ones(1))
+            scale_b.append(torch.ones(1))
+            recipes.append(F.ScalingType.TensorWise)
+            swizzles.append(F.SwizzleType.NO_SWIZZLE)
         gemm_kwargs = {
-            "scale_recipe_a": F.ScalingType.BlockWise1x32,
-            "scale_recipe_b": F.ScalingType.BlockWise1x32,
-            "swizzle_a": F.SwizzleType.SWIZZLE_32_4_4,
-            "swizzle_b": F.SwizzleType.SWIZZLE_32_4_4,
+            "scale_recipe_a": list(recipes),
+            "scale_recipe_b": list(recipes),
+            "swizzle_a": list(swizzles),
+            "swizzle_b": list(swizzles),
         }
         kernel_options = {"backend": "QUACK"}
         match case:
@@ -3200,25 +3217,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 scale_b = [torch.empty(2048, dtype=torch.float32)]
             case "scale_count":
                 scale_a *= 2
-            case "global_dtype" | "global_shape":
-                a = torch.empty(256, 128, dtype=torch.float4_e2m1fn_x2)
-                b = torch.empty_like(a).t()
-                scale_a = [torch.empty(4096, dtype=torch.float8_e4m3fn), torch.ones(1)]
-                scale_b = [torch.empty_like(scale_a[0]), torch.ones(1)]
-                scale_a[1] = (
-                    torch.ones(1, dtype=torch.bfloat16)
-                    if case == "global_dtype"
-                    else torch.ones(1, 1, 1)
-                )
-                for side in ("a", "b"):
-                    gemm_kwargs[f"scale_recipe_{side}"] = [
-                        F.ScalingType.BlockWise1x16,
-                        F.ScalingType.TensorWise,
-                    ]
-                    gemm_kwargs[f"swizzle_{side}"] = [
-                        F.SwizzleType.SWIZZLE_32_4_4,
-                        F.SwizzleType.NO_SWIZZLE,
-                    ]
+            case "global_dtype":
+                scale_a[1] = torch.ones(1, dtype=torch.bfloat16)
+            case "global_shape":
+                scale_a[1] = torch.ones(1, 1, 1)
             case "bias":
                 gemm_kwargs["bias"] = torch.zeros(256, dtype=torch.bfloat16)
             case "contraction_dim":
@@ -9063,8 +9065,6 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         name_fn=lambda case: f"{case[0]}_tuned_{case[1]}",
     )
     def test_scaled_mm_compiled_matches_reference(self, device, case):
-        import torch.nn.functional as F
-
         format_name, tuned = case
         n = 256
         a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
@@ -9105,8 +9105,6 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         name_fn=lambda case: f"shared_{case[0]}_rank_{len(case[1])}",
     )
     def test_nvfp4_scaled_mm_global_scales(self, device, case):
-        import torch.nn.functional as F
-
         shared_global_scale, shape = case
         global_a = torch.full(shape, 0.5, device=device, dtype=torch.float32)
         global_b = (
@@ -9154,8 +9152,6 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         name_fn=lambda case: f"{case[0]}_local_reduce_{case[1]}",
     )
     def test_scaled_mm_output_contraction_and_local_reduce(self, device, case):
-        import torch.nn.functional as F
-
         format_name, local_reduce = case
         m = 256
         group = 16
@@ -9209,9 +9205,6 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         self.assertNotIn("aten._scaled_mm_v2", code)
 
     def test_scaled_mm_quantized_output(self, device):
-        import torch.nn.functional as F
-        from torch._higher_order_ops.flex_gemm import to_blocked
-
         m = n = 256
         group = 32
         a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
@@ -9267,8 +9260,6 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         self.assertNotIn("aten._scaled_mm_v2", code)
 
     def test_scaled_mm_dynamic_m(self, device):
-        import torch.nn.functional as F
-
         n = k = 256
         scale_b, b = to_mxfp(
             torch.randn(n, k, device=device, dtype=torch.bfloat16) / math.sqrt(k)
@@ -9312,9 +9303,6 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
 
     @parametrize("case", (("mx", 32), ("nvfp4", 16)), name_fn=lambda case: case[0])
     def test_mm_quant_blocked_output_feeds_scaled_mm(self, device, case):
-        import torch.nn.functional as F
-        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
-
         format_name, group = case
         m = hidden = output = k = 256
         scale_fn = mx_e8m0_scale if format_name == "mx" else nvfp4_e4m3_scale
