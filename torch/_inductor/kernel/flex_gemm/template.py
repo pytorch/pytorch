@@ -135,6 +135,8 @@ class FlexGemmEpilogueConfig:
         blockscaled_format: Shared QuACK A/B block-scaled format.
         quack_config: Exact QuACK GemmConfig fields pinned for this choice;
             None only before lowering has selected the candidates.
+        cu_seqlens_index: Template input index of the varlen-M ``[0, *offs]``
+            boundaries for grouped_mm, or None for dense GEMMs.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
@@ -149,6 +151,7 @@ class FlexGemmEpilogueConfig:
     beta: float
     blockscaled_format: str | None
     quack_config: QuackConfigKey | None
+    cu_seqlens_index: int | None
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
@@ -354,6 +357,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 f", SFA={input_args[2]}, SFB={input_args[3]}, "
                 f"blockscaled_format={config.blockscaled_format!r}"
             )
+        if config.cu_seqlens_index is not None:
+            kwargs.append(f", cu_seqlens_m={input_args[config.cu_seqlens_index]}")
         if epilogue_args:
             kwargs.append(
                 f", epilogue_args=({', '.join(epilogue_args)},), "
