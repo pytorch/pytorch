@@ -60,7 +60,12 @@ class TestDiffusionCompileBenchmark(TestCase):
             "workload": dataclasses.asdict(scenario.workload),
             "execution": dataclasses.asdict(scenario.execution),
             "mode": scenario.mode,
-            "dtype": "float32",
+            "dtype": scenario.model.default_dtype
+            if scenario.execution.dtype == "auto"
+            else scenario.execution.dtype,
+            "device": scenario.model.default_device
+            if scenario.execution.device == "auto"
+            else scenario.execution.device,
             "compiled_targets": [] if scenario.mode == "eager" else ["ToyDenoiser"],
             "model_setup_s": 0.1,
             "compile_wrapper_setup_s": 0.0,
@@ -70,8 +75,26 @@ class TestDiffusionCompileBenchmark(TestCase):
             "steady_state_mad_s": 0.0,
             "setup_device_peak": {"allocated_bytes": None, "reserved_bytes": None},
             "request_device_peak": {"allocated_bytes": None, "reserved_bytes": None},
-            "compiler_diagnostics": {"compiler_times_s": {}},
+            "compiler_diagnostics": {
+                "compiler_times_s": {},
+                "unique_graphs": int(scenario.mode != "eager"),
+            },
+            "output_summary": {"shape": [1], "dtype": "torch.float32", "sha256": "0" * 64},
+            "output_check": "not requested",
         }
+
+    @parametrize("timeout", ("nan", "inf", "-inf", "0", "-1"))
+    def test_timeout_must_be_finite_and_positive(self, timeout):
+        args = benchmark._parser().parse_args([f"--timeout={timeout}"])
+        with self.assertRaisesRegex(ValueError, "timeout must be finite and positive"):
+            benchmark._execution_from_args(args, ("eager",))
+        scenario = self._toy_scenarios(("eager",))[0]
+        scenario = dataclasses.replace(
+            scenario,
+            execution=dataclasses.replace(scenario.execution, timeout_s=float(timeout)),
+        )
+        with self.assertRaisesRegex(ValueError, "timeout must be finite and positive"):
+            benchmark._validate_worker_scenario(scenario, "cpu")
 
     def test_invalid_mode_and_missing_region(self):
         model = torch.nn.Linear(2, 2)
@@ -156,8 +179,11 @@ class TestDiffusionCompileBenchmark(TestCase):
             scheduler = Scheduler(1)
 
         pipeline = Pipeline()
-        make_request = benchmark._fresh_request(pipeline, {"input": 1}, 7, "cpu")
+        make_request = benchmark._fresh_request(
+            pipeline, {}, 7, "cpu", mutable_parameters={"input": lambda: [1]}
+        )
         _, first = make_request()
+        first["input"].append(2)
         first_value = torch.rand(2, generator=first["generator"])
         first_scheduler = pipeline.scheduler
         pipeline.scheduler.value = 9
@@ -165,6 +191,7 @@ class TestDiffusionCompileBenchmark(TestCase):
         second_value = torch.rand(2, generator=second["generator"])
         self.assertIsNot(pipeline.scheduler, first_scheduler)
         self.assertEqual(pipeline.scheduler.value, 1)
+        self.assertEqual(second["input"], [1])
         self.assertEqual(first_value, second_value)
 
     def test_explicit_cuda_device_initializes_before_memory_reset(self):
@@ -288,7 +315,7 @@ class TestDiffusionCompileBenchmark(TestCase):
             self.assertEqual(output.read_text(encoding="utf-8"), "existing results")
 
     def test_fresh_worker_timing_and_output_boundary(self):
-        scenarios = self._toy_scenarios(("eager", "full"))
+        scenarios = self._toy_scenarios(benchmark.MODES)
         run_worker = benchmark.run_worker_process
         cache_dirs = []
         probe = """
@@ -344,17 +371,37 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             ):
                 results, errors = benchmark._run_scenarios(scenarios, output, True)
         self.assertEqual(errors, [])
-        self.assertEqual(len({result["pid"] for result in results}), 2)
-        self.assertEqual(len(set(cache_dirs)), 2)
-        self.assertEqual(
-            results[0]["output_summary"]["sha256"],
-            results[1]["output_summary"]["sha256"],
-        )
+        self.assertEqual(len({result["pid"] for result in results}), len(scenarios))
+        self.assertEqual(len(set(cache_dirs)), len(scenarios))
         for result in results:
+            self.assertEqual(result["output_summary"], results[0]["output_summary"])
+            graphs = result["compiler_diagnostics"]["unique_graphs"]
+            self.assertEqual(graphs > 0, result["mode"] != "eager")
             self.assertEqual(result["workload"]["output_boundary"], "latent")
             self.assertEqual(len(result["steady_state_samples_s"]), 1)
             self.assertGreaterEqual(result["model_setup_s"], 0)
             self.assertGreaterEqual(result["first_request_s"], 0)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_dashboard_distinguishes_compilation_modes(self, backend):
+        scenarios = self._toy_scenarios(benchmark.MODES)
+        scenarios += [
+            dataclasses.replace(
+                scenario,
+                execution=dataclasses.replace(scenario.execution, cudagraphs=True),
+            )
+            for scenario in scenarios
+            if scenario.mode != "eager"
+        ]
+        backends = []
+        for scenario in scenarios:
+            scenario = dataclasses.replace(
+                scenario,
+                execution=dataclasses.replace(scenario.execution, backend=backend),
+            )
+            records = benchmark.dashboard_records(self._success_result(scenario))
+            backends.append(records[0]["model"]["backend"])
+        self.assertEqual(len(set(backends)), len(scenarios))
 
     @parametrize("filename", ("results", "results.csv", "results.txt"))
     def test_result_schema_and_scenario_accounting(self, filename):
@@ -464,10 +511,27 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             "allocated_bytes",
             "nonfinite_timing",
             "failed_metadata",
+            "device",
+            "dtype",
+            "output_summary",
+            "unique_graphs",
+            "requested_mode",
+            "requested_model",
+            "requested_workload",
+            "requested_repetitions",
+            "resolved_device",
+            "resolved_dtype",
         ),
     )
     def test_malformed_child_preserves_other_results(self, field):
-        scenarios = self._toy_scenarios(("eager", "full"))
+        args = ["--model", "toy", "--mode", "eager", "--mode", "full", "--backend", "eager"]
+        execution = benchmark._execution_from_args(
+            benchmark._parser().parse_args(args), ("eager", "full")
+        )
+        scenarios = [
+            dataclasses.replace(scenario, execution=execution)
+            for scenario in self._toy_scenarios(("eager", "full"))
+        ]
         payloads = {
             scenario.scenario_id: self._success_result(scenario)
             for scenario in scenarios
@@ -483,6 +547,22 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             malformed["first_request_s"] = float("nan")
         elif field == "failed_metadata":
             malformed.update(status="failed", model=None)
+        elif field == "unique_graphs":
+            del malformed["compiler_diagnostics"]["unique_graphs"]
+        elif field == "requested_mode":
+            malformed.update(mode="eager", compiled_targets=[])
+            malformed["compiler_diagnostics"]["unique_graphs"] = 0
+        elif field == "requested_model":
+            malformed["model"]["revision"] = "wrong-revision"
+        elif field == "requested_workload":
+            malformed["workload"]["parameters"]["num_inference_steps"] = 1
+        elif field == "requested_repetitions":
+            malformed["execution"]["repetitions"] = 1
+            malformed["steady_state_samples_s"] = [0.3]
+        elif field == "resolved_device":
+            malformed["device"] = "cuda:0"
+        elif field == "resolved_dtype":
+            malformed["dtype"] = "float16"
         else:
             malformed[field] = None
         run_worker = benchmark.run_worker_process
@@ -508,22 +588,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             mock.patch.object(benchmark, "run_worker_process", side_effect=run_child),
         ):
             output = Path(directory) / "results.csv"
-            exit_code = benchmark.main(
-                [
-                    "--model",
-                    "toy",
-                    "--mode",
-                    "eager",
-                    "--mode",
-                    "full",
-                    "--backend",
-                    "eager",
-                    "--repetitions",
-                    "1",
-                    "--output",
-                    str(output),
-                ]
-            )
+            exit_code = benchmark.main([*args, "--output", str(output)])
             with output.open(newline="") as file:
                 rows = list(csv.DictReader(file))
             records = [
@@ -636,6 +701,31 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         self.assertEqual(results[1]["status"], "failed")
         self.assertEqual(results[1]["output_check"], "failed")
 
+    @parametrize("failure", ("worker_failed", "missing_sample"))
+    def test_output_check_requires_eager_reference(self, failure):
+        scenarios = self._toy_scenarios(("eager", "full"))
+        results = [self._success_result(scenario) for scenario in scenarios]
+        if failure == "worker_failed":
+            results[0].update(status="failed", error="eager worker failed")
+        with tempfile.TemporaryDirectory() as directory:
+            paths = {
+                scenario.scenario_id: Path(directory) / f"{scenario.mode}.pt"
+                for scenario in scenarios
+            }
+            benchmark._compare_outputs(scenarios, results, paths)
+            output = Path(directory) / "results.csv"
+            benchmark.write_outputs(output, results)
+            with output.open(newline="") as file:
+                rows = list(csv.DictReader(file))
+        compiled = results[1]
+        self.assertEqual(compiled["status"], "failed")
+        self.assertEqual(compiled["output_check"], "reference unavailable")
+        self.assertEqual(json.loads(rows[1]["steady_state_samples_s"]), [0.3])
+        records = benchmark.dashboard_records(compiled)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["metric"]["name"], "scenario_status")
+        self.assertNotIn("benchmark_values", records[0]["metric"])
+
     @parametrize("name", ("auraflow", "flux"))
     def test_prefetch_excludes_unused_weights(self, name):
         artifacts = benchmark.BENCHMARKS[name].model.artifacts
@@ -645,6 +735,8 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         )
         with mock.patch.dict(sys.modules, {"huggingface_hub": hub}):
             benchmark._prefetch(artifacts)
+        self.assertEqual(snapshot.call_args.kwargs["repo_id"], artifacts[0].repo_id)
+        self.assertEqual(snapshot.call_args.kwargs["revision"], artifacts[0].revision)
         patterns = snapshot.call_args.kwargs["ignore_patterns"]
         needed = (
             "model_index.json",
@@ -693,6 +785,67 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         self.assertEqual(kwargs["config"], paths[base.key])
         self.assertEqual(kwargs["subfolder"], "transformer")
         self.assertTrue(kwargs["local_files_only"])
+        self.assertEqual(kwargs["torch_dtype"], torch.float32)
+        diffusers.GGUFQuantizationConfig.assert_called_once_with(
+            compute_dtype=torch.float32
+        )
+        diffusers.AuraFlowPipeline.from_pretrained.assert_called_once_with(
+            paths[base.key],
+            torch_dtype=torch.float32,
+            transformer=diffusers.AuraFlowTransformer2DModel.from_single_file.return_value,
+        )
+
+    def test_wan_request_contract(self):
+        from PIL import Image
+
+        recipe = benchmark.BENCHMARKS["wan"]
+        scenario = dataclasses.replace(
+            self._toy_scenarios(("eager",))[0],
+            model=recipe.model,
+            workload=recipe.workload,
+            loader=recipe.loader,
+        )
+        model, image = recipe.model.artifacts
+        paths = {model.key: "pinned-model", image.key: "pinned-image.png"}
+        diffusers = SimpleNamespace(
+            AutoencoderKLWan=mock.Mock(), WanImageToVideoPipeline=mock.Mock()
+        )
+        encoder = mock.Mock()
+        transformers = SimpleNamespace(CLIPVisionModel=encoder)
+        pipeline = diffusers.WanImageToVideoPipeline.from_pretrained.return_value
+        pipeline.vae_scale_factor_spatial = 8
+        pipeline.transformer.config.patch_size = (1, 2, 2)
+        source = Image.new("RGB", (640, 480), "red")
+        with (
+            mock.patch.dict(
+                sys.modules, {"diffusers": diffusers, "transformers": transformers}
+            ),
+            mock.patch.object(Image, "open", return_value=source) as open_image,
+            mock.patch.object(benchmark, "_finish_loading") as finish,
+        ):
+            benchmark._load_wan(scenario, paths, "cpu", torch.bfloat16)
+        open_image.assert_called_once_with(paths[image.key])
+        encoder.from_pretrained.assert_called_once_with(
+            paths[model.key], subfolder="image_encoder", torch_dtype=torch.float32
+        )
+        diffusers.AutoencoderKLWan.from_pretrained.assert_called_once_with(
+            paths[model.key], subfolder="vae", torch_dtype=torch.float32
+        )
+        diffusers.WanImageToVideoPipeline.from_pretrained.assert_called_once_with(
+            paths[model.key],
+            vae=diffusers.AutoencoderKLWan.from_pretrained.return_value,
+            image_encoder=encoder.from_pretrained.return_value,
+            torch_dtype=torch.bfloat16,
+        )
+        parameters = dict(recipe.workload.parameters, height=544, width=720)
+        self.assertEqual(finish.call_args.args, (pipeline, scenario, "cpu", parameters))
+        self.assertEqual(finish.call_args.kwargs["output_fields"], ("frames",))
+        image_factory = finish.call_args.kwargs["mutable_parameters"]["image"]
+        first = image_factory()
+        first.putpixel((0, 0), (0, 0, 0))
+        second = image_factory()
+        self.assertEqual(second.size, (720, 544))
+        self.assertEqual(second.getpixel((0, 0)), (255, 0, 0))
 
 
 class TestDiffusionCompileBenchmarkDeviceType(TestCase):
@@ -711,17 +864,19 @@ class TestDiffusionCompileBenchmarkDeviceType(TestCase):
             denoise, fullgraph=True, options={"triton.cudagraphs": True}
         )
         value = torch.ones(8, device=device)
+        other = torch.full_like(value, 2)
 
         def pipeline():
             first = compiled(value)
-            second = compiled(value)
-            return first + second
+            second = compiled(other)
+            return first, second
 
         loaded = benchmark.LoadedPipeline(pipeline, compiled, lambda: ((), {}), ())
         with torch.inference_mode():
             for _ in range(3):
                 _, output = benchmark._timed_request(loaded, device, cudagraphs=True)
-                self.assertEqual(output, torch.full_like(value, 4))
+                self.assertEqual(output[0], torch.full_like(value, 2))
+                self.assertEqual(output[1], torch.full_like(value, 3))
                 del output
         benchmark._compiler_diagnostics("full", device, True)
 

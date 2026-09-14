@@ -894,7 +894,8 @@ def _hardware_info(device: str) -> dict[str, Any]:
                 "accelerator": props.name,
                 "accelerator_memory_bytes": props.total_memory,
                 "compute_capability": f"{props.major}.{props.minor}",
-                "driver_runtime": torch.version.cuda,
+                "cuda_compiled_version": torch.version.cuda,
+                "hip_compiled_version": torch.version.hip,
             }
         )
     else:
@@ -924,8 +925,9 @@ def _validate_worker_scenario(scenario: Scenario, device: str) -> None:
         raise ValueError("warmups must be non-negative")
     if scenario.execution.repetitions < 1:
         raise ValueError("repetitions must be positive")
-    if scenario.execution.timeout_s <= 0:
-        raise ValueError("timeout must be positive")
+    timeout = scenario.execution.timeout_s
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("timeout must be finite and positive")
     if (
         scenario.execution.num_threads is not None
         and scenario.execution.num_threads < 1
@@ -1143,7 +1145,9 @@ def _failure_result(scenario_id: str, status: str, error: str) -> dict[str, Any]
     return {"scenario_id": scenario_id, "status": status, "error": error}
 
 
-def _validate_worker_result(result: Any, scenario_id: str) -> None:
+def _validate_worker_result(
+    result: Any, scenario_id: str, scenario: Scenario | None = None
+) -> None:
     if not isinstance(result, dict) or result.get("scenario_id") != scenario_id:
         raise ValueError("worker result has the wrong scenario id")
     status = result.get("status")
@@ -1156,6 +1160,7 @@ def _validate_worker_result(result: Any, scenario_id: str) -> None:
         "compiler_diagnostics",
         "setup_device_peak",
         "request_device_peak",
+        "output_summary",
     ):
         if (status == "success" or name in result) and not isinstance(
             result.get(name), dict
@@ -1172,7 +1177,8 @@ def _validate_worker_result(result: Any, scenario_id: str) -> None:
         ("model.name", result["model"].get("name")),
         ("execution.backend", result["execution"].get("backend")),
         ("execution.dtype", result["execution"].get("dtype")),
-        ("dtype", result.get("dtype", result["execution"].get("dtype"))),
+        ("dtype", result.get("dtype")),
+        ("device", result.get("device")),
     ):
         if not isinstance(value, str) or not value:
             raise ValueError(f"malformed {name}: expected a nonempty string")
@@ -1185,6 +1191,29 @@ def _validate_worker_result(result: Any, scenario_id: str) -> None:
         raise ValueError("malformed compiled targets")
     if result["mode"] != "eager" and not targets:
         raise ValueError("missing compiled targets")
+    graphs = result["compiler_diagnostics"].get("unique_graphs")
+    eager = result["mode"] == "eager"
+    if type(graphs) is not int or graphs < 0 or (graphs == 0) != eager:
+        raise ValueError("missing or inconsistent compiled graph count")
+    summary = result["output_summary"]
+    if (
+        not isinstance(summary.get("shape"), list)
+        or not isinstance(summary.get("dtype"), str)
+        or not isinstance(summary.get("sha256"), str)
+    ):
+        raise ValueError("missing output summary fields")
+    if scenario is not None:
+        declared = _scenario_to_dict(scenario)
+        for name in ("model", "workload", "execution", "mode"):
+            actual = json.dumps(result.get(name), sort_keys=True)
+            if actual != json.dumps(declared[name], sort_keys=True):
+                raise ValueError(f"worker result does not match requested {name}")
+        for name in ("device", "dtype"):
+            expected = getattr(scenario.execution, name)
+            if expected == "auto":
+                expected = getattr(scenario.model, f"default_{name}")
+            if result[name] != expected:
+                raise ValueError(f"worker result has unexpected {name}: {result[name]}")
 
     timings = {
         name: [result.get(name)]
@@ -1363,16 +1392,16 @@ def _compare_outputs(
     eager_result = next(
         result for result in results if result["scenario_id"] == eager.scenario_id
     )
-    if eager_result.get("status") != "success":
-        return
-    try:
-        reference = torch.load(sample_paths[eager.scenario_id], weights_only=True)
-    except (OSError, RuntimeError) as error:
-        eager_result["status"] = "failed"
-        eager_result["error"] = f"could not load eager output for comparison: {error}"
-        eager_result["output_check"] = "failed"
-        return
-    eager_result["output_check"] = "reference"
+    reference = None
+    if eager_result.get("status") == "success":
+        try:
+            reference = torch.load(sample_paths[eager.scenario_id], weights_only=True)
+        except (OSError, RuntimeError) as error:
+            eager_result["status"] = "failed"
+            eager_result["error"] = f"could not load eager output for comparison: {error}"
+            eager_result["output_check"] = "failed"
+        else:
+            eager_result["output_check"] = "reference"
     for scenario in scenarios:
         if scenario.mode == "eager":
             continue
@@ -1382,6 +1411,13 @@ def _compare_outputs(
             if result["scenario_id"] == scenario.scenario_id
         )
         if result.get("status") != "success":
+            continue
+        if eager_result.get("status") != "success":
+            result.update(
+                status="failed",
+                error="output comparison requires a successful eager reference",
+                output_check="reference unavailable",
+            )
             continue
         try:
             actual = torch.load(sample_paths[scenario.scenario_id], weights_only=True)
@@ -1413,6 +1449,13 @@ def _record_extra_info(result: dict[str, Any]) -> dict[str, Any]:
 def dashboard_records(result: dict[str, Any]) -> list[dict[str, Any]]:
     model = result.get("model", {})
     execution = result.get("execution", {})
+    mode = result.get("mode", "unknown")
+    backend = execution.get("backend", "unknown")
+    if mode == "eager":
+        backend = "eager"
+    else:
+        graphs = "cudagraphs" if execution.get("cudagraphs") else "no_cudagraphs"
+        backend = f"{backend}_{mode}_{graphs}"
     benchmark = {
         "name": BENCHMARK_NAME,
         "mode": "inference",
@@ -1422,9 +1465,7 @@ def dashboard_records(result: dict[str, Any]) -> list[dict[str, Any]]:
     model_record = {
         "name": model.get("name", result["scenario_id"].split(":", 1)[0]),
         "type": "micro-benchmark" if model.get("name") == "toy" else "OSS model",
-        "backend": execution.get("backend")
-        if result.get("mode") != "eager"
-        else "eager",
+        "backend": backend,
         "origins": ["pytorch"] if model.get("name") == "toy" else ["huggingface"],
     }
     if result.get("status") != "success":
@@ -1566,8 +1607,8 @@ def _execution_from_args(
         raise ValueError("--warmups must be non-negative")
     if args.repetitions < 1:
         raise ValueError("--repetitions must be positive")
-    if args.timeout <= 0:
-        raise ValueError("--timeout must be positive")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        raise ValueError("--timeout must be finite and positive")
     if args.num_threads is not None and args.num_threads < 1:
         raise ValueError("--num-threads must be positive")
     return ExecutionConfig(
@@ -1644,6 +1685,10 @@ def _run_scenarios(
                 scenario.execution.timeout_s,
                 env,
             )
+            try:
+                _validate_worker_result(result, scenario.scenario_id, scenario)
+            except ValueError as error:
+                result = _failure_result(scenario.scenario_id, "malformed", str(error))
             result.setdefault("model", dataclasses.asdict(scenario.model))
             result.setdefault("workload", dataclasses.asdict(scenario.workload))
             result.setdefault("execution", dataclasses.asdict(scenario.execution))

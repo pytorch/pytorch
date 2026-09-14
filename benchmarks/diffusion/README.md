@@ -5,6 +5,9 @@ benchmarks. Each requested mode runs in a fresh process with a private Inductor
 cache. A run writes a CSV summary, JSON-lines records for the PyTorch OSS
 benchmark database, and one log per worker.
 
+Dashboard backends include compilation mode and CUDA graph configuration, for
+example `inductor_regional_no_cudagraphs`; the eager baseline uses `eager`.
+
 `--output` names the CSV file; JSON records use the same path with a `.json`
 suffix. Output paths with a `.json` suffix (case-insensitive) are rejected before
 workers start.
@@ -35,13 +38,21 @@ an eager reference on the same CUDA device.
 - Compiler-reported phases are emitted individually. They overlap and must not
   be summed.
 - Steady-state samples follow warmup and are retained individually. The summary
-  reports their median and median absolute deviation.
+  reports their median and median absolute deviation. Warmup request durations,
+  which may include CUDA graph recording, are not reported, so these measurements
+  cannot reconstruct total time to steady state.
 - Accelerator synchronization brackets every wall-time sample.
 - CUDA allocated and reserved peaks are reported separately for setup and
   requests. Request peaks are absolute process peaks and include resident model
   state. Device memory is unavailable for CPU runs.
 - Output checks happen after timing and use `torch.testing.assert_close`
-  defaults against the eager result.
+  defaults against the eager result. Tolerances follow the extracted output
+  dtype: PIL images require exact pixel equality, and NumPy outputs use their
+  array dtype, even when the model computes in lower precision. These strict
+  checks can flag small compilation differences in postprocessed outputs.
+  If the eager reference is unavailable, compiled results are marked failed with
+  `output_check="reference unavailable"`; their CSV timings are retained, but
+  only failure status is exported to the dashboard.
 
 Every request gets a newly seeded generator and a scheduler reconstructed from
 its original config. With CUDA graphs, each complete request starts one graph
