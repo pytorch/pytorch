@@ -124,10 +124,14 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       c10::DeviceType device_type,
       uintptr_t event,
       uintptr_t stream) const override {}
-  void trace_gpu_memory_allocation(c10::DeviceType device_type, uintptr_t ptr)
-      const override {}
-  void trace_gpu_memory_deallocation(c10::DeviceType device_type, uintptr_t ptr)
-      const override {}
+  void trace_gpu_memory_allocation(
+      c10::DeviceType device_type,
+      uintptr_t ptr,
+      uintptr_t stream) const override {}
+  void trace_gpu_memory_deallocation(
+      c10::DeviceType device_type,
+      uintptr_t ptr,
+      uintptr_t stream) const override {}
   void trace_gpu_stream_creation(c10::DeviceType device_type, uintptr_t stream)
       const override {}
   void trace_gpu_device_synchronization(

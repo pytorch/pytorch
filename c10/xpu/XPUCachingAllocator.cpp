@@ -2150,7 +2150,9 @@ class NativeCachingAllocator : public XPUAllocator {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_allocation(
-          c10::kXPU, reinterpret_cast<uintptr_t>(*devPtr));
+          c10::kXPU,
+          reinterpret_cast<uintptr_t>(*devPtr),
+          reinterpret_cast<uintptr_t>(&queue));
     }
   }
 
@@ -2164,7 +2166,9 @@ class NativeCachingAllocator : public XPUAllocator {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_deallocation(
-          c10::kXPU, reinterpret_cast<uintptr_t>(block->ptr));
+          c10::kXPU,
+          reinterpret_cast<uintptr_t>(block->ptr),
+          reinterpret_cast<uintptr_t>(block->queue));
     }
   }
 
