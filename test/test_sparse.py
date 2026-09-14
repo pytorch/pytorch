@@ -1863,6 +1863,28 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
 
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
+    def test_sparse_mul_result_is_coalesced(self, device, dtype):
+        # The result of multiplying two coalesced tensors is flagged coalesced,
+        # so its indices have to be sorted. On MPS the intersection kernel used
+        # to take its output slot from an atomic counter, which put the matches
+        # in thread arrival order; the flag then lied and everything relying on
+        # it, `to_sparse_csr` in particular, produced a malformed tensor. The
+        # ordering depended on scheduling, hence the loop.
+        i = torch.arange(64, device=device).unsqueeze(0).repeat(2, 1)
+        i[1] = i[1].flip(0)
+        a = torch.sparse_coo_tensor(i, torch.ones(64, dtype=dtype, device=device),
+                                    (64, 64)).coalesce()
+        b = torch.sparse_coo_tensor(i, torch.full((64,), 2, dtype=dtype, device=device),
+                                    (64, 64)).coalesce()
+        for _ in range(50):
+            r = a * b
+            self.assertTrue(r.is_coalesced())
+            flat = r._indices()[0] * r.size(1) + r._indices()[1]
+            self.assertTrue(bool((flat[1:] > flat[:-1]).all()),
+                            f"indices of a coalesced result are not sorted: {flat.tolist()}")
+
     @unittest.skipIf(IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/174389")
     @coalescedonoff
     @dtypes(torch.double)
