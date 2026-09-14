@@ -839,6 +839,42 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             self.assertEqual(compiled(x), x + 1)
             self.assertEqual(torch.cuda.current_device(), 0)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("stream_kind", ("cuda", "generic"))
+    @parametrize("use_kwarg", (True, False))
+    def test_current_device_stream_constructor_under_coor(self, stream_kind, use_kwarg):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(x):
+            if stream_kind == "cuda":
+                stream = (
+                    torch.cuda.Stream(device=x.device)
+                    if use_kwarg
+                    else torch.cuda.Stream(x.device)
+                )
+            else:
+                stream = (
+                    torch.Stream(device=x.device)
+                    if use_kwarg
+                    else torch.Stream(x.device)
+                )
+            return x + 1, stream
+
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            _, stream = compiled(torch.zeros(1, device="cuda:0"))
+            self.assertEqual(stream.device, torch.device("cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            result, stream = compiled(x)
+            self.assertEqual(result, x + 1)
+            self.assertEqual(stream.device, torch.device("cuda:1"))
+
+        self.assertEqual(cnt.frame_count, 1)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_device_index_predicate_is_data_dependent_under_coor(self):
