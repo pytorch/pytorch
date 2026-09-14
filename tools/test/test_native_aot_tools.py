@@ -1265,6 +1265,41 @@ class TestStructuredIntrospection(unittest.TestCase):
         self.assertIn("arrive RAW", raw)
 
 
+class TestFunctionalIntrospection(unittest.TestCase):
+    def test_functional_codegen(self):
+        for op in ("_fused_rms_norm", "_fused_rms_norm_backward"):
+            with self.subTest(op=op):
+                params = gen_aot_lib.impl_signature_params(op)
+                self.assertIn("std::tuple<at::Tensor,at::Tensor>& aot_result", params)
+                self.assertNotIn("aot_result", gen_aot_lib._int32_size_gate(params))
+                _, schema = gen_aot_lib.covers_signature(op)
+                self.assertTrue(schema.startswith(f"covers_{op}("))
+                self.assertNotIn("aot_result", schema)
+                self.assertNotIn("Tensor? out", schema)
+                self.assertEqual(gen_aot_lib.precomputed_args(op), [])
+
+    def test_functional_hook_rejects_aliases_and_mutation(self):
+        from torchgen.gen import get_grouped_native_functions, parse_native_yaml
+        from torchgen.model import DispatchKey
+        from torchgen.native_aot import NativeAotManifest, validate_native_aot_manifests
+
+        native = os.path.join(REPO, "aten", "src", "ATen", "native")
+        parsed = parse_native_yaml(
+            os.path.join(native, "native_functions.yaml"),
+            os.path.join(native, "tags.yaml"),
+        )
+        grouped = get_grouped_native_functions(parsed.native_functions)
+        for op in ("view", "add.out", "missing_native_aot_op"):
+            with self.subTest(op=op):
+                manifest = NativeAotManifest(
+                    op=op, dispatch_key=DispatchKey.CUDA, structured=False
+                )
+                with self.assertRaisesRegex(RuntimeError, "returning fresh tensors"):
+                    validate_native_aot_manifests(
+                        {(DispatchKey.CUDA, op): manifest}, grouped
+                    )
+
+
 class TestAtomicWrites(unittest.TestCase):
     def test_a_failed_write_leaves_neither_a_partial_file_nor_a_tmp(self):
         # CMake reads the emitted file as authoritative, so a half-written one is

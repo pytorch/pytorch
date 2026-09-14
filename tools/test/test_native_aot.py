@@ -105,6 +105,23 @@ class TestDeclarationParsing(unittest.TestCase):
         self.assertEqual(m.stub_name(), "embfoo_aot_stub")
         self.assertEqual(m.fn_type_name(), "embfoo_aot_fn")
 
+    def test_functional_declaration_flag(self) -> None:
+        for flag in (False, True, "false"):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as d:
+                _write_declaration(
+                    d,
+                    "embbar",
+                    _MIN_DECL.format(op="embbar") + f"STRUCTURED = {flag!r}\n",
+                )
+                if isinstance(flag, bool):
+                    (m,) = native_aot.parse_native_aot_manifests(d).values()
+                    self.assertEqual(m.structured, flag)
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "STRUCTURED must be a bool"
+                    ):
+                        native_aot.parse_native_aot_manifests(d)
+
     def test_missing_dir_is_empty(self) -> None:
         self.assertEqual(native_aot.parse_native_aot_manifests("/nonexistent"), {})
 
@@ -175,6 +192,14 @@ class TestManifestValidation(unittest.TestCase):
                 {(DispatchKey.CUDA, "embbar"): m}, self.grouped
             )
 
+    def test_functional_op_accepted(self) -> None:
+        m = native_aot.NativeAotManifest(
+            op="embbar", dispatch_key=DispatchKey.CUDA, structured=False
+        )
+        native_aot.validate_native_aot_manifests(
+            {(DispatchKey.CUDA, "embbar"): m}, self.grouped
+        )
+
     def test_unknown_op_rejected(self) -> None:
         m = native_aot.NativeAotManifest(op="embmissing", dispatch_key=DispatchKey.CUDA)
         with self.assertRaisesRegex(RuntimeError, "not a structured op"):
@@ -229,6 +254,35 @@ class TestHookCodegen(unittest.TestCase):
 using embfoo_aot_fn = bool (*)(const at::Tensor & self, int64_t k, const at::Tensor & out);
 DECLARE_DISPATCH(embfoo_aot_fn, embfoo_aot_stub)
 """,
+        )
+
+    def test_functional_wrapper_returns_allocated_result(self) -> None:
+        f = next(
+            f for f in _parse_fixture().native_functions if str(f.func.name) == "embbar"
+        )
+        m = native_aot.NativeAotManifest(
+            op="embbar", dispatch_key=DispatchKey.CUDA, structured=False
+        )
+        self.assertIn(
+            "bool (*)(const at::Tensor & self, at::Tensor& aot_result)",
+            native_aot.gen_stub_declaration(m, f),
+        )
+        gen = RegisterDispatchKey(
+            self.backend_index,
+            Target.ANONYMOUS_DEFINITION,
+            SelectiveBuilder.get_nop_selector(),
+            rocm=False,
+            symint=True,
+            class_method_name=None,
+            skip_dispatcher_op_registration=False,
+            native_aot_manifests={"embbar": m},
+        )
+        body = "\n".join(gen(f))
+        self.assertIn("at::Tensor aot_result;", body)
+        self.assertIn("embbar_aot_stub(c10::DeviceType::CUDA, self, aot_result)", body)
+        self.assertLess(body.index("device_guard"), body.index("embbar_aot_stub"))
+        self.assertLess(
+            body.index("return aot_result;"), body.index("embbar_cuda(self)")
         )
 
     def test_stub_definition(self) -> None:

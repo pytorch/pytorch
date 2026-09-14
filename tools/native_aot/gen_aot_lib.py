@@ -23,6 +23,8 @@ covering every arch the op shipped for, containing:
 The kernel signature is the op's structured impl signature: meta() has allocated the
 outputs before the stub runs, so a body writes into them and returns true, or returns
 false to fall through to op.impl.
+For unstructured functions, the signature instead includes an aot_result output
+parameter; the declaration validates inputs and assigns the allocated result.
 
 Requires torchgen for the impl signature, but not a built torch.
 
@@ -285,6 +287,8 @@ def _int32_size_gate(params: str) -> str:
     optional: list[str] = []
     for p in _split_params(params):
         ctype, name = _param_type_and_name(p)
+        if name == "aot_result":
+            continue
         if ctype in ("std::optional<at::Tensor>", "::std::optional<at::Tensor>"):
             optional.append(name)
         elif ctype == "at::Tensor":
@@ -485,7 +489,7 @@ def gen_op(
     )
 
 
-def _structured_group(op: str):
+def _native_function(op: str):
     from torchgen.gen import get_grouped_native_functions, parse_native_yaml
     from torchgen.model import NativeFunctionsGroup
 
@@ -494,21 +498,30 @@ def _structured_group(op: str):
         os.path.join(aten, "native", "native_functions.yaml"),
         os.path.join(aten, "native", "tags.yaml"),
     )
-    for g in get_grouped_native_functions(parsed.native_functions):
+    groups = get_grouped_native_functions(parsed.native_functions)
+    for g in groups:
         # Base names repeat across groups (bmm vs bmm.dtype), so the signature
         # must come from the STRUCTURED one; a qualified op matches exactly.
         if isinstance(g, NativeFunctionsGroup) and g.structured:
             fname = g.functional.func.name
             if (str(fname) if "." in op else fname.name.base) == op:
                 return g
-    raise RuntimeError(f"no structured group for {op}")
+    for g in groups:
+        f = g.functional if isinstance(g, NativeFunctionsGroup) else g
+        if str(f.func.name) == op:
+            return f
+    raise RuntimeError(f"no native function for {op}")
 
 
 def impl_signature_params(op: str) -> str:
     from torchgen.api import structured
     from torchgen.context import native_function_manager
+    from torchgen.model import NativeFunction
+    from torchgen.native_aot import functional_stub_params
 
-    g = _structured_group(op)
+    g = _native_function(op)
+    if isinstance(g, NativeFunction):
+        return functional_stub_params(g)
     with native_function_manager(g):
         return ", ".join(b.decl() for b in structured.impl_arguments(g))
 
@@ -518,7 +531,11 @@ def precomputed_args(op: str) -> list[str]:
     -- index_add's dim arrives maybe_wrap_dim'ed, sum.dim_IntList's arrives RAW.
     Declarations must know which they get, so the generated .cpp states it per
     op."""
-    g = _structured_group(op)
+    from torchgen.model import NativeFunction
+
+    g = _native_function(op)
+    if isinstance(g, NativeFunction):
+        return []
     pre = g.out.precomputed
     return sorted(pre.replace.keys()) if pre is not None else []
 
@@ -532,22 +549,24 @@ def covers_signature(op: str) -> tuple[str, str]:
     """
     from torchgen.api.types import DispatcherSignature
     from torchgen.context import native_function_manager
+    from torchgen.model import NativeFunctionsGroup
 
-    g = _structured_group(op)
-    with native_function_manager(g):
-        sig = DispatcherSignature.from_schema(g.functional.func, symint=False)
+    g = _native_function(op)
+    f = g.functional if isinstance(g, NativeFunctionsGroup) else g
+    with native_function_manager(f):
+        sig = DispatcherSignature.from_schema(f.func, symint=False)
         params = [a.decl() for a in sig.arguments()]
     # Render per-argument from the model (not string surgery on the
     # whole schema): SymInt -> int argument-by-argument, and the
     # kwarg-only marker reconstructed from the model's split.
-    args = g.functional.func.arguments
+    args = f.func.arguments
     pos = [str(a).replace("SymInt", "int") for a in args.flat_positional]
     kw = [str(a).replace("SymInt", "int") for a in args.flat_kwarg_only]
     pieces = pos + (["*", *kw] if kw else [])
     # Trailing out-variant outputs bind the .out overload's kwargs;
     # appended last, so kwarg-only exactly when the schema already has
     # a kwarg section (matching the C++ params' positional binding).
-    for a in g.out.func.arguments.out:
+    for a in g.out.func.arguments.out if isinstance(g, NativeFunctionsGroup) else ():
         params.append(f"const std::optional<at::Tensor>& {a.name}")
         pieces.append(f"Tensor? {a.name}=None")
     schema_args = ", ".join(pieces)
