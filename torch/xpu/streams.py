@@ -96,8 +96,18 @@ class Stream(torch._C._XpuStreamBase):
             return super().__eq__(o)
         return False
 
-    def __hash__(self):
-        return hash((self.sycl_queue, self.device))
+    # Since ``__eq__`` is defined above, ``__hash__`` must be set explicitly.
+    # Reuse the base ``torch.Stream`` hash -- a C-level ``hash_combine`` over
+    # ``stream_id``/``device_index``/``device_type`` -- instead of
+    # ``hash((self.sycl_queue, self.device))``, which would allocate a
+    # ``torch.device`` (and read the ``sycl_queue`` handle) on every call.
+    # Dropping ``sycl_queue`` from the hash is safe: ``__eq__`` compares the
+    # underlying ``XPUStream`` (i.e. ``stream_id``/``device_index``/
+    # ``device_type``), not the queue pointer, and ``sycl_queue`` is itself
+    # derived from that same stream. So equal streams necessarily share those
+    # three fields (and hence this hash), keeping ``__hash__`` consistent with
+    # ``__eq__``.
+    __hash__ = torch.Stream.__hash__
 
     def __repr__(self) -> str:
         return f"torch.xpu.Stream(device={self.device} sycl_queue={self.sycl_queue:#x})"
