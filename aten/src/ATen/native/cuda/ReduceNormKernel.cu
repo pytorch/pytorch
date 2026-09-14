@@ -14,7 +14,7 @@ namespace at::native {
 // `scalar_t` is complex, `acc_t` is the downgraded real number type.
 // Otherwise, `acc_t` and `scalar_t` are the same type.
 template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
-void norm_kernel_cuda_impl(TensorIterator& iter, double p) {
+static void norm_kernel_cuda_impl(TensorIterator& iter, double p) {
   if (p == static_cast<double>(0)) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<scalar_t, acc_t, out_t>(), 0);
   } else if (p == static_cast<double>(1)) {
@@ -50,7 +50,7 @@ void norm_launch_kernel(TensorIterator& iter, double ord) {
 
 // powsum: computes sum(|x|^p) without the final root
 template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
-void powsum_kernel_cuda_impl(TensorIterator& iter, double p) {
+static void powsum_kernel_cuda_impl(TensorIterator& iter, double p) {
   if (p == static_cast<double>(2)) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, NormTwoOps<scalar_t, acc_t, out_t, false>(), 0);
   } else {

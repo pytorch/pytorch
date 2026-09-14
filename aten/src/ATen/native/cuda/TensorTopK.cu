@@ -757,7 +757,7 @@ __global__ void computeBlockDigitCounts(
 
 #ifndef USE_ROCM
 // CUDA path: compute global histogram and cumsum for each row
-__global__ void computeDigitCumSum(
+static __global__ void computeDigitCumSum(
   short* counts,
   uint32_t* digit_cum_sum,
   uint32_t blocks_per_slice) {
@@ -1265,7 +1265,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   }
 }
 
-int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
+static int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   // Occupancy of this kernel is limited by registers per thread
   // Platform-specific tuning for optimal register pressure
 #if defined(USE_ROCM)
@@ -1472,7 +1472,7 @@ void launch(
 
 } // namespace mbtopk
 
-bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
+static bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
   if (num_slices > std::numeric_limits<uint32_t>::max() ||
       slice_size > std::numeric_limits<uint32_t>::max()) return false;
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/74267
@@ -1485,7 +1485,7 @@ bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
       (num_slices > 4000 && slice_size >= 400);
 }
 
-bool should_use_warp_topk(int64_t slice_size, int64_t k) {
+static bool should_use_warp_topk(int64_t slice_size, int64_t k) {
 #if !defined(USE_ROCM) || !HAS_WARP_MERGE_SORT()
   return false;
 #else
