@@ -920,6 +920,42 @@ class TestFX(JitTestCase):
                     f"Expected 'test_fx.py' in node.stack_trace, got {node.stack_trace}"
                 )
 
+
+
+    def test_record_stack_traces_no_internal_frames(self):
+        # Regression test: internal PyTorch frames (proxy.py, _ops.py,
+        # _tensor.py, etc.) must not leak into recorded stack traces.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                z = torch.sin(y)
+                return z
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        graph = tracer.trace(M())
+
+        internal_patterns = [
+            "torch/fx/proxy.py",
+            "torch/_ops.py",
+            "torch/_tensor.py",
+            "torch/fx/_symbolic_trace.py",
+            "torch/utils/_python_dispatch.py",
+        ]
+
+        for node in graph.nodes:
+            if node.op in {"placeholder", "output"}:
+                continue
+            stack_trace = node.stack_trace or ""
+            self.assertTrue(stack_trace, f"Node {node.name} has no stack_trace")
+            for pattern in internal_patterns:
+                self.assertNotIn(
+                    pattern, stack_trace,
+                    f"Internal PyTorch frame '{pattern}' leaked into "
+                    f"stack_trace of node {node.name}: {stack_trace}"
+                )
+
     def test_node_pickle_type_preservation(self):
         g = Graph()
         n = g.placeholder("x")
