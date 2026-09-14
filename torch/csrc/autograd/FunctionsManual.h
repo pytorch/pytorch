@@ -122,6 +122,10 @@ at::Tensor pow_backward(
     at::Tensor grad,
     const at::Tensor& self,
     const at::Scalar& exponent_);
+at::Tensor pow_backward_self_raw(
+    const at::Tensor& grad,
+    const at::Tensor& self,
+    const at::Tensor& exponent);
 at::Tensor pow_backward_self(
     const at::Tensor& grad,
     const at::Tensor& self,
