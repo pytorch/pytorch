@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <type_traits>
@@ -145,10 +146,12 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
           const Vectorized<scalar_t> kOneVec(scalar_t(1));
           cpu_kernel_vec(
               iter,
-              [](scalar_t x) {
-                return x == scalar_t(1)
-                    ? std::numeric_limits<scalar_t>::infinity()
-                    : std::log(x / (scalar_t(1) - x));
+              [kOneVec](scalar_t x) {
+                std::array<scalar_t, Vectorized<scalar_t>::size()> acc_arr;
+                Vectorized<scalar_t> x_vec(x);
+                const Vectorized<scalar_t> res_vec = (x_vec / (kOneVec - x_vec)).log();
+                res_vec.store(acc_arr.data());
+                return acc_arr[0];
               },
               [kOneVec](Vectorized<scalar_t> x_vec) {
                 return (x_vec / (kOneVec - x_vec)).log();
@@ -161,11 +164,13 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
           const Vectorized<scalar_t> hi_vec(hi);
           cpu_kernel_vec(
               iter,
-              [lo, hi](scalar_t x) {
+              [kOneVec, lo, hi](scalar_t x) {
+                std::array<scalar_t, Vectorized<scalar_t>::size()> acc_arr;
                 x = x < lo ? lo : (x > hi ? hi : x);
-                return x == scalar_t(1)
-                    ? std::numeric_limits<scalar_t>::infinity()
-                    : std::log(x / (scalar_t(1) - x));
+                Vectorized<scalar_t> x_vec(x);
+                const Vectorized<scalar_t> res_vec = (x_vec / (kOneVec - x_vec)).log();
+                res_vec.store(acc_arr.data());
+                return acc_arr[0];
               },
               [kOneVec, lo_vec, hi_vec](Vectorized<scalar_t> x_vec) {
                 // Apply lo last so it wins when eps > 1 - eps, matching
