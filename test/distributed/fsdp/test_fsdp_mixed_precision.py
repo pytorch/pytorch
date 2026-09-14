@@ -37,6 +37,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -520,6 +521,8 @@ class TestFSDPMixedPrecision(FSDPTest):
 
 
 class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -1050,6 +1053,8 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     Smaller test suite for unshared param (i.e. world_size == 1) case.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 1
@@ -1114,6 +1119,8 @@ class ModelWithIgnoredModule(nn.Module):
 
 
 class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 1
@@ -1135,6 +1142,8 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
 
 
 class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -1290,6 +1299,8 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
 
 
 class TestFSDPTrainEval(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
