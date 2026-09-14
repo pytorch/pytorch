@@ -217,6 +217,16 @@ class DeviceInterface:
         """
         return cls.Stream is not DeviceInterface.Stream
 
+    @staticmethod
+    def allow_tf32() -> bool:
+        """Whether the backend permits reduced-precision FP32 matmul in Triton.
+
+        For third-party Triton backends this reflects the backend-specific
+        reduced-precision FP32 mode (not necessarily NVIDIA TF32). Inductor
+        may apply additional shape heuristics at the call site.
+        """
+        return False
+
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
@@ -368,6 +378,10 @@ class CudaInterface(DeviceInterface):
             torch.version.hip is not None
             or CudaInterface.Worker.get_device_properties(device).major >= 7
         )
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        return torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
@@ -585,6 +599,10 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         return True
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        return torch.backends.mkldnn.allow_tf32
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
