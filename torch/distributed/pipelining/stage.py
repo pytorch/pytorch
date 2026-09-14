@@ -113,7 +113,7 @@ class _RecvInfo:
         self.input_name = input_name
         # Stage index of the source of this input (None for root args)
         self.source = source
-        # Allocated immediately before recv and consumed by microbatch compute
+        # Assigned immediately before recv and consumed by microbatch compute.
         self.buffer: torch.Tensor | None = None
         # Tensor metadata for validation and DTensor reconstruction
         self.tensor_meta = tensor_meta
@@ -121,16 +121,18 @@ class _RecvInfo:
         self.is_root_arg = is_root_arg
 
     def allocate_buffer(self, device: torch.device | str) -> torch.Tensor | None:
+        """Allocate and retain this receive's runtime buffer."""
         if self.is_root_arg or self.tensor_meta is None:
             return None
         if self.buffer is not None:
             raise PipeliningMetadataError(
-                f"Receive buffer for '{self.input_name}' is already allocated"
+                f"Receive buffer for '{self.input_name}' is already set"
             )
         self.buffer = _make_tensor_from_meta(self.tensor_meta, device)
         return self.buffer
 
     def set_buffer(self, buffer: torch.Tensor) -> None:
+        """Retain a receive buffer supplied by the runtime or a local stage."""
         if self.is_root_arg or self.tensor_meta is None:
             raise PipeliningMetadataError(
                 f"Receive buffer for '{self.input_name}' is not expected"
@@ -142,6 +144,7 @@ class _RecvInfo:
         self.buffer = buffer
 
     def take_buffer(self) -> torch.Tensor | None:
+        """Transfer this descriptor's buffer reference to stage computation."""
         buffer = self.buffer
         self.buffer = None
         if buffer is None and self.tensor_meta is not None:
@@ -159,11 +162,108 @@ class _RecvInfo:
             return f"_RecvInfo(input={self.input_name}, root_arg=True)"
         meta_type = type(self.tensor_meta).__name__ if self.tensor_meta else "None"
         shape = self.tensor_meta.shape if self.tensor_meta is not None else "None"
-        buffer_state = "allocated" if self.buffer is not None else "unallocated"
+        state = "set" if self.buffer is not None else "unset"
         return (
             f"_RecvInfo(input={self.input_name}, source={self.source}, "
-            f"shape={shape}, meta={meta_type}, buffer={buffer_state})"
+            f"shape={shape}, meta={meta_type}, buffer={state})"
         )
+
+
+class _RecvBufferPool:
+    """Fixed receive buffers with explicit per-slot ownership."""
+
+    def __init__(self, direction: str) -> None:
+        self._direction = direction
+        self._buffers: tuple[tuple[torch.Tensor | None, ...], ...] = ()
+        self._metas: tuple[TensorMeta | None, ...] = ()
+        self._owners: dict[int, int] = {}
+
+    def prepare(
+        self,
+        num_slots: int,
+        recv_infos: tuple[_RecvInfo, ...],
+        device: torch.device | str,
+    ) -> None:
+        """Allocate the requested stable slots if their metadata changed."""
+        if self._owners:
+            raise PipeliningMetadataError(
+                f"Cannot resize active {self._direction} receive buffer pool"
+            )
+
+        metas = tuple(
+            None if info.is_root_arg else info.tensor_meta for info in recv_infos
+        )
+        if len(self._buffers) == num_slots and self._metas == metas:
+            return
+        self._metas = metas
+        self._buffers = tuple(
+            tuple(
+                _make_tensor_from_meta(meta, device) if meta is not None else None
+                for meta in metas
+            )
+            for _ in range(num_slots)
+        )
+
+    def acquire(
+        self,
+        slot: int,
+        microbatch_index: int,
+        recv_infos: tuple[_RecvInfo, ...],
+    ) -> None:
+        """Assign one exclusively owned pool slot to receive descriptors."""
+        if not 0 <= slot < len(self._buffers):
+            raise PipeliningMetadataError(
+                f"{self._direction} receive buffer slot {slot} is out of range"
+            )
+        if slot in self._owners:
+            raise PipeliningMetadataError(
+                f"{self._direction} receive buffer slot {slot} is still owned by "
+                f"microbatch {self._owners[slot]}"
+            )
+
+        buffers = self._buffers[slot]
+        if len(buffers) != len(recv_infos):
+            raise PipeliningMetadataError(
+                f"{self._direction} receive buffer slot {slot} has "
+                f"{len(buffers)} tensors, expected {len(recv_infos)}"
+            )
+        for info, expected_meta, buffer in zip(
+            recv_infos, self._metas, buffers, strict=True
+        ):
+            actual_meta = None if info.is_root_arg else info.tensor_meta
+            if actual_meta != expected_meta:
+                raise PipeliningMetadataError(
+                    f"Receive metadata changed for '{info.input_name}' in the "
+                    f"{self._direction} buffer pool"
+                )
+            if buffer is not None:
+                info.set_buffer(buffer)
+        self._owners[slot] = microbatch_index
+
+    def release(self, slot: int, microbatch_index: int) -> None:
+        """Release a slot after its schedule-derived lifetime completes."""
+        owner = self._owners.get(slot)
+        if owner is None:
+            raise PipeliningMetadataError(
+                f"{self._direction} receive buffer slot {slot} is not active"
+            )
+        if owner != microbatch_index:
+            raise PipeliningMetadataError(
+                f"{self._direction} receive buffer slot {slot} is owned by "
+                f"microbatch {owner}, not {microbatch_index}"
+            )
+
+        for buffer in self._buffers[slot]:
+            if buffer is not None:
+                buffer.grad = None
+                if buffer.requires_grad:
+                    buffer.requires_grad_(False)
+        del self._owners[slot]
+
+    def release_all(self) -> None:
+        """Release every active slot after outstanding communication completes."""
+        for slot, microbatch_index in tuple(self._owners.items()):
+            self.release(slot, microbatch_index)
 
 
 # Cache of per-direction P2P communicators, keyed (weakly) by the PP process
@@ -342,6 +442,7 @@ class _PipelineStageBase(ABC):
         # Backward infra will be created lazily
         self.grad_recv_info: dict = {}
         self.grad_send_info: list | None = None
+        self._init_recv_buffer_pools()
 
         # To be populated later by the Schedule
         self.chunks: int | None = None
@@ -359,6 +460,13 @@ class _PipelineStageBase(ABC):
         # DTensor support: consolidated stage metadata container
         # Contains inputs, outputs, input_grads, output_grads metadata
         self._stage_meta = _StageMeta()
+
+    def _init_recv_buffer_pools(self) -> None:
+        """Initialize the optional static receive-buffer state."""
+        self._fwd_recv_slots: dict[int, int] = {}
+        self._bwd_recv_slots: dict[int, int] = {}
+        self._fwd_recv_pool = _RecvBufferPool("forward")
+        self._bwd_recv_pool = _RecvBufferPool("backward")
 
     @property
     def has_backward(self) -> bool:
@@ -500,9 +608,12 @@ class _PipelineStageBase(ABC):
             if info.is_root_arg:
                 # Root args don't need recv operations
                 continue
-            buffer = info.allocate_buffer(self.device)
-            # Skip entries with no metadata (None gradients)
+            buffer = info.buffer
             if buffer is None:
+                if info.tensor_meta is not None:
+                    raise PipeliningMetadataError(
+                        f"Receive buffer for '{info.input_name}' has not been set"
+                    )
                 continue
             if info.source is None:
                 raise AssertionError("expected info.source to be not None")
@@ -510,6 +621,60 @@ class _PipelineStageBase(ABC):
             ops.append(dist.P2POp(dist.irecv, buffer, peer_global_rank, group))
 
         return ops
+
+    def _prepare_recv_buffer_pools(
+        self,
+        fwd_slots: dict[int, int],
+        bwd_slots: dict[int, int],
+    ) -> None:
+        """Allocate stable receive pools for a finalized runtime schedule."""
+        self._fwd_recv_slots = fwd_slots
+        self._bwd_recv_slots = bwd_slots
+
+        fwd_infos = self.args_recv_info[min(fwd_slots)] if fwd_slots else ()
+        self._fwd_recv_pool.prepare(
+            max(fwd_slots.values(), default=-1) + 1,
+            fwd_infos,
+            self.device,
+        )
+        bwd_infos = self.grad_recv_info[min(bwd_slots)] if bwd_slots else ()
+        self._bwd_recv_pool.prepare(
+            max(bwd_slots.values(), default=-1) + 1,
+            bwd_infos,
+            self.device,
+        )
+
+    def _acquire_recv_buffers(
+        self,
+        microbatch_index: int,
+        recv_infos: tuple[_RecvInfo, ...],
+        slots: dict[int, int],
+        pool: _RecvBufferPool,
+    ) -> None:
+        """Acquire a static slot or allocate this receive just in time."""
+        slot = slots.get(microbatch_index)
+        if slot is not None:
+            pool.acquire(slot, microbatch_index, recv_infos)
+            return
+        for info in recv_infos:
+            info.allocate_buffer(self.device)
+
+    def _release_fwd_recv_buffers(self, microbatch_index: int) -> None:
+        """Release the forward receive slot for one microbatch, if pooled."""
+        slot = self._fwd_recv_slots.get(microbatch_index)
+        if slot is not None:
+            self._fwd_recv_pool.release(slot, microbatch_index)
+
+    def _release_bwd_recv_buffers(self, microbatch_index: int) -> None:
+        """Release the backward receive slot for one microbatch, if pooled."""
+        slot = self._bwd_recv_slots.get(microbatch_index)
+        if slot is not None:
+            self._bwd_recv_pool.release(slot, microbatch_index)
+
+    def _release_all_recv_buffers(self) -> None:
+        """Release receive slots retained through the end of the step."""
+        self._fwd_recv_pool.release_all()
+        self._bwd_recv_pool.release_all()
 
     """[Note: V-schedule special case]
 
@@ -607,6 +772,13 @@ class _PipelineStageBase(ABC):
         """
         recv_infos: tuple[_RecvInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
+        self._acquire_recv_buffers(
+            fwd_chunk_id,
+            recv_infos,
+            self._fwd_recv_slots,
+            self._fwd_recv_pool,
+        )
+
         return self._get_recv_ops(recv_infos, self._downstream_group)
 
     def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
@@ -618,6 +790,12 @@ class _PipelineStageBase(ABC):
             return []
 
         recv_infos = self.grad_recv_info[bwd_chunk_id]
+        self._acquire_recv_buffers(
+            bwd_chunk_id,
+            recv_infos,
+            self._bwd_recv_slots,
+            self._bwd_recv_pool,
+        )
         return self._get_recv_ops(recv_infos, self._upstream_group)
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
@@ -848,7 +1026,7 @@ class _PipelineStageBase(ABC):
                     continue
                 if info.tensor_meta is None:
                     raise PipeliningMetadataError(
-                        f"Grad recv '{info.input_name}': buffer is not None but tensor_meta is None"
+                        f"Grad recv '{info.input_name}' has no tensor metadata"
                     )
                 if isinstance(info.tensor_meta, _DTensorMeta):
                     # Reconstruct DTensor gradient from local tensor + metadata
@@ -1566,7 +1744,6 @@ class _PipelineStage(_PipelineStageBase):
                 tensor_meta.shape,
                 tensor_meta.dtype,
             )
-
             return _RecvInfo(
                 arg_node.name,
                 src_stage,
