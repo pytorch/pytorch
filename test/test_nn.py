@@ -50,7 +50,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    expectedFailureMPSPre27, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -8785,7 +8785,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
-    @expectedFailureMPSPre27  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
