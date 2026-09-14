@@ -771,19 +771,11 @@ def _register_flex_attention_flops() -> None:
             return 0.0
         return max(0.0, min(1.0, custom.get("sparsity_hint", 0.0)))
 
-    def _expand_kv(query_shape, shape):
-        # flex_attention allows Bkv=1 broadcast against Bq
-        if shape[0] == 1 and query_shape[0] != 1:
-            return (query_shape[0], *shape[1:])
-        return shape
-
     @register_flop_formula(flex_attention, get_raw=True)
     def flex_attention_forward_flop(
         query, key, value, *args, out_val=None, **kwargs
     ) -> int:
-        k_shape = _expand_kv(query.shape, key.shape)
-        v_shape = _expand_kv(query.shape, value.shape)
-        flops = sdpa_flop_count(query.shape, k_shape, v_shape)
+        flops = sdpa_flop_count(query.shape, key.shape, value.shape)
         sparsity = _get_sparsity_hint(kwargs)
         return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
 
@@ -792,10 +784,8 @@ def _register_flex_attention_flops() -> None:
         query, key, value, out, logsumexp, grad_out, *args, out_val=None, **kwargs
     ) -> int:
         grad_out_shape = grad_out.shape if grad_out is not None else out.shape
-        k_shape = _expand_kv(query.shape, key.shape)
-        v_shape = _expand_kv(query.shape, value.shape)
         flops = sdpa_backward_flop_count(
-            grad_out_shape, query.shape, k_shape, v_shape
+            grad_out_shape, query.shape, key.shape, value.shape
         )
         sparsity = _get_sparsity_hint(kwargs)
         return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
@@ -967,8 +957,11 @@ class FlopCounterMode:
                          formulas are executed with a warning and tracked via
                          get_unsupported_ops() instead of failing (default: False).
                          Note that FLOPs of operations inside a skipped HOP are not
-                         counted. Only affects HOPs: regular ops without formulas always
-                         execute and count 0 FLOPs regardless of this setting.
+                         counted. Also required for Triton kernels to run at all: with
+                         the default False a kernel (registered or not) is counted but
+                         never executed, leaving its output buffer untouched. Regular
+                         ops without formulas always execute and count 0 FLOPs
+                         regardless of this setting.
 
     Example usage:
 
