@@ -637,6 +637,27 @@ def drop_sequence_length_guards(guard_entries):
     return [g.guard_type != "SEQUENCE_LENGTH" for g in guard_entries]
 
 
+class TensorDefaultModule(torch.nn.Module):
+    # A tensor default makes inspect.Signature equality raise (Parameter.__eq__
+    # takes bool() of `default == default`), whether or not the body reads it.
+    def forward(self, x, mask=torch.ones(3)):
+        return x * 2
+
+
+def make_scaling_forward(scale):
+    def forward(self, x):
+        return x * scale
+
+    return forward
+
+
+class RaisingReprModule(HermeticModule):
+    # get_traced_fn formats an unsupported forward into its error before raising,
+    # and formatting a functools.partial over this module reaches extra_repr.
+    def extra_repr(self):
+        raise ValueError("extra_repr")
+
+
 AOT_POOL_MODE = "sum"
 
 # Two globals bound to the SAME tensor: make_dupe_guard refuses to relate a local
@@ -2515,7 +2536,11 @@ from user code:
             with self.assertRaises(RuntimeError) as ctx:
                 model(torch.ones(3, 3, dtype=torch.float16))
             self.assertEqual(len(binds), 1)
-        self.assertEqual(len(str(ctx.exception).splitlines()), 6)
+        # One entry per result off that single bind, whatever else the report
+        # carries.
+        lines = str(ctx.exception).splitlines()
+        self.assertEqual(sum(line.startswith("  [") for line in lines), len(xs))
+        self.assertIn("Add a ModelInput", str(ctx.exception))
 
     def test_module_dispatch_binds_per_result_when_signatures_differ(self):
         # Results assembled by hand need not agree on a signature, and the guards
@@ -2607,6 +2632,90 @@ from user code:
         # The second evaluation is the re-check reading [1]'s global again; the
         # last resort would have served [0] without one.
         self.assertEqual(compares, 2)
+
+    def test_module_dispatch_serves_an_opted_out_result_from_any_position(self):
+        # With [0] still checked and [1] opted out, a call neither guards is
+        # served by [1]: the fall-through this dispatch replaced re-entered
+        # compiled_results[0] alone and raised its guard error.
+        mod = ModeBranchGlobalModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile(
+            [
+                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
+                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
+            ]
+        )
+        model.forward.compiled_results[1].disable_guard_check()
+        self.assertEqual(model(x, 2), x * AOT_BRANCH_SCALE)
+
+    def test_module_dispatch_rechecks_before_honouring_an_opt_out(self):
+        # [0] opted out, [1] checked and falsely rejected once: the re-check
+        # finds [1]'s real match before the last resort can hand the call to [0].
+        mod = ModeBranchGlobalModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(3, 3)
+        model._aot_compile(
+            [
+                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
+                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
+            ]
+        )
+        model.forward.compiled_results[0].disable_guard_check()
+        g = globals()
+        probe = CountedKey("AOT_BRANCH_SCALE", misses=1)
+        saved = g.pop("AOT_BRANCH_SCALE")
+        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
+        self.addCleanup(g.pop, probe, None)
+        g[probe] = saved
+        out = model(x, 1)
+        compares = probe.compares
+        self.assertEqual(out, x * saved)
+        self.assertEqual(compares, 2)
+
+    def test_module_dispatch_shares_a_binding_past_a_tensor_default(self):
+        # Every result's signature carries the same default object, so the
+        # results share a binding; deciding that through Signature equality
+        # raised `Boolean value of Tensor with more than one value is ambiguous`
+        # from the constructor, for _aot_compile and deserialize alike.
+        mod = TensorDefaultModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
+        self.assertTrue(model.forward._shared_binding)
+        for x in xs:
+            self.assertEqual(model(x), x * 2)
+        loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
+        for x in xs:
+            self.assertEqual(loaded(x), x * 2)
+
+    def test_module_dispatch_shares_a_binding_across_closure_cells(self):
+        # A forward closing over a cell shares a binding only while every
+        # result holds the SAME cell, which results of one _aot_compile do and
+        # results assembled from two modules -- same signature, same freevar
+        # name, different cell -- do not.
+        mod = torch.nn.Module()
+        mod.forward = types.MethodType(make_scaling_forward(3.0), mod)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
+        self.assertTrue(model.forward._shared_binding)
+        for x in xs:
+            self.assertEqual(model(x), x * 3)
+        other = torch.nn.Module()
+        other.forward = types.MethodType(make_scaling_forward(5.0), other)
+        model2 = torch.compile(other, fullgraph=True, backend="eager")
+        model2._aot_compile([ModelInput(args=(xs[1],), kwargs={}, contexts=[])])
+        results = model.forward.compiled_results[:1] + model2.forward.compiled_results
+        combined = AOTCompiledModel(mod, results)
+        self.assertFalse(combined._shared_binding)
+        self.assertEqual(combined(xs[0]), xs[0] * 3)
+        self.assertEqual(combined(xs[1]), xs[1] * 5)
 
     def test_no_match_message_when_a_guard_answers_inconsistently(self):
         # Both dispatch passes ran [1]'s whole tree and both rejected the call,
@@ -2860,6 +2969,38 @@ from user code:
         self.assertIn("AOT_HERMETIC_WEIGHT", HermeticModule.forward.__globals__)
         scope["AOT_HERMETIC_WEIGHT"] = AOT_HERMETIC_WEIGHT
         self.assertEqual(compiled(x), x @ AOT_HERMETIC_WEIGHT)
+
+    def test_no_match_report_resolves_forward_only_for_a_supplied_scope(self):
+        # An in-process capture keeps the CAPTURED scope, whose hint never names
+        # forward, so the report has no reason to resolve it -- and resolving it
+        # runs user code: get_traced_fn formats the forward it refuses, a partial
+        # over this module, whose extra_repr raises past the (RuntimeError,
+        # AttributeError) that _resolve_guard_scope catches. Dispatch itself
+        # never calls the rebound forward, so the rebind reaches only the report.
+        mod = RaisingReprModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(3, 3)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        mod.forward = functools.partial(HermeticModule.forward, mod)
+        with self.assertRaises(ValueError):
+            repr(mod.forward)
+        g = globals()
+        saved = g.pop("AOT_HERMETIC_WEIGHT")
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                model(x)
+            message = str(ctx.exception)
+        finally:
+            g["AOT_HERMETIC_WEIGHT"] = saved
+        self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
+        self.assertIn("the module the compiled function was traced in", message)
+        self.assertNotIn("RaisingReprModule.forward", message)
+        self.assertIn("Add a ModelInput", message)
 
     def test_no_match_message_when_a_failure_names_no_guard(self):
         # A set index past the end of a shorter set answers
