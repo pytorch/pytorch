@@ -1088,6 +1088,19 @@ class TestReductions(TestCase):
         c = a.to(torch.bool).all(dim=0)
         self.assertEqual(torch.ne(b, c).sum(), 0)
 
+    def test_all_any_uint8_out_float_input(self, device):
+        # Issue #117215: with a uint8 out=, a float input must be nonzero-tested,
+        # not truncated to uint8 first (0.5 -> uint8 0 would wrongly become falsy).
+        for op in (torch.all, torch.any):
+            for contig in (True, False):
+                x = torch.full((4, 3), 0.5, device=device)
+                if not contig:
+                    x = x.t()
+                expected = op(x.to(torch.bool), dim=0).to(torch.uint8)
+                out = torch.empty(expected.shape, dtype=torch.uint8, device=device)
+                op(x, dim=0, out=out)
+                self.assertEqual(out, expected)
+
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)

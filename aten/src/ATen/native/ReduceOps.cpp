@@ -1678,8 +1678,16 @@ static inline TensorIterator get_allany_iter(
     // casting, so it can take the same fast path.
     return meta::make_reduction(self, result, dims, keepdim, self.scalar_type());
   }
-  return meta::make_reduction_from_out_ty(
-      self, result, dims, keepdim, result.scalar_type());
+  // On CPU we must reduce in kBool so the cast from self applies a nonzero
+  // test, not a truncating cast (e.g. a float 0.5 cast to uint8 is 0, silently
+  // making a truthy value falsy). Keep result's dtype only when self is already
+  // Byte/Bool, where the cast is exact and the byte fast path in
+  // and_kernel_impl/or_kernel_impl applies.
+  const ScalarType in_dtype =
+      (self.scalar_type() == at::kByte || self.scalar_type() == at::kBool)
+      ? result.scalar_type()
+      : at::kBool;
+  return meta::make_reduction(self, result, dims, keepdim, in_dtype);
 }
 
 template <int identity, typename Stub>
