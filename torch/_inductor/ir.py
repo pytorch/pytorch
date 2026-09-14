@@ -10352,6 +10352,9 @@ class FallbackKernel(ExternKernelAlloc):
         if not device and (
             isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
             or kernel is torch.ops.higher_order.print
+            # compile-on-one-rank: reads the current accelerator index and returns a
+            # plain SymInt, so it has no tensor to take a device from.
+            or kernel is torch.ops.coor.current_device_index.default
         ):
             device = torch.device("cpu")
 
