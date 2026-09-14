@@ -2288,7 +2288,15 @@ def bincount(
     if weights is None:
         return inputs.new_empty(new_size, dtype=torch.int64)  # type: ignore[return]
 
-    if weights.device.type == "mps":
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    try:
+        supports_f64 = get_interface_for_device(weights.device.type).is_dtype_supported(
+            torch.float64
+        )
+    except NotImplementedError:
+        supports_f64 = True
+    if not supports_f64:
         dtype = (
             weights.dtype
             if weights.dtype in (torch.float32, torch.int32, torch.float16)
