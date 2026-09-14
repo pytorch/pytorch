@@ -7,7 +7,7 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -1699,6 +1699,217 @@ def _merge_bw(
     return merged_actions
 
 
+def _add_wait_send(
+    comm_actions: dict[int, list[_Action]],
+) -> dict[int, list[_Action]]:
+    """Wait for a forward send after its matching local backward."""
+    backward_types = (FULL_BACKWARD, BACKWARD_INPUT)
+
+    def backward_slots(action: _Action) -> list[tuple[int, int | None]]:
+        return [
+            (part.stage_index, part.microbatch_index)
+            for part in action.sub_actions or (action,)
+            if part.computation_type in backward_types
+        ]
+
+    result: dict[int, list[_Action]] = {}
+    for rank, actions in comm_actions.items():
+        sent = {
+            (action.stage_index, action.microbatch_index)
+            for action in actions
+            if action.computation_type == SEND_F
+        }
+        lowered: list[_Action] = []
+        for action in actions:
+            lowered.append(action)
+            for stage_index, microbatch_index in backward_slots(action):
+                if (stage_index, microbatch_index) in sent:
+                    lowered.append(_Action(stage_index, WAIT_SEND_F, microbatch_index))
+                    sent.remove((stage_index, microbatch_index))
+        result[rank] = lowered
+
+    return result
+
+
+def _add_wait_send_budget(
+    comm_actions: dict[int, list[_Action]],
+    stage_to_rank: Callable[[int], int],
+    max_outstanding_sends: int,
+) -> dict[int, list[_Action]]:
+    """Enforce a per-rank pending send-batch limit with causal waits."""
+    ranks = sorted(comm_actions)
+    send_types = {SEND_F: (1, RECV_F), SEND_B: (-1, RECV_B)}
+
+    recv_at: dict[tuple[int, _ComputationType, int, int | None], int] = {}
+    for rank in ranks:
+        for index, action in enumerate(comm_actions[rank]):
+            if action.computation_type in (RECV_F, RECV_B):
+                recv_at[
+                    (
+                        rank,
+                        action.computation_type,
+                        action.stage_index,
+                        action.microbatch_index,
+                    )
+                ] = index
+
+    recv_of_send: dict[tuple[int, int], tuple[int, int]] = {}
+    send_of_recv: dict[tuple[int, int], tuple[int, int]] = {}
+    for rank in ranks:
+        for index, action in enumerate(comm_actions[rank]):
+            if action.computation_type not in send_types:
+                continue
+            stage_offset, recv_type = send_types[action.computation_type]
+            peer_stage = action.stage_index + stage_offset
+            peer_rank = stage_to_rank(peer_stage)
+            recv = (
+                peer_rank,
+                recv_at[(peer_rank, recv_type, peer_stage, action.microbatch_index)],
+            )
+            recv_of_send[(rank, index)] = recv
+            send_of_recv[recv] = (rank, index)
+
+    successors: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    in_degree = {
+        (rank, index): 0 for rank in ranks for index in range(len(comm_actions[rank]))
+    }
+    for rank in ranks:
+        for index in range(1, len(comm_actions[rank])):
+            successors[(rank, index - 1)].append((rank, index))
+            in_degree[(rank, index)] += 1
+    for send, recv in recv_of_send.items():
+        successors[send].append(recv)
+        in_degree[recv] += 1
+
+    def consumed_recvs(action: _Action, rank: int) -> list[int]:
+        result = []
+        for part in action.sub_actions or (action,):
+            if part.computation_type == F:
+                recv_type = RECV_F
+            elif part.computation_type in (FULL_BACKWARD, BACKWARD_INPUT):
+                recv_type = RECV_B
+            else:
+                continue
+            key = (rank, recv_type, part.stage_index, part.microbatch_index)
+            if key in recv_at:
+                result.append(recv_at[key])
+        return result
+
+    knowledge = {rank: dict.fromkeys(ranks, -1) for rank in ranks}
+    knowledge_at_send: dict[tuple[int, int], dict[int, int]] = {}
+    outstanding: dict[int, dict[_Action, tuple[int, int]]] = {
+        rank: {} for rank in ranks
+    }
+    inserted_waits: Counter[_Action] = Counter()
+    inserted_counts = {rank: Counter() for rank in ranks}
+    potentially_stalling = {rank: Counter() for rank in ranks}
+    lowered: dict[int, list[_Action]] = {rank: [] for rank in ranks}
+    posted_recvs: set[tuple[int, int]] = set()
+
+    def release(rank: int, keep: int) -> None:
+        known = knowledge[rank]
+        pending = outstanding[rank]
+        for known_complete in (True, False):
+            for send, (peer_rank, recv_index) in list(pending.items()):
+                if len(pending) <= keep:
+                    return
+                if known_complete:
+                    if known[peer_rank] < recv_index:
+                        continue
+                elif (peer_rank, recv_index) not in posted_recvs:
+                    continue
+                else:
+                    potentially_stalling[rank][send.computation_type] += 1
+                wait_type = (
+                    WAIT_SEND_F if send.computation_type == SEND_F else WAIT_SEND_B
+                )
+                lowered[rank].append(
+                    _Action(send.stage_index, wait_type, send.microbatch_index)
+                )
+                inserted_waits[send] += 1
+                inserted_counts[rank][send.computation_type] += 1
+                del pending[send]
+
+    queue = deque(sorted(node for node, degree in in_degree.items() if degree == 0))
+    num_walked = 0
+    while queue:
+        rank, index = queue.popleft()
+        num_walked += 1
+        action = comm_actions[rank][index]
+        known = knowledge[rank]
+        known[rank] = index
+
+        if action.computation_type in send_types:
+            release(rank, max_outstanding_sends - 1)
+            lowered[rank].append(action)
+            knowledge_at_send[(rank, index)] = dict(known)
+            outstanding[rank][action] = recv_of_send[(rank, index)]
+        elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+            send_type = SEND_F if action.computation_type == WAIT_SEND_F else SEND_B
+            send = _Action(action.stage_index, send_type, action.microbatch_index)
+            if outstanding[rank].pop(send, None) is not None:
+                lowered[rank].append(action)
+            elif inserted_waits[send]:
+                inserted_waits[send] -= 1
+            else:
+                raise ValueError(f"{action} has no pending send")
+        else:
+            if action.computation_type in (RECV_F, RECV_B):
+                posted_recvs.add((rank, index))
+            lowered[rank].append(action)
+            for recv_index in consumed_recvs(action, rank):
+                send_rank, send_index = send_of_recv[(rank, recv_index)]
+                for peer_rank, position in knowledge_at_send[
+                    (send_rank, send_index)
+                ].items():
+                    known[peer_rank] = max(known[peer_rank], position)
+            release(rank, max_outstanding_sends)
+
+        for successor in successors[(rank, index)]:
+            in_degree[successor] -= 1
+            if in_degree[successor] == 0:
+                queue.append(successor)
+
+    if num_walked != len(in_degree):
+        raise ValueError("Pipeline sends and receives form a cycle")
+
+    for rank, actions in lowered.items():
+        pending: list[_Action] = []
+        peak = 0
+        for action in actions:
+            if action.computation_type in send_types:
+                pending.append(action)
+                peak = max(peak, len(pending))
+                if len(pending) > max_outstanding_sends:
+                    prior = ", ".join(str(send) for send in pending[:-1])
+                    raise ValueError(
+                        f"Cannot satisfy max_outstanding_sends={max_outstanding_sends} "
+                        f"on pipeline rank {rank}: the safe static schedule requires "
+                        f"peak {len(pending)} before {action}. Outstanding: [{prior}]. "
+                        "No causally safe release point existed before this send. "
+                        "Increase the limit or change the schedule."
+                    )
+            elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+                send_type = SEND_F if action.computation_type == WAIT_SEND_F else SEND_B
+                pending.remove(
+                    _Action(action.stage_index, send_type, action.microbatch_index)
+                )
+        logger.info(
+            "Pipeline rank %d send budget %d: peak %d, inserted waits F=%d B=%d, "
+            "potentially stalling F=%d B=%d, final drain=%d",
+            rank,
+            max_outstanding_sends,
+            peak,
+            inserted_counts[rank][SEND_F],
+            inserted_counts[rank][SEND_B],
+            potentially_stalling[rank][SEND_F],
+            potentially_stalling[rank][SEND_B],
+            len(pending),
+        )
+
+    return lowered
+
+
 def _add_send_recv(
     compute_actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
@@ -2579,6 +2790,15 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
         self._max_active_stages: int = kwargs.pop("max_active_stages", 3)
         self._defer_reduce_grad_wait: bool = kwargs.pop("defer_reduce_grad_wait", False)
+        self._max_outstanding_sends: int | None = kwargs.pop(
+            "max_outstanding_sends", None
+        )
+        if self._max_outstanding_sends is not None and (
+            not isinstance(self._max_outstanding_sends, int)
+            or isinstance(self._max_outstanding_sends, bool)
+            or self._max_outstanding_sends < 0
+        ):
+            raise ValueError("max_outstanding_sends must be a non-negative integer")
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2718,6 +2938,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 num_stages=self._num_stages,
             )
 
+            # Release forward sends at no-stall causal points first. The optional
+            # budget pass below adds any remaining waits needed to enforce its limit.
+            self.pipeline_order_with_comms = _add_wait_send(
+                self.pipeline_order_with_comms
+            )
+
             if self._defer_pp_recv:
                 self.pipeline_order_with_comms = _defer_recv_ops(
                     self.pipeline_order_with_comms,
@@ -2725,6 +2951,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
+
+        if self._max_outstanding_sends is not None:
+            self.pipeline_order_with_comms = _add_wait_send_budget(
+                self.pipeline_order_with_comms,
+                stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
+                max_outstanding_sends=self._max_outstanding_sends,
+            )
 
     def _load_csv(
         self,
@@ -3361,6 +3594,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3375,6 +3609,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
