@@ -1,11 +1,13 @@
 import builtins
 import dataclasses
+import enum
 import importlib
 import inspect
 import io
 import logging
 import os
 import pickle
+import re
 import tempfile
 import types
 from collections.abc import Callable, Sequence
@@ -38,6 +40,52 @@ log = logging.getLogger(__name__)
 _EXTERNAL_DATA_HINT = (
     "Mark the value(s) as external data by using `external_data={'key': ...}`."
 )
+
+
+# A guard failure that is exactly a missing top-level global: the verbose code
+# part a guard tree reports for one ("KeyError on G['CONFIG']"). A trailing
+# subscript ("KeyError on G['CONFIG']['scale']") means the global itself
+# resolved and only a key inside it is absent, so the advice to define the
+# global would be wrong.
+_MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
+
+# Names Dynamo mints into the scope the guards resolve against, rather than
+# names the caller wrote: the __import_* module aliases, the __builtins_dict___N
+# key, and the ___unnamed_scope_<id>_c<n> key an inlined frame whose globals
+# belong to no module is guarded through. A load seeds each of the first two a
+# kept guard is rooted at, so a KeyError on one reports a gap in that seeding;
+# the last embeds id() of a dict in the tracing process, so no module's vars()
+# in a loading process holds it. None of the three is a name the advice below
+# can send a caller to define. The list is complete because a report here needs
+# a serializable guard rooted at a GlobalSource on the name: every other minted
+# family builds no Source (the codegen-only installs) or a guard type in
+# UNSUPPORTED_SERIALIZATION_GUARD_TYPES, which ___unnamed_scope's was not -- so
+# moving a type off that list means re-checking this one.
+_MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", "___unnamed_scope")
+
+
+def _names_a_missing_global(text: str) -> bool:
+    # Matched whole, against one verbose code part: matching a substring of the
+    # GuardDebugInfo string would also fire for the nested-key failure above.
+    match = _MISSING_GLOBAL_RE.fullmatch(text)
+    if match is None:
+        return False
+    return not match["name"].strip("\"'").startswith(_MINTED_GLOBAL_PREFIXES)
+
+
+class _GuardScope(enum.Enum):
+    """Which dict the artifact's global guards resolve names against."""
+
+    # Never serialized: the guards still hold the tracing process's globals.
+    CAPTURED = "captured"
+    # A live scope the load path re-rooted the guards at, e.g. a function
+    # load's f_globals.
+    SUPPLIED = "supplied"
+    # Rebuilt for this load: the globals the graph lifted, the graph's freshly
+    # imported module aliases, the backend id, and whatever an f_globals= was
+    # merged over them. That merge copies, so a name bound in the f_globals
+    # after the load is invisible to these guards.
+    RECONSTRUCTED = "reconstructed"
 
 
 def bind_locals(
@@ -467,6 +515,23 @@ class AOTCompiledFunction:
     # caller-supplied one cannot rewire what the compiled bytecode reads. Left
     # None, the guards resolve against fn.__globals__ itself and are seeded into it.
     _guard_globals: dict[str, object] | None = None
+    # Which of the three scopes the artifact's guards resolve against, so a
+    # guard failure can say something actionable about the dict the name was
+    # looked up in. Not init-settable: it stays CAPTURED unless __post_init__
+    # itself resolves a scope, which it does only for a load that has guards
+    # left to re-root.
+    _guard_scope: _GuardScope = dataclasses.field(
+        init=False, default=_GuardScope.CAPTURED
+    )
+    # The rebuilt callable, set by __post_init__ (never absent on a live
+    # artifact); a declared field rather than an attribute setattr'd onto the
+    # instance. Out of repr and eq because the field has no default: leaving it
+    # in either makes both raise AttributeError on an instance __post_init__
+    # abandoned -- check_compatibility and forward_callable both raise there --
+    # which is what a traceback rendering frame locals would report instead of
+    # the real failure. It is a per-instance FunctionType, so it is not
+    # equality state either.
+    fn: Callable[..., Any] = dataclasses.field(init=False, repr=False, compare=False)
 
     def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
         f_locals: dict[str, object] = {}
@@ -504,7 +569,12 @@ class AOTCompiledFunction:
             guards_state = load_guards_state(self._artifacts.guards_state)
             guard_scope = self._guard_globals
             if guard_scope is None:
+                self._guard_scope = _GuardScope.RECONSTRUCTED
                 guard_scope = self.fn.__globals__
+            else:
+                # A live scope: a name it lacks must fail the guard rather than
+                # fall back to the value serialized with the artifact.
+                self._guard_scope = _GuardScope.SUPPLIED
             # Seeded AFTER forward_callable, never before: on the default path this
             # IS fn.__globals__, and PyFunction_New caches __builtins__ at creation,
             # so the __builtins__ written below cannot rewire the bytecode's lookups.
@@ -608,13 +678,49 @@ class AOTCompiledFunction:
         guard_scope.setdefault("__builtins__", builtins.__dict__)
         guard_scope[builtins_key] = get_builtins_dict(guard_scope)
 
+    def _missing_global_hint(self) -> str:
+        """Advice for a guard that failed on a global its scope does not define,
+        worded for the scope the guards were actually resolved against."""
+        if self._guard_scope is _GuardScope.RECONSTRUCTED:
+            return (
+                " -- a guarded global is missing from the scope rebuilt from the "
+                "artifact; load with an f_globals= that is a complete live scope "
+                "carrying the name -- normally vars(mod) for the module mod that "
+                "defined the function, which is usually not the module doing the "
+                "loading -- so the guard can resolve it."
+            )
+        if self._guard_scope is _GuardScope.SUPPLIED:
+            return (
+                " -- a guarded global is missing from the live scope this "
+                "artifact was loaded against; define it there so the guard can "
+                "resolve it."
+            )
+        # CAPTURED: the guards hold the globals they were traced against BY
+        # REFERENCE, so a name deleted after capture can be defined there again
+        # to make the guard resolve -- the same advice as SUPPLIED, worded for
+        # the dict this path actually used.
+        return (
+            " -- a guarded global is missing from the globals of the module the "
+            "compiled function was traced in, which its guards still resolve "
+            "against; define it there so the guard can resolve it."
+        )
+
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self._artifacts.guard_manager is None:
             raise AssertionError("guard_manager must not be None")
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
-            reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
-            raise RuntimeError(f"GuardManager check failed, reason: {reason}")
+            debug_info = self._artifacts.guard_manager.check_verbose(f_locals)
+            msg = f"GuardManager check failed, reason: {debug_info}"
+            if any(
+                _names_a_missing_global(part) for part in debug_info.verbose_code_parts
+            ):
+                # What the f-string interpolated is str(GuardDebugInfo), which
+                # ends in a newline, so the hint has to be appended to the
+                # stripped message: otherwise its inline continuation lands on a
+                # line of its own, starting with a stray space.
+                msg = msg.rstrip() + self._missing_global_hint()
+            raise RuntimeError(msg)
         return self.fn(*args, **kwargs)
 
     def source_info(self) -> "SourceInfo":
