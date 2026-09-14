@@ -939,7 +939,7 @@ struct TORCH_API IValue final {
 
   bool isScalar() const {
     return isDouble() || isInt() || isComplexDouble() || isBool() ||
-        isSymInt() || isSymFloat() || isSymBool();
+        isSymInt() || isSymFloat() || isSymBool() || isUnsigned();
   }
 
   at::Scalar toScalar() const {
