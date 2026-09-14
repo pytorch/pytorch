@@ -27,12 +27,27 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-def _init_cublas_workspace(dev: torch.device):
+def _init_cublas_workspace(dev: torch.device) -> int:
+    # MemTracker accounts for tensor storages, and a BLAS workspace is not one.
+    # It used to stay out of the measured peak by being cached for the process
+    # lifetime, so priming it here was enough. Per-operation workspaces end
+    # that, so also measure what one costs and let the caller discount it.
+    # Returns 0 wherever the workspace is still persistent.
+    mod = torch.get_device_module(dev)
     lin = torch.nn.Linear(768, 768, device=dev)
     inp = torch.randn(1, 768, device=dev)
     lin(inp).sum().backward()
     del lin
     del inp
+    gc.collect()
+    mod.empty_cache()
+    mod.reset_peak_memory_stats(dev)
+    a = torch.randn(512, 512, device=dev)
+    b = torch.randn(512, 512, device=dev)
+    base = mod.memory_stats(dev)["active_bytes.all.current"]
+    out = a @ b
+    peak = mod.memory_stats(dev)["active_bytes.all.peak"]
+    return peak - base - out.untyped_storage().nbytes()
 
 
 def _reset_mem_stats(dev: torch.device):
@@ -79,7 +94,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     ):
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
-        _init_cublas_workspace(dev)
+        blas_scratch = _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
         mod = torch.get_device_module(dev)
@@ -114,7 +129,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
                     fmt.reset_mod_stats()
         mem_stats = mod.memory_stats()
         tracker_max = fmt.get_tracker_snapshot("peak")[dev]["Total"]
-        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
+        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active - blas_scratch
         accuracy = tracker_max / acc_max
         if self.rank == 0 and debug:
             print(
@@ -137,7 +152,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         """
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
-        _init_cublas_workspace(dev)
+        blas_scratch = _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
         mod = torch.get_device_module(dev)
@@ -164,7 +179,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
                     fmt.reset_mod_stats()
         mem_stats = mod.memory_stats()
         tracker_max = fmt.get_tracker_snapshot("peak")[dev]["Total"]
-        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
+        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active - blas_scratch
         accuracy = tracker_max / acc_max
         if self.rank == 0 and debug:
             print(
@@ -249,7 +264,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
             )
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
-        _init_cublas_workspace(dev)
+        blas_scratch = _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
         mod = torch.get_device_module(dev)
@@ -303,7 +318,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
                     fmt.reset_mod_stats()
         mem_stats = mod.memory_stats()
         tracker_max = fmt.get_tracker_snapshot("peak")[dev]["Total"]
-        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
+        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active - blas_scratch
         accuracy = tracker_max / acc_max
         if self.rank == 0 and debug:
             print(
