@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
-from types import SimpleNamespace
 from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
@@ -10,6 +9,7 @@ import sympy
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.ir as ir
+import torch._inductor.memory as inductor_memory
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
@@ -33,6 +33,7 @@ from torch._inductor.scheduler import (
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedNestedReductions,
+    FusionMemoryState,
     MemoryDepMatch,
     NestedReduction,
     OrderedParentNodes,
@@ -50,6 +51,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
     skipCUDAIf,
 )
@@ -57,6 +59,8 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
     run_tests,
+    skipIfMPS,
+    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -152,6 +156,15 @@ class TestScheduler(TestCase):
         node.ancestors = OrderedSet(ancestors)
         node.get_operation_names.return_value = OrderedSet([name])
         node.get_buffer_names.return_value = OrderedSet(writes)
+
+        def make_output(buf_name):
+            buf = Mock()
+            buf.get_name.return_value = buf_name
+            buf.get_aliases.return_value = ()
+            buf.get_mutations.return_value = ()
+            return buf
+
+        node.get_outputs.return_value = tuple(make_output(w) for w in writes)
         node.is_reduction.return_value = is_reduction
         if is_reduction:
             node.__class__ = SchedulerNode
@@ -291,7 +304,7 @@ class TestScheduler(TestCase):
 
     def test_fuse_two_nodes_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
-        device = torch.device("cuda", 0)
+        device = torch.device(GPU_TYPE, 0)
         node1 = self._mock_base_snode("node1", device)
         node2 = self._mock_base_snode("node2", device)
         node3 = self._mock_base_snode("node3", device)
@@ -365,10 +378,11 @@ class TestScheduler(TestCase):
 
         self.assertIsNone(result)
 
+    @skipIfMPS  # MPS is filtered by _filter_nodes_for_combo_kernel_grouping
     @inductor_config.patch(combo_kernel_max_num_nodes=16)
     def test_combo_kernel_grouping_respects_mempool(self):
         scheduler = Mock()
-        device = torch.device("cuda", 0)
+        device = torch.device(GPU_TYPE, 0)
         pool_node1 = self._mock_base_snode("pool_node1", device)
         pool_node2 = self._mock_base_snode("pool_node2", device)
         default_node = self._mock_base_snode("default_node", device)
@@ -398,86 +412,6 @@ class TestScheduler(TestCase):
             groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
         )
 
-    def test_fuse_if_speedup_checks_memory_before_callback(self):
-        scheduler = object.__new__(Scheduler)
-        scheduler._fusion_memory_state = object()
-        scheduler._can_fuse_impl = Mock(return_value=True)
-        scheduler.will_fusion_create_cycle = Mock(return_value=False)
-        scheduler._check_fusion_memory = Mock(return_value=(True, None))
-        scheduler.fuse_two_nodes = Mock()
-        speedup = Mock(return_value=True)
-        node1, node2 = Mock(), Mock()
-
-        self.assertFalse(
-            scheduler._fuse_if_speedup_with_memory(
-                node1,
-                node2,
-                speedup,
-                OrderedSet([node1, node2]),
-                can_reorder=True,
-            )
-        )
-
-        scheduler._can_fuse_impl.assert_called_once_with(
-            node1, node2, can_reorder=True, allow_mix_order_reduction=True
-        )
-        speedup.assert_not_called()
-        scheduler.fuse_two_nodes.assert_not_called()
-
-    def test_resize_storage_fails_fusion_memory_closed(self):
-        scheduler = object.__new__(Scheduler)
-        node = self._mock_base_snode("resize")
-        node.node = object.__new__(ir.ResizeStorageBytes)
-        counter = "fusion_memory_timeline_resize_unsupported"
-        initial_count = counters["inductor"][counter]
-
-        with patch.object(torch._logging, "warning_once") as warning:
-            state = scheduler._init_fusion_memory_state([node])
-
-        self.assertEqual(
-            scheduler._check_fusion_memory(state, node, node), (True, None)
-        )
-        self.assertEqual(counters["inductor"][counter], initial_count + 1)
-        warning.assert_called_once()
-
-    @inductor_config.patch(max_autotune=False, max_autotune_gemm=False)
-    def test_fusion_memory_planning_info_is_restored(self):
-        from torch._inductor import memory as memory_module
-
-        scheduler = object.__new__(Scheduler)
-        node = Mock(min_order=0)
-        node.read_writes = SimpleNamespace(reads=[])
-        scheduler.name_to_buf = {}
-        scheduler.name_to_fused_node = {}
-        scheduler.prune_redundant_deps = Mock()
-        scheduler.fusion_memory_timeline_peak_allowed_increase_bytes = Mock(
-            return_value=0
-        )
-        scheduler._init_fusion_memory_state = Mock(return_value=object())
-        scheduler.get_possible_fusions = Mock(return_value=[])
-        scheduler._try_fusion_pairs = Mock()
-        scheduler._finish_pending_fusions = Mock()
-        scheduler._evaluate_pending_template_fusions = Mock()
-        scheduler.topological_sort_schedule = Mock(return_value=[node])
-
-        with (
-            V.set_graph_handler(SimpleNamespace(graph_inputs={})),
-            patch.object(
-                memory_module,
-                "assign_memory_planning_info_for_scheduler_buffers",
-            ) as assign_buffers,
-            patch.object(
-                memory_module,
-                "assign_memory_planning_info_for_scheduler_nodes",
-            ) as assign_nodes,
-        ):
-            result = scheduler.fuse_nodes_once([node], is_reorder_round=False)
-
-        self.assertEqual(result, [node])
-        assign_buffers.assert_called_once_with([node], {})
-        assign_nodes.assert_called_once_with([node], {}, {}, {})
-        self.assertIsNone(scheduler._fusion_memory_state)
-
     @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
@@ -490,101 +424,92 @@ class TestScheduler(TestCase):
         weight = torch.testing.make_tensor(
             (4096, 1), device=device, dtype=torch.float32
         )
-        memory_config = "fusion_memory_timeline_peak_allowed_increase_mb"
 
-        def compile_and_count(allowed_increase_mb):
+        def compile_and_measure(increase_gb, pct_threshold):
             torch._dynamo.reset()
             metrics.reset()
-            compiled = torch.compile(
-                fn,
-                backend="inductor",
-                fullgraph=True,
-                options={
-                    "fx_graph_cache": False,
-                    "reorder_for_peak_memory": False,
-                    memory_config: allowed_increase_mb,
-                },
-            )
+            final_peaks = []
+            original_fuse_nodes = Scheduler.fuse_nodes
+
+            def fuse_nodes_and_record(scheduler, nodes):
+                nodes = original_fuse_nodes(scheduler, nodes)
+                graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+                graph_outputs = OrderedSet(V.graph.get_output_names())
+                freeable = inductor_memory.get_freeable_input_buf(nodes, graph_inputs)
+                inductor_memory.assign_memory_planning_info_for_scheduler_buffers(
+                    nodes, scheduler.name_to_buf
+                )
+                inductor_memory.assign_memory_planning_info_for_scheduler_nodes(
+                    nodes,
+                    scheduler.name_to_fused_node,
+                    scheduler.name_to_buf,
+                    freeable,
+                )
+                peak, _ = inductor_memory.estimate_peak_memory(
+                    nodes, freeable, graph_outputs
+                )
+                final_peaks.append(peak)
+                return nodes
+
+            with patch.object(Scheduler, "fuse_nodes", fuse_nodes_and_record):
+                compiled = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    options={
+                        "fx_graph_cache": False,
+                        "reorder_for_peak_memory": False,
+                        "fusion_memory_timeline_peak_memory_increase_gb": increase_gb,
+                        "fusion_memory_timeline_peak_memory_pct_threshold": pct_threshold,
+                    },
+                )
+                self.assertEqual(compiled(x, weight), fn(x, weight))
+
+            self.assertEqual(len(final_peaks), 1)
+            return metrics.generated_kernel_count, final_peaks[0]
+
+        unrestricted_count, unrestricted_peak = compile_and_measure(None, None)
+        guarded_count, guarded_peak = compile_and_measure(0.0, None)
+
+        self.assertEqual(unrestricted_count, 1)
+        self.assertEqual(guarded_count, 2)
+        self.assertLess(guarded_peak, unrestricted_peak)
+        self.assertEqual(compile_and_measure(1000.0, None)[0], 1)
+        self.assertEqual(compile_and_measure(None, 1000.0)[0], 1)
+        self.assertEqual(compile_and_measure(1000.0, 0.0)[0], 2)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_fusion_memory_guard_fails_open(self, device):
+        def fn(x, weight):
+            early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
+            late = torch.cos(x).sum(dim=0)
+            return early, late
+
+        x = torch.testing.make_tensor((1, 4096), device=device, dtype=torch.bool)
+        weight = torch.testing.make_tensor(
+            (4096, 1), device=device, dtype=torch.float32
+        )
+        counter = "fusion_memory_timeline_fail_open"
+        initial_count = counters["inductor"][counter]
+        torch._dynamo.reset()
+        metrics.reset()
+
+        with (
+            patch.object(
+                FusionMemoryState, "update_boundaries_match", return_value=False
+            ),
+            inductor_config.patch(
+                fx_graph_cache=False,
+                reorder_for_peak_memory=False,
+                fusion_memory_timeline_peak_memory_increase_gb=1000.0,
+            ),
+        ):
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
             self.assertEqual(compiled(x, weight), fn(x, weight))
-            return metrics.generated_kernel_count
 
-        self.assertEqual(compile_and_count(None), 1)
-        self.assertEqual(compile_and_count(1000), 1)
-        self.assertEqual(compile_and_count(0), 2)
-
-    def test_pending_fusion_preserves_reorder_legality(self):
-        from torch._inductor.scheduler import FusionMemoryState, PendingFusion
-
-        scheduler = object.__new__(Scheduler)
-        scheduler._fusion_memory_state = FusionMemoryState({})
-        scheduler.get_fused_node = lambda node: node
-        scheduler._fuse_if_speedup_with_memory = Mock(return_value=False)
-        node1, node2 = Mock(), Mock()
-        speedup = Mock(return_value=True)
-        pending = PendingFusion(speedup, node1, node2, can_reorder=True)
-
-        scheduler._finish_pending_fusions(
-            OrderedSet([node1, node2]), {node1: pending, node2: pending}
-        )
-
-        scheduler._fuse_if_speedup_with_memory.assert_called_once_with(
-            node1,
-            node2,
-            speedup,
-            OrderedSet([node1, node2]),
-            can_reorder=True,
-        )
-
-    def test_disabled_pending_fusion_preserves_fuse_if_speedup_signature(self):
-        from torch._inductor.scheduler import PendingFusion
-
-        scheduler = object.__new__(Scheduler)
-        scheduler._fusion_memory_state = None
-        scheduler.get_fused_node = lambda node: node
-        scheduler.fuse_if_speedup = Mock(return_value=False)
-        node1, node2 = Mock(), Mock()
-        speedup = Mock(return_value=True)
-        pending = PendingFusion(speedup, node1, node2, can_reorder=True)
-        fused_nodes = OrderedSet([node1, node2])
-
-        scheduler._finish_pending_fusions(fused_nodes, {node1: pending, node2: pending})
-
-        scheduler.fuse_if_speedup.assert_called_once_with(
-            node1, node2, speedup, fused_nodes
-        )
-
-    def test_disabled_pending_conflict_uses_legacy_resolution(self):
-        from torch._inductor.scheduler import PendingFusion
-
-        scheduler = object.__new__(Scheduler)
-        scheduler._fusion_memory_state = None
-        scheduler.seen_template_fusions = OrderedSet()
-        scheduler.get_fused_node = lambda node: node
-        scheduler.can_fuse = Mock(return_value=False)
-        scheduler.will_fusion_create_cycle = Mock(return_value=False)
-        scheduler.fuse_two_nodes = Mock()
-        scheduler.fuse_if_speedup = Mock(
-            side_effect=AssertionError("unexpected fusion legality recheck")
-        )
-        node1, node2, candidate = (
-            self._mock_base_snode(name) for name in ("node1", "node2", "candidate")
-        )
-        speedup = Mock(return_value=True)
-        pending = PendingFusion(speedup, node1, node2, can_reorder=True)
-        fused_nodes = OrderedSet([node1, node2, candidate])
-
-        scheduler._try_fusion_pairs(
-            [(node1, candidate)],
-            {node1: pending, node2: pending},
-            {},
-            fused_nodes,
-            True,
-        )
-
-        speedup.assert_called_once_with()
-        scheduler.will_fusion_create_cycle.assert_called_once_with(node1, candidate)
-        scheduler.fuse_two_nodes.assert_called_once_with(node1, node2, fused_nodes)
-        scheduler.fuse_if_speedup.assert_not_called()
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertEqual(counters["inductor"][counter], initial_count + 1)
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
         snode = Mock()
@@ -1505,6 +1430,119 @@ class TestScheduler(TestCase):
         self.assertIsNone(cross_group_rate)
         self.assertIsNone(x_grouped_rate)
 
+    def test_nested_reduction_rejects_ambiguous_pointwise_domain(self):
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("reduced",), is_reduction=True
+        )
+        grouped.get_ranges.return_value = ([8], [2])
+        consumer = self._mock_schedule_node(
+            "consumer", reads=("reduced",), ancestors=("grouped",)
+        )
+        consumer.__class__ = SchedulerNode
+        context = Mock(grouped_reduction=grouped, grouped_numel=8, grouped_rnumel=2)
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_pointwise_node_matches_domain", return_value=True
+            ),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+        ):
+            result = NestedReduction._classify_grouped_pointwise_nodes(
+                context, (grouped, consumer)
+            )
+
+        self.assertIsNone(result)
+
+    def test_nested_reduction_rejects_template_nodes(self):
+        outer = self._mock_schedule_node("outer", is_reduction=True)
+        outer.node = Mock(spec=ir.TemplateBuffer)
+        outer.get_nodes.return_value = (outer,)
+        grouped = self._mock_schedule_node("grouped", is_reduction=True)
+        grouped.get_nodes.return_value = (grouped,)
+        context = Mock(grouped_axis=NestedReduction.GroupedAxis.R)
+
+        self.assertFalse(
+            NestedReduction._r_grouped_stage_accesses_match(outer, grouped, context, ())
+        )
+
+    @parametrize("writer_role", ["parent_stage", "local_input", "reduction"])
+    def test_nested_sub_parent_rejects_parent_stage_live_source(self, writer_role):
+        outer_reduction = self._mock_schedule_node(
+            "outer_reduction", writes=("rstd",), is_reduction=True
+        )
+        writer = self._mock_schedule_node(
+            "writer", writes=("source",), is_reduction=writer_role == "reduction"
+        )
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("scale",), is_reduction=True
+        )
+        epilogue = self._mock_schedule_node(
+            "epilogue",
+            reads=("source", "scale"),
+            writes=("packed",),
+            ancestors=("writer", "grouped"),
+        )
+        outer = Mock()
+        outer.get_nodes.return_value = (outer_reduction, writer)
+        outer.group = (None, (8, 16))
+        context = Mock(grouped_reduction=grouped, grouped_rnumel=2)
+        domains = [(epilogue, NestedReduction.PointwiseDomain.SUB_PARENT)]
+        if writer_role == "local_input":
+            domains.append(
+                (writer, NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT)
+            )
+        relation = Mock(requires_live_source=True)
+        relation.consumer_access.name = "source"
+        grouping = Mock(output_groups=(Mock(output_lanes=1, nodes=(epilogue,)),))
+        grouping.factor = 2
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+            patch.object(
+                NestedReduction,
+                "_group_sub_parent_epilogue_nodes",
+                return_value=grouping,
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_internal_access_relations",
+                return_value=(),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_epilogue_outputs_unread",
+                return_value=True,
+            ),
+            patch.object(
+                NestedReduction,
+                "_try_get_sub_parent_access_relations",
+                return_value=(relation,),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_broadcast_access_relations",
+                return_value=(),
+            ),
+        ):
+            stage = NestedReduction._plan_nested_sub_parent_stage(
+                outer, (grouped, epilogue), context, domains
+            )
+
+        # Only a value produced inside the parent loop is dead once a looped
+        # parent closes it; displaced and reduction writers stay live.
+        if writer_role == "parent_stage":
+            self.assertIsNone(stage)
+        else:
+            self.assertIsNotNone(stage)
+
     def test_sub_parent_parent_order_closes_final_loop_dependencies(self):
         source = self._mock_schedule_node("source", writes=("source",))
         sibling = self._mock_schedule_node("sibling", writes=("sibling",))
@@ -1831,6 +1869,7 @@ class TestScheduler(TestCase):
         {"force_disable_caches": True, "shape_padding": False}
     )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
             return
@@ -2014,7 +2053,7 @@ class TestScheduler(TestCase):
         self.assertFalse(can_fuse_prologue(hook_blocks=True))
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_index_add_fusion_prevented(self):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
@@ -2035,7 +2074,7 @@ class TestScheduler(TestCase):
             F_u_at_atom = F_u_mol[batch] + 1e-6
             return f_u / F_u_at_atom
 
-        device = "cuda"
+        device = GPU_TYPE
         f = torch.ones(1024, 1, device=device)
         batch = torch.zeros(1024, dtype=torch.long, device=device)
 
@@ -2055,7 +2094,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_atomic_add_no_fusion_correctness(self):
         """
         Test that atomic_add operations produce correct results.
@@ -2066,7 +2105,7 @@ class TestScheduler(TestCase):
             out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
             return out[idx] + 1.0  # read from same buffer: requires sync
 
-        device = "cuda"
+        device = GPU_TYPE
         x = torch.ones(5, device=device)
         idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
 
@@ -2086,7 +2125,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_expand_reuse_does_not_realize_before_reduction(self):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
@@ -2112,7 +2151,7 @@ class TestScheduler(TestCase):
         U = 4
         V = 4
         W = 4
-        device = "cuda"
+        device = GPU_TYPE
 
         torch.manual_seed(0)
         input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
@@ -2157,7 +2196,7 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_expand_reuse_realizes_in_deterministic_mode(self):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
@@ -2174,7 +2213,7 @@ class TestScheduler(TestCase):
             self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
             self.assertEqual(metrics.generated_kernel_count, 2)
 
-        device = "cuda"
+        device = GPU_TYPE
         torch.manual_seed(0)
         args = [
             torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)

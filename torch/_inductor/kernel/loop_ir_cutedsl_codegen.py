@@ -20,6 +20,7 @@ from .gemm_epilogue import (
     GEMM_LOCAL_REDUCTION_RESULT_NAME,
     GemmEpiloguePlan,
     GemmReductionGeometry,
+    GemmReductionType,
 )
 from .gemm_epilogue_codegen import (
     canonical_tensorssa_reduction_type,
@@ -68,6 +69,77 @@ class LoopIRCuteDSLCodegen:
             )
         return self.input_values[name]
 
+    @staticmethod
+    def _buffer(name: str) -> Any | None:
+        return V.graph.get_buffer(name) or V.graph.graph_inputs.get(name)
+
+    def _direct_load_index(
+        self,
+        analysis: GemmEpilogueIRAnalysis,
+        output_name: str,
+        source_name: str,
+    ) -> sympy.Expr | None:
+        output = self._buffer(output_name)
+        source = self._buffer(source_name)
+        indices = analysis.index_vars.get(output_name)
+        if output is None or source is None or indices is None:
+            return None
+
+        output_size = output.get_size()
+        source_size = source.get_size()
+        if len(indices) != len(output_size) or len(source_size) > len(output_size):
+            return None
+
+        source_stride = source.get_stride()
+        offset = source.get_layout().offset
+        expected = sympy.sympify(offset)
+        aligned_indices = indices[len(output_size) - len(source_size) :]
+        aligned_output_size = output_size[len(output_size) - len(source_size) :]
+        for index, source_dim, output_dim, stride in zip(
+            aligned_indices,
+            source_size,
+            aligned_output_size,
+            source_stride,
+            strict=True,
+        ):
+            if V.graph.sizevars.statically_known_equals(source_dim, 1):
+                continue
+            if not V.graph.sizevars.statically_known_equals(source_dim, output_dim):
+                return None
+            expected += index * stride
+        return expected
+
+    def _validate_load_indices(
+        self, analysis: GemmEpilogueIRAnalysis, output_name: str
+    ) -> None:
+        store = analysis.store(output_name)
+        if store is None or store.value.reductions:
+            return
+
+        pending = [store.value]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, (tuple, list)):
+                pending.extend(value)
+                continue
+            if not isinstance(value, GemmEpilogueIRExpression):
+                continue
+            if value.op == "load":
+                name, index, stored = value.args
+                expected_index = self._direct_load_index(analysis, output_name, name)
+                if (
+                    expected_index is None
+                    or sympy.simplify(index - expected_index) != 0
+                ):
+                    raise NotImplementedError(
+                        "CuTeDSL GEMM epilogues do not support remapped tensor loads"
+                    )
+                if stored is not None:
+                    pending.append(stored)
+                continue
+            pending.extend(value.args)
+            pending.extend(item for _, item in value.kwargs)
+
     def _generate_like(self, expr: str, ref: Any, *, shape_ref: Any | None = None):
         if shape_ref is None:
             shape_ref = ref
@@ -84,9 +156,6 @@ class LoopIRCuteDSLCodegen:
         reduction_type: str,
         geometry: GemmReductionGeometry,
     ) -> Any:
-        if geometry.needs_physical_callbacks and geometry.axis == 0:
-            return source
-        desc = tensorssa_reduction(canonical_tensorssa_reduction_type(reduction_type))
         fragment_group = (
             f"cutlass.const_expr(min({geometry.group}, "
             f"cute.size({source}.shape, mode=[0])))"
@@ -95,6 +164,12 @@ class LoopIRCuteDSLCodegen:
             f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
             f"// min({geometry.group}, cute.size({source}.shape, mode=[0])))"
         )
+        if geometry.needs_physical_callbacks and geometry.axis == 0:
+            return self._generate_like(
+                f"{source}.reshape((({fragment_group}, 1, {repeats}), 1, 1))",
+                source,
+            )
+        desc = tensorssa_reduction(canonical_tensorssa_reduction_type(reduction_type))
         grouped = self._generate_like(
             f"{source}.reshape(((1, {fragment_group}, {repeats}), 1, 1))",
             source,
@@ -139,7 +214,7 @@ class LoopIRCuteDSLCodegen:
         )
         if region is None or len(region.reductions) != 1:
             raise NotImplementedError(
-                "physical CuTeDSL GEMM epilogues require one reduction"
+                "cross-fragment CuTeDSL GEMM epilogues require one reduction"
             )
         reduction = region.reductions[0]
         source = reduction.synthetic_element or reduction.source
@@ -304,6 +379,7 @@ class LoopIRCuteDSLCodegen:
         if self.accumulator not in self.removed_buffers:
             outputs.append((self.accumulator, self.accumulator_value))
         for name, store in analysis.stores.items():
+            self._validate_load_indices(analysis, name)
             if name not in self.removed_buffers and name not in self.suppressed_outputs:
                 outputs.append((name, self.lower(store.value)))
         if not outputs:
@@ -337,7 +413,7 @@ class LoopIRCuteDSLCodegen:
         )
         return GemmEpiloguePlan(
             source=source,
-            is_cutedsl=True,
+            is_evt_fallback=False,
             reads=tuple(self.reads),
             writes=tuple(name for name, _ in outputs),
             renames=renames,
@@ -416,15 +492,23 @@ class LoopIRCuteDSLCodegen:
         body.append(f"    return {result}")
         return f"def {fn_name}(value):\n" + "\n".join(body)
 
+    @staticmethod
+    def logical_reduction_finalizer(
+        reduction_type: GemmReductionType, fn_name: str
+    ) -> str | None:
+        if reduction_type != "mean":
+            return None
+        return f"def {fn_name}(value, group):\n    return value / group"
+
     @classmethod
-    def physical_reduction_callbacks(
+    def reduction_callbacks(
         cls,
         accumulator: str,
         analysis: GemmEpilogueIRAnalysis,
         output_name: str,
         geometry: GemmReductionGeometry,
     ) -> tuple[str, str]:
-        """Generate combine and finalizer callbacks for one physical reduction."""
+        """Generate combine and finalizer callbacks for one Loop IR reduction."""
         region = analysis.reduction_region(
             output_name,
             accumulator,
@@ -433,7 +517,7 @@ class LoopIRCuteDSLCodegen:
         )
         if region is None or len(region.reductions) != 1:
             raise NotImplementedError(
-                "physical CuTeDSL GEMM epilogues require one reduction"
+                "cross-fragment CuTeDSL GEMM epilogues require one reduction"
             )
         reduction = region.reductions[0]
         desc = tensorssa_reduction(
@@ -462,7 +546,7 @@ class LoopIRCuteDSLCodegen:
                 pending.extend(item for _, item in value.kwargs)
             if target is None:
                 raise NotImplementedError(
-                    "physical CuTeDSL GEMM epilogue reduction is missing"
+                    "cross-fragment CuTeDSL GEMM epilogue reduction is missing"
                 )
 
         codegen = cls(accumulator, OrderedSet((accumulator,)))
@@ -481,7 +565,7 @@ class LoopIRCuteDSLCodegen:
             result = codegen.lower(region.expression)
         if codegen.reads:
             raise NotImplementedError(
-                "physical reduction finalizer cannot capture tensor inputs"
+                "cross-fragment reduction finalizer cannot capture tensor inputs"
             )
         body = [*(f"    {line}" for line in codegen.kernel.body.lines)]
         body.append(f"    return {result}")
