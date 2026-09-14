@@ -4478,8 +4478,22 @@ class GraphModule(torch.nn.Module):
             return operator.length_hint(SymHint(x.shape[0] - 5)), x + 1
 
         opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported, "length_hint with a non-constant result"
+        ):
             opt_fn(torch.ones(3))
+
+    def test_operator_length_hint_non_constant_default(self):
+        class NoHint:
+            pass
+
+        def fn(x):
+            # The default is only ever used when the object has no hint, but
+            # PyObject_LengthHint converts it to an ssize_t up front.
+            return operator.length_hint(NoHint(), x.shape[0] - 5), x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(3)), fn(torch.ones(3)))
 
     def test_operator_concat(self):
         for seq_type in (list, tuple):

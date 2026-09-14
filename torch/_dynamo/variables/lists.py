@@ -2432,9 +2432,8 @@ class BaseListIteratorVariable(IteratorVariable):
         self.items = items
         self.index = index
         # Whether `items` aliases the live, mutation-tracked source container.
-        # Snapshot iterators (reversed lists, deques, iterators passed in from
-        # uncompiled code) set this False and decline __length_hint__ rather
-        # than report a length that ignores later mutations of the source.
+        # Snapshot iterators (reversed lists, dequeues, iterators passed in from
+        # uncompiled code) leave this False and cannot answer __length_hint__.
         self.tracks_source = tracks_source
         self.is_exhausted = False
 
@@ -2480,13 +2479,19 @@ class BaseListIteratorVariable(IteratorVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
+    ) -> VariableTracker:
         # listiter_len/tupleiter_len: items left, floored at 0; an exhausted
         # iterator permanently reports 0.  Only a live source can answer this,
-        # so snapshots decline and let the caller graph-break.
+        # because a snapshot's length ignores later mutations of its source.
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/listobject.c#L4100-L4108
         if not self.tracks_source:
-            return None
+            unimplemented(
+                gb_type="length_hint on an iterator that does not track its source",
+                context=f"length_hint {self}",
+                explanation="This iterator is a snapshot taken while tracing, so "
+                "its remaining length can diverge from the source container's.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         if self.is_exhausted:
             return ConstantVariable.create(0)
         return ConstantVariable.create(max(len(self.items) - self.index, 0))

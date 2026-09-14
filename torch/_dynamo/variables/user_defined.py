@@ -1245,28 +1245,31 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 hints=graph_break_hints.SUPPORTABLE,
             )
 
-        # Unbound C method call on a builtin type, e.g. Lib/operator.py does
-        # `type(obj).__length_hint__(obj)`.  The class VT has no per-type method
-        # table; the instance VT owns the slot implementation.  Only dispatch the
-        # class's own C methods, and only for an actual instance.
+        # Unbound C method call on a builtin iterator type: the pure-Python
+        # Lib/operator.py::length_hint resolves `type(obj).__length_hint__` and
+        # calls it with the instance.  The class VT has no per-type method table,
+        # while the instance VT owns the slot implementation.
+        #
+        # `Base.method(instance)` runs Base's C slot, so only an instance whose
+        # type is exactly that class may reach here: obj.call_method resolves
+        # from type(obj) and would run a subclass override instead.  The builtin
+        # iterator types are not subclassable, so the type test is exact.
         if (
-            args
+            name == "__length_hint__"
+            and args
             and isinstance(self.value, type)
             and self.value.__module__ == "builtins"
         ):
             descriptor = inspect.getattr_static(self.value, name, None)
             if (
-                isinstance(
-                    descriptor,
-                    (types.MethodDescriptorType, types.WrapperDescriptorType),
-                )
+                isinstance(descriptor, types.MethodDescriptorType)
                 and descriptor.__objclass__ is self.value
             ):
                 try:
                     obj_type = args[0].python_type()
                 except NotImplementedError:
                     obj_type = None
-                if obj_type is not None and issubclass(obj_type, self.value):
+                if obj_type is self.value:
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         # Dispatch dunder methods defined on the metaclass (e.g., EnumType.__contains__).
