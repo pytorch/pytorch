@@ -121,7 +121,6 @@ def compile(
     params: f"{cls.__name__}{'Cpp' if params['package_cpp_only'] else ''}_{params['device']}",
 )
 class TestAOTInductorPackage(TestCase):
-
     def check_model(
         self: TestCase,
         model,
