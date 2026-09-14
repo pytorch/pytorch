@@ -1668,6 +1668,13 @@ bool gemm_and_bias(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
 
   if (bias) {
+#ifndef USE_ROCM
+    // cuBLASLt has no alignment preference for the bias pointer (unlike A/B/C/D),
+    // so an under-aligned bias can pick a kernel that faults on it.
+    if (detail::getAlignment(reinterpret_cast<uintptr_t>(bias)) < 16) {
+      return false;
+    }
+#endif
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
 
