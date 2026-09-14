@@ -575,6 +575,34 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
             self.assertIn("import triton.language.extra.libdevice as libdevice", repro)
 
+    def test_save_graph_repro_emits_false_constexpr_for_nested_kernel(self):
+        extra_import_kernel = self.import_triton_extra_import_kernel()
+
+        with (
+            patch.object(kernel_side_table, "id_to_kernel", {}),
+            patch.object(kernel_side_table, "kernel_to_id", {}),
+            patch.object(kernel_side_table, "constant_args", {}),
+        ):
+            kernel_side_table.add_kernel(
+                extra_import_kernel.triton_kernel_with_false_constexpr
+            )
+
+            args = [torch.randn(4)]
+
+            def f(x):
+                return (x + 1,)
+
+            gm = make_fx(f)(*args)
+            buf = io.StringIO()
+            save_graph_repro(buf, gm, args, "inductor")
+            repro = buf.getvalue()
+
+            self.assertIn("IS_HIP = tl.constexpr(False)", repro)
+            self.assertLess(
+                repro.index("IS_HIP = tl.constexpr(False)"),
+                repro.index("def _store_with_platform_check"),
+            )
+
     def test_repro_run_accuracy_does_not_reuse_compiled_graph(self):
         class Repro(torch.nn.Module):
             def forward(self, arg0, arg1, arg2):
