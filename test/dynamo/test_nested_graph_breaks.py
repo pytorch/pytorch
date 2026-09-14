@@ -6,7 +6,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.utils._pytree as python_pytree
-from torch.testing._internal.common_utils import HardwareClassification
 
 
 try:
@@ -32,8 +31,6 @@ class CustomizedCtxManager:
 
 
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
         # prevents them from being freevars
