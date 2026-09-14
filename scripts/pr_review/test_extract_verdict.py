@@ -26,12 +26,19 @@ from pathlib import Path
 SCRIPT = Path(__file__).with_name("extract_verdict.py")
 sys.path.insert(0, str(SCRIPT.parent))
 
-from extract_verdict import (  # noqa: E402
+from extract_verdict import (
+    _is_repo_path,  # noqa: E402
+    analysis_view,
     build,
     check_charset,
     check_no_encoded_blob,
+    downgrade,
+    failure,
+    MAX_DROPPED_TRACKED,
+    MAX_PATH,
     MAX_SUMMARY,
     neutralize,
+    neutralize_path,
     parse_diff,
     Rejected,
     sanitize_findings,
@@ -185,9 +192,12 @@ class TestFindingAnchoring(unittest.TestCase):
             verdict="ready_for_human_review",
             findings=[
                 {
+                    # `minor` so the drop is observed on its own: a clean
+                    # verdict alongside a claimed major is now refused before
+                    # anchoring is consulted.
                     "path": "src/secrets.py",
                     "line": 3,
-                    "severity": "major",
+                    "severity": "minor",
                     "message": "Unrelated file the PR never touched.",
                 }
             ],
@@ -266,31 +276,33 @@ class TestTypeRevalidation(unittest.TestCase):
     def test_bool_line_is_not_accepted_as_line_one(self):
         # bool subclasses int, so a naive isinstance(line, int) lets True
         # through as line 1 — which happens to be a real line in most diffs.
-        kept, dropped = sanitize_findings([self.base(line=True)], parse_diff(DIFF))
+        kept, dropped, _ = sanitize_findings([self.base(line=True)], parse_diff(DIFF))
         self.assertEqual(kept, [])
         self.assertEqual(dropped[0]["reason"], "line_not_an_integer")
 
     def test_float_line_is_not_truncated_to_an_integer(self):
-        kept, dropped = sanitize_findings([self.base(line=12.9)], parse_diff(DIFF))
+        kept, dropped, _ = sanitize_findings([self.base(line=12.9)], parse_diff(DIFF))
         self.assertEqual(kept, [])
         self.assertEqual(dropped[0]["reason"], "line_not_an_integer")
 
     def test_non_string_message_is_not_stringified(self):
-        kept, dropped = sanitize_findings(
+        kept, dropped, _ = sanitize_findings(
             [self.base(message={"a": 1})], parse_diff(DIFF)
         )
         self.assertEqual(kept, [])
         self.assertEqual(dropped[0]["reason"], "path_or_message_not_a_string")
 
     def test_unknown_severity_is_dropped_not_coerced_to_info(self):
-        kept, dropped = sanitize_findings(
+        kept, dropped, _ = sanitize_findings(
             [self.base(severity="catastrophic")], parse_diff(DIFF)
         )
         self.assertEqual(kept, [])
         self.assertEqual(dropped[0]["reason"], "bad_severity")
 
     def test_extra_finding_keys_are_rejected(self):
-        kept, dropped = sanitize_findings([self.base(evil="payload")], parse_diff(DIFF))
+        kept, dropped, _ = sanitize_findings(
+            [self.base(evil="payload")], parse_diff(DIFF)
+        )
         self.assertEqual(kept, [])
         self.assertEqual(dropped[0]["reason"], "unexpected_keys")
 
@@ -390,8 +402,116 @@ class TestRoundTwoRegressions(unittest.TestCase):
         with self.assertRaises(Rejected):
             build(ok_payload(findings=[]), parse_diff(DIFF))
 
-    def test_message_that_neutralizes_to_nothing_is_dropped(self):
-        kept, dropped = sanitize_findings(
+    def test_a_clean_verdict_carrying_a_major_finding_is_refused(self):
+        # The suppression direction, and the one an injection wants: publish
+        # acts on `verdict`, so a clean verdict would move the PR to the
+        # terminal label while the artifact records a major problem nothing
+        # downstream reads.
+        with self.assertRaises(Rejected):
+            build(ok_payload(verdict="ready_for_human_review"), parse_diff(DIFF))
+
+    def test_a_clean_verdict_carrying_only_minor_findings_is_published(self):
+        # The pair to the test above: the rubric reserves `major` for "send it
+        # back", so info and minor do not contradict a clean verdict and must
+        # not start failing the review.
+        payload = ok_payload(
+            verdict="ready_for_human_review",
+            findings=[
+                {
+                    "path": "src/app.py",
+                    "line": 12,
+                    "severity": "minor",
+                    "message": "Reads clearly enough, but the name is vague.",
+                }
+            ],
+        )
+        result = build(payload, parse_diff(DIFF))
+        self.assertEqual(result["verdict"], "ready_for_human_review")
+        self.assertEqual(len(result["findings"]), 1)
+
+    def test_an_unanchored_major_cannot_launder_a_clean_verdict(self):
+        # The escape a kept-only check leaves open, and why the contradiction
+        # is read off the CLAIM. Anchoring runs first, so a major finding
+        # pointed at an untouched file is discarded — and a kept-only check
+        # would then see a clean verdict with no surviving contradiction.
+        payload = ok_payload(
+            verdict="ready_for_human_review",
+            findings=[
+                {
+                    "path": "never/touched.py",
+                    "line": 3,
+                    "severity": "major",
+                    "message": "Points at a file this PR does not change.",
+                }
+            ],
+        )
+        with self.assertRaises(Rejected):
+            build(payload, parse_diff(DIFF))
+
+    def test_the_contradiction_check_is_case_and_whitespace_insensitive(self):
+        # `severity` is compared before the sanitizer normalizes it, so the
+        # claim has to be read the same way the sanitizer will read it.
+        for spelling in ("MAJOR", " Major ", "major"):
+            with self.subTest(spelling=spelling), self.assertRaises(Rejected):
+                build(
+                    ok_payload(
+                        verdict="ready_for_human_review",
+                        findings=[
+                            {
+                                "path": "src/app.py",
+                                "line": 12,
+                                "severity": spelling,
+                                "message": "Forwards a credential to send().",
+                            }
+                        ],
+                    ),
+                    parse_diff(DIFF),
+                )
+
+    def test_a_message_that_is_only_markup_is_now_KEPT_as_literal_text(self):
+        # Premise inverted when tags stopped being stripped: this publishes as
+        # `&lt;b&gt;&lt;/b&gt;`, which renders as the visible characters
+        # `<b></b>`. Junk, but not nothing.
+        kept, _, _ = sanitize_findings(
+            [
+                {
+                    "path": "src/app.py",
+                    "line": 12,
+                    "severity": "info",
+                    "message": "<b></b>",
+                }
+            ],
+            parse_diff(DIFF),
+        )
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0]["message"], "&lt;b&gt;&lt;/b&gt;")
+
+    def test_a_finding_written_inside_an_html_comment_is_not_dropped(self):
+        msg = "<!-- Missing authorization permits cross-tenant reads. -->"
+        kept, _, dropped_n = sanitize_findings(
+            [{"path": "src/app.py", "line": 12, "severity": "major", "message": msg}],
+            parse_diff(DIFF),
+        )
+        self.assertEqual(len(kept), 1, "dropped a visible finding")
+        self.assertIn("cross-tenant reads", kept[0]["message"])
+
+    def test_a_truly_empty_message_is_still_dropped(self):
+        kept, dropped, _ = sanitize_findings(
+            [
+                {
+                    "path": "src/app.py",
+                    "line": 12,
+                    "severity": "info",
+                    "message": "   \t  ",
+                }
+            ],
+            parse_diff(DIFF),
+        )
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped[0]["reason"], "missing_path_or_message")
+
+    def _retired_test_message_that_neutralizes_to_nothing_is_dropped(self):
+        kept, dropped, _ = sanitize_findings(
             [
                 {
                     "path": "src/app.py",
@@ -664,7 +784,7 @@ class TestRoundThreeRegressions(unittest.TestCase):
         name = "@pytorchbot [rebase](evil.example.com) #1.py"
         diff = f"diff --git a/x b/x\n--- a/x\n+++ b/{name}\n@@ -0,0 +1,2 @@\n+a\n+b\n"
         touched = parse_diff(diff)
-        kept, _ = sanitize_findings(
+        kept, _, _ = sanitize_findings(
             [{"path": name, "line": 1, "severity": "info", "message": "m"}], touched
         )
         self.assertEqual(len(kept), 1)
@@ -976,6 +1096,248 @@ class TestRoundThreeRegressions(unittest.TestCase):
                 self.assertEqual(down["status"], expected)
                 self.assertIsNone(down["verdict"])
                 self.assertIn(outcome, down["failure_detail"])
+
+
+class TestTrailingWhitespacePathAnchoring(unittest.TestCase):
+    """git delimits a trailing-whitespace path with a TAB; stripping it moved the anchor."""
+
+    DIFF = (
+        "diff --git a/victim.py  b/victim.py \n"
+        "--- a/victim.py \t\n"
+        "+++ b/victim.py \t\n"
+        "@@ -1 +1 @@\n"
+        "-a\n"
+        "+b\n"
+    )
+
+    def test_the_name_keeps_its_trailing_space(self):
+        touched = parse_diff(self.DIFF)
+        self.assertEqual(list(touched), ["victim.py "])
+
+    def test_the_untouched_neighbour_is_not_anchorable(self):
+        touched = parse_diff(self.DIFF)
+        self.assertNotIn("victim.py", touched)
+        kept, dropped, _ = sanitize_findings(
+            [{"path": "victim.py", "line": 1, "severity": "major", "message": "m"}],
+            touched,
+        )
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped[0]["reason"], "path_not_in_diff")
+
+
+class TestPublishedPathRefusesRenderingCharacters(unittest.TestCase):
+    def test_angle_brackets_and_ampersand_are_refused(self):
+        for name in ("</details>.py", "a&b.py", "x>y.py", "<script>.py"):
+            with self.subTest(name=name):
+                self.assertFalse(_is_repo_path(name))
+
+    def test_an_ordinary_path_still_passes(self):
+        self.assertTrue(_is_repo_path("torch/nn/modules/linear.py"))
+
+    def test_a_path_whose_escaped_form_would_not_fit_is_refused(self):
+        self.assertFalse(_is_repo_path("@" * (MAX_PATH - 1)))
+
+    def test_a_kept_path_is_never_cut_mid_escape(self):
+        # Everything that survives validation escapes to at most MAX_PATH, so
+        # the published copy is the whole validated name.
+        name = "@" * 100 + "/x.py"
+        self.assertTrue(_is_repo_path(name))
+        self.assertEqual(len(neutralize_path(name)), 205)
+
+
+class TestBoundaryGuardsAreNotDefeatedByAnUnderscore(unittest.TestCase):
+    def test_underscore_wrapped_mention_is_defused(self):
+        self.assertNotIn("@pytorchbot", neutralize("_@pytorchbot_"))
+
+    def test_underscore_wrapped_issue_ref_is_defused(self):
+        self.assertNotIn("#1234", neutralize("_#1234_"))
+
+    def test_underscore_wrapped_url_is_removed(self):
+        self.assertNotIn("evil.example.com", neutralize("_https://evil.example.com/x_"))
+
+    def test_an_email_is_still_left_alone(self):
+        self.assertEqual(neutralize("user@example.com"), "user@example.com")
+
+
+class TestBareWwwLinksAreDefused(unittest.TestCase):
+    def test_www_without_a_scheme_is_removed(self):
+        self.assertNotIn(
+            "evil.example.com", neutralize("see www.evil.example.com/x?d=1 now")
+        )
+
+    def test_a_word_merely_ENDING_in_www_is_untouched(self):
+        # Must carry a full domain after it, or it does not test the lookbehind.
+        self.assertIn(
+            "cwww.example.com", neutralize("the host cwww.example.com is fine")
+        )
+
+    def test_www_with_a_single_label_after_it_is_still_defused(self):
+        # GFM autolinks `www.com` -- the domain's one required dot is the one
+        # in `www.` itself -- so requiring a second dot missed this spelling.
+        self.assertNotIn("www.com", neutralize("go to www.com/path now"))
+
+
+class TestComparisonOperatorsSurviveTagStripping(unittest.TestCase):
+    def test_a_paired_comparison_keeps_the_text_between_it(self):
+        out = neutralize("Reject when x < 0 or x > 10 here.")
+        self.assertIn("0 or x", out)
+        self.assertIn("&lt;", out)
+        self.assertIn("&gt;", out)
+
+    def test_an_unspaced_comparison_pair_also_survives(self):
+        out = neutralize("Reject when x<limit && y>0.")
+        self.assertIn("limit", out)
+        self.assertIn("y", out)
+        self.assertIn("&lt;", out)
+
+    def test_a_real_end_tag_is_rendered_inert_rather_than_deleted(self):
+        # Escaped, not stripped: it can no longer close the renderer's
+        # collapsible block, and the surrounding prose is untouched.
+        out = neutralize("text</details>more")
+        self.assertNotIn("</details>", out)
+        self.assertIn("&lt;/details&gt;", out)
+        self.assertIn("text", out)
+        self.assertIn("more", out)
+
+    def test_a_split_tag_still_cannot_reassemble_a_url(self):
+        self.assertNotIn(
+            "evil.example.com", neutralize("https:<i></i>//evil.example.com")
+        )
+
+
+class TestDroppedCountDoesNotSaturate(unittest.TestCase):
+    def test_the_published_count_is_the_true_total(self):
+        touched = parse_diff(DIFF)
+        many = [
+            {"path": "nope.py", "line": 1, "severity": "major", "message": "m"}
+        ] * 300
+        kept, dropped, total = sanitize_findings(many, touched)
+        self.assertEqual(kept, [])
+        self.assertEqual(total, 300)
+        self.assertLessEqual(len(dropped), MAX_DROPPED_TRACKED)
+
+    def test_the_PUBLISHED_count_is_the_true_total(self):
+        # The assertion above tests sanitize_findings. Reverting `build()`
+        # alone to publish `len(dropped)` would escape it, so pin the field
+        # that actually ships.
+        payload = ok_payload(
+            verdict="ready_for_human_review",
+            findings=[
+                # `minor`, not `major`: a clean verdict alongside a claimed
+                # major is refused outright now, and this test is about the
+                # count, not the contradiction.
+                {"path": "nope.py", "line": 1, "severity": "minor", "message": "m"}
+            ]
+            * 300,
+        )
+        result = build(payload, parse_diff(DIFF))
+        self.assertEqual(result["findings_dropped"], 300)
+        self.assertLessEqual(len(result["dropped_detail"]), MAX_DROPPED_TRACKED)
+
+
+class TestAnImplausibleLineIsNotPublishedWhole(unittest.TestCase):
+    def test_a_huge_line_is_dropped_without_recording_the_integer(self):
+        touched = parse_diff(DIFF)
+        kept, dropped, _ = sanitize_findings(
+            [
+                {
+                    "path": sorted(touched)[0],
+                    "line": int("9" * 3000),
+                    "severity": "major",
+                    "message": "m",
+                }
+            ],
+            touched,
+        )
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped[0]["reason"], "line_out_of_range")
+        self.assertNotIn("line", dropped[0])
+
+
+class TestTruncationNeverLeavesADanglingEscape(unittest.TestCase):
+    def test_the_capped_result_does_not_end_on_a_lone_backslash(self):
+        # cap=600 is what makes this a truncation test. At the default
+        # MAX_SUMMARY of 1500 the escaped form (1199 chars) is never cut, and
+        # the pre-fix code passed it too.
+        out = neutralize("a" + "[" * 599, cap=600)
+        # 599, not 600: the cut landed between a backslash and its bracket and
+        # the dangling half was dropped. Under the old code this was 600 and
+        # ended on that lone backslash.
+        self.assertEqual(len(out), 599)
+        trailing = len(out) - len(out.rstrip("\\"))
+        self.assertEqual(trailing % 2, 0, f"ends on a lone backslash: {out[-6:]!r}")
+
+
+class TestDowngradeKeepsTheOriginalReason(unittest.TestCase):
+    def test_a_sanitizer_rejection_survives_a_later_step_failure(self):
+        original = failure("sanitizer_rejected", "a specific refusal")
+        out = downgrade(original, "failure")
+        self.assertEqual(out["status"], "model_error")
+        self.assertIn("a specific refusal", out["failure_detail"])
+        self.assertIn("outcome=failure", out["failure_detail"])
+
+    def test_content_is_cleared_so_the_row_is_internally_consistent(self):
+        reviewed = {
+            "status": "succeeded",
+            "verdict": "ready_for_human_review",
+            "summary": "looks fine",
+            "findings": [{"path": "a.py"}],
+            "findings_dropped": 0,
+        }
+        out = downgrade(reviewed, "cancelled")
+        self.assertEqual(out["status"], "blocked")
+        self.assertIsNone(out["verdict"])
+        self.assertEqual(out["findings"], [])
+        self.assertEqual(out["summary"], "")
+
+
+class TestTheAnalysisViewIsLinear(unittest.TestCase):
+    """A quadratic strip here is reachable from the RAW 1MB document."""
+
+    def test_a_long_run_of_open_brackets_is_fast(self):
+        hostile = "<" * 262144
+        start = time.perf_counter()
+        analysis_view(hostile)
+        elapsed = time.perf_counter() - start
+        # The regex form measured 28s on this input. Two orders of magnitude of
+        # headroom, so this is not a flaky timing assertion.
+        self.assertLess(
+            elapsed, 1.0, f"analysis_view took {elapsed:.1f}s — quadratic again?"
+        )
+
+    def test_it_still_agrees_with_the_regex_it_replaced(self):
+        rx = re.compile(r"<[^>]*>", re.DOTALL)
+        for case in (
+            "a<b>c",
+            "<i></i>x",
+            "no tags",
+            "<unterminated",
+            "a<b>c<d>e",
+            "",
+            "<>",
+            "x<!--\n-->y",
+            "<<>>",
+            "a<<b>>c",
+        ):
+            with self.subTest(case=case):
+                self.assertEqual(analysis_view(case), rx.sub("", case))
+
+    def test_a_tag_split_payload_is_still_caught(self):
+        # The one property the strip was retained for: rejoining the halves so
+        # the 120-character blob floor sees one run.
+        half = base64.b64encode(bytes(range(256)) * 4).decode()[:70]
+        with self.assertRaises(Rejected):
+            check_no_encoded_blob(f"{half}<i></i>{half}", "t")
+
+    def test_the_escaped_spelling_of_that_split_is_caught_too(self):
+        # What actually reaches the guard after neutralize() has escaped it.
+        half = base64.b64encode(bytes(range(256)) * 4).decode()[:70]
+        with self.assertRaises(Rejected):
+            check_no_encoded_blob(f"{half}&lt;i&gt;&lt;/i&gt;{half}", "t")
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 
 if __name__ == "__main__":
