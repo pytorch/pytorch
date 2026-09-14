@@ -1192,7 +1192,7 @@ _scaled_mxfp8_mxfp8(
 #ifdef USE_ROCM
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
   int64_t scale_a_elems, scale_b_elems;
-  const char* scale_layout;
+  [[maybe_unused]] const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
     scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), mat_a.size(1));
     scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), mat_b.size(0));
@@ -1205,7 +1205,7 @@ _scaled_mxfp8_mxfp8(
 #else
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0), 32), 4);
-  const char* scale_layout = "SWIZZLE_32_4_4";
+  [[maybe_unused]] const char* scale_layout = "SWIZZLE_32_4_4";
 #endif
   TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling with ", scale_layout, " scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
@@ -1282,7 +1282,7 @@ _scaled_mxfp4_mxfp4(
   // AMD
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
   int64_t scale_a_elems, scale_b_elems;
-  const char* scale_layout;
+  [[maybe_unused]] const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
     scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), K_multiplier * mat_a.size(1));
     scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), K_multiplier * mat_b.size(0));
@@ -1296,7 +1296,7 @@ _scaled_mxfp4_mxfp4(
   // NVIDIA
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_b.size(0), 32), 4);
-  const char* scale_layout = "SWIZZLE_32_4_4";
+  [[maybe_unused]] const char* scale_layout = "SWIZZLE_32_4_4";
 #endif
   TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling with ", scale_layout, " scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
