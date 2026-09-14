@@ -93,7 +93,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .code_context import code_context
 from .codegen import PyCodegen
@@ -3537,7 +3537,12 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected resume_inst.target to be true")
             resume_inst = resume_inst.target
 
-        resume_name = unique_id(f"__resume_at_{resume_inst.offset}")
+        # The name is skipped forward here rather than inside
+        # install_global_unsafe, which cannot hand a substitute back to callers
+        # that use the name they passed for more than the install: this one bakes
+        # it into the resume function itself and records it on the package.
+        resume_prefix = f"__resume_at_{resume_inst.offset}"
+        resume_name = unique_id_unbound_in(resume_prefix, self.output.global_scope)
 
         # More locals may have been pruned in the current/leaf frame
         # after the unsupported instruction (e.g. branch).
