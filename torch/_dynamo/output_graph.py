@@ -466,6 +466,8 @@ class OutputGraphGuardsState:
     skip_guards_check: bool = False
     export_constraints: bool = False
     name_of_builtins_dict_key_in_fglobals: str | None = None
+    # None means no relative-device decisions were recorded; rebuild exact guards.
+    tensor_device_index_is_current: dict[Source, bool] | None = None
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -497,6 +499,7 @@ class OutputGraphGuardsState:
             _guards=self.guards,
             _aotautograd_guards=self.aotautograd_guards,
             skip_guards_check=self.skip_guards_check,
+            tensor_device_index_is_current=self.tensor_device_index_is_current,
         )
 
 
@@ -643,6 +646,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.skip_guards_check,
             output_graph_guards_state.export_constraints,
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
+            getattr(output_graph_guards_state, "tensor_device_index_is_current", None),
         )
 
         self.import_sources = import_sources or {}
@@ -731,6 +735,7 @@ class OutputGraph(OutputGraphCommon):
             # These are set by @property instead, just initialize them as blank
             _guards=torch._guards.GuardsSet(),
             _aotautograd_guards=[],
+            tensor_device_index_is_current={},
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
