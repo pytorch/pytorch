@@ -17,9 +17,6 @@ from torch.testing._internal.common_utils import (
 from torch.utils.checkpoint import CheckpointError
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 class MemoryDelta(ContextDecorator):
     def __init__(self, device: torch.device):
         self.device: torch.device = device
@@ -338,8 +335,8 @@ class TestCheckpointAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_tensor_only_gpu(self, device):
-        x = torch.randn(20, 100, device=f"{device_type}:0")
-        net = ToyModel().to(f"{device_type}:0")
+        x = torch.randn(20, 100, device=f"{self.device_type}:0")
+        net = ToyModel().to(f"{self.device_type}:0")
         check_tensor_only(self, net, x)
 
 
