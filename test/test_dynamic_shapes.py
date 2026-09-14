@@ -5609,9 +5609,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         def f(x, start, end):
             return torch.narrow(x, 0, start, end)
 
-        x = torch.tensor(
-            [False], device="cuda:0" if torch.cuda.is_available() else "cpu"
-        )
+        x = torch.tensor([False])
         start = torch.tensor(0)
         res = f(x, start, 0)
         self.assertEqual(res.shape, torch.Size([0]))
@@ -7489,7 +7487,6 @@ class TestTransferSymbolsFromForeignShapeEnvDevice(TestCase):
 instantiate_device_type_tests(
     TestTransferSymbolsFromForeignShapeEnvDevice,
     globals(),
-    only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
