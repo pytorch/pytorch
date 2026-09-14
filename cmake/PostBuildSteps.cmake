@@ -89,6 +89,22 @@ if(WIN32 AND BUILD_PYTHON)
     else()
       set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin")
     endif()
+    # CUPTI and its nvperf helper are not where they used to be. Through 13.2
+    # they ship under extras/CUPTI/lib64; 13.4 drops that tree and puts them
+    # beside the other runtime DLLs, so search both and take whichever exists.
+    # The filenames are unchanged (13.4's is cupti64_2026.1.1.dll, which the
+    # same glob matches) -- only the directory moved.
+    set(_cupti_dirs
+      "${_cuda_bin}"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64"
+    )
+    set(_cupti_patterns "")
+    set(_nvperf_patterns "")
+    foreach(_dir ${_cupti_dirs})
+      list(APPEND _cupti_patterns "${_dir}/cupti64_*.dll")
+      list(APPEND _nvperf_patterns "${_dir}/nvperf_host*.dll")
+    endforeach()
+
     set(_cuda_dll_patterns
       "${_cuda_bin}/cusparse*64_*.dll"
       "${_cuda_bin}/cublas*64_*.dll"
@@ -99,8 +115,8 @@ if(WIN32 AND BUILD_PYTHON)
       "${_cuda_bin}/nvrtc*64_*.dll"
       "${_cuda_bin}/nvJitLink_*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/bin/cudnn*64_*.dll"
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/cupti64_*.dll"
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/nvperf_host*.dll"
+      ${_cupti_patterns}
+      ${_nvperf_patterns}
     )
     foreach(_pattern ${_cuda_dll_patterns})
       file(GLOB _dlls "${_pattern}")
@@ -108,6 +124,25 @@ if(WIN32 AND BUILD_PYTHON)
         install(FILES ${_dlls} DESTINATION "${TORCH_INSTALL_LIB_DIR}")
       endif()
     endforeach()
+
+    # A pattern matching nothing is exactly how a 13.4 wheel shipped without
+    # CUPTI and still built green: file(GLOB) is silent and install() is simply
+    # skipped. libkineto import-links CUPTI on Windows, so that wheel could not
+    # be imported at all -- it failed with WinError 126 naming shm.dll, which is
+    # merely the first entry in torch/__init__.py's load loop whose dependency
+    # chain reaches torch_cuda.dll. Fail the build instead.
+    if(USE_KINETO)
+      file(GLOB _cupti_dlls ${_cupti_patterns})
+      if(NOT _cupti_dlls)
+        string(REPLACE ";" "\n  " _cupti_dirs_msg "${_cupti_dirs}")
+        message(FATAL_ERROR
+          "USE_KINETO is ON but no CUPTI DLL was found under:\n  "
+          "${_cupti_dirs_msg}\n"
+          "torch_cuda.dll import-links CUPTI, so the wheel would fail to "
+          "import. Point CUDA_TOOLKIT_ROOT_DIR at a toolkit that ships CUPTI, "
+          "or configure with USE_KINETO=OFF.")
+      endif()
+    endif()
 
     # NvToolsExt (legacy, may not exist on all systems).
     set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
