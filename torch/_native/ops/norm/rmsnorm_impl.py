@@ -224,6 +224,9 @@ def _fused_rms_norm_backward_impl(
     weight: torch.Tensor | None,
     output_mask: list[bool],
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    if not output_mask[0] and (weight is None or not output_mask[1]):
+        return None, None
+
     from .norms import quack_rmsnorm_bwd
 
     grad_input, grad_weight = quack_rmsnorm_bwd(
