@@ -291,8 +291,6 @@ S390X_BLOCKLIST = [
 ]
 
 XPU_BLOCKLIST = [
-    "test_autograd",
-    "profiler/test_memory_profiler",
     # Not applicable to XPU, tracked by
     # https://github.com/intel/torch-xpu-ops/issues/5205
     "benchmark_utils/test_benchmark_utils",
