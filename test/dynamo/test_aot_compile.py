@@ -858,6 +858,90 @@ def _subprocess_aot_compile_module():
                     )
 
 
+def _subprocess_save_child_module_artifact(path, guard_filter_fn):
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = ParentWithChildModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": guard_filter_fn},
+        )
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(4, 4),), kwargs={}, contexts=[])]
+        )
+        model._save_aot_compiled_module(path)
+
+
+def _subprocess_load_then_compile(path):
+    import itertools
+
+    import torch
+    from torch._dynamo import bytecode_transformation, config
+
+    with config.patch(enable_aot_compile=True):
+        mod = ParentWithChildModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        with open(path, "rb") as f:
+            model._load_aot_compiled_module(f.read())
+        # The only serve of the loaded artifact: a guard rooted at a name the
+        # load failed to seed raises HERE, not at any assertion below.
+        model(torch.randn(4, 4))
+
+        # len() is what puts a BUILTIN_MATCH guard on the compile, so the served
+        # call below evaluates a guard rooted at the builtins-dict key the mint
+        # landed on rather than none at all.
+        def later(x):
+            return x + len(x)
+
+        seeded = {k for k in globals() if k.startswith("__builtins_dict__")}
+        if len(seeded) != 1:
+            raise AssertionError(f"the load must seed one builtins key: {seeded}")
+        (taken,) = seeded
+        minted = []
+        real_unique_id = bytecode_transformation.unique_id
+
+        def recording_unique_id(*args, **kwargs):
+            name = real_unique_id(*args, **kwargs)
+            minted.append(name)
+            return name
+
+        # Land the next mint on the name the load seeded, read off that name and
+        # not off both processes' counters happening to stop at the same index:
+        # either side burning an id leaves the two names in no conflict and the
+        # retry unrun -- and without the retry install_global raises in
+        # CleanupHook.create. The mint goes through unique_id_unbound_in, which
+        # reads unique_id out of its own module globals, so patching it there
+        # sees every name install_global tried.
+        rewound = itertools.count(int(taken.rpartition("_")[2]))
+        x = torch.randn(3)
+        expected = later(x)
+        with (
+            patch.object(bytecode_transformation, "unique_id", recording_unique_id),
+            patch.object(bytecode_transformation, "_unique_id_counter", rewound),
+        ):
+            compiled = torch.compile(later, fullgraph=True, backend="eager")
+            actual = compiled(x)
+            if not torch.equal(actual, expected):
+                raise AssertionError(f"the skip cost the result: {actual}")
+            # A SERVED second call is what ties the answer to the name the mint
+            # landed on: its builtin guard has to resolve through that key, in a
+            # module dict that still carries the other process's binding of the
+            # name it skipped.
+            with config.patch(error_on_recompile=True):
+                if not torch.equal(compiled(x), expected):
+                    raise AssertionError("the served call answered differently")
+
+        # The compile has to have MINTED the taken name and then installed
+        # another; an install that overwrote it leaves this set unchanged.
+        after = {k for k in globals() if k.startswith("__builtins_dict__")}
+        if taken not in minted or after == seeded:
+            raise AssertionError(f"no collision on {taken}: {minted} -> {after}")
+
+
 class RedistributeModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1735,10 +1819,13 @@ from user code:
         _run_in_subprocess(_subprocess_aot_compile_module)
 
     def _hide_leaked_dynamo_globals(self):
-        # A capture in this process leaks Dynamo's generated globals into this
-        # module dict. Pop the ones _MINTED_PREFIXES names for the duration of
-        # the test, and in cleanup strip whatever the test added before putting
-        # the originals back.
+        # A capture in this process leaks Dynamo's synthetic globals into this
+        # module dict. Pop every name at a _MINTED_PREFIXES prefix for the
+        # duration of the test, and in cleanup strip whatever the test added
+        # before putting the originals back. A test that LOADS an artifact needs
+        # the __import_* half popped as well: its guards are rooted at those
+        # aliases, so a leaked one resolves and hides the seeding the test
+        # covers.
         g = globals()
         # Disown before popping: the hook that installed each name still owns it
         # and fires whenever its code object is collected, which after the
@@ -4032,6 +4119,62 @@ from user code:
         self.assertIsInstance(abandoned, AOTCompiledFunction)
         self.assertIn("AOTCompiledFunction", repr(abandoned))
         self.assertEqual(abandoned, abandoned)
+
+    def test_aot_compile_module_import_alias_guard_loads_across_processes(self):
+        # The real deployment shape: the artifact is captured by a process that
+        # never runs here, so the __import_* aliases its guards are rooted at
+        # have to be seeded into this module's globals by the load itself.
+        path = self.path()
+        _run_in_subprocess(
+            functools.partial(
+                _subprocess_save_child_module_artifact, path, keep_global_guards
+            )
+        )
+        # This process's module is freshly initialized and no state dict crosses
+        # from the capturing process, so the closing assertion also pins that
+        # dispatch reads its LIVE parameters rather than baked-in tensors.
+        mod = ParentWithChildModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        self._hide_leaked_dynamo_globals()
+        g = globals()
+        self.assertEqual({k for k in g if k.startswith("__import_")}, set())
+        with open(path, "rb") as f:
+            model._load_aot_compiled_module(f.read())
+        (result,) = model.forward.compiled_results
+        import_sources = result._artifacts.runtime_env.import_sources
+        guards_state = load_guards_state(result._artifacts.guards_state)
+        # Assert against what the load actually wrote into this live namespace,
+        # not against the artifact re-filtered by the gate under test. Read the
+        # guarded alias off the serialized global_scope, pruned to exactly the
+        # guarded names, rather than off a literal or off import_sources' order.
+        guarded = set(import_sources) & set(guards_state.output_graph.global_scope)
+        self.assertLess(len(guarded), len(import_sources))
+        # Named before the unpacking below: an nn.Module internal that adds or
+        # drops a guarded alias would otherwise report a bare ValueError.
+        self.assertEqual(len(guarded), 1, f"expected one guarded alias: {guarded}")
+        (alias,) = guarded
+        self.assertEqual({k for k in g if k.startswith("__import_")}, guarded)
+        self.assertIs(g[alias], importlib.import_module(import_sources[alias]))
+        # keep_global_guards drops BUILTIN_MATCH, so no kept guard is rooted at
+        # the recorded builtins key and the load must leave it unbound.
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertTrue(builtins_key)
+        self.assertNotIn(builtins_key, g)
+        x = torch.randn(4, 4)
+        self.assertEqual(model(x), mod(x))
+
+    def test_load_then_compile_survives_baked_in_global_collision(self):
+        # output_graph.install_global's retry loop reached across processes: the
+        # name the mint collides with is one a real load seeded out of another
+        # process's artifact, where the sibling in-process test can only pre-bind
+        # a sentinel string to it.
+        path = self.path()
+        _run_in_subprocess(
+            functools.partial(
+                _subprocess_save_child_module_artifact, path, keep_builtin_guards
+            )
+        )
+        _run_in_subprocess(functools.partial(_subprocess_load_then_compile, path))
 
     @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
