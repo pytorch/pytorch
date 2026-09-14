@@ -35,7 +35,8 @@ TEST(TestHeaderOnlyArrayRef, TestAPIs) {
 
 TEST(TestHeaderOnlyArrayRef, TestFromInitializerList) {
   std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7};
-  HeaderOnlyArrayRef<int> arr({1, 2, 3, 4, 5, 6, 7});
+  std::initializer_list<int> il = {1, 2, 3, 4, 5, 6, 7};
+  HeaderOnlyArrayRef<int> arr(il);
   auto res_vec = arr.vec();
   for (size_t i = 0; i < vec.size(); i++) {
     EXPECT_EQ(vec[i], res_vec[i]);
