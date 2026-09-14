@@ -1324,6 +1324,93 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
+    def _linear_reference(self, x, weight, bias):
+        import numpy as np
+        x_np = x.detach().cpu().numpy()
+        weight_np = weight.detach().cpu().numpy()
+        expected = np.matmul(x_np, weight_np.T)
+        if bias is not None:
+            expected += bias.detach().cpu().numpy()
+        return torch.from_numpy(expected)
+
+    @parametrize("input_shape", [(1, 256, 10), (2, 3, 10), (2, 3, 4, 10)])
+    @parametrize("with_bias", [True, False])
+    def test_mkldnn_linear_higher_rank(self, input_shape, with_bias):
+        in_features = input_shape[-1]
+        out_features = 7
+        x = torch.randn(input_shape, dtype=torch.float32)
+        weight = torch.randn(out_features, in_features, dtype=torch.float32)
+        bias = torch.randn(out_features, dtype=torch.float32) if with_bias else None
+        expected = self._linear_reference(x, weight, bias)
+        actual = torch._C._nn.mkldnn_linear(
+            x.to_mkldnn(),
+            weight.to_mkldnn(),
+            bias.to_mkldnn() if bias is not None else None,
+        ).to_dense()
+        self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
+
+    @parametrize("input_shape", [(1, 256, 10), (2, 3, 10), (2, 3, 4, 10)])
+    @parametrize("with_bias", [True, False])
+    def test_mkldnn_linear_higher_rank_packed_weight(self, input_shape, with_bias):
+        x = torch.randn(input_shape, dtype=torch.float32)
+        weight = torch.randn(7, 10, dtype=torch.float32)
+        bias = torch.randn(7, dtype=torch.float32) if with_bias else None
+        flattened_m = x.numel() // x.size(-1)
+        packed_weight = torch.ops.mkldnn._reorder_linear_weight(weight, flattened_m)
+        expected = self._linear_reference(x, weight, bias)
+        actual = torch._C._nn.mkldnn_linear(
+            x.to_mkldnn(),
+            packed_weight,
+            bias.to_mkldnn() if bias is not None else None,
+        ).to_dense()
+        self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
+
+    @parametrize("input_shape", [(2, 3, 10), (2, 3, 4, 10)])
+    @parametrize("with_bias", [True, False])
+    @parametrize("packed_weight", [True, False])
+    @parametrize("is_binary", [True, False])
+    @parametrize("dtype", (torch.float32, torch.float16, torch.bfloat16))
+    def test_mkldnn_linear_fused_higher_rank(
+        self,
+        dtype,
+        input_shape,
+        with_bias,
+        packed_weight,
+        is_binary,
+    ):
+        lowp_support = {
+            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+            torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+        }
+        if dtype in lowp_support and not lowp_support[dtype]():
+            self.skipTest(f"MKLDNN does not support {dtype} on this CPU")
+        in_features = input_shape[-1]
+        out_features = 7
+        x = torch.randn(input_shape, dtype=dtype)
+        weight = torch.randn(out_features, in_features, dtype=dtype)
+        bias = None
+        if with_bias:
+            bias = torch.randn(out_features, dtype=dtype)
+        linear_ref = self._linear_reference(
+            x.float(),
+            weight.float(),
+            bias.float() if bias is not None else None,
+        )
+        op_weight = weight
+        if packed_weight:
+            flattened_m = x.numel() // x.size(-1)
+            op_weight = torch.ops.mkldnn._reorder_linear_weight(weight, flattened_m)
+        if is_binary:
+            other = torch.randn(*input_shape[:-1], out_features, dtype=dtype)
+            expected = linear_ref + other.float()
+            actual = torch.ops.mkldnn._linear_pointwise(x, other, op_weight, bias, "add")
+        else:
+            expected = torch.relu(linear_ref)
+            actual = torch.ops.mkldnn._linear_pointwise(x, op_weight, bias, "relu", [], "")
+        atol = {torch.float32: 1e-5, torch.float16: 5e-3, torch.bfloat16: 1e-1}[dtype]
+        rtol = 1e-5 if dtype == torch.float32 else 1e-3
+        self.assertEqual(actual.float(), expected, atol=atol, rtol=rtol)
+
     def test_linear_backward(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
