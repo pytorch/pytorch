@@ -1002,7 +1002,7 @@ ldl_diagonal_panel_fused_kernel(
     // L21 = L21 @ inv(D)
     if (pivot_rank == 1) {
       double D11 = ldl::real(dLD[LinOff(curr_step, curr_step, lda)]);
-      for (int i = curr_step + pivot_rank; i < n; i += BS) {
+      for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
         dLD[LinOff(i, curr_step, lda)] /= D11;
       }
     } else {
@@ -1019,7 +1019,7 @@ ldl_diagonal_panel_fused_kernel(
       D[0][1] /= det;
       D[1][0] /= det;
 
-      for (int i = curr_step + pivot_rank; i < n; i += BS) {
+      for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
         auto l0 = dLD[LinOff(i, curr_step + 0, lda)];
         auto l1 = dLD[LinOff(i, curr_step + 1, lda)];
         dLD[LinOff(i, curr_step + 0, lda)] = l0 * D[0][0] + l1 * D[1][0];
@@ -1030,6 +1030,11 @@ ldl_diagonal_panel_fused_kernel(
 
     // Finish iteration
     curr_step += pivot_rank;
+  }
+
+  // Panel is processed -- update curr_step in the global memory
+  if (tid == 0) {
+    *dcurr_step = curr_step;
   }
 }
 
@@ -1078,7 +1083,7 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
     auto* dipiv = static_cast<int*>(pivots.data_ptr());
     auto* dinfo = static_cast<int*>(info.data_ptr());
 
-    auto panel_step_holder = at::zeros({0}, LD.options().dtype(at::kInt));
+    auto panel_step_holder = at::empty({1}, LD.options().dtype(at::kInt));
     auto* dcurr_step = static_cast<int*>(panel_step_holder.data_ptr());
     int curr_step = 0;
 
