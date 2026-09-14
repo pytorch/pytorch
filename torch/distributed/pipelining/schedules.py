@@ -1895,7 +1895,14 @@ def _resolve_unshard_lookahead(
     num_pp_ranks: int,
     max_active_stages: int,
 ) -> tuple[int, ...]:
-    """Resolve one all-gather prefetch distance per pipeline rank."""
+    """Resolve one validated all-gather prefetch distance per pipeline rank.
+
+    ``"full"`` is the compatibility default and matches the residency window
+    on every rank. ``"auto"`` uses the fixed rank-aware policy
+    ``min(rank + 2, max_active_stages)``. A tuple is the exact expert override;
+    it must contain one value per PP rank and every value must be within the
+    residency window.
+    """
     if unshard_lookahead == "full":
         return (max_active_stages,) * num_pp_ranks
     if unshard_lookahead == "auto":
@@ -2819,11 +2826,19 @@ class _CustomFunctionProtocol(Protocol):
 
 
 class _PipelineScheduleRuntime(PipelineScheduleMulti):
-    """
-    Provides a simple runtime that requires a 'schedule IR' including specified communication operations.
+    """Run a multi-stage schedule lowered to explicit communication actions.
 
-    Can be instantiated directly by creating _PipelineScheduleRuntime and calling load_csv, or can be
-    subclassed and the subclass can be responsible for creating a schedule IR.
+    This runtime can be instantiated directly and populated with ``load_csv``,
+    or subclassed by a schedule that produces its own IR.
+
+    ``max_active_stages`` and ``unshard_lookahead`` are independent FSDP
+    controls. The former bounds parameter residency and determines reshard
+    placement. The latter controls only how many upcoming distinct stages may
+    issue asynchronous unshards: ``"full"`` uses the complete residency window,
+    ``"auto"`` resolves rank ``r`` to
+    ``min(r + 2, max_active_stages)``, and a tuple supplies one value per PP
+    rank. The existing wait immediately before first parameter use remains the
+    correctness boundary for every policy.
     """
 
     def __init__(self, *args, **kwargs):
