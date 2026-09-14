@@ -2895,7 +2895,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
-    @skipXPU
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
