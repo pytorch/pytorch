@@ -495,6 +495,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
     output_contraction = outputs.output_contraction
+    if (
+        blockscaled is not None
+        and output_contraction is not None
+        and output_contraction.chunked
+    ):
+        # TODO: Upstream block-scaled concat_layout support to QuACK if needed.
+        raise NotImplementedError(
+            "FlexGEMM block-scaled GEMMs do not yet support chunked output contractions"
+        )
     if output_contraction is not None and epilogue_args[len(mainloop_scale_nodes) :]:
         raise NotImplementedError(
             "FlexGEMM grouped main outputs do not yet support captured tensors"
