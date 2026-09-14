@@ -831,9 +831,9 @@ class AOTCompiledFunction:
         """Advice for a guard that failed on a global its scope does not define,
         worded for the scope the guards were actually resolved against. Returns a
         bare sentence; a caller that continues a line of its own adds the
-        separator. ``forward`` is the model class's ``forward``, passed only when
-        the guards hold the dict it resolves to, and honoured only in the
-        SUPPLIED branch."""
+        separator. ``forward`` names the instance attribute a module load resolved
+        the scope from, passed only when the guards hold the dict it resolves to,
+        and honoured only in the SUPPLIED branch."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
             rebuilt = (
                 "a guarded global is missing from the scope rebuilt from the artifact"
@@ -860,17 +860,8 @@ class AOTCompiledFunction:
             namespace = _module_namespace_name(self._guard_globals or {})
             named = "" if namespace is None else f", here vars({namespace})"
             where = (
-                # A module load resolves the scope from the INSTANCE attribute,
-                # so the dict is the globals of the function that attribute
-                # resolves to. Resolving forward on the class lands in that
-                # same dict whenever it reaches that same function, inheritance
-                # from another module included, and can land elsewhere once an
-                # instance rebinds forward; naming the class's forward alone
-                # would send that reader to a dict these guards never read.
-                f"the globals of the function {forward} resolves to -- or, for "
-                "an instance that rebound forward before the load, of the "
-                "function it was rebound to, since that is the one the load "
-                f"resolved{named}"
+                f"the globals of the function {forward} resolves to, since that "
+                f"is the one the load resolved{named}"
                 if forward is not None
                 else f"the live scope this artifact was loaded against{named}"
             )
@@ -1535,14 +1526,13 @@ class AOTCompiledModel:
         default=(), init=False, compare=False, repr=False
     )
 
-    def _binds_alike(self) -> bool:
+    def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
         # By identity, not ==: the dataclass __eq__ would reach the Signature
         # compare _binding_key exists to avoid. Measured at 0.27us for four
         # results, call included, against 0.81us for one check().
-        results, prior = self.compiled_results, self._decided_over
+        prior = self._decided_over
         if len(results) == len(prior) and all(map(operator.is_, results, prior)):
             return self._shared_binding
-        results = tuple(results)
         key = _binding_key(results[0]._artifacts) if results else None
         shared = key is not None and all(
             _binding_key(result._artifacts) == key for result in results[1:]
@@ -1555,6 +1545,9 @@ class AOTCompiledModel:
         return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # compiled_results is public, so read it once: every stage below judges
+        # the results this call began with, on the binding decided over them.
+        results = tuple(self.compiled_results)
         # Guard evaluation ignores _guard_check_enabled, which only the last
         # resort and the report read, so scan every result.
         raised: dict[int, Exception] = {}
@@ -1573,8 +1566,8 @@ class AOTCompiledModel:
         # every guard, so a call the signature cannot bind still surfaces as
         # bind_locals' TypeError, as the plain module call would.
         shared = (
-            self.compiled_results[0].prepare_f_locals(self.model, *args, **kwargs)
-            if self._binds_alike()
+            results[0].prepare_f_locals(self.model, *args, **kwargs)
+            if self._binds_alike(results)
             else None
         )
         bound: dict[int, dict[str, object]] = {}
@@ -1625,7 +1618,7 @@ class AOTCompiledModel:
                 if (i, kind) in self._warned:
                     continue
                 self._warned.add((i, kind))
-                if self.compiled_results[i]._guard_check_enabled:
+                if results[i]._guard_check_enabled:
                     advice = (
                         f"Fix or drop input [{i}]: a tree that raises rejects "
                         "nothing, and a C++ throw out of it leaves its own "
@@ -1653,7 +1646,7 @@ class AOTCompiledModel:
                     advice,
                 )
 
-        for i, result in enumerate(self.compiled_results):
+        for i, result in enumerate(results):
             if accepts(i, result):
                 if raised:
                     warn_swallowed(i)
@@ -1668,7 +1661,7 @@ class AOTCompiledModel:
                 return result._serve(self.model, *args, **kwargs)
         # A check() can reject from the dict-tag fast path without running the
         # tree; a second check() then evaluates it in full, opted-out results too.
-        for i, result in enumerate(self.compiled_results):
+        for i, result in enumerate(results):
             if accepts(i, result):
                 if raised:
                     warn_swallowed(i)
@@ -1680,14 +1673,14 @@ class AOTCompiledModel:
         # guard state the throw left stale (see warn_swallowed) rather than about
         # this call. A raise from the opted-out result itself is not such a case:
         # nobody wanted its answer.
-        if not any(self.compiled_results[i]._guard_check_enabled for i in raised):
-            for i, result in enumerate(self.compiled_results):
+        if not any(results[i]._guard_check_enabled for i in raised):
+            for i, result in enumerate(results):
                 if not result._guard_check_enabled:
                     if raised:
                         warn_swallowed(i)
                     return result._serve(self.model, *args, **kwargs)
         report = self._no_match_report(
-            raised, unanswered, answered, bound, torch_function_state
+            results, raised, unanswered, answered, bound, torch_function_state
         )
         if raised:
             # `raised` is in recording order, so this chains the first index that
@@ -1700,6 +1693,7 @@ class AOTCompiledModel:
 
     def _no_match_report(
         self,
+        results: tuple[AOTCompiledFunction, ...],
         raised: dict[int, Exception],
         unanswered: set[int],
         answered: set[int],
@@ -1710,36 +1704,37 @@ class AOTCompiledModel:
         """A report naming every compiled input and what its guard check said,
         raised, or -- for a withheld opt-out -- was never asked.
 
-        ``bound`` is the f_locals the dispatch above judged, one per result, so
-        the report explains the same binding rather than a fresh one, and
-        ``torch_function_state`` the TLS state dispatch read before evaluating
-        anything: a throw here skips the same non-RAII restore, and what has to
-        come back is the state the CALLER had, not one this dispatch left."""
+        ``results`` and ``bound`` are the results the dispatch above judged and
+        the f_locals it judged them on, one per result, so the report explains
+        the same call rather than a fresh one, and ``torch_function_state`` the
+        TLS state dispatch read before evaluating anything: a throw here skips
+        the same non-RAII restore, and what has to come back is the state the
+        CALLER had, not one this dispatch left."""
         lines = [
             "No AOT compiled graph matched this call. Tried "
-            f"{len(self.compiled_results)} compiled input(s):"
+            f"{len(results)} compiled input(s):"
         ]
         # An opted-out result is reported at all only because a raise vetoed the
         # last resort above; without one it is served and there is no report.
         raiser = next(
-            (i for i in raised if self.compiled_results[i]._guard_check_enabled),
+            (i for i in raised if results[i]._guard_check_enabled),
             None,
         )
         # An entry that answered in EITHER dispatch pass rejected this call, so
         # an input covering it is on the table even where its LAST evaluation
         # raised and the line below is that raise.
-        covered = any(self.compiled_results[i]._guard_check_enabled for i in answered)
+        covered = any(results[i]._guard_check_enabled for i in answered)
         # A rejection that FOLLOWED a throw from the same tree is the answer the
         # veto above refuses to trust, so when no enabled entry rejected the call
         # before it raised, the advice below says so beside the ModelInput line.
         answered_first = any(
-            self.compiled_results[i]._guard_check_enabled
+            results[i]._guard_check_enabled
             for i in answered
             if i not in raised or i in unanswered
         )
         missing_at: int | None = None
         withheld = False
-        for i, result in enumerate(self.compiled_results):
+        for i, result in enumerate(results):
             if not result._guard_check_enabled:
                 # Nobody asked about this result's guards, so quoting them would
                 # name the wrong thing -- a raise out of them included -- and it
@@ -1784,25 +1779,20 @@ class AOTCompiledModel:
                 )
                 continue
             if not reason.verbose_code_parts:
-                # A failing accessor can report no parts at all (a set index past
-                # the end of a shorter set answers GuardDebugInfo(false, 0)), so
-                # an empty list is not the passing signal reason.result is.
+                # A failing accessor can answer false with no parts to quote.
                 lines.append(f"  [{i}] <guard check failed without naming a guard>")
                 continue
             parts = reason.verbose_code_parts
             if missing_at is None and any(map(_names_a_missing_global, parts)):
                 missing_at = i
-            # A part embeds the guard's raw source line, which linecache ends
-            # only at \n: collapse every separator splitlines() reads it back on.
+            # Collapse every separator splitlines() reads the report back on.
             joined = " ".join("; ".join(parts).splitlines())
             lines.append(f"  [{i}] {joined}")
         if missing_at is not None:
-            missing_global = self.compiled_results[missing_at]
-            # The name is the class attribute, which is a definition a reader
-            # can go and look at, and not necessarily the function object
-            # dispatch resolved: an instance that rebinds forward is served by
-            # the rebound function, and the guards read THAT function's globals.
-            forward: str | None = f"{type(self.model).__name__}.forward"
+            missing_global = results[missing_at]
+            # Named as the instance attribute: the load resolved the scope from
+            # model.forward, and a rebound instance reads another function's dict.
+            forward: str | None = f"this {type(self.model).__name__} instance's forward"
             resolved: dict[str, Any] | None = None
             if missing_global._guard_scope is _GuardScope.SUPPLIED:
                 # Resolving forward runs user code: get_traced_fn formats a
@@ -1831,7 +1821,7 @@ class AOTCompiledModel:
             )
         # An artifact holding no inputs at all -- which deserialize() accepts --
         # has no entry to answer, and adding an input is exactly the advice for it.
-        if covered or not self.compiled_results:
+        if covered or not results:
             lines.append(
                 "Add a ModelInput covering this call, or check whether "
                 "guard_filter_fn kept a guard this call cannot satisfy -- both "
