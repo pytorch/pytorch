@@ -43,10 +43,15 @@ def _worker(rank: int, world_size: int) -> None:
 
 def main() -> int:
     n = torch.cuda.device_count()
-    if n < 1:
-        print("::error::ROCm pre-flight: no GPUs visible to the container")
+    test_config = os.environ.get("TEST_CONFIG", "")
+    min_gpus = 4 if test_config == "distributed_4gpu" else 1
+    if n < min_gpus:
+        print(
+            f"::error::ROCm pre-flight: need at least {min_gpus} GPUs "
+            f"(TEST_CONFIG={test_config!r}), saw {n}"
+        )
         return 1
-    world_size = min(2, n)
+    world_size = min(4, n) if test_config == "distributed_4gpu" else min(2, n)
     try:
         mp.spawn(_worker, args=(world_size,), nprocs=world_size, join=True)
     except Exception as e:

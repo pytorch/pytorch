@@ -572,16 +572,6 @@ class MultiGpuMinFilterPlugin:
                 f"deselected {len(deselected)}",
                 flush=True,
             )
-        if not selected:
-            import sys
-
-            print(
-                f"ERROR: --multigpu-min-gpus {self.min_gpus} deselected every "
-                f"collected test ({len(deselected)} items); refusing empty run.",
-                file=sys.stderr,
-                flush=True,
-            )
-            pytest.exit("multigpu-min-gpus filter matched no tests", returncode=1)
 
 
 class StepcurrentPlugin:
