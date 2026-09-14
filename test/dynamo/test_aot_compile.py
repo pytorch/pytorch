@@ -603,7 +603,8 @@ class ModeBranchGlobalModule(torch.nn.Module):
 class SelfModeBranchGlobalModule(torch.nn.Module):
     # The same branch on an attribute rather than an argument: the guard on
     # self.mode is a LOCAL_UNSPECIALIZED_NN_MODULE source, which sorts after
-    # GLOBAL, so the root's G accessor is installed -- and fails -- first.
+    # GLOBAL, so the root's G accessor is installed -- and fails -- before the
+    # self.mode guard (the L['x'] TENSOR_MATCH, a LOCAL, comes before both).
     def __init__(self, mode):
         super().__init__()
         self.mode = mode
@@ -2543,10 +2544,18 @@ from user code:
         finally:
             g["AOT_BRANCH_SCALE"] = saved
         self.assertIn("[0] KeyError on G['AOT_BRANCH_SCALE']", message)
-        # The mismatch that would have been reported had the global resolved.
         self.assertNotIn("L['self'].mode", message)
         self.assertIn("For [0]: a guarded global is missing", message)
+        # The footer is unconditional at this tree; this fences a future gate on
+        # it (the mixed case is keeps_the_advice_for_every_entry's).
         self.assertIn("Add a ModelInput", message)
+        # The mismatch the entry above hid: with the global back, the same call
+        # fails on self.mode alone. Second, not first, because a failed check()
+        # re-sorts the root's children by fail count, which would have put this
+        # guard ahead of the G accessor for the call above.
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x)
+        self.assertIn("[0] L['self'].mode == 1", str(ctx.exception))
 
     def test_no_match_message_hint_covers_a_rebound_forward(self):
         # The load resolves the guard scope from model.forward, the INSTANCE
@@ -2648,6 +2657,9 @@ from user code:
         # over this module, whose extra_repr raises past the (RuntimeError,
         # AttributeError) that _resolve_guard_scope catches. Dispatch itself
         # never calls the rebound forward, so the rebind reaches only the report.
+        # The catch alone would keep this report arriving, so the gate is pinned
+        # by counting resolves rather than by the wording.
+        self._hide_leaked_dynamo_globals()
         mod = RaisingReprModule()
         model = torch.compile(
             mod,
@@ -2662,12 +2674,16 @@ from user code:
             repr(mod.forward)
         g = globals()
         saved = g.pop("AOT_HERMETIC_WEIGHT")
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
         try:
-            with self.assertRaises(RuntimeError) as ctx:
+            with resolve as resolved, self.assertRaises(RuntimeError) as ctx:
                 model(x)
             message = str(ctx.exception)
         finally:
             g["AOT_HERMETIC_WEIGHT"] = saved
+        resolved.assert_not_called()
         self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
         self.assertIn("the module the compiled function was traced in", message)
         self.assertNotIn("instance's forward", message)
@@ -5104,6 +5120,7 @@ from user code:
         # whose advice (define the global) is wrong here. The whole-verbose-part
         # match that tells the two apart came in with the hint and is pinned
         # there; what this pins is which of the two the module report reaches for.
+        self._hide_leaked_dynamo_globals()
         mod = GlobalConfigModule()
         x = torch.randn(4, 8)
         model = torch.compile(
@@ -5120,7 +5137,7 @@ from user code:
             message = str(ctx.exception)
         finally:
             GLOBAL_POOLING_CONFIG["pooling"] = saved
-        self.assertIn("GLOBAL_POOLING_CONFIG'][", message)
+        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']['pooling']", message)
         self.assertIn("Add a ModelInput", message)
         self.assertNotIn("a guarded global is missing", message)
 

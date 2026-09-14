@@ -19443,6 +19443,7 @@ op_db: list[OpInfo] = [
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.float8_e4m3fn),
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
