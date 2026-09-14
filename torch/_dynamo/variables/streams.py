@@ -177,12 +177,17 @@ has_side_effect(torch.ops.streams.synchronize_event.default)
 
 
 @custom_op("streams::synchronize_device", mutates_args=())
-def synchronize_device(device_type: str, device_index: int) -> None:
-    torch.accelerator.synchronize(torch.device(device_type, device_index))
+def synchronize_device(device_type: str, device_index: int | None) -> None:
+    device = (
+        torch.device(device_type)
+        if device_index is None
+        else torch.device(device_type, device_index)
+    )
+    torch.accelerator.synchronize(device)
 
 
 @synchronize_device.register_fake
-def _(device_type: str, device_index: int) -> None:
+def _(device_type: str, device_index: int | None) -> None:
     pass
 
 
@@ -270,10 +275,16 @@ class SymbolicStreamState:
 
         cur_stack: list[StreamVariable] = []
         if torch.accelerator.is_available():
+            from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
             # Reset the registry so the current stream is guaranteed index 0.
             reset_user_object_tracking()
             stream = torch.accelerator.current_stream()
-            source = CurrentStreamSource(stream.device)
+            device = stream.device
+            if _coor_device_index_is_current(device):
+                # Reconstruct the stream relative to each rank's current device.
+                device = torch.device(device.type)
+            source = CurrentStreamSource(device)
             # Register the current stream so it gets index 0 (registry is
             # fresh at tracing start).  The inductor wrapper updates this
             # entry at runtime so cudagraph capture uses the capture stream
