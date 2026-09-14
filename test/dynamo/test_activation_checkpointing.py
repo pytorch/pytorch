@@ -57,9 +57,6 @@ from torch.utils.checkpoint import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 if HAS_GPU_AND_TRITON:
     import triton
     from triton import language as tl
@@ -1726,7 +1723,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         fwd_graph = aot_graphs[0]
         # Determine which fused attention backend is expected based on the
         # prioritization logic in sdp_utils.cpp:check_prefer_cudnn_attention.
-        dprops = torch.get_device_module(device_type).get_device_properties(device)
+        dprops = torch.get_device_module(device).get_device_properties(device)
         cudnn_version = (
             torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         )
@@ -2821,6 +2818,8 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
     """Checkpointing the same module at two sibling call sites. See
     https://github.com/pytorch/pytorch/issues/193194."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
         # An unspecialized plain-float module attribute (self.eps), read
         # inside a torch.utils.checkpoint region that's entered from two
@@ -2906,7 +2905,6 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
 
         return result, captured_gm
 
-    @unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
     def test_ac_rematerialize_simple_forward_backward(self):
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3953,10 +3951,10 @@ def forward(self, arg0_1, arg1_1):
 
 
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_gpu_and_triton
-    def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self):
+    def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self, device):
         from torch._guards import tracing, TracingContext
         from torch._subclasses import FakeTensorMode
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -3980,8 +3978,8 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
             def block(self, x):
                 return compiled_f(x)
 
-        m = getattr(M(), device_type)()
-        x = torch.randn(8, device=device_type, requires_grad=True)
+        m = M().to(device)
+        x = torch.randn(8, device=device, requires_grad=True)
 
         def fn(x):
             y = m(x).sum()
@@ -4029,6 +4027,14 @@ def forward(self, x_1):
     alias_4 = torch.ops.aten.alias.default(sum_1);  sum_1 = None
     return (alias_4, mul_1)""",
         )
+
+
+instantiate_device_type_tests(
+    ActivationCheckpointingNestedCompileTests,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
