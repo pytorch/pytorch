@@ -25,8 +25,11 @@ class AutoHeuristicTest(TestCase):
             return torch.mm(a, b)
 
         cf = torch.compile(f)
-        a = torch.randn(2047, 2048, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randn(2048, 2048, device=GPU_TYPE, dtype=torch.float16)
+        # Keep one normal-mode padding candidate. M-only padding is not
+        # generally offered, while this N tail exercises the same binary
+        # AutoHeuristic collection path.
+        a = torch.randn(2048, 2048, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(2048, 2047, device=GPU_TYPE, dtype=torch.float16)
         cf(a, b)
 
     def get_path_to_autoheuristic_log(self, name):
