@@ -2849,6 +2849,7 @@ Call this whenever a new thread is created in order to propagate values from
     TORCH_CHECK(t.defined(), "Expected a defined tensor");
     TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
     auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
+    TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
     const auto& constant = mode->get_constant(t.unsafeGetTensorImpl());
     if (!constant) {
       return py::none();
@@ -2856,10 +2857,19 @@ Call this whenever a new thread is created in order to propagate values from
     return py::cast(at::Tensor(constant));
   });
 
-  py_module.def("_clear_fake_constant", [](const at::Tensor& fake) {
-    auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
-    mode->set_constant(fake.getIntrusivePtr(), nullptr);
-  });
+  py_module.def(
+      "_set_fake_constant",
+      [](const at::Tensor& fake, const std::optional<at::Tensor>& constant) {
+        TORCH_CHECK(fake.defined(), "Expected a defined tensor");
+        TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
+        auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
+        TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
+        mode->set_constant(
+            fake.unsafeGetTensorImpl(),
+            constant ? constant->getIntrusivePtr() : nullptr);
+      },
+      py::arg("fake"),
+      py::arg("constant"));
 
   py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
     return py::reinterpret_steal<py::object>(
