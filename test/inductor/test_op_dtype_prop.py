@@ -3,6 +3,7 @@ import importlib
 import os
 import re
 import sys
+import unittest
 
 import torch
 from torch._dynamo.utils import disable_cache_limit
@@ -15,8 +16,8 @@ from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import parametrize
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
+from torch.utils._triton import has_triton
 
 
 # Make the helper files in test/ importable
@@ -30,7 +31,6 @@ importlib.import_module("filelock")
 
 from torch._inductor.lowering import lowerings
 from torch.testing._internal.common_device_type import ops
-from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 unique_pointwise_op_names = set()
@@ -56,6 +56,8 @@ pointwise_ops = [
 
 
 class TestCase(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(
         pointwise_ops,
         allowed_dtypes=(
@@ -71,11 +73,11 @@ class TestCase(InductorTestCase):
     @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @disable_cache_limit()
-    def test_op_dtype_propagation(self, op, dtype):
+    def test_op_dtype_propagation(self, device, op, dtype):
         def run(op, args, kwargs):
             return op(*args, **kwargs)
 
-        sample_inputs_itr = op.sample_inputs(GPU_TYPE, dtype, requires_grad=False)
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
@@ -84,22 +86,22 @@ class TestCase(InductorTestCase):
             out_c = torch.compile(run, dynamic=True)(op.get_op(), args, kwargs)
             self.assertEqual(out, out_c)
 
-    @requires_gpu()
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @parametrize("upcast_to_fp32", [False, True])
     @config.patch("triton.use_block_ptr", True)
-    def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
+    def test_codegen_upcast_to_fp32(self, device, upcast_to_fp32):
         @torch.compile
         def func(a, b, c, d):
             return a * b * c * d
 
-        inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 4
+        inps = (torch.rand((32, 32), device=device, dtype=torch.float16),) * 4
         with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
             func_opt = torch.compile(func, backend="inductor")
             code = run_and_get_triton_code(func_opt, *inps)
             fp32_cast_in_code = "to(tl.float32)" in code
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
-    @requires_gpu()
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
     @parametrize(
         "reduction_func",
@@ -114,17 +116,318 @@ class TestCase(InductorTestCase):
     )
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
     @config.patch("triton.use_block_ptr", True)
-    def test_low_precision_reduction(self, input_shape, reduction_func, input_dtype):
+    def test_low_precision_reduction(
+        self, device, input_shape, reduction_func, input_dtype
+    ):
         @torch.compile
         def func(a, b, c, d):
             return reduction_func(a * b * c * d)
 
-        inps = (torch.rand(input_shape, device=GPU_TYPE, dtype=input_dtype),) * 4
+        inps = (torch.rand(input_shape, device=device, dtype=input_dtype),) * 4
         with config.patch("triton.codegen_upcast_to_fp32", False):
             func_opt = torch._dynamo.optimize("inductor")(func)
             code = run_and_get_triton_code(func_opt, *inps)
             self.assertTrue(".to(tl.float32)" in code)
             self.assertEqual(func(*inps), func_opt(*inps))
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @parametrize("op_name", OpDtypeSupport.supported_dtypes)
+    @parametrize("load_upcast_to_fp32", [False, True])
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    @config.patch("triton.use_block_ptr", True)
+    def test_dtype_aware_codegen(
+        self, device, op_name: str, load_upcast_to_fp32, input_dtype
+    ):
+        """
+        Test dtype aware codegen for some tl.math/libdevice calls.
+        Operands should be upcast to float32, and the output should be downcast to float16.
+        """
+
+        # Check if the op's output should be upcasted/downcasted.
+        supported_dtypes = OpDtypeSupport.supported_dtypes[op_name]
+        convert_output = OpDtypeSupport.convert_outputs[op_name]
+        self.assertNotIn(input_dtype, supported_dtypes)
+
+        # Retrieve the corresponding torch op.
+        torch_op_name = op_name.removeprefix("libdevice_")
+        op = getattr(torch, torch_op_name)
+
+        # Edge case: torch.round maps to libdevice.nearbyint.
+        device_type = torch.device(device).type
+        triton_op_name_overrides = {
+            "default": {
+                "round": "nearbyint",
+                # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
+                "sqrt": "sqrt_rn",
+            },
+        }
+        if device_type in triton_op_name_overrides:
+            override = triton_op_name_overrides[device_type].get(op_name)
+        else:
+            override = triton_op_name_overrides["default"].get(op_name)
+        triton_op_name = override if override is not None else torch_op_name
+
+        # Get the number of args for the op.
+        # Take the minimum over all signatures to isolate required args.
+        signatures = get_signature_for_torch_op(op)
+        num_args = min(len(signature.parameters) for signature in signatures)
+
+        # Test codegen and check for casts.
+        inps = (torch.rand((32, 32), device=device, dtype=input_dtype),) * num_args
+        tl_dtype_str = str(input_dtype).replace("torch", "tl")
+        with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
+            compiled = torch.compile(op, backend="inductor")
+            code = run_and_get_triton_code(compiled, *inps)
+
+            if op_name == "atan" and device_type == "cuda" and not torch.version.hip:
+                self.assertIn("rcp.approx.ftz.f32", code)
+                separate_upcast = (
+                    re.search(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)", code) is not None
+                )
+                self.assertNotEqual(separate_upcast, load_upcast_to_fp32)
+                # The atan output downcast shows up as an explicit
+                # `.to(<low prec>)` on the block-pointer path (always) and on the
+                # default masked path whenever the op-local upcast is used
+                # (codegen_upcast_to_fp32=False). With a global load upcast on the
+                # default path the store narrows implicitly, so no explicit cast
+                # is emitted -- mirroring the assertNotEqual(..., load_upcast...)
+                # check on the general path below.
+                if convert_output and (
+                    use_block_ptr_enabled() or not load_upcast_to_fp32
+                ):
+                    self.assertIn(f".to({tl_dtype_str})", code)
+                return
+
+            # Search the code with a regex.
+            # Example code: libdevice.floor(tmp3.to(tl.float32)).to(tl.float16)
+            output_cast = rf"\.to\({tl_dtype_str}\)" if convert_output else ""
+            pattern = rf"{triton_op_name}\(.*\.to\(tl\.float32\)\){output_cast}"
+            cast_in_code = re.search(pattern, code, re.MULTILINE) is not None
+            self.assertNotEqual(cast_in_code, load_upcast_to_fp32)
+
+    @config.patch("triton.codegen_upcast_to_fp32", False)
+    def test_binary_math_mixed_precision(self, device):
+        """
+        Test a binary math operator where only one input needs to be upcast.
+        """
+        # Create inputs of different dtypes.
+        inputs = [
+            torch.randn(8, device=device, dtype=dtype)
+            for dtype in (torch.float16, torch.float32)
+        ]
+
+        func = torch.hypot
+        compiled = torch.compile(backend="inductor")(func)
+        result, (code,) = run_and_get_code(compiled, *inputs)
+
+        # Check accuracy.
+        ref = func(*inputs)
+        self.assertTrue(torch.allclose(ref, result))
+
+        # Check for exactly one upcast.
+        num_upcasts = code.count(".to(tl.float32)")
+        self.assertEqual(num_upcasts, 1)
+
+        # There should be no downcast, since the input is promoted to float32.
+        self.assertNotIn(".to(tl.float16)", code)
+
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    @config.patch("triton.codegen_upcast_to_fp32", False)
+    def test_downcast_div_mod(self, device):
+        def fn(x, y):
+            return x % y, x / y
+
+        x, y = (torch.rand([8], dtype=torch.float16, device=device) for _ in range(2))
+
+        out, code = run_and_get_code(torch.compile(fn), x, y)
+
+        FileCheck().check("static_assert").check_same(".dtype").run(code[0])
+        self.assertEqual(fn(x, y), out)
+
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    def test_constant(self, device):
+        def fn():
+            return (torch.full((2, 3), 3.1416, device=device, dtype=torch.float16),)
+
+        out, code = run_and_get_code(torch.compile(fn))
+        FileCheck().check("static_assert").check_same(".dtype").run(code[0])
+        self.assertEqual(fn(), out)
+
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
+    @config.patch("triton.persistent_reductions", False)
+    def test_any(self, device):
+        def fn(x):
+            return torch.any(x)
+
+        x = torch.rand([40], device=device).to(torch.bool)
+        out, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(fn(x), out)
+
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
+    def test_assoc_scan(self, device):
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        x = torch.randn(10, device=device)
+        # dtype check correctly
+        associative_scan(
+            lambda acc, curr: acc + torch.abs(curr), x, dim=-1, combine_mode="pointwise"
+        )
+
+    @parametrize("upcast_to_fp32", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_upcast_rank_0_cpu(self, device, dtype: torch.dtype, upcast_to_fp32: bool):
+        """
+        Test whether we implicitly upcast CPU tensors of rank 0 to float32.
+        """
+
+        # Test broadcasting a rank-0 CPU tensor to rank 1.
+        x = torch.randn(1, dtype=dtype, device="cpu")[0]
+        y = torch.randn(8, dtype=dtype, device=device)
+        self.assertEqual(len(x.shape), 0)
+        self.assertEqual(len(y.shape), 1)
+        inps = (x, y)
+        func = torch.add
+
+        with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
+            compiled = torch.compile(func)
+            result, (code,) = run_and_get_code(compiled, *inps)
+
+        # Check numerics.
+        ref = func(*inps)
+        self.assertTrue(torch.allclose(result, ref))
+
+        # Inductor upcasts CPU arguments of rank 0 to float32. Check for a downcast to
+        # the original dtype.
+        num_downcasts = code.count(f".to({triton_type(dtype)})")
+        self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
+    def test_unbacked_float_uses_fp64_signature(self, device):
+        """
+        Test that unbacked float scalars from .item() use fp64 in kernel signature
+        and are cast down to fp32 when used with fp32 tensors.
+
+        This verifies the fix for precision loss when Python floats or unbacked
+        float symbols were hardcoded to fp32 in Triton kernel signatures.
+        """
+
+        def fn(inputs, scalar_tensor):
+            # .item() creates an unbacked float symbol that becomes a kernel arg
+            val = scalar_tensor.item()
+            return torch._foreach_mul(inputs, val)
+
+        inputs = [torch.randn(8, device=device, dtype=torch.float32)]
+        scalar = torch.tensor(0.333333333333333333, device=device, dtype=torch.float64)
+
+        compiled = torch.compile(fn, fullgraph=True)
+        code = run_and_get_triton_code(compiled, inputs, scalar)
+
+        # The unbacked float should be passed as fp64 ('ks0': 'fp64' in signature)
+        # and cast down to fp32 for use with the fp32 tensor
+        self.assertIn("'ks0': 'fp64'", code)
+        self.assertIn(".to(tl.float32)", code)
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    def test_index_expr_ks_arg_dtype_int(self, device):
+        """
+        ks* kernel args are always int64 in the Triton signature (per
+        _decide_tl_dtype), even when the kernel's index_dtype is int32.
+        Verify that index_expr emits an explicit final cast to index_dtype.
+        """
+
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        a = torch.randint(0, 10, (5, 5), device=device, dtype=torch.int32)
+        b = torch.randint(0, 10, (5, 5), device=device, dtype=torch.int32)
+
+        compiled = torch.compile(fn, dynamic=True)
+        result, codes = run_and_get_code(compiled, a, b, 2)
+        code = "\n".join(codes)
+        self.assertEqual(result, torch.add(a, b, alpha=2))
+        self.assertIn("'ks0': 'i64'", code)
+        self.assertIn(".to(tl.int32)", code)
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    def test_index_expr_ks_arg_dtype_float(self, device):
+        """
+        When a symbolic scalar is used in a float context (e.g. math.sqrt of
+        a tensor size), index_expr emits an explicit final cast to the
+        requested float dtype.
+        """
+        import math
+
+        @torch.compile(dynamic=True)
+        def fn(a, b):
+            r = 1 / math.sqrt(a.size(1))
+            return torch.bmm(a, b) / r
+
+        a = torch.randn(2, 4, 4, device=device)
+        b = torch.randn(2, 4, 4, device=device)
+        result, codes = run_and_get_code(fn, a, b)
+        code = "\n".join(codes)
+        expected = torch.bmm(a, b) / (1 / math.sqrt(a.size(1)))
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIn(".to(tl.float32)", code)
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    def test_randint_symbolic_bounds_use_value_expr(self, device):
+        @torch.compile(fullgraph=True)
+        def fn(high):
+            return torch.randint(2**32, high.item(), (5, 5), device=device)
+
+        high = torch.tensor(2**40, device=device, dtype=torch.int64)
+        result, codes = run_and_get_code(fn, high)
+        code = "\n".join(codes)
+        self.assertEqual(result.dtype, torch.int64)
+        self.assertGreaterEqual(result.min().item(), 2**32)
+        self.assertLess(result.max().item(), 2**40)
+        self.assertIn("triton_helpers.randint64", code)
+        self.assertIn(".to(tl.int64)", code)
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_int64_symint_not_downcast_to_int32_index_expr(self, device, dynamic):
+        def fn(x, hi):
+            h = hi.item()
+            torch._check_is_size(h)
+            torch._check(h > 2**31)
+            return torch.randint(
+                0, h, (x.shape[0],), device=x.device, dtype=torch.int64
+            )
+
+        x = torch.zeros(4, device=device)
+        hi = torch.tensor(2**31 + 1234, device=device, dtype=torch.int64)
+        cfn = torch.compile(fn, dynamic=dynamic, fullgraph=True)
+        got, codes = run_and_get_code(cfn, x, hi)
+        code = "\n".join(codes)
+        self.assertTrue(bool((got >= 0).all()))
+        self.assertTrue(bool((got < hi.item()).all()))
+        self.assertIn("'ks1': 'i64'", code)
+        self.assertIn("triton_helpers.randint64", code)
+        self.assertIn(".to(tl.int64)", code)
+
+
+class TestCaseGeneric(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_op_dtype_support(self):
         """
@@ -171,307 +474,12 @@ class TestCase(InductorTestCase):
             self.assertIn(torch.float32, supported_dtypes)
             self.assertIn(torch.float64, supported_dtypes)
 
-    @requires_gpu()
-    @parametrize("op_name", OpDtypeSupport.supported_dtypes)
-    @parametrize("load_upcast_to_fp32", [False, True])
-    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
-    @config.patch("triton.use_block_ptr", True)
-    def test_dtype_aware_codegen(self, op_name: str, load_upcast_to_fp32, input_dtype):
-        """
-        Test dtype aware codegen for some tl.math/libdevice calls.
-        Operands should be upcast to float32, and the output should be downcast to float16.
-        """
 
-        # Check if the op's output should be upcasted/downcasted.
-        supported_dtypes = OpDtypeSupport.supported_dtypes[op_name]
-        convert_output = OpDtypeSupport.convert_outputs[op_name]
-        self.assertNotIn(input_dtype, supported_dtypes)
+instantiate_device_type_tests(TestCase, globals(), except_for="cpu", allow_xpu=True)
 
-        # Retrieve the corresponding torch op.
-        torch_op_name = op_name.removeprefix("libdevice_")
-        op = getattr(torch, torch_op_name)
-
-        # Edge case: torch.round maps to libdevice.nearbyint.
-        triton_op_name_overrides = {
-            "default": {
-                "round": "nearbyint",
-                # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
-                "sqrt": "sqrt_rn",
-            },
-        }
-        if GPU_TYPE in triton_op_name_overrides:
-            override = triton_op_name_overrides[GPU_TYPE].get(op_name)
-        else:
-            override = triton_op_name_overrides["default"].get(op_name)
-        triton_op_name = override if override is not None else torch_op_name
-
-        # Get the number of args for the op.
-        # Take the minimum over all signatures to isolate required args.
-        signatures = get_signature_for_torch_op(op)
-        num_args = min(len(signature.parameters) for signature in signatures)
-
-        # Test codegen and check for casts.
-        inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * num_args
-        tl_dtype_str = str(input_dtype).replace("torch", "tl")
-        with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
-            compiled = torch.compile(op, backend="inductor")
-            code = run_and_get_triton_code(compiled, *inps)
-
-            if op_name == "atan" and GPU_TYPE == "cuda" and not torch.version.hip:
-                self.assertIn("rcp.approx.ftz.f32", code)
-                separate_upcast = (
-                    re.search(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)", code) is not None
-                )
-                self.assertNotEqual(separate_upcast, load_upcast_to_fp32)
-                # The atan output downcast shows up as an explicit
-                # `.to(<low prec>)` on the block-pointer path (always) and on the
-                # default masked path whenever the op-local upcast is used
-                # (codegen_upcast_to_fp32=False). With a global load upcast on the
-                # default path the store narrows implicitly, so no explicit cast
-                # is emitted -- mirroring the assertNotEqual(..., load_upcast...)
-                # check on the general path below.
-                if convert_output and (
-                    use_block_ptr_enabled() or not load_upcast_to_fp32
-                ):
-                    self.assertIn(f".to({tl_dtype_str})", code)
-                return
-
-            # Search the code with a regex.
-            # Example code: libdevice.floor(tmp3.to(tl.float32)).to(tl.float16)
-            output_cast = rf"\.to\({tl_dtype_str}\)" if convert_output else ""
-            pattern = rf"{triton_op_name}\(.*\.to\(tl\.float32\)\){output_cast}"
-            cast_in_code = re.search(pattern, code, re.MULTILINE) is not None
-            self.assertNotEqual(cast_in_code, load_upcast_to_fp32)
-
-    @config.patch("triton.codegen_upcast_to_fp32", False)
-    def test_binary_math_mixed_precision(self):
-        """
-        Test a binary math operator where only one input needs to be upcast.
-        """
-        # Create inputs of different dtypes.
-        inputs = [
-            torch.randn(8, device=GPU_TYPE, dtype=dtype)
-            for dtype in (torch.float16, torch.float32)
-        ]
-
-        func = torch.hypot
-        compiled = torch.compile(backend="inductor")(func)
-        result, (code,) = run_and_get_code(compiled, *inputs)
-
-        # Check accuracy.
-        ref = func(*inputs)
-        self.assertTrue(torch.allclose(ref, result))
-
-        # Check for exactly one upcast.
-        num_upcasts = code.count(".to(tl.float32)")
-        self.assertEqual(num_upcasts, 1)
-
-        # There should be no downcast, since the input is promoted to float32.
-        self.assertNotIn(".to(tl.float16)", code)
-
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_shape_assert", True)
-    @config.patch("triton.codegen_upcast_to_fp32", False)
-    def test_downcast_div_mod(self):
-        def fn(x, y):
-            return x % y, x / y
-
-        x, y = (torch.rand([8], dtype=torch.float16, device=GPU_TYPE) for _ in range(2))
-
-        out, code = run_and_get_code(torch.compile(fn), x, y)
-
-        FileCheck().check("static_assert").check_same(".dtype").run(code[0])
-        self.assertEqual(fn(x, y), out)
-
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_shape_assert", True)
-    def test_constant(self):
-        def fn():
-            return (torch.full((2, 3), 3.1416, device=GPU_TYPE, dtype=torch.float16),)
-
-        out, code = run_and_get_code(torch.compile(fn))
-        FileCheck().check("static_assert").check_same(".dtype").run(code[0])
-        self.assertEqual(fn(), out)
-
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_shape_assert", True)
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
-    @config.patch("triton.persistent_reductions", False)
-    def test_any(self):
-        def fn(x):
-            return torch.any(x)
-
-        x = torch.rand([40], device=GPU_TYPE).to(torch.bool)
-        out, code = run_and_get_code(torch.compile(fn), x)
-        self.assertEqual(fn(x), out)
-
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_shape_assert", True)
-    @config.patch("test_configs.static_cpp_dtype_assert", True)
-    def test_assoc_scan(self):
-        from torch._higher_order_ops.associative_scan import associative_scan
-
-        x = torch.randn(10, device=GPU_TYPE)
-        # dtype check correctly
-        associative_scan(
-            lambda acc, curr: acc + torch.abs(curr), x, dim=-1, combine_mode="pointwise"
-        )
-
-    @parametrize("upcast_to_fp32", (False, True))
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_upcast_rank_0_cpu(self, dtype: torch.dtype, upcast_to_fp32: bool):
-        """
-        Test whether we implicitly upcast CPU tensors of rank 0 to float32.
-        """
-
-        # Test broadcasting a rank-0 CPU tensor to rank 1.
-        x = torch.randn(1, dtype=dtype, device="cpu")[0]
-        y = torch.randn(8, dtype=dtype, device=GPU_TYPE)
-        self.assertEqual(len(x.shape), 0)
-        self.assertEqual(len(y.shape), 1)
-        inps = (x, y)
-        func = torch.add
-
-        with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
-            compiled = torch.compile(func)
-            result, (code,) = run_and_get_code(compiled, *inps)
-
-        # Check numerics.
-        ref = func(*inps)
-        self.assertTrue(torch.allclose(result, ref))
-
-        # Inductor upcasts CPU arguments of rank 0 to float32. Check for a downcast to
-        # the original dtype.
-        num_downcasts = code.count(f".to({triton_type(dtype)})")
-        self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
-
-    @requires_gpu()
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
-    def test_unbacked_float_uses_fp64_signature(self):
-        """
-        Test that unbacked float scalars from .item() use fp64 in kernel signature
-        and are cast down to fp32 when used with fp32 tensors.
-
-        This verifies the fix for precision loss when Python floats or unbacked
-        float symbols were hardcoded to fp32 in Triton kernel signatures.
-        """
-
-        def fn(inputs, scalar_tensor):
-            # .item() creates an unbacked float symbol that becomes a kernel arg
-            val = scalar_tensor.item()
-            return torch._foreach_mul(inputs, val)
-
-        inputs = [torch.randn(8, device=GPU_TYPE, dtype=torch.float32)]
-        scalar = torch.tensor(
-            0.333333333333333333, device=GPU_TYPE, dtype=torch.float64
-        )
-
-        compiled = torch.compile(fn, fullgraph=True)
-        code = run_and_get_triton_code(compiled, inputs, scalar)
-
-        # The unbacked float should be passed as fp64 ('ks0': 'fp64' in signature)
-        # and cast down to fp32 for use with the fp32 tensor
-        self.assertIn("'ks0': 'fp64'", code)
-        self.assertIn(".to(tl.float32)", code)
-
-    @requires_gpu()
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_shape_assert", True)
-    def test_index_expr_ks_arg_dtype_int(self):
-        """
-        ks* kernel args are always int64 in the Triton signature (per
-        _decide_tl_dtype), even when the kernel's index_dtype is int32.
-        Verify that index_expr emits an explicit final cast to index_dtype.
-        """
-
-        def fn(a, b, alpha):
-            return torch.add(a, b, alpha=alpha)
-
-        a = torch.randint(0, 10, (5, 5), device=GPU_TYPE, dtype=torch.int32)
-        b = torch.randint(0, 10, (5, 5), device=GPU_TYPE, dtype=torch.int32)
-
-        compiled = torch.compile(fn, dynamic=True)
-        result, codes = run_and_get_code(compiled, a, b, 2)
-        code = "\n".join(codes)
-        self.assertEqual(result, torch.add(a, b, alpha=2))
-        self.assertIn("'ks0': 'i64'", code)
-        self.assertIn(".to(tl.int32)", code)
-
-    @requires_gpu()
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_shape_assert", True)
-    def test_index_expr_ks_arg_dtype_float(self):
-        """
-        When a symbolic scalar is used in a float context (e.g. math.sqrt of
-        a tensor size), index_expr emits an explicit final cast to the
-        requested float dtype.
-        """
-        import math
-
-        @torch.compile(dynamic=True)
-        def fn(a, b):
-            r = 1 / math.sqrt(a.size(1))
-            return torch.bmm(a, b) / r
-
-        a = torch.randn(2, 4, 4, device=GPU_TYPE)
-        b = torch.randn(2, 4, 4, device=GPU_TYPE)
-        result, codes = run_and_get_code(fn, a, b)
-        code = "\n".join(codes)
-        expected = torch.bmm(a, b) / (1 / math.sqrt(a.size(1)))
-        self.assertTrue(torch.allclose(result, expected))
-        self.assertIn(".to(tl.float32)", code)
-
-    @requires_gpu()
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("test_configs.runtime_triton_shape_assert", True)
-    def test_randint_symbolic_bounds_use_value_expr(self):
-        @torch.compile(fullgraph=True)
-        def fn(high):
-            return torch.randint(2**32, high.item(), (5, 5), device=GPU_TYPE)
-
-        high = torch.tensor(2**40, device=GPU_TYPE, dtype=torch.int64)
-        result, codes = run_and_get_code(fn, high)
-        code = "\n".join(codes)
-        self.assertEqual(result.dtype, torch.int64)
-        self.assertGreaterEqual(result.min().item(), 2**32)
-        self.assertLess(result.max().item(), 2**40)
-        self.assertIn("triton_helpers.randint64", code)
-        self.assertIn(".to(tl.int64)", code)
-
-    @requires_gpu()
-    @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_int64_symint_not_downcast_to_int32_index_expr(self, dynamic):
-        def fn(x, hi):
-            h = hi.item()
-            torch._check_is_size(h)
-            torch._check(h > 2**31)
-            return torch.randint(
-                0, h, (x.shape[0],), device=x.device, dtype=torch.int64
-            )
-
-        x = torch.zeros(4, device=GPU_TYPE)
-        hi = torch.tensor(2**31 + 1234, device=GPU_TYPE, dtype=torch.int64)
-        cfn = torch.compile(fn, dynamic=dynamic, fullgraph=True)
-        got, codes = run_and_get_code(cfn, x, hi)
-        code = "\n".join(codes)
-        self.assertTrue(bool((got >= 0).all()))
-        self.assertTrue(bool((got < hi.item()).all()))
-        self.assertIn("'ks1': 'i64'", code)
-        self.assertIn("triton_helpers.randint64", code)
-        self.assertIn(".to(tl.int64)", code)
-
-
-instantiate_device_type_tests(
-    TestCase, globals(), only_for=("cuda", "xpu"), allow_xpu=True
-)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU:
+    if has_triton():
         run_tests(needs="filelock")
