@@ -15,8 +15,7 @@ import torch.fx as fx
 import torch.nn as nn
 from torch._logging import warning_once
 from torch._subclasses.fake_tensor import is_fake_tensor
-from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
-from torch.distributed.fsdp import FSDPModule, fully_shard
+from torch.distributed.fsdp import FSDPModule, GradientReductionHandle
 from torch.distributed.pipelining._utils import (
     _derive_grad_metas,
     _DTensorMeta,
@@ -287,6 +286,7 @@ class _PipelineStageBase(ABC):
         self.bwd_cache: dict[int, tuple[torch.Tensor | None, ...]] = {}
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: list[Any] = []
+        self._gradient_reduction_handle: GradientReductionHandle | None = None
 
         # Initialize has_backward to false; this will be set to true if loss
         # function is passed to pipeline schedule
@@ -712,6 +712,9 @@ class _PipelineStageBase(ABC):
         """
         Clear runtime states of the stage.
         """
+        if self._gradient_reduction_handle is not None:
+            self._gradient_reduction_handle.wait()
+            self._gradient_reduction_handle = None
         # map microbatch ID to list of forward tensor args
         self.fwd_cache.clear()
         # Caching chunk outputs for final output merge or reduction
@@ -1275,35 +1278,30 @@ class _PipelineStageBase(ABC):
         return ops
 
     def perform_reduce_grad(self, grad_scale_factor: int):
-        """
-        Called as a part of schedule IR.
-        REDUCE_GRAD action is scheduled after all microbatches W, B actions.
-
-        Currently contains "post_backward" functionality for FSDP.
-        We can try to extract post_backward in a separate IR action in future.
-        """
-        # Manually call post backward for FSDP
+        r"""Finalize FSDP gradient accumulation and scale stage gradients."""
         if isinstance(self.submod, FSDPModule):
-            fsdp_module = self.submod
-            fsdp_module.set_is_last_backward(True)
-            fsdp_module.set_reshard_after_backward(True)
-            fsdp_module.set_requires_gradient_sync(True)
-
-            if isinstance(fsdp_module, ReplicateModule):
-                distributed_state = replicate.state(fsdp_module)  # type: ignore[arg-type]
-            else:
-                distributed_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
-
-            for state in distributed_state._state_ctx.all_states:
-                for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group.post_backward()
-
-            # it would be much better if pipelining backward invoked .backward so autograd hooks
-            # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
-            # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
-            distributed_state._root_post_backward_final_callback()
+            self.submod.finalize_gradient_accumulation()
         # Call gradient scaling at the end of the backward pass
         # NOTE: this must happen after FSDP post_backward is FSDP is enabled
+        if grad_scale_factor != 1:
+            self.scale_grads(grad_scale_factor)
+
+    def start_gradient_reduction(self) -> None:
+        """Start FSDP gradient reduction without waiting for it."""
+        if not isinstance(self.submod, FSDPModule):
+            raise RuntimeError("Asynchronous gradient reduction requires FSDP")
+        if self._gradient_reduction_handle is not None:
+            raise RuntimeError("A gradient reduction is already pending")
+        self._gradient_reduction_handle = self.submod.finalize_gradient_accumulation(
+            async_op=True
+        )
+
+    def wait_for_gradient_reduction(self, grad_scale_factor: int) -> None:
+        """Wait for FSDP gradient reduction and scale the gradients."""
+        if self._gradient_reduction_handle is None:
+            raise RuntimeError("No gradient reduction is pending")
+        self._gradient_reduction_handle.wait()
+        self._gradient_reduction_handle = None
         if grad_scale_factor != 1:
             self.scale_grads(grad_scale_factor)
 

@@ -51,6 +51,9 @@ class FSDPStateContext(Generic[_StateType]):
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
+        # An asynchronous explicit finalization must be waited on before this
+        # FSDP tree starts more work.
+        self.gradient_reduction_pending: bool = False
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
@@ -290,6 +293,10 @@ class FSDPState(_State):
     def _pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        if self._state_ctx.gradient_reduction_pending:
+            raise RuntimeError(
+                "The previous gradient reduction must be waited on before forward"
+            )
         # When composing with module-hook-based activation checkpointing, the
         # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -398,7 +405,11 @@ class FSDPState(_State):
             return grad
 
     @_dynamo_disable
-    def _root_post_backward_final_callback(self) -> None:
+    def _root_post_backward_final_callback(
+        self,
+        finalize_gradient_accumulation: bool = False,
+        wait_for_gradient_reduction: bool = True,
+    ) -> None:
         logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             # Reset per-iteration state. With chunked loss, each standalone
@@ -415,27 +426,57 @@ class FSDPState(_State):
                 # autograd backward order and preserving RS overlap for
                 # per-param-mesh modules whose inputs lack gradients.
                 for fsdp_param_group in reversed(state._fsdp_param_groups):
-                    if fsdp_param_group._training_state != TrainingState.POST_BACKWARD:
+                    if finalize_gradient_accumulation:
+                        if fsdp_param_group._deferred_gradient_reduction:
+                            # set_requires_gradient_sync(False) deferred this
+                            # parameter group's reduction.
+                            fsdp_param_group.post_backward()
+                        else:
+                            # This group already reduced or did not participate
+                            # in backward.
+                            fsdp_param_group.reshard()
+                    elif (
+                        fsdp_param_group._training_state != TrainingState.POST_BACKWARD
+                    ):
                         # Run post-backward in case forward inputs did not require
                         # gradient so the autograd backward did not run
                         fsdp_param_group.post_backward()
                     fsdp_param_group._training_state = TrainingState.IDLE
                 state._training_state = TrainingState.IDLE
-                if self._state_ctx.is_last_backward:
-                    for fsdp_param_group in state._fsdp_param_groups:
-                        fsdp_param_group.finalize_backward()
-            if self._state_ctx.is_last_backward:
-                self._comm_ctx.post_forward_order.clear()
-                # Wait on and release any retained reduce-scatter input buffers:
-                # the last module's (which no later module's rs_wait clears) and,
-                # when set_reduce_scatter_max_input_buffers retains more than
-                # one in flight, the rest. The compute stream (which reuses the
-                # memory) is ordered past each reduce-scatter first.
-                for rs_state in self._comm_ctx.reduce_scatter_states:
-                    if rs_state.event is not None:
-                        self._device_handle.current_stream().wait_event(rs_state.event)
-                self._comm_ctx.reduce_scatter_states.clear()
+            if self._state_ctx.is_last_backward and wait_for_gradient_reduction:
+                self._wait_for_gradient_reduction()
             self._state_ctx.post_backward_final_callback_queued = False
+
+    def _wait_for_gradient_reduction(self) -> None:
+        for state in self._state_ctx.all_states:
+            for fsdp_param_group in state._fsdp_param_groups:
+                fsdp_param_group.finalize_backward()
+        self._comm_ctx.post_forward_order.clear()
+        # Wait on and release any retained reduce-scatter input buffers. The
+        # current stream may reuse their memory after these waits.
+        for rs_state in self._comm_ctx.reduce_scatter_states:
+            if rs_state.event is not None:
+                self._device_handle.current_stream().wait_event(rs_state.event)
+        self._comm_ctx.reduce_scatter_states.clear()
+
+    def _join_comm_streams(self) -> None:
+        if self._device.type == "cpu":
+            return
+        current_stream = self._device_handle.current_stream()
+        # Connect each communication stream to the current CUDA graph capture,
+        # then join it back to the current stream.
+        current_stream_event = self._device_handle.Event()
+        current_stream_event.record(current_stream)
+        for stream in (
+            self._comm_ctx.all_gather_copy_in_stream,
+            self._comm_ctx.all_gather_stream,
+            self._comm_ctx.reduce_scatter_stream,
+            self._comm_ctx.all_reduce_stream,
+        ):
+            stream.wait_event(current_stream_event)
+            join_event = self._device_handle.Event()
+            join_event.record(stream)
+            current_stream.wait_event(join_event)
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
@@ -508,6 +549,7 @@ class FSDPState(_State):
                 fsdp_param_group._reset_iter_state()
         self._state_ctx.iter_forward_root = None
         self._state_ctx.post_backward_final_callback_queued = False
+        self._state_ctx.gradient_reduction_pending = False
 
 
 def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:
@@ -571,9 +613,12 @@ def _register_group_forward_hooks(
     @_dynamo_disable
     @functools.wraps(pre_hook)
     def wrapped_pre_hook(*args: Any, **kwargs: Any):
-        if len(modules_to_run) == 0:
+        initialize_modules_to_run = len(modules_to_run) == 0
+        # Run the pre-hook before entering the group so a failure can be retried.
+        result = pre_hook(*args, **kwargs)
+        if initialize_modules_to_run:
             modules_to_run.update(modules_set)
-        return pre_hook(*args, **kwargs)
+        return result
 
     def get_wrapped_post_hook(module: nn.Module):
         @_dynamo_disable
