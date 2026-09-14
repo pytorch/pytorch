@@ -8,6 +8,9 @@ OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 
 if [[ "$(uname -m)" == "aarch64" ]]; then
   OPENBLAS_TARGET="ARMV8"
+elif [[ "$(uname -m)" == "riscv64" && "${GCC_VERSION}" -lt 15 ]]; then
+  # FIXME: zvfbfwma (vector bfloat16 instructions) support has been added in GCC 15
+  OPENBLAS_BUILD_BFLOAT16=0
 fi
 
 # Clone OpenBLAS
@@ -21,7 +24,7 @@ DYNAMIC_ARCH=1
 TARGET=${OPENBLAS_TARGET:-}
 CFLAGS=-O3
 FFLAGS=-Wno-maybe-uninitialized
-BUILD_BFLOAT16=1
+BUILD_BFLOAT16=${OPENBLAS_BUILD_BFLOAT16:-1}
 BUILD_HFLOAT16=0
 BUILD_SINGLE=1
 BUILD_DOUBLE=1
