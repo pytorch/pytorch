@@ -173,16 +173,40 @@ void prod_kernel_impl(TensorIterator& iter) {
   }
 }
 
+// Vectorized online-scaled sum-of-squares step: (scale_vec, ssq_vec) is
+// updated per-lane so norm^2 == scale^2 * ssq per lane, mirroring the
+// scalar NormTwoOps::reduce in SharedReduceOps.h, so no lane ever squares
+// a term that could push it toward overflow.
 template <typename scalar_t, typename acc_t>
-inline void norm_two_reduce_step(Vectorized<acc_t>& acc_vec, Vectorized<scalar_t>& data_vec) {
-  acc_vec += data_vec * data_vec;
+inline void norm_two_reduce_step(Vectorized<acc_t>& scale_vec, Vectorized<acc_t>& ssq_vec, Vectorized<scalar_t>& data_vec) {
+  using fVec = Vectorized<acc_t>;
+  fVec ax = data_vec.abs();
+  fVec zero(acc_t(0));
+  fVec one(acc_t(1));
+
+  auto nonzero_mask = ax != zero;
+  auto grow_mask = scale_vec < ax;
+
+  fVec safe_ax    = fVec::blendv(one, ax, nonzero_mask);
+  fVec r_grow     = scale_vec / safe_ax;
+  fVec ssq_grow   = one + ssq_vec * r_grow * r_grow;
+
+  fVec safe_scale = fVec::blendv(one, scale_vec, scale_vec != zero);
+  fVec r_keep     = ax / safe_scale;
+  fVec ssq_keep   = ssq_vec + r_keep * r_keep;
+
+  fVec new_scale = fVec::blendv(scale_vec, ax, grow_mask);
+  fVec new_ssq   = fVec::blendv(ssq_keep, ssq_grow, grow_mask);
+
+  scale_vec = fVec::blendv(scale_vec, new_scale, nonzero_mask);
+  ssq_vec   = fVec::blendv(ssq_vec, new_ssq, nonzero_mask);
 }
 
 template <>
-inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat16>& data_bvec) {
+inline void norm_two_reduce_step(Vectorized<float>& scale_fvec, Vectorized<float>& ssq_fvec, Vectorized<BFloat16>& data_bvec) {
   auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
-  acc_fvec += data_fvec0 * data_fvec0;
-  acc_fvec += data_fvec1 * data_fvec1;
+  norm_two_reduce_step(scale_fvec, ssq_fvec, data_fvec0);
+  norm_two_reduce_step(scale_fvec, ssq_fvec, data_fvec1);
 }
 
 template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>::type>
@@ -194,7 +218,7 @@ void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   } else if (val == 1.0) {
     binary_kernel_reduce(iter, NormOneOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 2.0) {
-    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));
+    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), NormTwoAccumulator<acc_t>{});
   } else if (val == INFINITY) {
     binary_kernel_reduce(iter, AbsMaxOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == -INFINITY) {
@@ -236,22 +260,47 @@ void norm_kernel_tensor_iterator_impl(
 
           using Vec = Vectorized<scalar_t>;
           using fVec = Vectorized<acc_t>;
-          fVec acc_vec{acc_t(0)};
-          acc_t buffer[fVec::size()];
+          fVec scale_vec{acc_t(0)};
+          fVec ssq_vec{acc_t(0)};
+          acc_t scale_buf[fVec::size()];
+          acc_t ssq_buf[fVec::size()];
           int64_t d = 0;
           for (; d < size - (size % Vec::size()); d += Vec::size()) {
             Vec data_vec = Vec::loadu(self_data + d);
-            norm_two_reduce_step(acc_vec, data_vec);
+            norm_two_reduce_step(scale_vec, ssq_vec, data_vec);
           }
-          acc_vec.store(buffer);
+          scale_vec.store(scale_buf);
+          ssq_vec.store(ssq_buf);
+          acc_t scale = scale_buf[0];
+          acc_t ssq = ssq_buf[0];
           for (int j = 1; j < fVec::size(); j++) {
-            buffer[0] = buffer[0] + buffer[j];
+            acc_t s2 = scale_buf[j], q2 = ssq_buf[j];
+            if (scale == acc_t(0)) {
+              scale = s2; ssq = q2;
+            } else if (s2 != acc_t(0)) {
+              if (scale > s2) {
+                acc_t r = s2 / scale;
+                ssq = ssq + q2 * r * r;
+              } else {
+                acc_t r = scale / s2;
+                ssq = q2 + ssq * r * r;
+                scale = s2;
+              }
+            }
           }
           for (; d < size; d++) {
-            acc_t data_val = acc_t(self_data[d]);
-            buffer[0] += data_val * data_val;
+            acc_t ax = std::abs(acc_t(self_data[d]));
+            if (ax == acc_t(0)) continue;
+            if (scale < ax) {
+              acc_t r = scale / ax;
+              ssq = acc_t(1) + ssq * r * r;
+              scale = ax;
+            } else {
+              acc_t r = ax / scale;
+              ssq = ssq + r * r;
+            }
           }
-          result_data[0] = scalar_t(std::sqrt(buffer[0]));
+          result_data[0] = scalar_t(scale * std::sqrt(ssq));
         });
       });
   } else {
@@ -467,12 +516,11 @@ template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>
 void powsum_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   using acc_t = at::opmath_type<typename scalar_value_type<scalar_t>::type>;
   if (val == 2.0) {
-    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t, false>(), acc_t(0));
+    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t, false>(), NormTwoAccumulator<acc_t>{});
   } else {
     binary_kernel_reduce(iter, NormOps<scalar_t, acc_t, out_t, false>{acc_t(val)}, acc_t(0));
   }
 }
-
 void powsum_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
@@ -502,22 +550,47 @@ void powsum_kernel_tensor_iterator_impl(
 
           using Vec = Vectorized<scalar_t>;
           using fVec = Vectorized<acc_t>;
-          fVec acc_vec{acc_t(0)};
-          acc_t buffer[fVec::size()];
+          fVec scale_vec{acc_t(0)};
+          fVec ssq_vec{acc_t(0)};
+          acc_t scale_buf[fVec::size()];
+          acc_t ssq_buf[fVec::size()];
           int64_t d = 0;
           for (; d < size - (size % Vec::size()); d += Vec::size()) {
             Vec data_vec = Vec::loadu(self_data + d);
-            norm_two_reduce_step(acc_vec, data_vec);
+            norm_two_reduce_step(scale_vec, ssq_vec, data_vec);
           }
-          acc_vec.store(buffer);
+          scale_vec.store(scale_buf);
+          ssq_vec.store(ssq_buf);
+          acc_t scale = scale_buf[0];
+          acc_t ssq = ssq_buf[0];
           for (int j = 1; j < fVec::size(); j++) {
-            buffer[0] = buffer[0] + buffer[j];
+            acc_t s2 = scale_buf[j], q2 = ssq_buf[j];
+            if (scale == acc_t(0)) {
+              scale = s2; ssq = q2;
+            } else if (s2 != acc_t(0)) {
+              if (scale > s2) {
+                acc_t r = s2 / scale;
+                ssq = ssq + q2 * r * r;
+              } else {
+                acc_t r = scale / s2;
+                ssq = q2 + ssq * r * r;
+                scale = s2;
+              }
+            }
           }
           for (; d < size; d++) {
-            acc_t data_val = acc_t(self_data[d]);
-            buffer[0] += data_val * data_val;
+            acc_t ax = std::abs(acc_t(self_data[d]));
+            if (ax == acc_t(0)) continue;
+            if (scale < ax) {
+              acc_t r = scale / ax;
+              ssq = acc_t(1) + ssq * r * r;
+              scale = ax;
+            } else {
+              acc_t r = ax / scale;
+              ssq = ssq + r * r;
+            }
           }
-          result_data[0] = scalar_t(buffer[0]);  // No sqrt!
+          result_data[0] = scalar_t(scale * scale * ssq);  // No sqrt!
         });
       });
   } else {
