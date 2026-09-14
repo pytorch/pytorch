@@ -562,6 +562,11 @@ static void bindGetDeviceProperties(PyObject* module) {
 
 static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  m.def("_xpu_xpuCachingAllocator_raw_delete", [](uintptr_t mem_ptr) {
+    py::gil_scoped_release no_gil;
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::xpu::XPUCachingAllocator::raw_delete(reinterpret_cast<void*>(mem_ptr));
+  });
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
     py::gil_scoped_release no_gil;
     return at::getDeviceAllocator(at::kXPU)->getMemoryInfo(device_index);
@@ -819,19 +824,6 @@ static PyObject* THXPModule_isCurrentStreamCapturing_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_xpuCachingAllocator_raw_delete(
-    PyObject* _unused,
-    PyObject* obj) {
-  HANDLE_TH_ERRORS
-  void* mem_ptr = PyLong_AsVoidPtr(obj);
-  {
-    pybind11::gil_scoped_release no_gil;
-    c10::xpu::XPUCachingAllocator::raw_delete(mem_ptr);
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
@@ -873,10 +865,6 @@ static struct PyMethodDef _THXPModule_methods[] = {
      nullptr},
     {"_xpu_resetPeakMemoryStats",
      THXPModule_resetPeakMemoryStats,
-     METH_O,
-     nullptr},
-    {"_xpu_xpuCachingAllocator_raw_delete",
-     THXPModule_xpuCachingAllocator_raw_delete,
      METH_O,
      nullptr},
     {nullptr}};
