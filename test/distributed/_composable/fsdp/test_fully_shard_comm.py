@@ -1841,7 +1841,6 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
 )
-@skipCUDAIf(TEST_WITH_ROCM, "requires NVIDIA GPUs")
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
