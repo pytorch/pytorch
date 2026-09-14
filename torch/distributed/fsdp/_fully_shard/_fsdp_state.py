@@ -419,8 +419,12 @@ class FSDPState(_State):
                 for fsdp_param_group in reversed(state._fsdp_param_groups):
                     if finalize_gradient_accumulation:
                         if fsdp_param_group._deferred_gradient_reduction:
+                            # set_requires_gradient_sync(False) deferred this
+                            # parameter group's reduction.
                             fsdp_param_group.post_backward()
                         else:
+                            # This group already reduced or did not participate
+                            # in backward.
                             fsdp_param_group.reshard()
                     elif (
                         fsdp_param_group._training_state != TrainingState.POST_BACKWARD
@@ -450,16 +454,17 @@ class FSDPState(_State):
         if self._device.type == "cpu":
             return
         current_stream = self._device_handle.current_stream()
-        fork_event = self._device_handle.Event()
-        fork_event.record(current_stream)
-        # Fork from the current stream so communication joins an active capture.
+        # Connect each communication stream to the current CUDA graph capture,
+        # then join it back to the current stream.
+        current_stream_event = self._device_handle.Event()
+        current_stream_event.record(current_stream)
         for stream in (
             self._comm_ctx.all_gather_copy_in_stream,
             self._comm_ctx.all_gather_stream,
             self._comm_ctx.reduce_scatter_stream,
             self._comm_ctx.all_reduce_stream,
         ):
-            stream.wait_event(fork_event)
+            stream.wait_event(current_stream_event)
             join_event = self._device_handle.Event()
             join_event.record(stream)
             current_stream.wait_event(join_event)
