@@ -11,11 +11,13 @@ from torch import Tensor
 from torch._C import FileCheck
 from torch._inductor import config, inductor_prims, ir, utils
 from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
-from torch._inductor.kernel.mm import scaled_mm_v2_choice
+from torch._inductor.graph import GraphLowering
+from torch._inductor.kernel.mm import scaled_mm_v2_choice, scaled_mm_v2_constraint
 from torch._inductor.lowering import clone as lowering_clone, register_lowering
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, sympy_index_symbol_with_prefix
+from torch._inductor.virtualized import V
 from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defined]
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
@@ -31,6 +33,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
@@ -656,7 +659,171 @@ class TestScaledMMNativeChoice(TestCase):
         )
 
 
+class TestScaledMMLayoutConstraint(TestCase):
+    @parametrize("device_type", ["cpu", "cuda", "xpu"])
+    @parametrize(
+        "recipe,cuda_strides,other_strides",
+        [
+            (ScalingType.TensorWise, [6, 2], [6, 2]),
+            (ScalingType.RowWise, [3, 1], [3, 1]),
+            (ScalingType.BlockWise1x16, [3, 1], [3, 1]),
+            (ScalingType.BlockWise1x32, [3, 1], [3, 1]),
+            (ScalingType.BlockWise1x128, [1, 4], [3, 1]),
+            (ScalingType.BlockWise128x128, [1, 4], [3, 1]),
+        ],
+    )
+    @parametrize("keyword_args", [False, True])
+    def test_operand_layouts(
+        self, device_type, recipe, cuda_strides, other_strides, keyword_args
+    ):
+        graph = torch.fx.Graph()
+        graph.output(())
+        lowering = GraphLowering(torch.fx.GraphModule({}, graph))
+
+        def tensor(name, size, stride):
+            return ir.TensorBox.create(
+                ir.InputBuffer(
+                    name=name,
+                    layout=ir.FixedLayout(
+                        torch.device(device_type), torch.float32, size, stride
+                    ),
+                )
+            )
+
+        # Deliberately non-dense inputs with the right stride order: stride
+        # order alone does not satisfy the unit-inner-stride requirements.
+        a = tensor("a", [32, 64], [128, 2])
+        b = tensor("b", [64, 32], [2, 128])
+        scale = tensor("scale", [4, 3], [6, 2])
+        scalar = tensor("scalar", [], [])
+        bias = tensor("bias", [32], [2])
+        op = torch.ops.aten._scaled_mm_v2.default
+        args = (
+            a,
+            b,
+            [scale, scalar],
+            [recipe.value, ScalingType.TensorWise.value],
+            [0, 0],
+            [scale, scalar],
+            [recipe.value, ScalingType.TensorWise.value],
+            [0, 0],
+            bias,
+            torch.bfloat16,
+        )
+        names = [arg.name for arg in op._schema.arguments][: len(args)]
+        kwargs = dict(zip(names, args)) if keyword_args else {}
+        node = graph.call_function(op)
+        with V.set_graph_handler(lowering):
+            new_args, new_kwargs = scaled_mm_v2_constraint(
+                node, *(() if keyword_args else args), **kwargs
+            )
+            result = new_kwargs if keyword_args else dict(zip(names, new_args))
+            self.assertEqual(result["self"].get_stride(), [64, 1])
+            self.assertEqual(result["mat2"].get_stride(), [1, 64])
+            self.assertEqual(result["bias"].get_stride(), [1])
+            expected_strides = (
+                cuda_strides
+                if device_type == "cuda" and not torch.version.hip
+                else other_strides
+            )
+            for side in ("a", "b"):
+                scales = result[f"scale_{side}"]
+                self.assertIs(scales[1], scalar)
+                self.assertEqual(scales[0].get_stride(), expected_strides)
+                if recipe == ScalingType.TensorWise:
+                    self.assertIs(scales[0], scale)
+            self.assertEqual(len(new_args), 0 if keyword_args else len(args))
+            self.assertEqual(new_kwargs.keys(), kwargs.keys())
+
+    def test_compatible_leading_dimensions(self):
+        graph = torch.fx.Graph()
+        graph.output(())
+        lowering = GraphLowering(torch.fx.GraphModule({}, graph))
+        matrices = [
+            ir.TensorBox.create(
+                ir.InputBuffer(
+                    name=name,
+                    layout=ir.FixedLayout(
+                        torch.device("cpu"), torch.float32, [32, 32], strides
+                    ),
+                )
+            )
+            for name, strides in (("a", [80, 1]), ("b", [1, 96]))
+        ]
+        node = graph.call_function(torch.ops.aten._scaled_mm_v2.default)
+        with V.set_graph_handler(lowering):
+            args, _ = scaled_mm_v2_constraint(
+                node, *matrices, [], [], [], [], [], [], None, torch.bfloat16
+            )
+            self.assertIs(args[0], matrices[0])
+            self.assertIs(args[1], matrices[1])
+
+    def test_registry_and_hop_metadata(self):
+        from torch._higher_order_ops.flex_gemm import flex_gemm_hop
+        from torch.fx.experimental.proxy_tensor import PythonKeyTracer
+
+        tracer = PythonKeyTracer()
+        tracer.graph = torch.fx.Graph()
+        for op in (
+            torch.ops.aten._scaled_mm_v2.default,
+            torch.ops.aten._scaled_mm_v2.out,
+        ):
+            self.assertNotIn(torch.Tag.needs_exact_strides, op.tags)
+            self.assertIs(
+                inductor_lowering.maybe_layout_constraints(op), scaled_mm_v2_constraint
+            )
+            # Exercise operator-as-data admission, not FlexGEMM's public allowlist.
+            tracer.create_node("call_function", flex_gemm_hop, (op,), {})
+        with self.assertRaisesRegex(RuntimeError, "NYI: The HOP.*needs exact strides"):
+            tracer.create_node(
+                "call_function", flex_gemm_hop, (torch.ops.aten._scaled_mm.default,), {}
+            )
+
+
+instantiate_parametrized_tests(TestScaledMMLayoutConstraint)
+
+
 class TestFP8Lowering(TestCase):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 tensorwise eager path is not supported by hipBLAS")
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @parametrize("rowwise", [False, True])
+    @parametrize("keyword_args", [False, True])
+    def test_scaled_mm_v2_constructs_layouts(self, device, rowwise, keyword_args):
+        m, k, n = 32, 64, 32
+        a = torch.randn(m, k, device=device).to(torch.float8_e4m3fn)
+        b = torch.randn(k, n, device=device).to(torch.float8_e4m3fn)
+        sa = torch.rand((m, 1) if rowwise else (), device=device) + 0.5
+        sb = torch.rand((1, n) if rowwise else (), device=device) + 0.5
+        recipe = ScalingType.RowWise if rowwise else ScalingType.TensorWise
+        op = torch.ops.aten._scaled_mm_v2.default
+
+        def fn(a, b, sa, sb):
+            operands = dict(
+                self=a,
+                mat2=b,
+                scale_a=[sa],
+                recipe_a=[recipe.value],
+                swizzle_a=[0],
+                scale_b=[sb],
+                recipe_b=[recipe.value],
+                swizzle_b=[0],
+                bias=None,
+                out_dtype=torch.bfloat16,
+            )
+            return op(**operands) if keyword_args else op(*operands.values())
+
+        # Use a valid native layout for the reference. The compiled input B is
+        # deliberately row-major; lowering must construct a column-major layout.
+        expected = fn(a, b.t().contiguous().t(), sa, sb)
+        reference = (a.double() * sa.double()) @ (b.double() * sb.double())
+        actual = torch.compile(fn, fullgraph=True)(a, b, sa, sb)
+        self.assertTrue(torch.isfinite(actual).all())
+        eager_error = (expected.double() - reference).abs()
+        actual_error = (actual.double() - reference).abs()
+        rounding = torch.finfo(torch.bfloat16).eps * reference.abs()
+        self.assertTrue(torch.all(actual_error <= eager_error + rounding + 1e-5))
+
     @onlyOn(["cpu", "cuda", "xpu"])
     @parametrize("contraction_dim", [(0, 0), (1, 1), (0, 1)])
     def test_scaled_mm_v2_invalid_contraction_dim(self, device, contraction_dim):
@@ -679,6 +846,43 @@ class TestFP8Lowering(TestCase):
         scale = torch.ones((), device=device)
         with self.assertRaisesRegex(RuntimeError, "only supports contraction_dim"):
             torch.compile(fn, fullgraph=True)(a, a.t(), scale)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 tensorwise eager path is not supported by hipBLAS")
+    @onlyOn(["cpu", "cuda", "xpu"])
+    def test_scaled_mm_v2_out_dynamic_layouts(self, device):
+        def fn(a, b, scale, bias, out):
+            return torch.ops.aten._scaled_mm_v2.out(
+                a,
+                b,
+                [scale],
+                [ScalingType.TensorWise.value],
+                [0],
+                [scale],
+                [ScalingType.TensorWise.value],
+                [0],
+                bias,
+                torch.bfloat16,
+                out=out,
+            )
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        for m in (32, 64):
+            a = torch.randn(m, 64, device=device).to(torch.float8_e4m3fn)
+            b = torch.randn(64, 32, device=device).to(torch.float8_e4m3fn)
+            scale = torch.tensor(0.5, device=device)
+            bias = torch.randn(64, device=device, dtype=torch.bfloat16)[::2]
+            out = torch.empty(m, 32, device=device, dtype=torch.bfloat16)
+            expected = fn(
+                a,
+                b.t().contiguous().t(),
+                scale,
+                bias.contiguous(),
+                torch.empty_like(out),
+            )
+            actual = compiled(a, b, scale, bias, out)
+            self.assertIs(actual, out)
+            self.assertEqual(actual, expected)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
@@ -1929,7 +2133,8 @@ class TestFP8Lowering(TestCase):
     @onlyCUDA
     @skipIfRocm  # ROCm MX gemm requires NO_SWIZZLE; swizzle is NVIDIA-only
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
-    def test_scaled_mm_v2_swizzle_compile(self, device):
+    @parametrize("strided_scales", [False, True])
+    def test_scaled_mm_v2_swizzle_compile(self, device, strided_scales):
         """Swizzled scales (MX recipes on NVIDIA require SWIZZLE_32_4_4) are
         not supported by any inductor template; the lowering must fall back
         to the ATen kernel instead of failing compile."""
@@ -1937,16 +2142,17 @@ class TestFP8Lowering(TestCase):
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 32
-        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
-        B_ref = torch.eye(N, device=device, dtype=torch.bfloat16)
-        A = A_ref.to(torch.float8_e4m3fn)
-        B = B_ref.to(torch.float8_e4m3fn)
-        A_scale = torch.full(
-            (M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        A = torch.randn(M, K, device=device).to(torch.float8_e4m3fn)
+        B = torch.randn(N, K, device=device).to(torch.float8_e4m3fn)
+        A_scale = (2.0 ** torch.randint(-2, 3, (M, K // BLOCK_SIZE), device=device)).to(
+            torch.float8_e8m0fnu
         )
-        B_scale = torch.full(
-            (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        B_scale = (2.0 ** torch.randint(-2, 3, (N, K // BLOCK_SIZE), device=device)).to(
+            torch.float8_e8m0fnu
         )
+        reference = (A.double() * A_scale.double().repeat_interleave(BLOCK_SIZE, 1)) @ (
+            B.double() * B_scale.double().repeat_interleave(BLOCK_SIZE, 1)
+        ).t()
         A_scale = to_blocked(A_scale)
         B_scale = to_blocked(B_scale)
 
@@ -1964,11 +2170,26 @@ class TestFP8Lowering(TestCase):
             )
 
         y_eager = fn(A, B, A_scale, B_scale)
+        if strided_scales:
+
+            def strided_copy(scale):
+                result = torch.empty_strided(
+                    scale.shape, (2,), dtype=scale.dtype, device=device
+                )
+                return result.copy_(scale)
+
+            A_scale, B_scale = strided_copy(A_scale), strided_copy(B_scale)
         compiled = torch.compile(fn, backend="inductor", fullgraph=True)
         y_compiled, (code,) = run_and_get_code(compiled, A, B, A_scale, B_scale)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+        self.assertTrue(torch.isfinite(y_compiled).all())
+        eager_error = (y_eager.double() - reference).abs()
+        actual_error = (y_compiled.double() - reference).abs()
+        rounding = torch.finfo(torch.bfloat16).eps * reference.abs()
+        self.assertTrue(torch.all(actual_error <= eager_error + rounding + 1e-5))
         # The swizzled path must use the ATen fallback, not a generated kernel
         FileCheck().check("_scaled_mm_v2").run(code)
+        with self.assertRaisesRegex((ValueError, RuntimeError), "scale_a.*elements"):
+            compiled(A, B, A_scale[:-1], B_scale)
 
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")

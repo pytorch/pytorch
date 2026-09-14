@@ -31,6 +31,7 @@ from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import (
     Buffer,
     ChoiceCaller,
+    ExternKernel,
     FallbackKernel,
     IRNode,
     is_triton,
@@ -1197,6 +1198,64 @@ def get_scaling_options(
     raise AssertionError(
         f"Inductor Triton does not support scale_a.shape = {scale_a_size}, scale_b.shape = {scale_b_size}"
     )  # verify that shapes are supported by at least one existing pairing
+
+
+def scaled_mm_v2_constraint(
+    fx_node: torch.fx.Node, *args: Any, **kwargs: Any
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Construct kernel-compatible layouts instead of preserving eager strides."""
+    if not isinstance(fx_node.target, torch._ops.OpOverload):
+        raise AssertionError("scaled_mm_v2_constraint expects an OpOverload")
+    names = [arg.name for arg in fx_node.target._schema.arguments]
+    operands = dict(zip(names, args))
+    operands.update(kwargs)
+
+    # The optimized lowering requires row-major A and column-major B. Keep
+    # compatible leading dimensions rather than making both matrices dense.
+    for name, inner_dim in (("self", 1), ("mat2", 0)):
+        matrix = operands[name]
+        strides = matrix.maybe_get_stride()
+        if strides is None or not V.graph.sizevars.statically_known_equals(
+            strides[inner_dim], 1
+        ):
+            m, n = matrix.get_size()
+            strides = (n, 1) if inner_dim == 1 else (1, m)
+            operands[name] = ExternKernel.require_exact_strides(matrix, strides)
+
+    device = operands["self"].get_device_or_error().type
+    for side in ("a", "b"):
+        scales = operands[f"scale_{side}"]
+        recipes = operands[f"recipe_{side}"]
+        constrained_scales = []
+        for scale, recipe in zip(scales, recipes, strict=True):
+            recipe = ScalingType(recipe)
+            if (
+                device == "cuda"
+                and not torch.version.hip
+                and recipe in (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128)
+            ):
+                # Native v2 DeepSeek scales are column-major on both sides;
+                # padding for 128x128 is part of the scale's first dimension.
+                scale = ExternKernel.require_exact_strides(
+                    scale, (1, scale.get_size()[0])
+                )
+            elif recipe != ScalingType.TensorWise:
+                # Rowwise and packed/swizzled MX/NV scales are dense. XPU
+                # consumes row-major DeepSeek scales via oneDNN as well.
+                scale = ExternKernel.require_contiguous(scale)
+            constrained_scales.append(scale)
+        operands[f"scale_{side}"] = constrained_scales
+
+    if operands.get("bias") is not None:
+        operands["bias"] = ExternKernel.require_contiguous(operands["bias"])
+
+    # Keep the caller's argument structure for mutation propagation (including out).
+    return tuple(operands[name] for name in names[: len(args)]), {
+        name: operands[name] for name in kwargs
+    }
+
+
+L.add_layout_constraint(aten._scaled_mm_v2, scaled_mm_v2_constraint)
 
 
 # Inductor has no template or extern choice that understands swizzled scale
