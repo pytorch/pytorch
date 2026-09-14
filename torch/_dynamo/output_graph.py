@@ -124,7 +124,12 @@ from .graph_id_filter import (
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
-from .side_effects import AttributeMutationExisting, SideEffects, ValueMutationExisting
+from .side_effects import (
+    AttributeMutationExisting,
+    AttributeMutationNew,
+    SideEffects,
+    ValueMutationExisting,
+)
 from .source import (
     _get_source_debug_name,
     AttrSource,
@@ -1440,7 +1445,20 @@ class OutputGraph(OutputGraphCommon):
         # Attribute stores AND value mutations on tracked objects (list
         # appends, dict inserts, ...) both replay at subgraph exit, so a
         # pending event reachable from either is observable outside.
-        roots.extend(self.side_effects.store_attr_mutations.keys())
+        # store_attr_mutations also retains entries that only exist so
+        # close_local_generators can trace a generator's finally block; those
+        # are never reconstructed, so nothing outside can observe them.  Mirror
+        # prune_dead_object_new's liveness test to drop them: it removes dead
+        # new objects from id_to_variable, and anything else is live by
+        # definition there.  A generator that does escape is covered by
+        # all_stack_values instead.
+        live_vars = {id(v) for v in self.side_effects.id_to_variable.values()}
+        roots.extend(
+            k
+            for k in self.side_effects.store_attr_mutations
+            if not isinstance(k.mutation_type, AttributeMutationNew)
+            or id(k) in live_vars
+        )
         roots.extend(self.side_effects._get_modified_vars())
         # backward_state, tensor_hooks, and save_for_backward can also
         # keep objects alive across the subgraph boundary; include them
@@ -2612,6 +2630,10 @@ class OutputGraph(OutputGraphCommon):
         # scan above and can append new violations.  Re-run the escape
         # scan (rather than raising unconditionally) so a non-escaping
         # event recorded in a finally block still compiles.
+        if self._pending_event_record_violations:
+            # Objects the finally block created were never liveness-checked,
+            # so re-prune before scanning to drop those nothing can reach.
+            self.side_effects.prune_dead_object_new(tx)
         self.raise_pending_event_record_violations_if_escaping(tx, all_stack_values)
 
         return all_stack_locals_metas

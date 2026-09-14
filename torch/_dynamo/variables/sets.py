@@ -99,6 +99,14 @@ class BaseSetVariable(VariableTracker):
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
 
+    _nonvar_fields = {
+        # Same role as ConstDictVariable.original_items: a construction-time
+        # snapshot read only for still-live keys, so traversing it would make
+        # removed elements look reachable.
+        "original_items",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self,
         items: Iterable[VariableTracker | HashableTracker],

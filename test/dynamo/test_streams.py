@@ -2425,6 +2425,72 @@ class GraphModule(torch.nn.Module):
             "record_event op not found in graph",
         )
 
+    @parametrize("container", ("set", "dict"))
+    def test_event_record_after_input_mutation_non_escaping_removed_from_container(
+        self, device, container
+    ):
+        # The event goes into a container and is taken back out again. Only the
+        # current contents get reconstructed, so nothing outside can reach it;
+        # the container's construction-time snapshot must not count as an
+        # escape.
+        def fn(x):
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            if container == "set":
+                holder = {e}
+                holder.remove(e)
+            else:
+                holder = {"a": e}
+                holder.pop("a")
+            return holder
+
+        out = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.ones(2, 2, device=device)
+        )
+        self.assertEqual(len(out), 0)
+
+    def test_event_record_after_input_mutation_non_escaping_generator_local_holder(
+        self, device
+    ):
+        # The finally block records an event onto an object it also creates and
+        # drops. That object outlives pruning only so the generator can be
+        # closed, so it must not be treated as a surviving escape root.
+        class Holder:
+            pass
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def gen(s):
+            try:
+                yield
+            finally:
+                e = torch.Event(device=device)
+                e.record(s)
+                h = Holder()
+                h.evt = e
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            with s:
+                x.add_(1)
+                g = gen(s)
+                next(g)
+            return x + 1
+
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.ones(2, 2, device=device)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        self.assertTrue(
+            any(node.target is torch.ops.streams.record_event for node in nodes),
+            "record_event op not found in graph",
+        )
+
     def test_event_record_before_input_mutation_no_error(self, device):
         def fn(x):
             s = torch.Stream(device=device)
