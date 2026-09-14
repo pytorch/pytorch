@@ -229,7 +229,9 @@ def quack_rmsnorm_bwd(
         )
         compute_dw = weight is not None and dw_mask
         props = _device_properties(x.device)
-        blocks = backward_launch(N, compute_dw).blocks(M, props.multi_processor_count)
+        blocks = backward_launch(N, compute_dw, x.element_size()).blocks(
+            M, props.multi_processor_count
+        )
         partial = (
             torch.empty(blocks, N, device=x.device, dtype=torch.float32)
             if compute_dw
