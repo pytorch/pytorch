@@ -1465,7 +1465,7 @@ std::optional<std::string> get_cache_dir() {
 
   // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then TEMP (Windows) or XDG_CACHE_HOME (Linux), then HOME environment variables
   std::string cache_dir;
-  char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  const char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
   // Create kernel_cache_dir if needed as we do not want to create the base directory passed by the user
   std::string kernels_cache_dir;
   if (ptkcp != nullptr) {
