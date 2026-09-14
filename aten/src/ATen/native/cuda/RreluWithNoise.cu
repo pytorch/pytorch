@@ -74,7 +74,6 @@ inline void _rrelu_with_noise_cuda_train(
     const Scalar& upper_,
     std::optional<Generator> generator) {
   auto input = input_.contiguous();
-  auto noise = noise_.contiguous();
   Tensor tmp_output = output.contiguous();
 
   int64_t numel = input.numel();
@@ -91,7 +90,7 @@ inline void _rrelu_with_noise_cuda_train(
   }
 
   const scalar_t* input_data = input.const_data_ptr<scalar_t>();
-  scalar_t* noise_data = noise.mutable_data_ptr<scalar_t>();
+  scalar_t* noise_data = noise_.mutable_data_ptr<scalar_t>();
   scalar_t* output_data = tmp_output.mutable_data_ptr<scalar_t>();
 
   double lower = lower_.to<double>();
@@ -150,6 +149,9 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
   checkAllSameGPU("rrelu_with_noise_out_cuda", {self_arg, noise_arg, output_arg});
 
   if (training) {
+    // The kernel writes noise directly; a non-contiguous copy used to go
+    // into a temporary that was never copied back.
+    checkContiguous("rrelu_with_noise_out_cuda", noise_arg);
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
         self.scalar_type(), "rrelu_with_noise_out_cuda", [&] {
           _rrelu_with_noise_cuda_train<scalar_t>(
