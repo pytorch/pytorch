@@ -299,6 +299,7 @@ class TestIBVerbsTransport(TransportTestMixin, TestCase):
         first.close()
         second.close()
 
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_cuda_graph_provider_receives_multi_qp_transfer(self) -> None:
         provider = mock.Mock()
         transport = _rdma4py.IBVerbsTransport(
@@ -386,6 +387,7 @@ class TestIBVerbsTransport(TransportTestMixin, TestCase):
         with self.assertRaisesRegex(RuntimeError, "provider failed"):
             provider.transfer("write", 1000, 11, 2000, 13, 64, 1)
 
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_host_path_rejects_cuda_graph_capture(self) -> None:
         transport = _rdma4py.IBVerbsTransport("cuda:0", num_qps=1)
         transport.connect(transport.bind())
