@@ -2229,7 +2229,9 @@ class GuardBuilder(GuardBuilderBase):
         make_guard_fn_args = ", ".join(closure_vars.keys())
         _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: dict[str, Any] = {}
-        globals_for_guard_fn = {"G": self.scope["G"]}
+        # The dict the C++ globals tree is rooted at, so a G['NAME'] in a lambda
+        # guard and in an accessor guard read the same scope on a loaded artifact.
+        globals_for_guard_fn = {"G": self.runtime_global_scope}
         guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
