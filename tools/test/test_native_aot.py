@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import os
 import tempfile
 import textwrap
@@ -10,13 +11,14 @@ import yaml
 from torchgen import native_aot
 from torchgen.dest.register_dispatch_key import RegisterDispatchKey
 from torchgen.gen import (
+    gen_source_files,
     get_grouped_native_functions,
     LineLoader,
     parse_native_yaml_struct,
 )
 from torchgen.model import DispatchKey, NativeFunctionsGroup
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target
+from torchgen.utils import FileManager, Target
 
 
 # A minimal structured group (out declares the kernel), an unstructured op for
@@ -297,6 +299,65 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
     # assertExpectedInline without pulling in torch's expecttest plumbing.
     def assertExpectedInline(self, actual: str, expected: str) -> None:
         self.assertEqual(actual, textwrap.dedent(expected))
+
+
+class TestRegistrationTranslationUnit(unittest.TestCase):
+    """What a declaration adds to RegisterCUDA, and what it must not add without one."""
+
+    TEMPLATES = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "aten/src/ATen/templates",
+    )
+
+    def _register_cuda(self, manifests: dict) -> str:
+        """Every RegisterCUDA shard the fixture generates, concatenated."""
+        parsed = _parse_fixture()
+        grouped = get_grouped_native_functions(parsed.native_functions)
+        with tempfile.TemporaryDirectory() as d:
+            fm = FileManager(install_dir=d, template_dir=self.TEMPLATES, dry_run=False)
+            gen_source_files(
+                native_functions=parsed.native_functions,
+                grouped_native_functions=grouped,
+                structured_native_functions=[
+                    g
+                    for g in grouped
+                    if isinstance(g, NativeFunctionsGroup) and g.structured
+                ],
+                view_groups=[],
+                selector=SelectiveBuilder.get_nop_selector(),
+                static_dispatch_idx=[],
+                backend_indices=parsed.backend_indices,
+                aoti_fm=fm,
+                core_fm=fm,
+                cpu_vec_fm=fm,
+                cpu_fm=fm,
+                device_fms={"cuda": fm},
+                dispatch_keys=[DispatchKey.CUDA],
+                functions_keys={DispatchKey.CUDA},
+                rocm=False,
+                force_schema_registration=False,
+                per_operator_headers=False,
+                skip_dispatcher_op_registration=False,
+                update_aoti_c_shim=False,
+                aoti_backends=set(),
+                extend_aoti_c_shim=False,
+                native_aot_manifests=manifests,
+            )
+            shards = sorted(glob.glob(os.path.join(d, "RegisterCUDA_*.cpp")))
+            if not shards:
+                raise AssertionError(
+                    f"no RegisterCUDA shards in {sorted(os.listdir(d))}"
+                )
+            return "\n".join(open(s).read() for s in shards)
+
+    def test_stubs_header_included_only_where_a_declaration_exists(self) -> None:
+        # A tree declaring nothing builds the registration TU it had pre-native-AOT.
+        m = native_aot.NativeAotManifest(op="embfoo", dispatch_key=DispatchKey.CUDA)
+        self.assertIn(
+            "#include <ATen/NativeAotStubs.h>",
+            self._register_cuda({(DispatchKey.CUDA, "embfoo"): m}),
+        )
+        self.assertNotIn("#include <ATen/NativeAotStubs.h>", self._register_cuda({}))
 
 
 if __name__ == "__main__":
