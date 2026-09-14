@@ -7951,8 +7951,11 @@ class TestMPS(TestCaseMPS):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape, beta, threshold, dtype):
-            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
+        def helper(shape, beta, threshold, dtype, contiguous=True):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            if not contiguous:
+                cpu_x = cpu_x.transpose(0, 1)
+            cpu_x.requires_grad_()
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
@@ -7972,9 +7975,13 @@ class TestMPS(TestCaseMPS):
             [(), (2, 3), (10, 10), (2, 3, 4, 5)],
             [0.5, 1, 2, 3, 4],
             [0.5, 20, 30, 40, 50],
-            [torch.float16, torch.float32]
+            [torch.float16, torch.float32, torch.bfloat16]
         ):
             helper(shape, beta, threshold, dtype)
+
+        # Strided inputs are served by a different kernel than the dense fast path
+        for beta, threshold, dtype in product([0.5, 2], [0.5, 20], [torch.float16, torch.float32, torch.bfloat16]):
+            helper((10, 10), beta, threshold, dtype, contiguous=False)
 
     # Test silu
 

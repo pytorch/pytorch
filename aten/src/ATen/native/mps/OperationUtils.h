@@ -465,9 +465,6 @@ inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(M
   });
 }
 
-// Common math operations
-MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
-
 /**
  * Returns distance from lowest to highest element offset in given tensor.
  */
