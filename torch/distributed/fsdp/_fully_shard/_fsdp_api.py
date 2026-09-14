@@ -197,3 +197,55 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
+
+
+@dataclass(frozen=True)
+class PartialOffloadPolicy(OffloadPolicy):
+    """
+    This offload policy offloads only a fraction of a group's sharded
+    parameters to CPU, leaving the remainder resident on device. Unlike
+    :class:`CPUOffloadPolicy`, which offloads all of a group's sharded
+    parameters, gradients, and optimizer state, this policy offloads only
+    enough whole parameters to meet ``offload_ratio`` of the group's total
+    sharded parameter numel.
+
+    This targets the common case where a model is slightly over the
+    device-memory budget and full offload pays an unnecessary host-device copy
+    tax on every step. Offloading a fraction of the shards closes a small
+    memory gap at a fraction of the copy cost.
+
+    The selection is greedy and deterministic: parameters are offloaded
+    largest-first (by sharded numel, ties broken by group order) until the
+    cumulative offloaded numel would exceed ``offload_ratio`` of the group
+    total. Because every rank holds the same shard shapes for a group, every
+    rank makes the identical selection with no extra communication, preserving
+    FSDP2's invariant that gather and reduce participants agree on layout.
+
+    ``offload_ratio=0.0`` is observably identical to :class:`OffloadPolicy`;
+    ``offload_ratio=1.0`` is observably identical to :class:`CPUOffloadPolicy`.
+
+    Attributes:
+        offload_ratio (float): Target fraction in ``[0.0, 1.0]`` of this
+            group's total sharded parameter numel to place on host. (Default:
+            ``1.0``)
+        pin_memory (bool): Whether to pin sharded parameter and gradient
+            memory for the offloaded shards. See :class:`CPUOffloadPolicy`.
+            (Default: ``True``)
+    """
+
+    offload_ratio: float = 1.0
+    pin_memory: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.offload_ratio, (int, float)) or isinstance(
+            self.offload_ratio, bool
+        ):
+            raise TypeError(
+                "PartialOffloadPolicy.offload_ratio must be a float, got "
+                f"{type(self.offload_ratio).__name__}"
+            )
+        if not (0.0 <= self.offload_ratio <= 1.0):
+            raise ValueError(
+                "PartialOffloadPolicy.offload_ratio must be in [0.0, 1.0], got "
+                f"{self.offload_ratio}"
+            )
