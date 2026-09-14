@@ -8,6 +8,11 @@
 
     stride_am = {{stride("A", 0)}}
     stride_bn = {{stride("B", 1)}}
+    # The lowering supplies v2's scale axes; defaults describe the legacy API.
+    stride_asm = {{stride("A_inverse_scale", SCALE_A_OUTER_DIM | default(0))}}
+    stride_ask = {{stride("A_inverse_scale", 1 - (SCALE_A_OUTER_DIM | default(0)))}}
+    stride_bsn = {{stride("B_inverse_scale", SCALE_B_OUTER_DIM | default(1))}}
+    stride_bsk = {{stride("B_inverse_scale", 1 - (SCALE_B_OUTER_DIM | default(1)))}}
 
     start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
     num_pid_m = tl.cdiv(M, BLOCK_M)
@@ -63,6 +68,8 @@
                 ki,
                 am_blocks,
                 ak_blocks,
+                stride_asm,
+                stride_ask,
                 BLOCK_M,
                 BLOCK_K,
                 MIN_BLOCK_TILE_AM,
@@ -76,6 +83,8 @@
                 M,
                 am_blocks,
                 ak_blocks,
+                stride_asm,
+                stride_ask,
                 BLOCK_M,
                 BLOCK_K,
                 MIN_BLOCK_TILE_AK,
@@ -90,6 +99,8 @@
                 ki,
                 bn_blocks,
                 bk_blocks,
+                stride_bsn,
+                stride_bsk,
                 BLOCK_N,
                 BLOCK_K,
                 MIN_BLOCK_TILE_BN,
@@ -103,6 +114,8 @@
                 N,
                 bn_blocks,
                 bk_blocks,
+                stride_bsn,
+                stride_bsk,
                 BLOCK_N,
                 BLOCK_K,
                 MIN_BLOCK_TILE_BK,
@@ -135,14 +148,16 @@ def blockwise1xTILESIZE_scaling(
     lhs_size,
     lhs_blocks,
     k_blocks,
+    stride_outer,
+    stride_k,
     BLOCK_lhs: tl.constexpr,
     BLOCK_K: tl.constexpr,
     MIN_BLOCK_TILE_K: tl.constexpr,
     TILE_SIZE: tl.constexpr,
 ):
     row_offs_scale = pid * BLOCK_lhs + tl.arange(0, BLOCK_lhs)
-    col_offs_scale = ki * tl.cdiv(BLOCK_K, TILE_SIZE) + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
-    ptrs = scale + row_offs_scale[:, None] * k_blocks + col_offs_scale[None, :]
+    col_offs_scale = (ki * BLOCK_K) // TILE_SIZE + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
+    ptrs = scale + row_offs_scale[:, None] * stride_outer + col_offs_scale[None, :] * stride_k
     mask = (row_offs_scale[:, None] < lhs_size) & (col_offs_scale[None, :] < k_blocks)
     scale_block = tl.load(ptrs, mask=mask, other=1.0)
 
@@ -166,21 +181,23 @@ def blockwise128x128_scaling(
     ki,
     lhs_blocks,
     k_blocks,
+    stride_outer,
+    stride_k,
     BLOCK_lhs: tl.constexpr,
     BLOCK_K: tl.constexpr,
     MIN_BLOCK_TILE_lhs: tl.constexpr,
     MIN_BLOCK_TILE_K: tl.constexpr,
 ):
-    row_offs_scale = pid * tl.cdiv(BLOCK_lhs, 128) + tl.arange(0, (BLOCK_lhs + 128 - 1) // 128)
-    col_offs_scale = ki * tl.cdiv(BLOCK_K, 128) + tl.arange(0, (BLOCK_K + 128 - 1) // 128)
-    ptrs = scale + row_offs_scale[:, None] * k_blocks + col_offs_scale[None, :]
+    row_offs_scale = (pid * BLOCK_lhs) // 128 + tl.arange(0, (BLOCK_lhs + 128 - 1) // 128)
+    col_offs_scale = (ki * BLOCK_K) // 128 + tl.arange(0, (BLOCK_K + 128 - 1) // 128)
+    ptrs = scale + row_offs_scale[:, None] * stride_outer + col_offs_scale[None, :] * stride_k
     mask = (row_offs_scale[:, None] < lhs_blocks) & (col_offs_scale[None, :] < k_blocks)
     scale_block = tl.load(ptrs, mask=mask, other=1.0)
 
-    scale_expanded = scale_block[:, :, None, None]
+    scale_expanded = scale_block[:, None, :, None]
     scale_expanded = tl.broadcast_to(
         scale_expanded,
-        ((BLOCK_lhs + 128 - 1) // 128, (BLOCK_K + 128 - 1) // 128, MIN_BLOCK_TILE_lhs, MIN_BLOCK_TILE_K)
+        ((BLOCK_lhs + 128 - 1) // 128, MIN_BLOCK_TILE_lhs, (BLOCK_K + 128 - 1) // 128, MIN_BLOCK_TILE_K)
     )
     scale_expanded = scale_expanded.reshape(
         ((BLOCK_lhs + 128 - 1) // 128) * MIN_BLOCK_TILE_lhs,

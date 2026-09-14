@@ -22,8 +22,6 @@ from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
-    get_scaling_options,
-    get_tile_size,
     mm_template,
     persistent_mm_template,
     persistent_tdm_mm_template,
@@ -3609,8 +3607,7 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
     ScaledTMAConfigMixin, CUDAConfigHeuristic
 ):
     """
-    Scaled TMA template heuristic for CUDA:
-        main loop scaling variants (BlockWise1x128, BlockWise1x32, BlockWise1x16, BlockWise128x128)
+    Scaled TMA template heuristic for CUDA's 128-element main-loop scale blocks.
     """
 
     def __init__(self) -> None:
@@ -3627,14 +3624,10 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         """
         Generate main loop scaling kernel inputs.
         """
-        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
-        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
-
-        scale_option_a, scale_option_b = get_scaling_options(
-            mat_a, mat_b, scale_a_size, scale_b_size
-        )
-        tile_size_a = get_tile_size(scale_option_a)
-        tile_size_b = get_tile_size(scale_option_b)
+        # Both supported main-loop recipes scale blocks of 128 along K.
+        # Do not infer recipes from shapes: v1 and v2 use different scale axes,
+        # and the lowering already supplies the actual SCALE_RECIPE_A/B.
+        tile_size_a = tile_size_b = 128
 
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(

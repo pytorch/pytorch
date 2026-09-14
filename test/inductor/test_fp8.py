@@ -11,6 +11,7 @@ from torch import Tensor
 from torch._C import FileCheck
 from torch._inductor import config, inductor_prims, ir, utils
 from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
+from torch._inductor.kernel.mm import scaled_mm_v2_choice
 from torch._inductor.lowering import clone as lowering_clone, register_lowering
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
@@ -621,7 +622,64 @@ class TestFP8Types(TestCase):
         self.assertEqual(expected, actual, rtol=5e-2, atol=0.07)
 
 
+class TestScaledMMNativeChoice(TestCase):
+    def test_v2_native_choice_schema(self):
+        a, b, sa, sb, out = (object() for _ in range(5))
+        kernel = mock.Mock(return_value=out)
+        result = scaled_mm_v2_choice(
+            a,
+            b,
+            sa,
+            sb,
+            recipe_a=4,
+            recipe_b=5,
+            out_dtype=torch.float32,
+            use_fast_accum=False,
+            kernel=kernel,
+            out=out,
+        )
+        self.assertIs(result, out)
+        kernel.assert_called_once_with(
+            a,
+            b,
+            [sa],
+            [4],
+            [0],
+            [sb],
+            [5],
+            [0],
+            None,
+            torch.float32,
+            [],
+            False,
+            out=out,
+        )
+
+
 class TestFP8Lowering(TestCase):
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @parametrize("contraction_dim", [(0, 0), (1, 1), (0, 1)])
+    def test_scaled_mm_v2_invalid_contraction_dim(self, device, contraction_dim):
+        def fn(a, b, scale):
+            return torch.ops.aten._scaled_mm_v2.default(
+                a,
+                b,
+                [scale],
+                [0],
+                [0],
+                [scale],
+                [0],
+                [0],
+                None,
+                torch.bfloat16,
+                contraction_dim=contraction_dim,
+            )
+
+        a = torch.empty(32, 32, device=device, dtype=torch.float8_e4m3fn)
+        scale = torch.ones((), device=device)
+        with self.assertRaisesRegex(RuntimeError, "only supports contraction_dim"):
+            torch.compile(fn, fullgraph=True)(a, a.t(), scale)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
     @onlyOn(["cuda", "xpu"])
@@ -1138,6 +1196,82 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not has_triton_tma_device(), "Requires device-side TMA")
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("outer_a,outer_b", [(1, 1), (1, 128), (128, 1)])
+    @parametrize("block_k", [64, 256])
+    def test_deepseek_tma_scale_layouts(self, device, api, outer_a, outer_b, block_k):
+        m, n = (16, 16) if block_k == 64 else (160, 144)
+        k = 512 if api == "v1" else 384
+        a = (torch.randn(m, k, device=device) / 8).to(torch.float8_e4m3fn)
+        b_rows = (torch.randn(n, k, device=device) / 8).to(torch.float8_e4m3fn)
+        sa = torch.randint(
+            1, 5, (ceil_div(m, outer_a), ceil_div(k, 128)), device=device
+        ).float()
+        sb = torch.randint(
+            1, 5, (ceil_div(n, outer_b), ceil_div(k, 128)), device=device
+        ).float()
+        reference = (
+            a.double()
+            * sa.double()
+            .repeat_interleave(outer_a, 0)[:m]
+            .repeat_interleave(128, 1)[:, :k]
+        ) @ (
+            b_rows.double()
+            * sb.double()
+            .repeat_interleave(outer_b, 0)[:n]
+            .repeat_interleave(128, 1)[:, :k]
+        ).t()
+
+        def scale_layout(scale, outer, rhs):
+            if api == "v2":
+                if outer == 128:
+                    # Unused padded scale slots must never enter the product.
+                    return torch.nn.functional.pad(
+                        scale, (0, (-scale.size(1)) % 4), value=float("nan")
+                    ).t()
+                return scale.t().contiguous().t()
+            scale = scale.t().contiguous().t() if outer == 1 else scale
+            return scale.t() if rhs else scale
+
+        sa = scale_layout(sa, outer_a, False)
+        sb = scale_layout(sb, outer_b, True)
+        recipe_a = (
+            ScalingType.BlockWise1x128 if outer_a == 1 else ScalingType.BlockWise128x128
+        )
+        recipe_b = (
+            ScalingType.BlockWise1x128 if outer_b == 1 else ScalingType.BlockWise128x128
+        )
+
+        def fn(a, b, sa, sb):
+            if api == "v1":
+                return torch._scaled_mm(a, b, sa, sb, out_dtype=torch.float32)
+            return scaled_mm(
+                a, b, sa, recipe_a, sb, recipe_b, output_dtype=torch.float32
+            )
+
+        block_m, block_n = (16, 16) if block_k == 64 else (64, 32)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
+                "test_configs.autotune_choice_desc_regex": f"BLOCK_K={block_k}, BLOCK_M={block_m}, BLOCK_N={block_n}",
+            }
+        ):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual, code = run_and_get_code(compiled, a, b_rows.t(), sa, sb)
+            if api == "v2":
+                with self.assertRaisesRegex(RuntimeError, "expect_true|sizevars"):
+                    compiled(a, b_rows.t(), sa[:-1], sb)
+        self.assertTrue(torch.isfinite(actual).all())
+        self.assertEqual(actual.double(), reference, atol=1e-5, rtol=1e-4)
+        self.assertIn("blockwise1xTILESIZE_scaling", code[0])
+        self.assertNotIn("extern_kernels._scaled_mm", code[0])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
