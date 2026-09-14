@@ -141,10 +141,6 @@ class FSDPState(_State):
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         self._lazy_init()
-        if self._state_ctx.gradient_reduction_pending:
-            raise RuntimeError(
-                "The previous gradient reduction must be waited on before forward"
-            )
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
         logger.debug("FSDP::root_pre_forward")
@@ -297,6 +293,10 @@ class FSDPState(_State):
     def _pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        if self._state_ctx.gradient_reduction_pending:
+            raise RuntimeError(
+                "The previous gradient reduction must be waited on before forward"
+            )
         # When composing with module-hook-based activation checkpointing, the
         # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -428,8 +428,12 @@ class FSDPState(_State):
                 for fsdp_param_group in reversed(state._fsdp_param_groups):
                     if finalize_gradient_accumulation:
                         if fsdp_param_group._deferred_gradient_reduction:
+                            # set_requires_gradient_sync(False) deferred this
+                            # parameter group's reduction.
                             fsdp_param_group.post_backward()
                         else:
+                            # This group already reduced or did not participate
+                            # in backward.
                             fsdp_param_group.reshard()
                     elif (
                         fsdp_param_group._training_state != TrainingState.POST_BACKWARD
@@ -459,16 +463,17 @@ class FSDPState(_State):
         if self._device.type == "cpu":
             return
         current_stream = self._device_handle.current_stream()
-        fork_event = self._device_handle.Event()
-        fork_event.record(current_stream)
-        # Fork from the current stream so communication joins an active capture.
+        # Connect each communication stream to the current CUDA graph capture,
+        # then join it back to the current stream.
+        current_stream_event = self._device_handle.Event()
+        current_stream_event.record(current_stream)
         for stream in (
             self._comm_ctx.all_gather_copy_in_stream,
             self._comm_ctx.all_gather_stream,
             self._comm_ctx.reduce_scatter_stream,
             self._comm_ctx.all_reduce_stream,
         ):
-            stream.wait_event(fork_event)
+            stream.wait_event(current_stream_event)
             join_event = self._device_handle.Event()
             join_event.record(stream)
             current_stream.wait_event(join_event)
@@ -608,9 +613,12 @@ def _register_group_forward_hooks(
     @_dynamo_disable
     @functools.wraps(pre_hook)
     def wrapped_pre_hook(*args: Any, **kwargs: Any):
-        if len(modules_to_run) == 0:
+        initialize_modules_to_run = len(modules_to_run) == 0
+        # Run the pre-hook before entering the group so a failure can be retried.
+        result = pre_hook(*args, **kwargs)
+        if initialize_modules_to_run:
             modules_to_run.update(modules_set)
-        return pre_hook(*args, **kwargs)
+        return result
 
     def get_wrapped_post_hook(module: nn.Module):
         @_dynamo_disable

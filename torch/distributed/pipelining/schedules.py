@@ -1489,6 +1489,8 @@ def _add_reduce_grad(
     """
     REDUCE_GRAD refers to joint across minibatches grad reduction.
     reduce_grad frees memory and we want to schedule it just after the last "backward"-like stage.
+    When deferred, waits run before the next reduction or at schedule end, so
+    only one reduction is pending.
     """
     actions_with_reduce_grad: list[_Action | None] = []
     cnt: dict[int, int] = defaultdict(int)
@@ -2522,6 +2524,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
     Can be instantiated directly by creating _PipelineScheduleRuntime and calling load_csv, or can be
     subclassed and the subclass can be responsible for creating a schedule IR.
+    Deferred gradient waits require FSDP and matching WAIT_REDUCE_GRAD actions in compute-comms schedules.
     """
 
     def __init__(self, *args, **kwargs):
@@ -2541,10 +2544,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
         self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
         self.unsharded_stages = set()
-        # Stages kept unsharded until the next UNSHARD consumes the marker.
-        self._retained_stages: set[int] = set()
-        # Stages resharded by REDUCE_GRAD until RESHARD or the next step.
-        self._resharded_by_reduce: set[int] = set()
+        # A deferred FSDP stage keeps its unsharded parameters and accumulated
+        # gradients across schedule calls. The next UNSHARD consumes the
+        # deferred marker. The RESHARD after finalization consumes the finalized
+        # marker.
+        self._deferred_stages: set[int] = set()
+        self._finalized_stages: set[int] = set()
 
     def register_custom_function(
         self,
@@ -2572,9 +2577,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             WAIT_REDUCE_GRAD,
         ):
             raise ValueError(
-                f"Invalid computation type {computation_type}. Only FORWARD, FULL_BACKWARD, \
-                BACKWARD_INPUT, BACKWARD_WEIGHT, OVERLAP_F_B, UNSHARD, RESHARD, REDUCE_GRAD, \
-                and WAIT_REDUCE_GRAD are supported."
+                f"Invalid computation type {computation_type}. Only FORWARD, "
+                "FULL_BACKWARD, BACKWARD_INPUT, BACKWARD_WEIGHT, OVERLAP_F_B, "
+                "UNSHARD, RESHARD, REDUCE_GRAD, and WAIT_REDUCE_GRAD are supported."
             )
 
         # Check if computation_type is already registered
@@ -2610,6 +2615,31 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         )
                     self.pipeline_order_with_comms[rank].append(action)
             # TODO what level of validation should we offer for compute+comms schedule?
+            if self._defer_reduce_grad_wait:
+                for rank, action_list in self.pipeline_order_with_comms.items():
+                    pending_reduce_stages: set[int] = set()
+                    for action in action_list:
+                        for sub_action in action.sub_actions or (action,):
+                            stage_idx = sub_action.stage_index
+                            if sub_action.computation_type == REDUCE_GRAD:
+                                if stage_idx in pending_reduce_stages:
+                                    raise ValueError(
+                                        f"Stage {stage_idx} at rank {rank} has two "
+                                        "REDUCE_GRAD actions without a wait"
+                                    )
+                                pending_reduce_stages.add(stage_idx)
+                            elif sub_action.computation_type == WAIT_REDUCE_GRAD:
+                                if stage_idx not in pending_reduce_stages:
+                                    raise ValueError(
+                                        f"Stage {stage_idx} at rank {rank} has "
+                                        "WAIT_REDUCE_GRAD without a pending reduction"
+                                    )
+                                pending_reduce_stages.remove(stage_idx)
+                    if pending_reduce_stages:
+                        raise ValueError(
+                            f"Stages {sorted(pending_reduce_stages)} at rank {rank} "
+                            "have REDUCE_GRAD without WAIT_REDUCE_GRAD"
+                        )
         elif format == "compute_only":
             # Validate that the schedule does not have comms already added to it
             for rank, action_list in actions.items():
@@ -2801,8 +2831,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
             elif comp_type == UNSHARD:
                 if stage_uses_fsdp:
-                    if stage_idx in self._retained_stages:
-                        self._retained_stages.remove(stage_idx)
+                    if stage_idx in self._deferred_stages:
+                        self._deferred_stages.remove(stage_idx)
                         return
                     if stage_idx in self.unsharded_stages:
                         raise AssertionError(f"Already unsharded {stage_idx=}")
@@ -2817,14 +2847,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         self.unshard_ops[stage_idx].append(handle)
             elif comp_type == RESHARD:
                 if stage_uses_fsdp:
-                    if stage_idx in self._resharded_by_reduce:
-                        self._resharded_by_reduce.remove(stage_idx)
+                    if stage_idx in self._finalized_stages:
+                        self._finalized_stages.remove(stage_idx)
                         return
                     if (
                         not self._finalize_gradients
                         and self.backward_counter[stage_idx] == self._n_microbatches
                     ):
-                        self._retained_stages.add(stage_idx)
+                        self._deferred_stages.add(stage_idx)
                         return
                     if stage_idx not in self.unsharded_stages:
                         raise AssertionError(
@@ -2930,17 +2960,17 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
             elif comp_type == REDUCE_GRAD:
                 if not self._finalize_gradients and stage_uses_fsdp:
-                    self._retained_stages.add(stage_idx)
+                    self._deferred_stages.add(stage_idx)
                     return
-                grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                 if self._defer_reduce_grad_wait and stage_uses_fsdp:
                     stage.start_gradient_reduction()
                 else:
+                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                     stage.perform_reduce_grad(grad_scale_factor)
                 if stage_uses_fsdp:
                     self.unsharded_stages.discard(stage_idx)
-                    self._retained_stages.discard(stage_idx)
-                    self._resharded_by_reduce.add(stage_idx)
+                    self._deferred_stages.discard(stage_idx)
+                    self._finalized_stages.add(stage_idx)
             elif comp_type == WAIT_REDUCE_GRAD:
                 if not self._finalize_gradients and stage_uses_fsdp:
                     return
@@ -2952,7 +2982,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
         # count either full_backward or backward_weight together, to determine when to sync DP grads
         self.backward_counter.clear()
-        self._resharded_by_reduce.clear()
+        self._finalized_stages.clear()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
             logger.debug(
                 "_PipelineScheduleRuntime running time_step %d, action %s",
