@@ -566,12 +566,18 @@ class MultiGpuMinFilterPlugin:
         if deselected:
             config.hook.pytest_deselected(items=deselected)
             items[:] = selected
-        if config.getoption("verbose") >= 0:
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        selected = len(session.items)
+        if session.config.getoption("verbose") >= 0:
             print(
-                f"multigpu-min-gpus={self.min_gpus}: kept {len(selected)}, "
-                f"deselected {len(deselected)}",
+                f"multigpu-min-gpus={self.min_gpus}: final selected {selected}",
                 flush=True,
             )
+        count_file = os.getenv("PYTORCH_MULTIGPU_SELECTION_COUNT_FILE")
+        if count_file:
+            with open(count_file, "a") as fp:
+                fp.write(f"{selected}\n")
 
 
 class StepcurrentPlugin:

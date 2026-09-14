@@ -152,11 +152,6 @@ ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
 HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
 
-# GPUs on the standard multi-GPU distributed CI runner. A larger-runner config
-# selects the tests that need strictly more via `--multigpu-min-gpus` (resolved
-# at collection in test/conftest.py), e.g. `--multigpu-min-gpus 3`.
-STANDARD_DISTRIBUTED_GPUS = 2
-
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -269,6 +264,8 @@ def require_n_gpus_for_nccl_backend(n, backend):
             else:
                 return func(*args, **kwargs)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = n
         return wrapper
 
     return decorator
@@ -386,6 +383,8 @@ def nccl_skip_if_lt_x_gpu(backend, x):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = x
         return wrapper
 
     return decorator

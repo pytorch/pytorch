@@ -1843,21 +1843,21 @@ test_distributed_4gpu() {
   # test/conftest.py): --distributed-tests discovers every distributed test file
   # dynamically, --multigpu-filter multigpu keeps the process-spawning tests, and
   # --multigpu-min-gpus 3 keeps only those needing more than the standard 2-GPU
-  # runner (STANDARD_DISTRIBUTED_GPUS), so there is no per-test list to maintain.
+  # runner, so there is no per-test list to maintain.
   # Python suite only; the multi-GPU C++/mpiexec tests already run on the
   # standard `distributed` job.
   echo "Testing distributed python tests that need more than 2 GPUs"
-  # STANDARD_DISTRIBUTED_GPUS (2) + 1; avoid importing torch here — source tree
-  # shadows the installed wheel and breaks before run_test.py starts.
-  local min_gpus=3 log total_kept rc
-  log=$(mktemp)
+  local count_file min_gpus=3 total_kept rc
+  count_file=$(mktemp)
+  export PYTORCH_MULTIGPU_SELECTION_COUNT_FILE="$count_file"
   set +e
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests --multigpu-filter multigpu --multigpu-min-gpus "$min_gpus" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose 2>&1 | tee "$log"
-  rc=${PIPESTATUS[0]}
+  time python test/run_test.py --distributed-tests --multigpu-filter multigpu --multigpu-min-gpus "$min_gpus" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  rc=$?
   set -e
-  total_kept=$(grep 'multigpu-min-gpus=' "$log" | sed -n 's/.*kept \([0-9]*\).*/\1/p' | awk '{s+=$1} END {print s+0}')
-  rm -f "$log"
+  total_kept=$(awk '{s+=$1} END {print s+0}' "$count_file")
+  rm -f "$count_file"
+  unset PYTORCH_MULTIGPU_SELECTION_COUNT_FILE
   if [[ "$total_kept" -eq 0 ]]; then
     echo "::error::distributed_4gpu shard selected 0 tests; min-gpus filter may have regressed"
     exit 1

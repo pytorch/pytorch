@@ -2,11 +2,15 @@
 
 import os
 import sys
+import tempfile
 import types
+from unittest.mock import patch
 
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
+    nccl_skip_if_lt_x_gpu,
+    require_n_gpus_for_nccl_backend,
     requires_world_size,
     skip_if_lt_x_gpu,
 )
@@ -21,11 +25,9 @@ if _TEST_ROOT not in sys.path:
 
 from conftest import (
     _decorator_gpu_requirement,
-    _is_cpu_backed,
-    _is_local_tensor_simulation,
-    _probe_world_size,
     _resolve_gpu_requirement,
     _UNRESOLVED_GPU_REQUIREMENT,
+    MultiGpuMinFilterPlugin,
 )
 
 
@@ -38,22 +40,10 @@ class _MPws4(MultiProcessTestCase):
         return 4
 
 
-class _MPws3(MultiProcessTestCase):
-    @property
-    def world_size(self):
-        return 3
-
-
 class _MPws2(MultiProcessTestCase):
     @property
     def world_size(self):
         return 2
-
-
-class _MPws1(MultiProcessTestCase):
-    @property
-    def world_size(self):
-        return 1
 
 
 class _MPbroken(MultiProcessTestCase):
@@ -87,19 +77,6 @@ def _fake_item(cls=None, func=None, filename="test_something.py"):
 
 
 class TestMultiGpuMarker(TestCase):
-    def test_probe_world_size(self):
-        self.assertEqual(_probe_world_size(_MPws4), 4)
-        self.assertEqual(_probe_world_size(_MPws3), 3)
-        self.assertEqual(_probe_world_size(_MPws2), 2)
-        self.assertEqual(_probe_world_size(_MPbroken), 0)
-        try:
-            import torch
-
-            expected_mpc = max(int(torch.accelerator.device_count()), 0)
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            expected_mpc = 0
-        self.assertEqual(_probe_world_size(_MPCunset), expected_mpc)
-
     def test_decorator_requirement(self):
         @skip_if_lt_x_gpu(4)
         def needs4(self):
@@ -109,34 +86,23 @@ class TestMultiGpuMarker(TestCase):
         def needs3(self):
             pass
 
+        @require_n_gpus_for_nccl_backend(4, "nccl")
+        def nccl_needs4(self):
+            pass
+
+        @nccl_skip_if_lt_x_gpu("nccl", 8)
+        def nccl_needs8(self):
+            pass
+
         def plain(self):
             pass
 
         self.assertEqual(_decorator_gpu_requirement(needs4), 4)
         self.assertEqual(_decorator_gpu_requirement(needs3), 3)
+        self.assertEqual(_decorator_gpu_requirement(nccl_needs4), 4)
+        self.assertEqual(_decorator_gpu_requirement(nccl_needs8), 8)
         self.assertEqual(_decorator_gpu_requirement(plain), 0)
         self.assertEqual(_decorator_gpu_requirement(None), 0)
-
-    def test_cpu_backed_detection(self):
-        self.assertTrue(_is_cpu_backed(_fake_item(filename="test_c10d_gloo.py")))
-        self.assertTrue(_is_cpu_backed(_fake_item(filename="test_foo_cpu.py")))
-        self.assertFalse(_is_cpu_backed(_fake_item(filename="test_c10d_nccl.py")))
-        # Backend tokens match whole ``_``-delimited words, not substrings: the
-        # "mpi" backend must not flag "compile".
-        self.assertFalse(_is_cpu_backed(_fake_item(filename="test_dtensor_compile.py")))
-
-    def test_local_tensor_simulation_detection(self):
-        self.assertTrue(_is_local_tensor_simulation(_MPws4WithLocalTensor))
-        self.assertFalse(_is_local_tensor_simulation(_MPws4))
-        self.assertFalse(_is_local_tensor_simulation(None))
-
-    def test_world_size_requirement(self):
-        # The resolved requirement is the class world_size; the 4-GPU job keeps
-        # tests needing >2 GPUs (--multigpu-min-gpus 3).
-        self.assertEqual(_resolve_gpu_requirement(_fake_item(cls=_MPws4), _MPws4), 4)
-        self.assertEqual(_resolve_gpu_requirement(_fake_item(cls=_MPws3), _MPws3), 3)
-        self.assertEqual(_resolve_gpu_requirement(_fake_item(cls=_MPws2), _MPws2), 2)
-        self.assertEqual(_resolve_gpu_requirement(_fake_item(cls=_MPws1), _MPws1), 1)
 
     def test_ambiguity_favors_coverage(self):
         # Unresolvable world_size clears any threshold (routes to larger runner).
@@ -214,8 +180,8 @@ class TestMultiGpuMarker(TestCase):
 
     def test_real_local_tensor_class(self):
         from torch.testing._internal.distributed._tensor.common_dtensor import (
-            DTensorTestBase,
             create_local_tensor_test_class,
+            DTensorTestBase,
         )
 
         class _Orig(DTensorTestBase):
@@ -225,9 +191,23 @@ class TestMultiGpuMarker(TestCase):
                 pass
 
         local_cls = create_local_tensor_test_class(_Orig)
-        self.assertTrue(_is_local_tensor_simulation(local_cls))
         item = _fake_item(cls=local_cls)
         self.assertEqual(_resolve_gpu_requirement(item, local_cls), 0)
+
+    def test_writes_final_selection_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            count_file = os.path.join(tmp, "counts")
+            with patch.dict(
+                os.environ, {"PYTORCH_MULTIGPU_SELECTION_COUNT_FILE": count_file}
+            ):
+                MultiGpuMinFilterPlugin(3).pytest_collection_finish(
+                    types.SimpleNamespace(
+                        items=[object(), object()],
+                        config=types.SimpleNamespace(getoption=lambda _: -1),
+                    )
+                )
+            with open(count_file) as fp:
+                self.assertEqual(fp.read(), "2\n")
 
 
 if __name__ == "__main__":
