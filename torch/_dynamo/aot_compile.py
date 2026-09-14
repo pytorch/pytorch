@@ -1262,6 +1262,8 @@ def _resolve_guard_scope(
     # attribute keeps winning the lookup), but object.__setattr__ can; refusing
     # here also keeps get_traced_fn's Module branch, whose hook reads can raise
     # AttributeError on an uninitialized module, off this path entirely.
+    from torch._dynamo.eval_frame import _static_getattr, innermost_fn
+
     forward = model.forward
     # Describe forward AS GIVEN, not what the unwrap below reached, in a bounded
     # way that avoids dumping the entire module repr (functools.partial embeds
@@ -1272,42 +1274,60 @@ def _resolve_guard_scope(
         f"{type(model).__name__}.forward ({forward_type}"
         f"{f' named {forward_qualname}' if forward_qualname else ''})"
     )
-    if not isinstance(forward, torch.nn.Module):
-        from torch._dynamo.eval_frame import innermost_fn
-
-        # innermost_fn raises AssertionError on a non-callable
-        # _torchdynamo_orig_callable, and the __globals__ read is inside the
-        # try because get_traced_fn's __self__ branch returns __func__ unchecked.
-        try:
-            # torch.compile(mod.forward) or torch._dynamo.disable(mod.forward)
-            # bound back on the instance is a functools.wraps'd wrapper Dynamo
-            # minted, in eval_frame or (non-recursive disable) external_utils;
-            # innermost_fn follows the chain those set and stops at a wrapper
-            # Dynamo did not mint. When the compile wrapped its target in
-            # wrap_inline (config.wrap_top_frame, or a forward defined under
-            # torch/) that chain ends on external_utils' inner, which only
-            # calls the forward it wraps; the module capture traces that
-            # forward directly, so the scope it recorded is that forward's.
-            # external_utils' non-wraps'd wrappers (wrap_dunder_call_ctx_manager's
-            # inner, bound by error_on_graph_break, patch_dynamo_config and
-            # disable_nested_graph_breaks) carry no __wrapped__ to follow. The
-            # test is that one module's identity, not "defined under
-            # torch._dynamo": functools.wraps copies __module__, so inner reports
-            # the forward's; and the wraps'd wrappers of torch._dynamo.decorators
-            # (nonstrict_trace, leaf_function) are applied by the user BEFORE the
-            # capture, which then traces them as its root frame and records
-            # decorators' dict (reaching the user's globals by __import_* alias),
-            # so a load that hopped through them would disagree with it.
-            resolved: Any = innermost_fn(forward)
-            while getattr(resolved, "__globals__", None) is vars(external_utils):
-                if not hasattr(resolved, "__wrapped__"):
-                    return None, (
-                        f"{described} is a Dynamo wrapper without a resolvable "
-                        "target, a torch._dynamo.external_utils function carrying "
-                        "no __wrapped__; bind the forward it wraps as "
-                        "model.forward instead"
-                    )
-                resolved = resolved.__wrapped__
+    if isinstance(forward, torch.nn.Module):
+        return None, (
+            f"{described} is an nn.Module, which get_traced_fn would rewrite to "
+            "that module's forward, rooting the guards in its defining namespace; "
+            "bind a plain function or bound method as model.forward instead"
+        )
+    # innermost_fn raises AssertionError on a non-callable
+    # _torchdynamo_orig_callable, and the __globals__ read is inside the try
+    # because get_traced_fn's __self__ branch returns __func__ unchecked.
+    try:
+        # torch.compile(mod.forward) or torch._dynamo.disable(mod.forward)
+        # bound back on the instance is a functools.wraps'd wrapper Dynamo
+        # minted, in eval_frame or (non-recursive disable) external_utils;
+        # innermost_fn follows the chain those set and stops at a wrapper
+        # Dynamo did not mint. The branches of _TorchDynamoContext.__call__
+        # that wrap their target (config.wrap_top_frame and trace_rules.check
+        # among them) end that chain on external_utils.wrap_inline's inner, a
+        # wraps'd function that only forwards to the callable it wraps -- the
+        # one the module capture traced -- so a function that OWNS
+        # external_utils' dict as its __globals__ is hopped to its __wrapped__,
+        # one hop per stacked compile. external_utils' non-wraps'd wrappers
+        # (wrap_dunder_call_ctx_manager's inner, bound by error_on_graph_break
+        # and its siblings) carry no __wrapped__ to follow. The predicate is
+        # that module's identity, not "defined under torch._dynamo":
+        # functools.wraps copies __module__, so inner reports the forward's;
+        # and torch._dynamo.decorators' wraps'd wrappers (nonstrict_trace,
+        # leaf_function) are what the capture traces as its root frame,
+        # recording decorators' dict, so hopping through them would disagree
+        # with it. _static_getattr reads only what the object owns, never a
+        # user __getattr__: a bound method proxies __globals__ to __func__ but
+        # owns none, so a method the user decorated with
+        # torch.compiler.wrap_numpy (external_utils' other wraps'd wrapper) is
+        # not hopped and resolves to wrap, the root frame the capture traced.
+        resolved: Any = innermost_fn(forward)
+        while _static_getattr(resolved, "__globals__") is vars(external_utils):
+            wrapped = _static_getattr(resolved, "__wrapped__")
+            if wrapped is None:
+                return None, (
+                    f"{described} is a Dynamo wrapper without a resolvable "
+                    "target, a torch._dynamo.external_utils function carrying "
+                    "no __wrapped__; bind the forward it wraps as "
+                    "model.forward instead"
+                )
+            resolved = wrapped
+        # torch.compile(mod).forward and torch._dynamo.disable(mod).forward
+        # wrap the module's DISPATCH, not its forward: the module itself, which
+        # OptimizedModule._initialize hands wrap_inline under
+        # config.wrap_top_frame or a skip rule, or else its bound
+        # nn.Module.__call__, which get_traced_fn resolves to
+        # Module._wrapped_call_impl in nn.Module's namespace -- the dict the
+        # header refuses. The capture traced the forward, so refuse both.
+        if isinstance(resolved, torch.nn.Module):
+            reached = "an nn.Module"
+        else:
             try:
                 traced_fn = convert_frame.get_traced_fn(resolved)[0]
             except RuntimeError:
@@ -1323,14 +1343,22 @@ def _resolve_guard_scope(
                     "resolve to a Python function; bind a plain function or "
                     "bound method as model.forward instead"
                 )
-            return traced_fn.__globals__, None
-        except (RuntimeError, AttributeError, AssertionError):
-            pass
-    return None, (
-        f"get_traced_fn cannot resolve {described} to a Python function; make "
-        "model.forward a plain function or bound method so its own globals are "
-        "used instead"
-    )
+            if traced_fn.__globals__ is not vars(torch.nn.modules.module):
+                return traced_fn.__globals__, None
+            reached = f"the bound {traced_fn.__qualname__}"
+        via = "is" if resolved is forward else "resolves through a Dynamo wrapper to"
+        return None, (
+            f"{described} {via} {reached}, the module's dispatch rather than its "
+            "forward, whose globals are torch.nn.modules.module's namespace; bind "
+            "that module's forward, or a wrapper over the forward rather than over "
+            "the module, as model.forward instead"
+        )
+    except (RuntimeError, AttributeError, AssertionError):
+        return None, (
+            f"get_traced_fn cannot resolve {described} to a Python function; "
+            "make model.forward a plain function or bound method so its own "
+            "globals are used instead"
+        )
 
 
 def _unwrap_optimized_module(model: torch.nn.Module) -> torch.nn.Module:
@@ -1751,10 +1779,6 @@ class AOTCompiledModel:
         )
         missing_global: AOTCompiledFunction | None = None
         withheld = False
-        # Whether an entry line below quotes a rejection: the re-check is a third
-        # evaluation, and where it raises or accepts instead, the qualifier on
-        # post-throw rejections would describe a line the report never printed.
-        rejected = False
         for i, result in enumerate(self.compiled_results):
             if not result._guard_check_enabled:
                 # Nobody asked about this result's guards, so quoting them would
@@ -1800,7 +1824,6 @@ class AOTCompiledModel:
                     "tree>"
                 )
                 continue
-            rejected = True
             if not reason.verbose_code_parts:
                 # A failing accessor can report no parts at all (a set index past
                 # the end of a shorter set answers GuardDebugInfo(false, 0)), so
@@ -1851,25 +1874,28 @@ class AOTCompiledModel:
                 "belong to the process that compiles the artifacts, which need "
                 "not be the one that loaded them."
             )
-        if raised and not withheld and not answered_first and (rejected or not covered):
-            # Not with an opted-out entry reported, whose withheld line has
-            # already said what happened; not for the empty artifact above, which
-            # has no raise to describe; and not where dispatch rejected but the
-            # re-check quoted no rejection, since there is no line to qualify.
-            if rejected:
-                # The ModelInput line above stands on post-throw rejections only.
-                tail = (
-                    "every rejection above followed a raise from the same tree, "
-                    "so it can be about the relational guard state a C++ throw "
-                    "leaves stale rather than about this call."
-                )
-            else:
-                # No tree whose guards were asked about ever got as far as
-                # rejecting the call, so adding a ModelInput cannot help.
-                tail = (
-                    "the reasons above are those raises, not guards this call failed."
-                )
-            lines.append(f"Every guard tree raised while checking this call; {tail}")
+        if covered and not answered_first:
+            # Every rejection dispatch got out of an enabled tree followed a throw
+            # from the same tree -- the answer the veto above declines to act on
+            # -- so the ModelInput line stands on those alone. Keyed on what
+            # dispatch recorded, not on the entry lines: the re-check is a third
+            # evaluation and may have printed a raise or an accept instead, and a
+            # withheld line says only why the opt-out was withheld.
+            lines.append(
+                "The ModelInput advice above rests only on rejections dispatch "
+                "took after the same tree had raised, so they can be about the "
+                "relational guard state a C++ throw leaves stale rather than "
+                "about this call."
+            )
+        elif raised and not withheld and not covered:
+            # No tree whose guards were asked about ever got as far as rejecting
+            # the call, so adding a ModelInput cannot help. Not with an opted-out
+            # entry reported, whose withheld line has already said what happened,
+            # and not for the empty artifact above, which has no raise to describe.
+            lines.append(
+                "Every guard tree raised while checking this call; the reasons "
+                "above are those raises, not guards this call failed."
+            )
         return "\n".join(lines)
 
     def serialize(self) -> bytes:
@@ -1914,12 +1940,14 @@ class AOTCompiledModel:
         resolve in a process that never traced.
 
         There is no live scope only when ``model.forward`` does not resolve to a
-        Python function: ``get_traced_fn`` cannot resolve it, or it is a Dynamo
-        wrapper (a ``torch._dynamo.external_utils`` function) with no wrapped
-        forward to follow to, or one that itself does not resolve; guards then
-        resolve against the scope rebuilt from the artifact, where they check
-        nothing useful, and a guard rooted at any global but those aliases and
-        that key warns to say so, naming the cause.
+        Python function of its own: ``get_traced_fn`` cannot resolve it, or it is
+        an ``nn.Module``, or a Dynamo wrapper (a ``torch._dynamo.external_utils``
+        function) with no wrapped forward to follow to, or one that resolves to
+        the module's dispatch (``torch.compile(mod).forward``) or to something
+        that itself does not resolve; guards then resolve against the scope
+        rebuilt from the artifact, where they check nothing useful, and a guard
+        rooted at any global but those aliases and that key warns to say so,
+        naming the cause.
 
         ``guard_globals``, when supplied, is that scope instead of anything
         resolved from ``model.forward``, so a caller who wants neither the live
@@ -1977,13 +2005,13 @@ class AOTCompiledModel:
             result._has_global_guards for result in compiled_results
         ):
             log.warning(
-                "%s; no live guard scope could be resolved, so global guards "
-                "on this artifact resolve against "
-                "the scope rebuilt from the serialized bytecode instead, "
-                "where they check nothing useful: one on a global the graph "
-                "lifted is compared against the value serialized with it and "
-                "cannot fail, and one on a global that scope does not carry "
-                "cannot be satisfied, so the call will report no match",
+                "no live guard scope could be resolved from model.forward, so "
+                "global guards on this artifact resolve against the scope "
+                "rebuilt from the serialized bytecode instead, where they check "
+                "nothing useful: one on a global the graph lifted is compared "
+                "against the value serialized with it and cannot fail, and one "
+                "on a global that scope does not carry cannot be satisfied, so "
+                "the call will report no match. %s.",
                 forward_not_resolved_reason,
             )
         return cls(model, compiled_results)
