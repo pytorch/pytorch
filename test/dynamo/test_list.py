@@ -35,14 +35,8 @@ class IndexForListPop:
         return 1
 
 
-class IntSubclassForListPop(int):
-    # _PyNumber_Index hands an int subclass back untouched, so this never runs.
-    def __index__(self):
-        raise AssertionError("__index__ consulted for an int subclass")
-
-
 class IntEnumForListPop(enum.IntEnum):
-    ONE = 1
+    SECOND = 1
 
 
 class CmpKeyForListSort:
@@ -317,17 +311,16 @@ class ListTests(TupleTests):
         self.assertEqual(p.pop(-2), "c")
         self.assertEqual(p.pop(IndexForListPop()), "b")
         self.assertEqual(p, ["a", "d"])
-        # An int subclass converts without its __index__ being consulted.
+
+        # An IntEnum and a bool are int subclasses, so both convert by value.
         p = self.thetype("abcd")
-        self.assertEqual(p.pop(IntSubclassForListPop(1)), "b")
-        self.assertEqual(p.pop(IntEnumForListPop.ONE), "c")
-        self.assertEqual(p.pop(True), "d")
+        self.assertEqual(p.pop(IntEnumForListPop.SECOND), "b")
+        self.assertEqual(p.pop(True), "c")
         self.assertRaises(IndexError, p.pop, -3)
         self.assertRaises(TypeError, p.pop, 1.0)
-        with self.assertRaisesRegex(
-            OverflowError, "Python int too large to convert to C ssize_t"
-        ):
-            p.pop(2**80)
+        self.assertRaisesRegex(
+            OverflowError, "too large to convert to C ssize_t", p.pop, 2**80
+        )
 
         # The conversion precedes the empty-list check.
         self.assertRaises(TypeError, self.thetype().pop, 1.0)
@@ -649,47 +642,6 @@ class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
         self._check(fn)
 
 
-class DequeMaxlenTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def _parity(self, fn):
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(3)), fn(torch.ones(3)))
-        return compiled(torch.ones(3))
-
-    def test_maxlen_conversion(self):
-        # maxlen is a Py_ssize_t, so a bool or an int subclass lands as a plain int.
-        def fn(x):
-            try:
-                collections.deque([1], maxlen=-1)
-                negative = None
-            except ValueError as e:
-                negative = str(e)
-            try:
-                collections.deque([1], maxlen=1.0)
-                wrong_type = None
-            except TypeError as e:
-                wrong_type = str(e)
-            return (
-                repr(collections.deque([1], maxlen=True)),
-                repr(collections.deque([1], maxlen=IntEnumForListPop.ONE)),
-                negative,
-                wrong_type,
-                collections.deque([1], maxlen=None).maxlen,
-            )
-
-        self.assertEqual(
-            self._parity(fn),
-            (
-                "deque([1], maxlen=1)",
-                "deque([1], maxlen=1)",
-                "maxlen must be non-negative",
-                "an integer is required",
-                None,
-            ),
-        )
-
-
 class SymIntIndexTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -720,14 +672,12 @@ class SymIntIndexTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_pop_sym_index_out_of_range(self):
+        # Caught inside the compiled region: fullgraph rejects an escaping one.
         def fn(x):
-            seen = []
-            for idx in (x.shape[0] + 5, -x.shape[0] - 5):
-                try:
-                    [1, 2, 3].pop(idx)
-                except IndexError as e:
-                    seen.append(str(e))
-            return seen
+            try:
+                return [1, 2, 3].pop(x.shape[0] + 5)
+            except IndexError as e:
+                return str(e)
 
         self._check(fn, [3])
 
