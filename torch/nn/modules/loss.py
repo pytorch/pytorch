@@ -870,7 +870,7 @@ class HingeEmbeddingLoss(_Loss):
     where :math:`L = \{l_1,\dots,l_N\}^\top`.
 
     Args:
-        margin (float, optional): Has a default value of `1`.
+        margin (float, optional): Has a default value of :math:`1`.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
