@@ -2,6 +2,7 @@
 import warnings
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.init import constant_, xavier_normal_, xavier_uniform_
@@ -1571,6 +1572,109 @@ class MultiheadAttention(Module):
 
         # no attn_mask and no key_padding_mask, returns None, None
         return merged_mask, mask_type
+
+
+class GroupedQueryAttention(Module):
+    """Grouped Query Attention (GQA) module.
+
+    This module implements the Grouped Query Attention mechanism using
+    :func:`torch.nn.functional.scaled_dot_product_attention` with
+    ``enable_gqa=True``.
+
+    Args:
+        dim_model (int): Size of the input and output embedding dimension.
+        num_heads (int): Number of query attention heads.
+        num_kv_heads (int): Number of key/value attention heads.
+        dropout (float, optional): Dropout probability applied to attention
+            weights during training. Default: ``0.0``.
+        is_causal (bool, optional): Whether to apply causal masking.
+            Default: ``False``.
+        bias (bool, optional): If ``True``, linear projections learn an
+            additive bias. Default: ``True``.
+
+    Raises:
+        ValueError: If ``num_heads`` or ``num_kv_heads`` is not positive,
+            if ``dim_model`` is not divisible by ``num_heads``,
+            if ``num_heads`` is not divisible by ``num_kv_heads``,
+            or if ``dropout`` is outside the range ``[0, 1]``.
+    """
+
+    def __init__(
+        self,
+        dim_model: int,
+        num_heads: int,
+        num_kv_heads: int,
+        dropout: float = 0.0,
+        is_causal: bool = False,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+
+        if num_heads <= 0:
+            raise ValueError(f"num_heads ({num_heads}) must be positive")
+
+        if num_kv_heads <= 0:
+            raise ValueError(f"num_kv_heads ({num_kv_heads}) must be positive")
+
+        if dim_model % num_heads != 0:
+            raise ValueError(
+                f"dim_model ({dim_model}) must be divisible by num_heads ({num_heads})"
+            )
+
+        if num_heads % num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads ({num_heads}) "
+                f"must be divisible by "
+                f"num_kv_heads ({num_kv_heads})"
+            )
+
+        if not 0.0 <= dropout <= 1.0:
+            raise ValueError(f"dropout ({dropout}) must be between 0 and 1")
+
+        self.dropout = dropout
+        self.is_causal = is_causal
+
+        self.head_dim = dim_model // num_heads
+        self.kv_dim = num_kv_heads * self.head_dim
+
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+
+        self.q_proj = nn.Linear(dim_model, dim_model, bias=bias)
+        self.k_proj = nn.Linear(dim_model, self.kv_dim, bias=bias)
+        self.v_proj = nn.Linear(dim_model, self.kv_dim, bias=bias)
+
+        self.out_proj = nn.Linear(dim_model, dim_model, bias=bias)
+
+    def _split_heads(self, x: Tensor, heads: int) -> Tensor:
+        batch_size, seq_len, _ = x.shape
+
+        return x.view(
+            batch_size,
+            seq_len,
+            heads,
+            self.head_dim,
+        ).transpose(1, 2)
+
+    def forward(self, x: Tensor) -> Tensor:
+        batch_size, seq_len, _ = x.shape
+
+        q = self._split_heads(self.q_proj(x), self.num_heads)
+        k = self._split_heads(self.k_proj(x), self.num_kv_heads)
+        v = self._split_heads(self.v_proj(x), self.num_kv_heads)
+
+        out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=self.dropout if self.training else 0.0,
+            is_causal=self.is_causal,
+            enable_gqa=True,
+        )
+
+        out = out.transpose(1, 2).reshape(batch_size, seq_len, self.num_heads * self.head_dim)
+
+        return self.out_proj(out)
 
 
 class PReLU(Module):
