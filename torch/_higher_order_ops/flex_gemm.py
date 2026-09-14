@@ -45,7 +45,6 @@ FLEX_GEMM_OP_ALIASES = {
     torch.addmm: torch.ops.aten.addmm.default,
     torch.bmm: torch.ops.aten.bmm.default,
     torch.baddbmm: torch.ops.aten.baddbmm.default,
-    torch.nn.functional.scaled_mm: torch.ops.aten._scaled_mm_v2.default,
 }
 _SUPPORTED_BACKENDS = {"NVGEMM", "QUACK", "TRITON"}
 
@@ -537,8 +536,7 @@ def flex_gemm(
         gemm_kwargs = {}
     if kernel_options is None:
         kernel_options = {}
-    public_gemm_op = gemm_op
-    if public_gemm_op in (
+    if gemm_op in (
         torch.ops.aten._scaled_mm_v2,
         torch.ops.aten._scaled_mm_v2.default,
     ):
@@ -546,10 +544,10 @@ def flex_gemm(
             "FlexGEMM direct aten._scaled_mm_v2 calls are unsupported; "
             "use torch.nn.functional.scaled_mm"
         )
-    gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
-
-    if public_gemm_op is torch.nn.functional.scaled_mm:
+    if gemm_op is torch.nn.functional.scaled_mm:
         return flex_gemm_scaled_mm(gemm_args, epilogue_fn, gemm_kwargs, kernel_options)
+
+    gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
 
     def body_fn(*args: Any) -> Any:
         # Keep the traced body positional-only; the HOP carries gemm_kwargs for lowering.
