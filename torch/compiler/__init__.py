@@ -1001,23 +1001,23 @@ def load_compiled_function(
     Args:
         file: A file-like object containing the serialized compiled function.
         f_globals: Optional live global scope enclosing the compiled function,
-                   and the scope its kept guards resolve globals against.
-                   Symbolic-shape guards are exempt by default: they install as
-                   Python lambdas over the globals serialized with the
-                   artifact, while an artifact captured under
-                   ``enable_cpp_symbolic_shape_guards`` may resolve their
-                   global operands here instead, like any other guard. When a
-                   kept guard reads a global -- which takes a ``guard_filter_fn``
-                   that keeps global guards, since the default drops them all --
-                   pass ``vars(mod)`` for the module ``mod`` that DEFINED the
-                   original function rather than a dict of a few extra names:
-                   every global a kept guard reads has to be bound here with a
-                   value that satisfies it, or else the call raises
-                   ``RuntimeError: GuardManager check failed`` rather than
-                   recompiling. Under the default filter no kept guard reads a
-                   global, so this dict only widens what the bytecode merges
-                   over (below) with nothing checking it; pass only the names
-                   the load cannot otherwise resolve, if any. Passing ``{}`` is
+                   and the scope its kept guards resolve globals against,
+                   symbolic-shape guards included: whether one installs as a
+                   Python lambda (the default) or as a C++ guard under
+                   ``enable_cpp_symbolic_shape_guards``, its global operands
+                   resolve here. When a kept guard reads a global -- which,
+                   beyond a symbolic-shape guard on a global with a dynamic
+                   dim, takes a ``guard_filter_fn`` that keeps global guards,
+                   since the default drops them all -- pass ``vars(mod)`` for
+                   the module ``mod`` that DEFINED the original function rather
+                   than a dict of a few extra names: every global a kept guard
+                   reads has to be bound here with a value that satisfies it,
+                   or else the call raises ``RuntimeError: GuardManager check
+                   failed`` rather than recompiling. Under the default filter
+                   no other kept guard reads a global, so this dict only widens
+                   what the bytecode merges over (below) with nothing checking
+                   it; pass only the names the load cannot otherwise resolve,
+                   if any. Passing ``{}`` is
                    an empty guard scope, not the same as omitting the argument,
                    which resolves the guards against the scope rebuilt from the
                    artifact instead. The
