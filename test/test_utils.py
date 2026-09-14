@@ -1252,6 +1252,42 @@ class TestTryImport(TestCase):
 
 
 class TestUtilsInternal(TestCase):
+    def test_max_clock_rate_uses_requested_device(self):
+        properties = types.SimpleNamespace(clock_rate=1_980_000)
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(1), 1980)
+
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+    def test_max_clock_rate_uses_current_rocm_device(self):
+        properties = types.SimpleNamespace(gcnArchName="gfx90a:sramecc+")
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", "6.0"),
+                unittest.mock.patch.object(
+                    torch.cuda, "current_device", return_value=1
+                ) as current_device,
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1700)
+
+            current_device.assert_called_once_with()
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
     def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
         def nvsmi(_query):
             raise FileNotFoundError("nvidia-smi")
