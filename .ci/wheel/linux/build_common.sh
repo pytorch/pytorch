@@ -7,8 +7,8 @@ set -ex
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source ${SOURCE_DIR}/set_desired_python.sh
-# shellcheck source=../pytorch/rocm_utils.sh
-source "$(dirname "${SOURCE_DIR}")/pytorch/rocm_utils.sh"
+# shellcheck source=../../pytorch/rocm_utils.sh
+source "$(dirname "$(dirname "${SOURCE_DIR}")")/pytorch/rocm_utils.sh"
 
 
 if [[ -n "$BUILD_PYTHONLESS" && -z "$LIBTORCH_VARIANT" ]]; then
@@ -118,14 +118,19 @@ pushd "$PYTORCH_ROOT"
 retry pip install -qUr requirements-build.txt
 python -m spin clean
 retry pip install -qr requirements.txt
+# Keep in sync with NUMPY_PINS in .ci/wheel/_common.py. This table serves
+# s390x, the one Linux arch that does not run the Python pipeline.
 case ${DESIRED_PYTHON} in
+  cp315*)
+    retry pip install -q --pre numpy==2.5.2
+    ;;
   cp314*)
     retry pip install -q --pre numpy==2.3.4
     ;;
-  cp31*)
-    retry pip install -q --pre numpy==2.1.0
+  cp313*)
+    retry pip install -q --pre numpy==2.1.2
     ;;
-  # Should catch 3.9+
+  # Should catch 3.10-3.12
   *)
     retry pip install -q --pre numpy==2.0.2
     ;;

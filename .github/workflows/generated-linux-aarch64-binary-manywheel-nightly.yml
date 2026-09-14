@@ -184,7 +184,7 @@ jobs:
         run: |
           # shellcheck disable=SC1091
           source "${BINARY_ENV_FILE}"
-          bash .ci/manywheel/build_all.sh
+          bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
       - uses: actions/upload-artifact@v4.4.0
@@ -273,7 +273,7 @@ jobs:
         run: |
           # shellcheck disable=SC1091
           source "${BINARY_ENV_FILE}"
-          bash .ci/manywheel/build_all.sh
+          bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
       - uses: actions/upload-artifact@v4.4.0
@@ -362,7 +362,7 @@ jobs:
         run: |
           # shellcheck disable=SC1091
           source "${BINARY_ENV_FILE}"
-          bash .ci/manywheel/build_all.sh
+          bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
       - uses: actions/upload-artifact@v4.4.0
@@ -451,7 +451,7 @@ jobs:
         run: |
           # shellcheck disable=SC1091
           source "${BINARY_ENV_FILE}"
-          bash .ci/manywheel/build_all.sh
+          bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
       - uses: actions/upload-artifact@v4.4.0
