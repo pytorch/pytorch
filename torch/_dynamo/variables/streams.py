@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from ..codegen import PyCodegen
+    from .tensor import CurrentDeviceVariable
 
 from torch._library.custom_ops import custom_op
 
@@ -177,12 +178,17 @@ has_side_effect(torch.ops.streams.synchronize_event.default)
 
 
 @custom_op("streams::synchronize_device", mutates_args=())
-def synchronize_device(device_type: str, device_index: int) -> None:
-    torch.accelerator.synchronize(torch.device(device_type, device_index))
+def synchronize_device(device_type: str, device_index: int | None) -> None:
+    device = (
+        torch.device(device_type)
+        if device_index is None
+        else torch.device(device_type, device_index)
+    )
+    torch.accelerator.synchronize(device)
 
 
 @synchronize_device.register_fake
-def _(device_type: str, device_index: int) -> None:
+def _(device_type: str, device_index: int | None) -> None:
     pass
 
 
@@ -270,10 +276,16 @@ class SymbolicStreamState:
 
         cur_stack: list[StreamVariable] = []
         if torch.accelerator.is_available():
+            from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
             # Reset the registry so the current stream is guaranteed index 0.
             reset_user_object_tracking()
             stream = torch.accelerator.current_stream()
-            source = CurrentStreamSource(stream.device)
+            device = stream.device
+            if _coor_device_index_is_current(device):
+                # Reconstruct the stream relative to each rank's current device.
+                device = torch.device(device.type)
+            source = CurrentStreamSource(device)
             # Register the current stream so it gets index 0 (registry is
             # fresh at tracing start).  The inductor wrapper updates this
             # entry at runtime so cudagraph capture uses the capture stream
@@ -382,6 +394,7 @@ class StreamVariable(StreamContextVariable):
         proxy: Proxy,
         value: torch.Stream,
         user_object_index: int | None = None,
+        current_device: "CurrentDeviceVariable | None" = None,
         **kwargs: Any,
     ) -> None:
         # Index into the user object table
@@ -395,12 +408,45 @@ class StreamVariable(StreamContextVariable):
         self.proxy = proxy
         self.value = value
         self.device = value.device
+        source = kwargs.get("source")
+        if (
+            current_device is None
+            and isinstance(source, CurrentStreamSource)
+            and source.device.index is None
+        ):
+            from .tensor import CurrentDeviceVariable
+
+            current_device = CurrentDeviceVariable(torch.device(self.device.type))
+        self.current_device = current_device
 
         self.user_object_index = user_object_index
         super().__init__(None, **kwargs)
 
     def python_type(self) -> type:
         return self._cpython_type
+
+    def _stream_device_get(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        return self.current_device
+
+    def _stream_device_index_get(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        if self.current_device is None:
+            return None
+        return self.current_device.tp_getattro_impl(tx, "index")
+
+    def _is_current_stream(self) -> bool:
+        return (
+            isinstance(self.source, CurrentStreamSource)
+            and self.source.device.index is None
+        )
+
+    tp_getset = {
+        "device": GetSet(_stream_device_get, readonly_setter),
+        "device_index": GetSet(_stream_device_index_get, readonly_setter),
+    }
 
     def _stream_device_handle_get(
         self: "StreamVariable", tx: "InstructionTranslatorBase"
@@ -542,11 +588,33 @@ class StreamVariable(StreamContextVariable):
             # Stream's tp_richcompare (THPStream_richcompare) compares
             # stream_id/device and never returns NotImplemented.
             return ConstantVariable.create(op == "__ne__")
-        if self.source:
-            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-        if other.source:
-            install_guard(other.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        self_is_current = self._is_current_stream()
+        other_is_current = other._is_current_stream()
+        if self_is_current != other_is_current:
+            stream = other if self_is_current else self
+            if stream.source:
+                install_guard(
+                    stream.source.make_guard(GuardBuilder.CURRENT_STREAM_MATCH)
+                )
+        elif not self_is_current:
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+            if other.source:
+                install_guard(other.source.make_guard(GuardBuilder.EQUALS_MATCH))
         op_fn = cmp_name_to_op_mapping[op]
+        if self_is_current or other_is_current:
+            self_type = self.python_type() if self_is_current else type(self.value)
+            other_type = other.python_type() if other_is_current else type(other.value)
+            equal = self_type is other_type and (
+                self.value.stream_id,
+                self.value.device_index,
+                self.value.device_type,
+            ) == (
+                other.value.stream_id,
+                other.value.device_index,
+                other.value.device_type,
+            )
+            return ConstantVariable.create(equal if op == "__eq__" else not equal)
         return VariableTracker.build(
             tx,
             op_fn(self.value, other.value),  # pyrefly: ignore[bad-argument-type]
