@@ -818,6 +818,39 @@ class TestBlackwellExhaustiveConfigs(TestCase):
     VALID_EPILOGUE_SUBTILE = {1, 2, 4}
 
     @parametrize(
+        "dtype,allow_tf32,a_row_major,b_row_major,block_m,expected",
+        (
+            (torch.float32, True, False, True, 64, False),
+            (torch.float32, True, False, False, 128, False),
+            (torch.float32, True, False, True, 256, False),
+            (torch.float32, True, False, True, 32, True),
+            (torch.float32, False, False, True, 128, True),
+            (torch.float32, True, True, False, 128, True),
+            (torch.bfloat16, True, False, True, 128, True),
+        ),
+    )
+    def test_fp32_mma_layout_filter(
+        self,
+        dtype,
+        allow_tf32,
+        a_row_major,
+        b_row_major,
+        block_m,
+        expected,
+    ):
+        kwargs = {
+            "A_ROW_MAJOR": a_row_major,
+            "B_ROW_MAJOR": b_row_major,
+            "BLOCK_M": block_m,
+        }
+        self.assertEqual(
+            CUDABlackwellPersistentTMATemplateConfigHeuristic._supports_mma_layout(
+                dtype, allow_tf32, kwargs
+            ),
+            expected,
+        )
+
+    @parametrize(
         "heuristic_cls",
         (
             CUDABlackwellPersistentTMATemplateConfigHeuristic,

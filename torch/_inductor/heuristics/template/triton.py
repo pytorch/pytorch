@@ -2406,11 +2406,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # kernels are unaffected.
     ascending_k: bool = False
 
-    def get_extra_kwargs(
-        self,
-        kernel_inputs: KernelInputs,
-        op_name: str,
-    ) -> dict[str, Any]:
+    def _allow_tf32(self, kernel_inputs: KernelInputs) -> bool:
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
@@ -2429,6 +2425,15 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             )
         else:
             allow_tf32 = False
+
+        return bool(allow_tf32)
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        allow_tf32 = self._allow_tf32(kernel_inputs)
 
         extra_kwargs = {
             "ALLOW_TF32": allow_tf32,
@@ -2975,6 +2980,23 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
     combinations the lowering cannot support before they reach codegen.
     """
 
+    @staticmethod
+    def _supports_mma_layout(
+        dtype: torch.dtype,
+        allow_tf32: bool,
+        template_kwargs: dict[str, Any],
+    ) -> bool:
+        # tcgen05.mma does not support transposed FP32 operands in shared
+        # memory. With the layouts emitted by this template, the unsupported
+        # case is a transposed A operand with TF32 enabled and BLOCK_M > 32.
+        # BLOCK_M=32 and either orientation of B use supported MMA layouts.
+        return not (
+            dtype == torch.float32
+            and allow_tf32
+            and not template_kwargs["A_ROW_MAJOR"]
+            and template_kwargs["BLOCK_M"] > 32
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -2984,12 +3006,18 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
+        allow_tf32 = self._allow_tf32(kernel_inputs)
+
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
             op_name,
             **kwargs,
         ):
+            if not self._supports_mma_layout(
+                kernel_inputs.dtype(), allow_tf32, template_kwargs
+            ):
+                continue
             use_meta_ws = template_kwargs.get("USE_META_WS", False)
             # autoWS configs come from a full sweep; drop combos the lowering
             # does not support so no invalid config reaches codegen.
