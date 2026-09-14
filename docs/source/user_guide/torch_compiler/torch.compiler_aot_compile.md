@@ -157,17 +157,17 @@ Load a previously saved AOT-compiled function from a file.
   guard reads a global -- which takes a `guard_filter_fn` that keeps global
   guards, since the default drops them all -- that means `vars(my_module)` for
   the module that defined the original function (as in the example below)
-  rather than a dict of a few extra names; under the default filter no kept
-  guard reads a global, so the dict only widens what the bytecode merges over
+  rather than a dict of a few extra names; under the default filter the only
+  kept guard that reads a global is a symbolic-shape guard on a global with a
+  dynamic dim, so otherwise the dict only widens what the bytecode merges over
   (below) with nothing checking it, and only the names the load cannot
   otherwise resolve belong in it. Guards
   read this dict by reference, so a global rebound after loading is seen on
   the next call, and a guarded global the dict lacks fails the guard until
   that name is bound in it -- there is no fallback to the values serialized
-  with the artifact. Symbolic-shape guards are exempt by default: they install
-  as Python lambdas over the globals serialized with the artifact, while an
-  artifact captured under `enable_cpp_symbolic_shape_guards` may resolve their
-  global operands here instead, like any other guard. Loading may
+  with the artifact. That holds for a symbolic-shape guard too, whether it
+  installs as a Python lambda (the default) or as a C++ guard under
+  `enable_cpp_symbolic_shape_guards`: its global operands resolve here. Loading may
   insert names of its own, never overwriting an existing key: the
   Dynamo-generated globals a kept guard is rooted at, and
   `__builtins__` when it has to build the builtins dict one of those names
