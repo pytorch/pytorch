@@ -8,7 +8,7 @@ import itertools
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -37,6 +37,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     HSDPMeshInfo,
     ShardPlacementResult,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import AllGatherState
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -2678,6 +2679,22 @@ class TestFullyShardCudaGraph(FSDPTest):
     @property
     def world_size(self) -> int:
         return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_post_backward_clears_deferred_all_gather_state(self):
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        model = nn.Linear(8, 8, bias=False).to(device)
+        fully_shard(model, reshard_after_forward=False)
+        output = model(torch.randn(4, 8, device=device))
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        event = torch.cuda.Event()
+        event.record()
+        comm_ctx.all_gather_state = AllGatherState(cast(Any, None), event)
+
+        output.sum().backward()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
     @skip_if_lt_x_gpu(2, allow_cpu=True)

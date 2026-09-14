@@ -443,8 +443,16 @@ def _unpack_flash_attention_nested_shapes(
             raise AssertionError("sdpa_flop_count: expected key.shape to be 3-dimensional")
         if len(value.shape) != 3:
             raise AssertionError("sdpa_flop_count: expected value.shape to be 3-dimensional")
-        if grad_out is not None and grad_out.shape != query.shape:
-            raise AssertionError("sdpa_flop_count: grad_out.shape must match query.shape when provided")
+        expected_grad_out_shape = (
+            query.shape[0],
+            query.shape[1],
+            value.shape[2],
+        )
+        if grad_out is not None and grad_out.shape != expected_grad_out_shape:
+            raise AssertionError(
+                "sdpa_flop_count: grad_out must match query tokens/heads and "
+                "value head dimension when provided"
+            )
         _, h_q, d_q = query.shape
         _, h_k, d_k = key.shape
         _, h_v, d_v = value.shape
@@ -460,7 +468,9 @@ def _unpack_flash_attention_nested_shapes(
             new_query_shape = (1, h_q, seq_q_len, d_q)
             new_key_shape = (1, h_k, seq_k_len, d_k)
             new_value_shape = (1, h_v, seq_k_len, d_v)
-            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            new_grad_out_shape = (
+                (1, h_q, seq_q_len, d_v) if grad_out is not None else None
+            )
             yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
         return
 

@@ -1430,6 +1430,23 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # cuda comm split happened on this rank.
         self.assertEqual(cuda_backend.comm_split_count(), 1)
 
+        ng2 = c10d.split_group(pg, [subg_ranks], backend="cuda:nccl-legacy")
+        if self.rank in subg_ranks:
+            self.assertIsInstance(ng2, c10d.ProcessGroup)
+            self.assertIs(
+                ng.get_group_store().underlying_store,
+                ng2.get_group_store().underlying_store,
+            )
+            self.assertIsNot(
+                ng.get_group_store().underlying_store,
+                pg.get_group_store().underlying_store,
+            )
+            cuda_tensor = torch.full((1,), self.rank).cuda(device)
+            dist.broadcast(cuda_tensor, dist.get_global_rank(ng2, 0), group=ng2)
+            self.assertEqual(cuda_tensor, torch.full((1,), 0))
+
+        self.assertEqual(cuda_backend.comm_split_count(), 2)
+
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
