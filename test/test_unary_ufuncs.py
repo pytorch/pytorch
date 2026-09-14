@@ -78,7 +78,7 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs
 
 # TODO: port test_unary_out_op_mem_overlap
 # TODO: add test for inplace variants erroring on broadcasted inputs
-class TestUnaryUfuncs(TestCase):
+class TestUnaryUfuncsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
@@ -1860,7 +1860,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(torch.all(torch.isfinite(result)))
 
 
-class TestUnaryUfuncsCpuOnly(TestCase):
+class TestUnaryUfuncsCPU(TestCase):
     hw_classification = HardwareClassification.CPU
 
     def test_op_invert(self, device):
@@ -1918,7 +1918,7 @@ class TestUnaryUfuncsCpuOnly(TestCase):
         self.assertEqual(got, ref)
 
 
-class TestUnaryUfuncsCUDADevice(TestCase):
+class TestUnaryUfuncsCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_nonzero_static_large(self, device):
@@ -1976,9 +1976,9 @@ class TestUnaryUfuncsCUDADevice(TestCase):
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
 
-instantiate_device_type_tests(TestUnaryUfuncs, globals())
-instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
-instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda")
+instantiate_device_type_tests(TestUnaryUfuncsDevice, globals())
+instantiate_device_type_tests(TestUnaryUfuncsCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestUnaryUfuncsCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()

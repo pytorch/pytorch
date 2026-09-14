@@ -136,15 +136,15 @@ try:
 except ImportError as e:
     log.warning(e)
 try:
+    from quantization.core.experimental.test_floatx import TestFloat8DtypeDeviceCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.experimental.test_floatx import TestFloat8DtypeDeviceCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCPU  # noqa: F401
-except ImportError as e:
-    log.warning(e)
-try:
-    from quantization.core.experimental.test_floatx import TestFloat8DtypeCUDA  # noqa: F401
-except ImportError as e:
-    log.warning(e)
-try:
-    from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
 except ImportError as e:
     log.warning(e)
 
