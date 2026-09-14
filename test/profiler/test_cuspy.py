@@ -154,22 +154,21 @@ class TestCuspyRecords(TestCase):
         # A graph's annotations sit under its capture node ids or its exec ones depending on
         # that capture's annotation_config["key_by"], and one trace can carry both, so the
         # lookup tries the source (capture) id first and falls back to the exec id. Rows
-        # whose CUPTI ABI reports no source id pass the exec id as both.
+        # CUPTI reports no source id for carry 0 and go straight to the exec id.
         import numpy as np
 
         from torch.profiler._cuspy.observers.profiler import _resolve_annotation_column
 
-        registry = {10: {"name": "capture_keyed"}, 21: {"name": "exec_keyed"}}
-        gnid = np.array([20, 21, 22], dtype=np.int64)
-        src_gnid = np.array([10, 11, 12], dtype=np.int64)
+        cap, ex = {"name": "capture_keyed"}, {"name": "exec_keyed"}
+        registry = {10: cap, 21: ex}
+        gnid = np.array([20, 21, 22, 21], dtype=np.int64)
+        src_gnid = np.array([10, 11, 12, 0], dtype=np.int64)
 
         out = _resolve_annotation_column(registry.get, gnid, src_gnid)
-        self.assertEqual(
-            list(out), [{"name": "capture_keyed"}, {"name": "exec_keyed"}, None]
-        )
+        self.assertEqual(list(out), [cap, ex, None, ex])
         # No resolver installed -> no lookups at all.
         self.assertEqual(
-            list(_resolve_annotation_column(None, gnid, src_gnid)), [None] * 3
+            list(_resolve_annotation_column(None, gnid, src_gnid)), [None] * 4
         )
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires the cupti python bindings")

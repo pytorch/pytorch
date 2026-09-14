@@ -857,22 +857,26 @@ def _demangle_column(names: Any) -> Any:
 
 
 def _source_gnid(cols, cat, gnid: Any) -> Any:
-    """Per-row source (capture-graph) node id, or the exec node ids when this CUPTI ABI has
-    no such field. See _resolve_annotation_column for what the two are used for."""
+    """Per-row source (capture-graph) node id, 0 where CUPTI reports none -- either this ABI
+    predates the field or the kind has none of its own (MEMCPY2, GRAPH_HOST_NODE). A node id
+    is never 0 (its graph id occupies the high word and starts at 1), so the column says
+    which rows carry a real source id rather than quietly repeating the exec one."""
     field = getattr(cat, "SOURCE_GRAPH_NODE_ID", None)
     col = None if field is None else cols.get(field.id)
-    return gnid if col is None else col.astype(np.int64)
+    return np.zeros_like(gnid) if col is None else col.astype(np.int64)
 
 
 def _resolve_node_id(resolver, src: int, exec_id: int) -> Any:
-    """Resolve one node against the registry, source node first. Which key a graph's entries
-    are under is that capture's choice (annotation_config["key_by"]: rekeyed to each exec
-    graph, or left on the capture graph for CUPTI's sourceGraphNodeId), and a trace can mix
-    graphs that chose differently, so both are tried. The two key spaces hold different graph
-    ids, so a hit is never ambiguous."""
+    """Resolve one node against the registry, source node first, then the exec node id (0
+    source = none reported, so straight to the exec id). Which key a graph's entries are
+    under is that capture's choice (annotation_config["key_by"]: rekeyed to each exec graph,
+    or left on the capture graph for CUPTI's sourceGraphNodeId), and a trace can mix graphs
+    that chose differently, so both are tried. The two key spaces hold different graph ids,
+    so a hit is never ambiguous."""
     if resolver is None:
         return None
-    return resolver(src) or (resolver(exec_id) if exec_id != src else None)
+    hit = resolver(src) if src else None
+    return hit or (resolver(exec_id) if exec_id != src else None)
 
 
 def _resolve_annotation_column(resolver, gnid: Any, src_gnid: Any) -> Any:
