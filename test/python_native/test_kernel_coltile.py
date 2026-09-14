@@ -134,7 +134,7 @@ class TestColTileHost(TestCase):
         from torch._native.ops.reductions import tile, traits as T
 
         trait = T.SumOps(acc=cutlass.Float32)
-        row = tile.TileReduce(trait, cutlass.Float32, "row", 1024, tpr=32)
+        row = tile.TileReduce(trait, cutlass.Float32, "row", 1024, threads_per_row=32)
         self.assertIs(row.tilemap, row.tm)
 
         col = tile.TileReduce(trait, cutlass.Float32, "col", 1024, vec=4)

@@ -25,12 +25,12 @@ _P_MAX = 4096
 _C_THREAD_STAGE2 = 8192
 # vec controls both load width and live accumulators; cap at 4 because bf16 vec 8 is 0.77-0.83x.
 _VEC_MAX = 4
-# Small blocks avoid idle threads on narrow columns; nt=256 took 17.3us versus 9.9us
+# Small blocks avoid idle threads on narrow columns; threads_per_block=256 took 17.3us versus 9.9us
 # at 64. Use 32 threads for 1-2 fields and 64 for register-heavy Welford. Against the
 # pre-shared kernel this is 0.92-1.01x, except (16384, 1024) sum/amax lose 7-9%,
 # while argmax gains 6-8% and wide-short sum gains 15%.
-_NT = 32
-_NT_WIDE_ACC = 64  # 3-field traits (Welford): see above
+_THREADS_PER_BLOCK = 32
+_WIDE_ACC_THREADS_PER_BLOCK = 64  # 3-field traits (Welford): see above
 
 
 def _split_p(R):
@@ -38,12 +38,16 @@ def _split_p(R):
     return max(1, min(_P_MAX, -(-R // _Q_TARGET)))
 
 
-def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None):
+def reduce_col_tile(
+    trait, trait_key, x, out_dtype, threads_per_block=None, npar=None, vec=None
+):
     """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways."""
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
-    if nt is None:
-        nt = _NT_WIDE_ACC if trait.nfields >= 3 else _NT
+    if threads_per_block is None:
+        threads_per_block = (
+            _WIDE_ACC_THREADS_PER_BLOCK if trait.nfields >= 3 else _THREADS_PER_BLOCK
+        )
     R, C = x.shape
     vec = min(tile.vec_size(C, x.element_size()), _VEC_MAX) if vec is None else vec
     if C % vec:
@@ -62,7 +66,7 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
         torch2cute[x.dtype],
         "col",
         C,
-        nt=nt,
+        threads_per_block=threads_per_block,
         final=single,
         vec=vec,
         pc=pc,
@@ -146,7 +150,13 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
 
     # Shared combine mode uses nchunks as C and nrows as true R; q is unused.
     op2 = tile.TileReduce(
-        trait, torch2cute[x.dtype], "col", C, nt=nt, vec=1, combine=True
+        trait,
+        torch2cute[x.dtype],
+        "col",
+        C,
+        threads_per_block=threads_per_block,
+        vec=1,
+        combine=True,
     )
 
     def _fake2():

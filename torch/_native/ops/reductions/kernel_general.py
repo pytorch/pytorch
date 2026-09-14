@@ -75,7 +75,7 @@ class ReduceBlock:
             None,
             "general",
             0,
-            nt=block,
+            threads_per_block=block,
             nouts=nouts,
             final=final,
             combine=from_partials,
@@ -239,8 +239,8 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
 
     width = x.element_size() * 8
     vec = math.gcd(N, 128 // width)
-    tpr = max(WARP, rt.row_config(N, width).tpr)
-    return -(-N // (tpr * vec)) <= _ONESHOT_MAX_LOADS
+    threads_per_row = max(WARP, rt.row_config(N, width).threads_per_row)
+    return -(-N // (threads_per_row * vec)) <= _ONESHOT_MAX_LOADS
 
 
 def _try_fast_row(
@@ -257,12 +257,14 @@ def _try_fast_row(
     from . import kernel_rowtile as rt
 
     # Packed rows floor at one warp (25% utilized at N=32), but inner-tree order owns
-    # its thread map. Forcing tpr=1 changed bits at (524288, 16) and (524288, 128).
+    # its thread map. Forcing threads_per_row=1 changed bits at (524288, 16) and (524288, 128).
     if (
         rt.narrow_row(N, x.element_size(), x.shape[0])
         and not rt.inner_tree_order_enabled()
     ):
-        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts, tpr=1)
+        return rt.reduce_row_tile(
+            trait, trait_key, x, out_dtypes, nouts=nouts, threads_per_row=1
+        )
     if _oneshot_ok(x):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
     # Bypass default-order xcta whenever the fold gate has a plan. Otherwise bits differed at
@@ -446,7 +448,14 @@ def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
 
         # Avoid row-packing threads for a single-row launch; None keeps the existing config.
         cfg = rt.single_row_config(L, x.element_size() * 8)
-        kw = {} if cfg is None else {"tpr": cfg.tpr, "nt": cfg.nt}
+        kw = (
+            {}
+            if cfg is None
+            else {
+                "threads_per_row": cfg.threads_per_row,
+                "threads_per_block": cfg.threads_per_block,
+            }
+        )
         outs = rt.reduce_row_tile(trait, trait_key, x2, out_dtypes, nouts=nouts, **kw)
         return tuple(_as_shape(o, ()) for o in outs)
     from . import kernel_xcta as xc
