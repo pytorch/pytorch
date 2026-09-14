@@ -1432,6 +1432,19 @@ class TritonOverrides(OpOverrides):
         return out
 
     @staticmethod
+    def neg(x):
+        # Triton's unary minus lowers to fneg, which drops the sign of -0.0.
+        # Multiplying by -1.0 preserves signed zero for floating-point dtypes
+        # while keeping integer negation as the original unary minus.
+        if (
+            isinstance(x, CSEVariable)
+            and x.dtype is not None
+            and x.dtype.is_floating_point
+        ):
+            return f"({x} * (-1.0))"
+        return f"-{x}"
+
+    @staticmethod
     def _shaped_constant(value, dtype, shape):
         type_ = torch._prims_common.dtype_to_type(dtype)
         triton_val = constant_repr(type_(value))
