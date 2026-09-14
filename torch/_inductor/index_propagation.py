@@ -297,7 +297,11 @@ class IndexPropagation(DefaultHandler):
 
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
-        new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        try:
+            new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        except (OverflowError, ValueError):
+            # e.g. int(inf) raises OverflowError, int(nan) raises ValueError
+            return self.fallback(name, args, kwargs)
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated
@@ -354,7 +358,7 @@ class IndexPropagation(DefaultHandler):
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
             # We still need to (perhaps) wrap the expression and add bound checks
-            # We want to do this "constant folding", as we don't allow to fuse
+            # We want to do this "constant folding", as we don't allow fusing
             # kernels into indirect indexing
 
             expr = sympy.sympify(index.value.expr)

@@ -177,7 +177,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // invoked. So any given graph task maintains its own cpu_ready_queue_ where
   // you should send work for it to be done. We memoize the cpu_ready_queue_ per
   // GraphTask so that we know which ready queue we should push to if we are on
-  // device thread (i.e. GPU) and but next NodeTask should be run on CPU.
+  // device thread (i.e. GPU) but next NodeTask should be run on CPU.
   std::shared_ptr<ReadyQueue> cpu_ready_queue_;
 
   // Future representing the completion of the graph task. Notified when all

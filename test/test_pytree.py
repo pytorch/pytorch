@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import unittest
+import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass, field
 from enum import auto
@@ -854,6 +855,21 @@ class TestGenericPytree(TestCase):
 
 
 class TestPythonPytree(TestCase):
+    def test_leafspec_copy_pickle_no_deprecation_warning(self):
+        # LeafSpec is @deprecated, so reconstructing it via copy/pickle used to
+        # re-invoke the constructor and leak a FutureWarning to users who never
+        # wrote an isinstance check. __reduce__ rebuilds via the factory, which
+        # both silences the warning and reuses the shared singleton.
+        leaf = python_pytree.treespec_leaf()
+        for reconstruct in (
+            lambda: copy.deepcopy(leaf),
+            lambda: pickle.loads(pickle.dumps(leaf)),
+        ):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", FutureWarning)
+                reconstructed = reconstruct()
+            self.assertIs(reconstructed, leaf)
+
     def test_deprecated_register_pytree_node(self):
         class DummyType:
             def __init__(self, x, y):

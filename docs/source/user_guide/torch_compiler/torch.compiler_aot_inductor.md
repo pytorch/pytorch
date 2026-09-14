@@ -148,7 +148,6 @@ add_custom_command(
 )
 
 target_link_libraries(aoti_example "${TORCH_LIBRARIES}")
-set_property(TARGET aoti_example PROPERTY CXX_STANDARD 17)
 ```
 
 Provided the directory structure resembles the following, you can execute the subsequent commands

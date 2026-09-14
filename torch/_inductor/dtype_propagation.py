@@ -158,13 +158,26 @@ class DtypePropagationOpsHandler:
 
     _instance: Optional["DtypePropagationOpsHandler"] = None
 
+    # The registries the rules are meta programmed from, as of the last time the
+    # singleton was populated. Python calls __init__ on every construction, so
+    # without this the meta programming reruns on each of the thousands of
+    # constructions a compile makes.
+    _rules_key: tuple[Any, ...] | None = None
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self) -> None:
-        for op, rule in torch._inductor.utils.op_dtype_propagation_rules.items():
+        # op_dtype_propagation_rules is the only registry read below that grows as
+        # inductor state comes up; the other two are module level literals.
+        rules = torch._inductor.utils.op_dtype_propagation_rules
+        key = tuple(rules.items())
+        if key == DtypePropagationOpsHandler._rules_key:
+            return
+
+        for op, rule in rules.items():
             fn = (
                 functools.partial(self.return_dtype, dtype=rule.override_return_dtype)
                 if rule.override_return_dtype
@@ -197,6 +210,7 @@ class DtypePropagationOpsHandler:
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
         )
+        DtypePropagationOpsHandler._rules_key = key
 
     # metaprogrammed in __init__
 
@@ -471,6 +485,8 @@ class DtypePropagationOpsHandler:
         is_pure=True,
         pack=1,
         input_dtypes=None,
+        output_dtypes=None,
+        output_index=0,
     ):
         return dtype
 
