@@ -4,6 +4,7 @@ import builtins
 import contextlib
 import copy
 import dataclasses
+import datetime
 import functools
 import importlib
 import inspect
@@ -2899,6 +2900,28 @@ from user code:
         (result,) = reloaded.compiled_results
         self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
         self.assertIs(globals()[key], result._artifacts.runtime_env.used_globals[key])
+
+    def test_aot_compile_module_unnamed_scope_builtins_dict_travels_by_reference(self):
+        # exec inserted the live builtins dict under the namespace's __builtins__,
+        # and the artifact carried that dict by value: every builtin plus whatever
+        # an extension module stashes there. pybind11 < 2.13 on CPython < 3.12
+        # keeps its internals in a PyCapsule under a __pybind11_internals_v4_*
+        # key, so the dump failed on the 3.10/3.11 CI shards, whose scipy is one
+        # such module, and passed on 3.12. Stand in for it with a real capsule.
+        builtins.__dict__["__pybind11_internals_v4_test__"] = datetime.datetime_CAPI
+        self.addCleanup(builtins.__dict__.pop, "__pybind11_internals_v4_test__")
+        x = torch.randn(4)
+        model = torch.compile(UnnamedScopeRowsModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        self._hide_leaked_dynamo_globals()
+        reloaded = AOTCompiledModel.deserialize(UnnamedScopeRowsModule(), data)
+        self.assertEqual(reloaded(x), x + _UNNAMED_SCOPE_NS["AOT_NS_ROWS"].sum(0))
+        (result,) = reloaded.compiled_results
+        (scope,) = result._artifacts.runtime_env.used_globals.values()
+        self.assertIs(scope["__builtins__"], builtins.__dict__)
+        self.assertIsNot(scope, _UNNAMED_SCOPE_NS)
 
     def test_aot_compile_module_unnamed_scope_key_is_disowned_when_left_alone(self):
         # A compile in this process that bound the key still owns it through a
