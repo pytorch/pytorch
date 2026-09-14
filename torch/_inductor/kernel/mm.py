@@ -719,13 +719,16 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         for choice in choices:
             if isinstance(choice, SubgraphChoiceCaller):
                 choice.inline_after_autotune = False
+    subgraph_autotune_kwargs = (
+        {"return_multi_template": False} if inline_selected_subgraph else {}
+    )
     node, _ = autotune_select_algorithm(
         name,
         choices,
         kernel_inputs.nodes(),
         layout,
         best_config_future=best_config_future,
-        return_multi_template=not inline_selected_subgraph,
+        **subgraph_autotune_kwargs,
     )
     return node
 

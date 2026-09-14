@@ -324,6 +324,7 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
         self.assertIn("prologue_descriptor1.load([offs_k, 0])", source)
         self.assertIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
         self.assertIn("BLOCK_K : tl.constexpr = 64", source)
+        self.assertIn("EPILOGUE_SUBTILE : tl.constexpr = 1", source)
         self.assertIn("TWO_CTAS : tl.constexpr = False", source)
         self.assertIn("num_stages=3", source)
         self.assertNotIn("arg_B", source)

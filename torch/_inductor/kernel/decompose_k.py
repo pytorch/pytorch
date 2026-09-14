@@ -34,7 +34,7 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
     # Single-CTA schedule for the M=128, N=128 cat/cast producer path.
-    BlackwellBMMConfig(128, 128, 64, 3, 8, 2, 1, True, False),
+    BlackwellBMMConfig(128, 128, 64, 3, 8, 1, 1, True, False),
 )
 
 
