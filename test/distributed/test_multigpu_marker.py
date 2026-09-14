@@ -24,8 +24,9 @@ from conftest import (
     _decorator_gpu_requirement,
     _is_cpu_backed,
     _is_local_tensor_simulation,
-    _needs_extra_gpus,
     _probe_world_size,
+    _resolve_gpu_requirement,
+    _UNRESOLVED_GPU_REQUIREMENT,
 )
 
 
@@ -69,14 +70,10 @@ class _MPCunset(MultiProcContinuousTest):
 
 
 # A LocalTensor simulation class: multi-process base and world_size 4, but runs
-# single-process on one GPU. Detected by the "LocalTensor" name token.
+# single-process on one GPU. Real *WithLocalTensor classes inherit a
+# LocalDTensor* base whose is_local_tensor_enabled property is True; model that
+# here so the name-independent probe detects it.
 class _MPws4WithLocalTensor(_MPws4):
-    pass
-
-
-# A LocalTensor simulation class detected by the is_local_tensor_enabled probe
-# (name carries no "LocalTensor" token).
-class _MPws4Simulated(_MPws4):
     @property
     def is_local_tensor_enabled(self):
         return True
@@ -129,37 +126,49 @@ class TestMultiGpuMarker(TestCase):
 
     def test_local_tensor_simulation_detection(self):
         self.assertTrue(_is_local_tensor_simulation(_MPws4WithLocalTensor))
-        self.assertTrue(_is_local_tensor_simulation(_MPws4Simulated))
         self.assertFalse(_is_local_tensor_simulation(_MPws4))
         self.assertFalse(_is_local_tensor_simulation(None))
 
-    def test_world_size_selection(self):
-        # >2 GPU tests are selected; <=2 are not.
-        self.assertTrue(_needs_extra_gpus(_fake_item(cls=_MPws4), _MPws4))
-        self.assertTrue(_needs_extra_gpus(_fake_item(cls=_MPws3), _MPws3))
-        self.assertFalse(_needs_extra_gpus(_fake_item(cls=_MPws2), _MPws2))
-        self.assertFalse(_needs_extra_gpus(_fake_item(cls=_MPws1), _MPws1))
+    def test_world_size_requirement(self):
+        # The resolved requirement is the class world_size; the 4-GPU job keeps
+        # tests needing >2 GPUs (--multigpu-min-gpus 3).
+        self.assertEqual(_resolve_gpu_requirement(_fake_item(cls=_MPws4), _MPws4), 4)
+        self.assertEqual(_resolve_gpu_requirement(_fake_item(cls=_MPws3), _MPws3), 3)
+        self.assertEqual(_resolve_gpu_requirement(_fake_item(cls=_MPws2), _MPws2), 2)
+        self.assertEqual(_resolve_gpu_requirement(_fake_item(cls=_MPws1), _MPws1), 1)
 
     def test_ambiguity_favors_coverage(self):
-        # Unresolvable world_size routes the test to the larger runner.
-        self.assertTrue(_needs_extra_gpus(_fake_item(cls=_MPbroken), _MPbroken))
-        self.assertTrue(_needs_extra_gpus(_fake_item(cls=_MPCunset), _MPCunset))
+        # Unresolvable world_size clears any threshold (routes to larger runner).
+        self.assertEqual(
+            _resolve_gpu_requirement(_fake_item(cls=_MPbroken), _MPbroken),
+            _UNRESOLVED_GPU_REQUIREMENT,
+        )
+        self.assertEqual(
+            _resolve_gpu_requirement(_fake_item(cls=_MPCunset), _MPCunset),
+            _UNRESOLVED_GPU_REQUIREMENT,
+        )
+
+    def test_local_tensor_simulation_requirement_zero(self):
+        # A LocalTensor simulation runs single-process on one GPU: its world_size
+        # is a simulated mesh size, not a GPU count, so it does not scale.
+        item = _fake_item(cls=_MPws4WithLocalTensor)
+        self.assertEqual(_resolve_gpu_requirement(item, _MPws4WithLocalTensor), 0)
 
     def test_cpu_backed_high_world_size_excluded(self):
         # A CPU-backed multi-process test spawns ranks, not GPUs, so a high
-        # world_size does not qualify it as an extra-GPU test.
+        # world_size does not scale its GPU requirement.
         item = _fake_item(cls=_MPws4, filename="test_c10d_gloo.py")
-        self.assertFalse(_needs_extra_gpus(item, _MPws4))
+        self.assertEqual(_resolve_gpu_requirement(item, _MPws4), 0)
 
     def test_cpu_gate_short_circuits_decorator(self):
         # The CPU/gloo gate wins over any GPU decorator: a CPU-backed test never
-        # qualifies, since it spawns ranks rather than GPUs.
+        # scales, since it spawns ranks rather than GPUs.
         @skip_if_lt_x_gpu(4)
         def needs4(self):
             pass
 
         item = _fake_item(cls=_MPws2, func=needs4, filename="test_c10d_gloo.py")
-        self.assertFalse(_needs_extra_gpus(item, _MPws2))
+        self.assertEqual(_resolve_gpu_requirement(item, _MPws2), 0)
 
     def test_decorator_and_world_size_combine(self):
         # The 5 genuine 4-GPU misses: only ``skip_if_lt_x_gpu(2)`` but the class
@@ -169,7 +178,7 @@ class TestMultiGpuMarker(TestCase):
             pass
 
         item = _fake_item(cls=_MPws4, func=needs2, filename="test_2d_composability.py")
-        self.assertTrue(_needs_extra_gpus(item, _MPws4))
+        self.assertEqual(_resolve_gpu_requirement(item, _MPws4), 4)
 
 
 if __name__ == "__main__":
