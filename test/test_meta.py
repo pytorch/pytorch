@@ -2631,6 +2631,33 @@ class TestMetaKernelRegistrations(TestCase):
             torch.fill(x_meta, value_meta)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_sdpa_flash_cpu_meta_matches_kernel_checks(self):
+        # The meta kernel is a port of _scaled_dot_product_flash_attention_cpu
+        # in aten/src/ATen/native/transformers/attention.cpp; without its checks
+        # a compiled graph is built around a call the CPU kernel then rejects.
+        op = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu
+        q = torch.randn(1, 2, 1, 8, device="meta")
+        k = torch.randn(1, 2, 2, 8, device="meta")
+        v = torch.randn(1, 2, 2, 8, device="meta")
+
+        # the valid case still goes through
+        out = op(q, k, v)[0]
+        self.assertEqual(out.shape, q.shape)
+
+        with self.assertRaisesRegex(RuntimeError, "Accept only 4 dims inputs"):
+            op(q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0))
+        with self.assertRaisesRegex(RuntimeError, "Expected data type"):
+            op(q.to(torch.int64), k.to(torch.int64), v.to(torch.int64))
+        with self.assertRaisesRegex(RuntimeError, "do not support dropout"):
+            op(q, k, v, 0.5)
+        with self.assertRaisesRegex(RuntimeError, "same head size"):
+            op(q, k, torch.randn(1, 2, 2, 4, device="meta"))
+        with self.assertRaisesRegex(RuntimeError, "Attention mask is the same"):
+            op(q, k, v, attn_mask=torch.zeros(1, 2, dtype=torch.int64, device="meta"))
+        with self.assertRaisesRegex(RuntimeError, "Attention mask dim"):
+            op(q, k, v, attn_mask=torch.zeros(1, 1, 2, device="meta"))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_fill_out_of_place_tensor_scalar_ok(self):
         x_cpu = torch.randn(3, 4)
         value_cpu = torch.tensor(1.0)
