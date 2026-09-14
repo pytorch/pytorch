@@ -70,7 +70,7 @@ def patches(fn):
     return wrapped
 
 
-class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
+class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     hw_classification = HardwareClassification.ACCELERATOR
     common = check_model
 
