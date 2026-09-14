@@ -17291,6 +17291,45 @@ class TestSelectiveActivationCheckpoint(TestCase):
         self.assertTrue(profiler_ops.isdisjoint(policy_calls))
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_effectful_op_overrides_recompute_policy(self):
+        call_count = [0]
+        with torch.library._scoped_library("test_sac_effect", "FRAGMENT"):
+
+            @torch.library.custom_op("test_sac_effect::identity", mutates_args=())
+            def effectful_identity(x: torch.Tensor) -> torch.Tensor:
+                call_count[0] += 1
+                return x.clone()
+
+            def backward(_ctx, grad_output):
+                return grad_output
+
+            effectful_identity.register_autograd(backward)
+            effectful_identity.register_effect(torch.library.EffectType.ORDERED)
+
+            def fn(x):
+                return effectful_identity(x).sin()
+
+            def recompute_all(_ctx, _op, *args, **kwargs):
+                return CheckpointPolicy.MUST_RECOMPUTE
+
+            x = torch.randn(3, requires_grad=True)
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, recompute_all
+            )
+            out = checkpoint(
+                fn, x, use_reentrant=False, context_fn=context_fn, early_stop=False
+            )
+            out.sum().backward()
+
+            self.assertEqual(call_count[0], 1)
+            self.assertEqual(x.grad, x.cos())
+
+    def test_raw_c10d_launch_is_not_a_cacheable_effect(self):
+        from torch.utils.checkpoint import _is_cacheable_effect
+
+        self.assertFalse(_is_cacheable_effect(torch.ops.c10d.alltoall_.default))
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_sac_bypass_context_skips_storage_and_counters(self):
         from torch.utils.checkpoint import (
             _bypass_sac_dispatch_modes,

@@ -1083,6 +1083,48 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         result = opt_fn(a, b)
         self.assertEqual(result, expected)
 
+    def test_compile_selective_checkpoint_preserves_registered_effect(self):
+        call_count = [0]
+        with torch.library._scoped_library("test_compile_sac_effect", "FRAGMENT"):
+
+            @torch.library.custom_op(
+                "test_compile_sac_effect::identity", mutates_args=()
+            )
+            def effectful_identity(x: torch.Tensor) -> torch.Tensor:
+                call_count[0] += 1
+                return x.clone()
+
+            @effectful_identity.register_fake
+            def _(x):
+                return torch.empty_like(x)
+
+            def backward(_ctx, grad_output):
+                return grad_output
+
+            effectful_identity.register_autograd(backward)
+            effectful_identity.register_effect(torch.library.EffectType.ORDERED)
+
+            def context_fn():
+                return create_selective_checkpoint_contexts(
+                    lambda _ctx, _op, *args, **kwargs: (CheckpointPolicy.MUST_RECOMPUTE)
+                )
+
+            def fn(x):
+                return checkpoint(
+                    lambda value: effectful_identity(value).sin(),
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
+                    early_stop=False,
+                )
+
+            x = torch.randn(3, requires_grad=True)
+            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(call_count[0], 1)
+            self.assertEqual(x.grad, x.cos())
+
     @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(

@@ -17,6 +17,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._higher_order_ops.effects import has_effects
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -1516,6 +1517,16 @@ def _policy_from_bool(b):
     return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
 
 
+def _is_cacheable_effect(op) -> bool:
+    """Return whether selective checkpointing can cache an effectful op.
+
+    Raw c10d launches return an asynchronous Work handle and mutate separately
+    allocated outputs. Their enclosing functional collective is the valid cache
+    boundary.
+    """
+    return has_effects(op) and getattr(op, "namespace", None) != "c10d"
+
+
 SAC_IGNORED_OPS = {
     # AC inserts different number of detach during forward and recompute.
     torch.ops.aten.detach.default,
@@ -1616,6 +1627,8 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
+        if _is_cacheable_effect(func):
+            policy = CheckpointPolicy.MUST_SAVE
 
         if is_compiling:
             if proxy_mode is not None:
