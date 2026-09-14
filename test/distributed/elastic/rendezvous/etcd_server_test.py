@@ -8,10 +8,11 @@
 import os
 import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -58,3 +59,45 @@ class EtcdServerTest(unittest.TestCase):
             self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()
+
+
+class FindFreePortTest(unittest.TestCase):
+    @patch("torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo")
+    @patch("torch.distributed.elastic.rendezvous.etcd_server.socket.socket")
+    def test_all_sockets_fail_no_unbound_local_error(
+        self, mock_socket, mock_getaddrinfo
+    ):
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+            (10, 1, 6, "", ("::1", 0)),
+        ]
+        mock_socket.side_effect = OSError("socket failed")
+        with self.assertRaises(RuntimeError):
+            find_free_port()
+
+    @patch("torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo")
+    @patch("torch.distributed.elastic.rendezvous.etcd_server.socket.socket")
+    def test_first_fails_second_succeeds(self, mock_socket, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+        ]
+        mock_sock = MagicMock()
+        mock_socket.side_effect = [OSError("socket failed"), mock_sock]
+        result = find_free_port()
+        self.assertEqual(result, mock_sock)
+        mock_sock.bind.assert_called_once_with(("localhost", 0))
+        mock_sock.listen.assert_called_once_with(0)
+
+    @patch("torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo")
+    @patch("torch.distributed.elastic.rendezvous.etcd_server.socket.socket")
+    def test_all_fail_raises_runtime_error_not_unbound_local(
+        self, mock_socket, mock_getaddrinfo
+    ):
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+        ]
+        mock_socket.side_effect = OSError("address family not supported")
+        with self.assertRaises(RuntimeError) as ctx:
+            find_free_port()
+        self.assertIn("Failed to create a socket", str(ctx.exception))
