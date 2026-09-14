@@ -63,9 +63,9 @@ void init_THPCaches() {}
 #undef _PyOpcode_Caches
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this
-// check forces us to manually re-check that the function didn't change on the
-// next major version
-#if IS_PYTHON_3_16_PLUS
+// check forces us to manually re-check that the functions below didn't change
+// on the next release.
+#if PY_MINOR_VERSION > 15
 #error \
     "Please ensure that the functions below still match the CPython implementation for 3.15"
 #endif
