@@ -328,6 +328,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
         torch.jit.is_scripting: False,
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
+        torch._C._is_tracing: False,
         torch.fx._symbolic_trace.is_fx_tracing: False,
         torch.fx._symbolic_trace.is_fx_symbolic_tracing: False,
         torch.onnx.is_in_onnx_export: False,
@@ -674,7 +675,7 @@ class BaseTorchVariable(VariableTracker):
             # interaction with Kineto is not a valid usecase. So, this is ok.
             return True
 
-        return getattr(self.value, "__module__", None) == "math"
+        return getattr(self.value, "__module__", None) in ("math", "cmath")
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
@@ -998,6 +999,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     f"Expected first argument to be callable, got {type(fns[0])}"
                 )
             return _register
+
+        def as_python_device(device: VariableTracker, /) -> Any:
+            """Preserve CooR's indexless device when unwrapping device arguments."""
+            from .tensor import CurrentDeviceVariable
+
+            if isinstance(device, CurrentDeviceVariable):
+                return device.value
+            return device.as_python_constant()
 
         from torch.backends.cuda import SDPAParams
 
@@ -2690,9 +2699,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = kwargs["device"].as_python_constant()
+                    device = as_python_device(kwargs["device"])
                 elif args:
-                    device = args[0].as_python_constant()
+                    device = as_python_device(args[0])
                 else:
                     device = None
                 module = torch.get_device_module(device)
@@ -2742,9 +2751,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = torch.device(kwargs["device"].as_python_constant())
+                    device = torch.device(as_python_device(kwargs["device"]))
                 elif args:
-                    device = torch.device(args[0].as_python_constant())
+                    device = torch.device(as_python_device(args[0]))
                 else:
                     device = None
 
@@ -2757,6 +2766,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
+                        current_device=stream_var.current_device,
                         source=stream_var.source,
                     )
                 return stream_var
@@ -2791,9 +2801,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             device = None
             if kwargs and "device" in kwargs:
-                device = torch.device(kwargs["device"].as_python_constant())
+                device = torch.device(as_python_device(kwargs["device"]))
             elif args:
-                device = torch.device(args[0].as_python_constant())
+                device = torch.device(as_python_device(args[0]))
 
             if device is None:
                 device_type = _synchronize_fn_to_device_type.get(self.value)
@@ -2814,7 +2824,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device.index),
                 {},
             )
             return ConstantVariable.create(None)

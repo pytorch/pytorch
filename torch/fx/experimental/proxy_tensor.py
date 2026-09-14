@@ -1258,6 +1258,29 @@ def _coor_current_device_fake() -> torch.device:
     return _coor_current_device()
 
 
+# An int has no index-less form meaning "this rank's device", so device-index
+# observations stay unknown until the artifact runs. The fake implementation returns
+# an unbacked symbol rather than the compiling rank's index.
+torch.library.define(
+    "coor::current_device_index",
+    "() -> SymInt",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+
+
+@torch.library.impl("coor::current_device_index", "CompositeExplicitAutograd")
+def _coor_current_device_index_impl() -> int:
+    return torch.accelerator.current_device_index()
+
+
+@torch.library.register_fake("coor::current_device_index")
+def _coor_current_device_index_fake() -> torch.SymInt:
+    ctx = torch.library.get_ctx()
+    # An accelerator index is non-negative; new_dynamic_size() carries that bound, so
+    # downstream reasoning is not stuck on a symbol that might be negative.
+    return ctx.new_dynamic_size()
+
+
 def _coor_check_current_accelerator(
     device: torch.device, cur: torch.device | None
 ) -> None:

@@ -9,8 +9,8 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.utils import (
-    _check_alias_and_mutation,
     autograd_not_implemented,
+    potential_input_alias_or_mutation,
     reenter_make_fx,
     register_fake,
     unique_graph_id,
@@ -29,19 +29,14 @@ class FlexGemmOpSpec:
     name: str
     mat1_index: int
     mat2_index: int
-    input_ndim: int
     bias_index: int | None = None
 
 
 FLEX_GEMM_OP_SPECS = {
-    torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1, input_ndim=2),
-    torch.ops.aten.addmm.default: FlexGemmOpSpec(
-        "addmm", 1, 2, input_ndim=2, bias_index=0
-    ),
-    torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1, input_ndim=3),
-    torch.ops.aten.baddbmm.default: FlexGemmOpSpec(
-        "baddbmm", 1, 2, input_ndim=3, bias_index=0
-    ),
+    torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1),
+    torch.ops.aten.addmm.default: FlexGemmOpSpec("addmm", 1, 2, bias_index=0),
+    torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1),
+    torch.ops.aten.baddbmm.default: FlexGemmOpSpec("baddbmm", 1, 2, bias_index=0),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
@@ -59,10 +54,10 @@ _PRESERVE_FLEX_GEMM_GEMM_OP = "preserve_flex_gemm_gemm_op"
 
 # Note [Preserving FlexGEMM body GEMMs]
 # FlexGEMM lowering materializes the captured epilogue by finding the body GEMM
-# node whose target matches the HOP-carried gemm_op. Generic graph passes can
-# rewrite batch-size-1 bmm into mm(...).unsqueeze(0), which removes the matching
-# node. This body pass tags FlexGEMM GEMM nodes so bmm_to_mm in joint_graph.py
-# skips them.
+# node whose target matches the HOP-carried gemm_op. Generic graph passes must
+# not replace that node with a different GEMM plus wrappers or padded operands.
+# This body pass tags the node so joint- and post-grad rewrites keep the captured
+# GEMM contract intact until FlexGEMM lowering owns the graph.
 
 
 def mark_flex_gemm_body_gemm_node(
@@ -229,6 +224,21 @@ def _(input_matrix: torch.Tensor) -> torch.Tensor:
     )
 
 
+def check_flex_gemm_alias_and_mutation(
+    body_fn: Callable[..., Any],
+    inputs: tuple[Any, ...],
+    pre_dispatch: bool,
+) -> None:
+    """Allow aliased inputs while rejecting output aliases and mutation."""
+    (_, input_output_aliases, output_aliases), mutations = (
+        potential_input_alias_or_mutation(body_fn, inputs, pre_dispatch)
+    )
+    if input_output_aliases or output_aliases:
+        raise RuntimeError("flex_gemm might be aliasing an input and output")
+    if mutations:
+        raise RuntimeError("flex_gemm might be modifying an input")
+
+
 def apply_flex_gemm_body_graph_passes(
     body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
 ) -> None:
@@ -342,10 +352,9 @@ def flex_gemm_fake_tensor_mode(gemm_op, body_fn, args, kwargs, kernel_options):
 def flex_gemm_functionalize(ctx, gemm_op, body_fn, args, kwargs, kernel_options):
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
-        _check_alias_and_mutation(
+        check_flex_gemm_alias_and_mutation(
             body_fn,
             unwrapped_args,
-            "flex_gemm",
             hasattr(ctx, "mode") and ctx.mode.pre_dispatch,
         )
         return ctx.wrap_tensors(
@@ -375,7 +384,8 @@ def flex_gemm_proxy_torch_dispatch_mode(
                 kernel_options, proxy_mode.decomposition_table
             ),
         )(*flat_args)
-        apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
+        if kernel_options.get("backend") == "QUACK":
+            apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(
