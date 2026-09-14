@@ -21,11 +21,14 @@ registration.
 
 Required exports (module or declaration object):
 
-  ATEN_OP: str                name of a STRUCTURED op: a base name
+  ATEN_OP: str                name of a structured op: a base name
                               ("topk") when the base resolves to exactly
                               one structured group, or overload-qualified
                               ("gt.Tensor", "all.dim") when overloads
-                              have separate structured groups. decl_id()
+                              have separate structured groups. With
+                              STRUCTURED=False, the exact name of an
+                              unstructured functional overload returning
+                              fresh tensors. decl_id()
                               (dots -> underscores) names the stub, the
                               generated kernel, and the covers op.
   DISPATCH_KEY: str           e.g. "CUDA"
@@ -49,8 +52,11 @@ Required exports (module or declaration object):
                               it served by THIS point? First match wins.
   cpp_launch(spec, launch_fn) -> str
                               C++ invoking this point's kernel via
-                              launch_fn(...); no allocation, no fallback
-                              (the chain's return false IS the fallback)
+                              launch_fn(...). Structured outputs are
+                              already allocated. With STRUCTURED=False,
+                              allocate outputs and assign aot_result
+                              (the schema's return type). No fallback:
+                              the chain's return false IS the fallback.
 
 Emitted C++ (any of the cpp_* exports) sees ATen/core/Tensor.h, not
 ATen/ATen.h -- Tensor methods all work, but calling an at:: FACTORY
@@ -60,6 +66,13 @@ loud "'empty' is not a member of 'at'" at build time, not a silent one.
 
 Optional exports:
 
+  STRUCTURED: bool           True by default. False opts a functional
+                              unstructured operator into a hook before
+                              its backend implementation. The declaration
+                              must validate inputs, allocate outputs, and
+                              assign aot_result only when it handles the
+                              call. The device guard and device checks
+                              have already run; meta() has not.
   ARCHS: tuple[str, ...]      architectures the op's kernels are valid
                               on (sm strings). Defaults to all sm90+.
                               Export skips arches outside it; codegen
@@ -102,7 +115,8 @@ generated stub is::
 in the op's structured impl scope (outputs allocated by meta(), device
 guard held). Dispatch conditions are evaluated ASSUMING the prelude
 passed; locals the prelude declares are in scope for dispatch and
-launch.
+launch. For unstructured functions the signature is the dispatcher
+signature followed by a reference to aot_result.
 """
 
 from torchgen.native_aot_decl import (
