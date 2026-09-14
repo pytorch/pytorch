@@ -110,7 +110,7 @@ class FusedTwoStage:
             None,
         ).launch(
             grid=[cute.ceil_div(mX.shape[0], const_expr(s1.rows_per_block)), 1, 1],
-            block=[const_expr(s1.nt), 1, 1],
+            block=[const_expr(s1.threads_per_block), 1, 1],
             stream=stream,
         )
         # Stage 2 uses one block per output row. Runtime grid and geometry let one
@@ -233,9 +233,11 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
 
     # Runtime rolled-loop length lets one stage-1 kernel serve a vector class, so omit N.
     cfg = _rt.row_config(s, elsize * 8)
-    tpr = max(_rt.WARP, cfg.tpr)
-    nt = max(tpr, cfg.nt)
-    nt -= nt % tpr  # rows_per_block must be whole
+    threads_per_row = max(_rt.WARP, cfg.threads_per_row)
+    threads_per_block = max(threads_per_row, cfg.threads_per_block)
+    threads_per_block -= (
+        threads_per_block % threads_per_row
+    )  # rows_per_block must be whole
     unroll = 16 if svec == 1 else 4  # scalar sub-rows want more loads in flight
     pkey = (
         "xcta",
@@ -243,15 +245,15 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
         x.dtype,
         out_dtypes,
         svec,
-        tpr,
-        nt,
+        threads_per_row,
+        threads_per_block,
         unroll,
         block,
         str(device),
     )
     align = svec * elsize
-    # Stage-1 rolled-loop counts: vector groups, then waves of tpr.
-    s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // tpr)))
+    # Stage-1 rolled-loop counts: vector groups, then waves of threads_per_row.
+    s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // threads_per_row)))
 
     def _make_s1():
         return tile.TileReduce(
@@ -259,8 +261,8 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
             torch2cute[x.dtype],
             "row",
             s,
-            tpr=tpr,
-            nt=nt,
+            threads_per_row=threads_per_row,
+            threads_per_block=threads_per_block,
             nouts=nouts,
             final=False,
             unroll=unroll,
