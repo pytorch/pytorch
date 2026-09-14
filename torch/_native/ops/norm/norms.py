@@ -13,6 +13,8 @@ import math
 import torch
 from torch._native.instrumentation import instrument_cutedsl_compile
 
+from .rmsnorm_launch import backward_launch, NORMALIZED_SIZES
+
 
 # quack's rmsnorm compile fns are vendored, so we can't decorate them in
 # place. Wrap them once at the call site instead -- they're @jit_cache so
@@ -68,13 +70,10 @@ def _const_data_ptr(t: torch.Tensor) -> int:
 def _read_only(t: torch.Tensor | None):  # type: ignore[no-untyped-def]
     if t is None:
         return None
-    from cutlass.cute.runtime import from_dlpack
-
     from torch.utils.dlpack import ReadOnlyTensorWrapper
 
     with torch._C.DisableTorchFunctionSubclass():
-        t = ReadOnlyTensorWrapper(t)
-    return from_dlpack(t, enable_tvm_ffi=True)
+        return ReadOnlyTensorWrapper(t)
 
 
 def _reshape_2d(t: torch.Tensor, M: int, N: int) -> torch.Tensor:
@@ -107,6 +106,23 @@ def _flatten_rstd(t: torch.Tensor, M: int) -> torch.Tensor:
     return t.reshape(M).contiguous()
 
 
+def _uses_shared_kernel(x: torch.Tensor, weight: torch.Tensor | None, n: int) -> bool:
+    props = torch.cuda.get_device_properties(x.device)
+    return (
+        n in NORMALIZED_SIZES
+        and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and not x.is_neg()
+        and not x.is_conj()
+        and (props.major, props.minor) in ((9, 0), (10, 0))
+        and (
+            weight is None
+            or (
+                weight.dtype == x.dtype and not weight.is_neg() and not weight.is_conj()
+            )
+        )
+    )
+
+
 def quack_rmsnorm_fwd(
     input: torch.Tensor,
     weight: torch.Tensor | None,
@@ -121,11 +137,28 @@ def quack_rmsnorm_fwd(
     x = _reshape_2d(input, M, N)
 
     out = torch.empty_like(x)
-    rstd = torch.empty(M, device=x.device, dtype=torch.float32)
 
     if weight is not None:
         weight = _aligned_weight(weight, N)
 
+    if _uses_shared_kernel(x, weight, N):
+        from .rmsnorm_kernels import compile_rmsnorm_forward, stream
+
+        rstd = torch.empty(M, device=x.device, dtype=torch.float32)
+        props = torch.cuda.get_device_properties(x.device)
+        arch = (props.major, props.minor)
+        kernel = compile_rmsnorm_forward(
+            str(x.dtype).removeprefix("torch."), N, weight is not None, arch
+        )
+        kernel(
+            _read_only(x), _read_only(weight), out, rstd, M, eps, stream(x.device.index)
+        )
+        stat_shape = list(input_shape[: -len(normalized_shape)]) + [1] * len(
+            normalized_shape
+        )
+        return out.view(input_shape), rstd.view(stat_shape)
+
+    rstd = torch.empty(M, device=x.device, dtype=torch.float32)
     dtype = _torch2cute(x)
     out_dtype = _torch2cute(out)
     weight_dtype = _torch2cute(weight)
@@ -166,16 +199,58 @@ def quack_rmsnorm_bwd(
     M = input.numel() // N
     x = _reshape_2d(input, M, N)
     dout = _reshape_2d(grad_out, M, N)
-    rstd_flat = _flatten_rstd(rstd, M)
-
-    dx = torch.empty_like(x)
-    from torch._vendor.quack.rmsnorm_config import get_sm_count
-
-    sm_count = get_sm_count(N, x.device)
 
     # quack's kernel requires a contiguous 1-D weight with matching dtype.
     if weight is not None:
         weight = _aligned_weight(weight, N)
+
+    dx = torch.empty_like(x)
+    if (
+        _uses_shared_kernel(x, weight, N)
+        and dout.dtype == x.dtype
+        and not dout.is_neg()
+        and not dout.is_conj()
+    ):
+        from .rmsnorm_kernels import compile_rmsnorm_backward, stream
+
+        rstd_flat = _flatten_rstd(rstd, M)
+        compute_dw = weight is not None and dw_mask
+        props = torch.cuda.get_device_properties(x.device)
+        blocks = backward_launch(N, compute_dw).blocks(M, props.multi_processor_count)
+        partial = (
+            torch.empty(blocks, N, device=x.device, dtype=torch.float32)
+            if compute_dw
+            else None
+        )
+        dw = torch.empty(N, device=x.device, dtype=x.dtype) if compute_dw else None
+        kernel = compile_rmsnorm_backward(
+            str(x.dtype).removeprefix("torch."),
+            N,
+            weight is not None,
+            compute_dw,
+            (props.major, props.minor),
+        )
+        kernel(
+            _read_only(x),
+            _read_only(weight),
+            _read_only(dout),
+            _read_only(rstd_flat),
+            dx,
+            partial,
+            dw,
+            M,
+            blocks,
+            stream(x.device.index),
+        )
+        dx = dx.view(input.shape)
+        if dw is not None:
+            dw = dw.view(normalized_shape)
+        return dx, dw
+
+    from torch._vendor.quack.rmsnorm_config import get_sm_count
+
+    rstd_flat = _flatten_rstd(rstd, M)
+    sm_count = get_sm_count(N, x.device)
 
     # quack treats `weight_dtype` (whether weight is present in the kernel)
     # and `has_dw_partial` (whether to accumulate dw) as independent flags.
