@@ -1599,7 +1599,8 @@ class SideEffects:
 
 @register_side_effect_replay_handler(
     name="list_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable),
+    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable)
+    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
     priority=90,
 )
 def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
