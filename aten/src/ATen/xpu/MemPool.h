@@ -14,7 +14,8 @@ struct TORCH_XPU_API MemPool {
       std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator> allocator =
           nullptr,
       bool is_user_created = true,
-      bool use_on_oom = false);
+      bool use_on_oom = false,
+      bool no_split = false);
 
   C10_DISABLE_COPY_AND_ASSIGN(MemPool);
   MemPool(MemPool&&) = default;

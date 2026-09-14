@@ -3976,6 +3976,133 @@ class TestMemPool(TestCase):
                     "-- free was likely deferred as if under graph capture",
                 )
 
+    @serialTest()
+    def test_mempool_no_split(self):
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+
+        pool_split = torch.xpu.MemPool()
+        pool_no_split = torch.xpu.MemPool(no_split=True)
+
+        # 4 MB allocation: get_allocation_size(4 MB) returns a 20 MB segment
+        # because 4 MB < kMinLargeAlloc (10 MB).
+        #
+        # split pool : 20 MB segment is split → 4 MB allocated + 16 MB inactive.
+        # no_split pool: 20 MB segment kept intact → single 20 MB allocated block.
+        _4mb = 1 * 1024 * 1024  # for int data type
+        with torch.xpu.use_mem_pool(pool_split):
+            a_split = torch.randn(_4mb, device="xpu")
+        with torch.xpu.use_mem_pool(pool_no_split):
+            a_no_split = torch.randn(_4mb, device="xpu")
+
+        # Second 4 MB allocation:
+        # split pool:   reuses the 16 MB inactive block, splits → 4 MB + 12 MB.
+        #               Final state: 1 segment, 3 blocks
+        #               [4 MB active, 4 MB active, 12 MB inactive]
+        # no_split pool: existing 20 MB block is still active; a new 20 MB segment
+        #               is allocated (no split allowed).
+        #               Final state: 2 segments, 1 block each
+        #               [20 MB active], [20 MB active]
+        with torch.xpu.use_mem_pool(pool_split):
+            b_split = torch.randn(_4mb, device="xpu")
+        with torch.xpu.use_mem_pool(pool_no_split):
+            b_no_split = torch.randn(_4mb, device="xpu")
+
+        snap_split = pool_split.snapshot()
+        snap_no_split = pool_no_split.snapshot()
+
+        # no_split pool needs a new segment per allocation → more segments
+        self.assertGreater(
+            len(snap_no_split),
+            len(snap_split),
+            f"Expected no_split pool to have more segments, "
+            f"but got {len(snap_no_split)} vs {len(snap_split)}",
+        )
+
+        # no_split pool: each segment must have exactly 1 block (no splitting occurred)
+        for seg in snap_no_split:
+            self.assertEqual(
+                len(seg["blocks"]),
+                1,
+                f"Expected 1 block per no_split segment, got {len(seg['blocks'])}",
+            )
+
+        # no_split pool: 2 total blocks (2 active, no inactive remainder)
+        # split pool: 3 total blocks (2 active + 1 inactive 12 MB remainder)
+        blocks_split = sum(len(seg["blocks"]) for seg in snap_split)
+        blocks_no_split = sum(len(seg["blocks"]) for seg in snap_no_split)
+        self.assertLess(
+            blocks_no_split,
+            blocks_split,
+            f"Expected no_split pool to have fewer total blocks, "
+            f"but got {blocks_no_split} vs {blocks_split}",
+        )
+
+    @serialTest()
+    def test_oom_mempool_with_limited_memory(self):
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+        pool_do_not_use = torch.xpu.MemPool()
+        pool_use = torch.xpu.MemPool(use_on_oom=True)
+
+        _1mb = 1 * 1024 * 1024 // 4  # for int data type
+        orig_fraction = torch.xpu.get_per_process_memory_fraction()
+
+        # pool_use [a] 40 mb
+        # pool_do_not_use [b] 40 mb
+        with torch.xpu.use_mem_pool(pool_do_not_use):
+            a = torch.randn(40 * _1mb, device="xpu")
+        with torch.xpu.use_mem_pool(pool_use):
+            b = torch.randn(40 * _1mb, device="xpu")
+        a_dataptr = a.data_ptr()
+        b_dataptr = b.data_ptr()
+
+        torch.xpu.memory.set_per_process_memory_fraction(1e-9)
+        with self.assertRaises(torch.OutOfMemoryError):
+            # out of memory
+            c = torch.randn(40 * _1mb, device="xpu")
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
+        del a, b
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [c] 40 mb
+        # c should not oom and instead can use pool_use as fallback
+        c = torch.randn(30 * _1mb, device="xpu")
+        c_dataptr = c.data_ptr()
+
+        with self.assertRaises(torch.OutOfMemoryError):
+            # out of memory since can't use pool_do_not_use
+            d = torch.randn(30 * _1mb, device="xpu")
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
+        del c
+
+        # expect that we used same memory address for both a and c
+        self.assertEqual(b_dataptr, c_dataptr)
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [e] 40 mb
+        with torch.xpu.use_mem_pool(pool_use):
+            # make sure we can still use pool_use as intended after c is deleted
+            e = torch.randn(20 * _1mb, device="xpu")
+
+        e_dataptr = e.data_ptr()
+        self.assertEqual(e_dataptr, c_dataptr)
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
+        del e
+
+        # pool's destructor calls emptyCache()
+        del pool_use, pool_do_not_use
+
+        torch.xpu.memory.set_per_process_memory_fraction(orig_fraction)
+
 
 instantiate_parametrized_tests(TestXpu)
 instantiate_device_type_tests(
