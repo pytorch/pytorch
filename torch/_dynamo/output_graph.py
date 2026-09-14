@@ -102,7 +102,7 @@ from .bytecode_transformation import (
     create_swap,
     Instruction,
     make_compiled_fn_name,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .code_context import code_context
 from .codegen import PyCodegen
@@ -466,6 +466,8 @@ class OutputGraphGuardsState:
     skip_guards_check: bool = False
     export_constraints: bool = False
     name_of_builtins_dict_key_in_fglobals: str | None = None
+    # None means no relative-device decisions were recorded; rebuild exact guards.
+    tensor_device_index_is_current: dict[Source, bool] | None = None
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -497,6 +499,7 @@ class OutputGraphGuardsState:
             _guards=self.guards,
             _aotautograd_guards=self.aotautograd_guards,
             skip_guards_check=self.skip_guards_check,
+            tensor_device_index_is_current=self.tensor_device_index_is_current,
         )
 
 
@@ -643,6 +646,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.skip_guards_check,
             output_graph_guards_state.export_constraints,
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
+            getattr(output_graph_guards_state, "tensor_device_index_is_current", None),
         )
 
         self.import_sources = import_sources or {}
@@ -731,6 +735,7 @@ class OutputGraph(OutputGraphCommon):
             # These are set by @property instead, just initialize them as blank
             _guards=torch._guards.GuardsSet(),
             _aotautograd_guards=[],
+            tensor_device_index_is_current={},
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -2604,7 +2609,7 @@ class OutputGraph(OutputGraphCommon):
                 **kwargs,
             },
         )
-        self.package.bypass_current_entry()
+        self.package.bypass_current_compile()
         self.package = None
 
     def get_graph_sizes_structured(self) -> dict[str, list[int | str]]:
@@ -3598,8 +3603,7 @@ class OutputGraph(OutputGraphCommon):
 
         Returns the name of the newly installed global.
         """
-        # NB: unique_id is unique, even across torch.compile instances
-        name = unique_id(prefix)
+        name = unique_id_unbound_in(prefix, self.global_scope)
         self.install_global_unsafe(name, value)
         return name
 
@@ -3712,6 +3716,12 @@ class DynamoTracerOutput:
     def _cleanup_output_graph(self) -> None:
         output_graph = self.output_graph_for_cleanup
         if output_graph:
+            # Failed tracing attempts never transfer these hooks to
+            # CleanupManager, so run them here to remove installed globals.
+            for cleanup in reversed(output_graph.cleanups):
+                cleanup()
+            output_graph.cleanups.clear()
+
             # Lazy import to avoid a circular import (convert_frame imports
             # output_graph at module load time).
             from .convert_frame import _clear_fake_mode_weakrefs
