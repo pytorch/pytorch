@@ -412,13 +412,19 @@ class FSDPModule:
 
     @_dynamo_disable
     def finalize_gradient_accumulation(self) -> None:
-        """Finish a deferred gradient reduction on the calling thread.
+        """Finalize an accumulation window on the calling thread.
 
-        Call this after backward passes run with :meth:`set_is_last_backward`,
-        :meth:`set_reshard_after_backward`, and gradient synchronization
-        disabled. This method temporarily enables gradient synchronization and
-        resharding, reduces the accumulated gradients into sharded ``.grad``,
-        and restores those settings.
+        Call this once after all backward passes in an accumulation window when
+        :meth:`set_is_last_backward` was set to ``False``. To defer gradient
+        reduction until this call, also set :meth:`set_requires_gradient_sync`
+        to ``False``. To retain unsharded parameters until this call, set
+        :meth:`set_reshard_after_backward` to ``False``.
+
+        This method is not needed when the final backward runs with
+        :meth:`set_is_last_backward` set to ``True`` because FSDP finalizes
+        automatically. It temporarily enables gradient synchronization,
+        resharding, and last-backward handling, then restores their original
+        settings.
 
         The autograd final callback runs on the autograd thread, where its
         stream waits cannot be CUDA graph captured. This method runs the work

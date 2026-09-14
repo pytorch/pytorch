@@ -2554,13 +2554,19 @@ class TestAutograd(TestCase):
         view.register_hook(fn0)
         view2.register_hook(fn1)
         view.mul_(2)
-        # We need to explicitly trigger an update to view to update its grad_fn
-        view2.grad_fn
         view2.register_hook(fn2)
         (view + view2).sum().backward()
-        # The hooks originally registered to view are not fired, one must explicitly
-        # trigger an update to the view's grad_fn, and then register a new hook
+        # Hooks registered before the inplace operation are not fired, but registering
+        # a new hook refreshes the view's grad_fn and attaches it to the new node.
         self.assertEqual(count[0], 1)
+
+    def test_tensor_hooks_inplace_through_view_alias(self):
+        leaf = torch.ones(2, requires_grad=True)
+        view = leaf.clone().view(2)
+        view[:].add_(1)
+        view.register_hook(lambda grad: grad * 2)
+        view.sum().backward()
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
 
     def test_retain_grad_cycle(self):
         x = torch.ones(5, 5, requires_grad=True)
