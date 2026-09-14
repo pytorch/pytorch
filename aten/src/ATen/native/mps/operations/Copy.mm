@@ -188,6 +188,12 @@ static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const
     at::mps::getIMPSAllocator()->recordEvents({pinned});
     return {__builtin_bit_cast(id<MTLBuffer>, pinned), static_cast<NSUInteger>(byte_offset)};
   }
+  // A pinned tensor took the branch above and is backed by an allocator buffer a
+  // capture can reserve. These host pages are only borrowed by the wrapper below,
+  // so a capture that records this blit has to hold the storage itself or replay
+  // would touch freed memory. It releases it on the calling thread, avoiding the
+  // completion-thread/GIL problem that stops the deallocator from doing it.
+  getCurrentMPSStream()->captureRetainStorage(cpu_tensor.storage());
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   const void* host = static_cast<const char*>(cpu_tensor.storage().data()) + byte_offset;
   NSUInteger alignedLength = 0;
