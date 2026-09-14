@@ -35,6 +35,18 @@ class CaptureTracker {
     return active_captures_ != 0;
   }
   template <typename Predicate>
+  bool anyActiveCaptureForPool(MempoolId_t pool_id, Predicate&& predicate)
+      const {
+    for (const auto& [_, capture] : capture_tree_) {
+      if (capture.is_active && capture.mempool_id == pool_id &&
+          predicate(capture.primary_stream)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  template <typename Predicate>
   bool captureIsActive(CaptureId_t capture_id, Predicate&& predicate) const {
     auto capture_it = capture_tree_.find(capture_id);
     return capture_it != capture_tree_.end() && capture_it->second.is_active &&
@@ -173,7 +185,13 @@ class BlockManager {
   }
 
   size_t captureEnd(CaptureId_t capture_id) {
-    return capture_tracker_.captureEnd(capture_id);
+    const size_t invalid_capture_free_count =
+        capture_tracker_.captureEnd(capture_id);
+    capture_state_.erase(capture_id);
+    if (!hasActiveCaptures()) {
+      capture_state_.clear();
+    }
+    return invalid_capture_free_count;
   }
 
   bool hasActiveCaptures() const {
@@ -310,14 +328,23 @@ class BlockManager {
     executeDeferredBlocks(std::move(pending), ops);
   }
 
-  // Ends the graph-memory state associated with a pool-routing scope. This is
-  // intentionally separate from captureEnd(): existing allocator integration
-  // ends CUDA capture before it closes the matching routing scope.
+  // Ends an allocation-routing scope. Conditional capture temporarily closes
+  // the parent's routing scope while its CUDA capture remains active. In that
+  // case, preserve traversal state and deferred blocks. A capture may retain
+  // several pools, so pool cleanup stays conservative until no registered
+  // capture remains active.
   template <typename AllocatorOps>
   void endCapturePool(
       MempoolId_t pool_id,
       DeferredFreePolicy policy,
       AllocatorOps&& ops) {
+    if (capture_tracker_.anyActiveCaptureForPool(
+            pool_id, [this](cudaStream_t stream) {
+              return capture_dag_.captureInfo(stream).status !=
+                  cudaStreamCaptureStatusNone;
+            })) {
+      return;
+    }
     for (auto* block : deferred_blocks_) {
       const auto& deferred = *block_state_.at(block).deferred;
       if (deferred.pool_id == pool_id &&
@@ -333,19 +360,30 @@ class BlockManager {
         return;
       }
     }
+    bool pool_has_active_capture = false;
     for (auto capture_it = capture_state_.begin();
          capture_it != capture_state_.end();) {
       if (capture_it->second.pool_id != pool_id) {
         ++capture_it;
         continue;
       }
+      bool capture_is_active = false;
       for (const auto& [stream, _] : capture_it->second.traversal_state) {
-        TORCH_INTERNAL_ASSERT(
-            capture_dag_.captureInfo(stream).status ==
-                cudaStreamCaptureStatusNone,
-            "This stream should not be capturing when the capture is ended");
+        if (capture_dag_.captureInfo(stream).status !=
+            cudaStreamCaptureStatusNone) {
+          capture_is_active = true;
+          break;
+        }
       }
-      capture_it = capture_state_.erase(capture_it);
+      if (capture_is_active) {
+        pool_has_active_capture = true;
+        ++capture_it;
+      } else {
+        capture_it = capture_state_.erase(capture_it);
+      }
+    }
+    if (pool_has_active_capture) {
+      return;
     }
 
     if (policy == DeferredFreePolicy::DEFER_UNTIL_NO_ACTIVE_CAPTURE) {
