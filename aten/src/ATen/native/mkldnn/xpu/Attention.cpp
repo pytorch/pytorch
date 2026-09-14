@@ -335,9 +335,6 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       batch_size, num_head_q, seq_len_q, head_dim_v};
   alloc_with_matching_layout(query, output, output_shape);
   at::Tensor logsumexp, debug_attn_mask; // not supported
-  // rng not used
-  auto philox_seed = at::empty({}, at::dtype(at::kLong));
-  auto philox_offset = at::empty({}, at::dtype(at::kLong));
 
   at::native::onednn::sdpa(
       batch_size,
@@ -355,11 +352,11 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim_qk)),
       output,
       false,
-      logsumexp,
-      dropout_p,
-      philox_seed,
-      philox_offset);
+      logsumexp);
 
+  // rng not used
+  auto philox_seed = at::empty({}, at::dtype(at::kLong));
+  auto philox_offset = at::empty({}, at::dtype(at::kLong));
   return std::make_tuple(
       std::move(output),
       std::move(logsumexp),

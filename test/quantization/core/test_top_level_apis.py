@@ -2,11 +2,10 @@
 
 import torch
 import torch.ao.quantization
-from torch.testing._internal.common_utils import HardwareClassification, TestCase
+from torch.testing._internal.common_utils import TestCase
 
 
 class TestDefaultObservers(TestCase):
-    hw_classification = HardwareClassification.GENERIC
     observers = [
         "default_affine_fixed_qparams_observer",
         "default_debug_observer",
@@ -63,8 +62,6 @@ class TestDefaultObservers(TestCase):
 
 
 class TestQConfig(TestCase):
-
-    hw_classification = HardwareClassification.GENERIC
 
     REDUCE_RANGE_DICT = {
         'fbgemm': (True, False),
