@@ -1048,7 +1048,7 @@ ldl_diagonal_panel_fused_kernel(
 
       auto numel = curr_nb * curr_dim;
 
-      if (pivot_rank = 1) {
+      if (pivot_rank == 1) {
         // Update B[:, :curr_nb]
         for (int linidx = tid; linidx < numel; linidx += BS) {
           auto r = linidx % curr_dim;
