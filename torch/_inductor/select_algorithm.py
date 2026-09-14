@@ -4485,8 +4485,8 @@ class AlgorithmSelectorCache(PersistentCache):
         try:
             return benchmark_fn(choices)
         finally:
-            # Safety net for failures before individual BenchmarkRequest cleanup
-            # can run; request-level cleanup remains the authoritative owner cleanup.
+            # Sole owner of evicting the module generate_and_load cached: benchmark
+            # requests load their own uncached copies and never touch PyCodeCache.
             evict_paths = OrderedSet(
                 [
                     path
@@ -5300,8 +5300,8 @@ class AlgorithmSelectorCache(PersistentCache):
             bmreq = _benchmark_request_for_choice(choice)
             cleanup_run_fn = getattr(bmreq, "cleanup_run_fn", None)
             if cleanup_run_fn is not None:
-                # In-process autotuning owns the loaded benchmark module, so clean it
-                # immediately after each choice. The outer benchmark cleanup is a fallback.
+                # Release each choice's own benchmark module as soon as it is done
+                # rather than holding every one of them until autotuning finishes.
                 cleanup_run_fn()
 
     @classmethod

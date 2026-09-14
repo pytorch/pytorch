@@ -878,6 +878,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             self.module_cache_key,
             self.module_path,
             set_sys_modules=False,
+            cache_module=False,
         )
         self._benchmark_module = mod
         autotuning_log.debug(
@@ -957,14 +958,12 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         return run_fn
 
     def cleanup_run_fn(self) -> None:
-        # Authoritative cleanup for one benchmark module load. Higher-level
-        # finally blocks may call this again as safety nets, so keep it idempotent.
+        # Releases this request's own module, which is loaded uncached and never
+        # enters PyCodeCache; evicting the module generate_and_load cached is the
+        # caller's job. Higher-level finally blocks may call this again, so keep
+        # it idempotent.
         mod = self._benchmark_module
         self._benchmark_module = None
-
-        cached_mod = PyCodeCache.modules_no_attr.pop(self.module_path, None)
-        if mod is None:
-            mod = cached_mod
 
         if mod is not None:
             kernel = getattr(mod, self.kernel_name, None)
@@ -993,19 +992,13 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                     if close is not None:
                         close()
 
-        PyCodeCache.modules[:] = [
-            module
-            for module in PyCodeCache.modules
-            if getattr(module, "__file__", None) != self.module_path
-        ]
-        PyCodeCache.linemaps.pop(self.module_path, None)
-
     def precompile(self):
         try:
             mod = PyCodeCache.load_by_key_path(
                 self.module_cache_key,
                 self.module_path,
                 set_sys_modules=False,
+                cache_module=False,
             )
             self._benchmark_module = mod
             kernel = getattr(mod, self.kernel_name)
