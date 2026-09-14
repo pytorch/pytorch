@@ -2057,6 +2057,12 @@ class FakeTensorMode(TorchDispatchMode):
                 self._prep_args_for_hash(result, arg, state, id_hashed_objects)
             elif isinstance(arg, types.FunctionType):
                 raise _BypassDispatchCache("function argument")
+            elif isinstance(arg, torch.ScriptObject):
+                # TorchScript custom classes are opaque to the cache: they expose no
+                # metadata it can reason about, and __eq__ is optional for them, so a
+                # key holding one raises NotImplementedError when two keys collide in
+                # the same bucket and __eq__ compares the key tuples.
+                raise _BypassDispatchCache("script object")
             elif isinstance(arg, torch.fx.GraphModule):
                 # This is used for invoke_subgraph where id(graph_module) allows
                 # us to cache fake outputs
