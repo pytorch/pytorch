@@ -5,7 +5,21 @@
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
-#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
+#if defined(__aarch64__)
+
+// Define this specialization to match c10::convert, as defined in TypeCast.h
+template <>
+inline void convert(
+    const float* __restrict src,
+    uint8_t* __restrict dst,
+    int64_t n) {
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dst[i] = static_cast<uint8_t>(static_cast<int64_t>(src[i]));
+  }
+}
+
+#if !defined(CPU_CAPABILITY_SVE256)
 
 // Enable auto-vectorization for clang-17+
 // GCC-12 has a bug: gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
@@ -102,7 +116,6 @@ CONVERT_TEMPLATE(int64_t, int64_t)
 CONVERT_TEMPLATE(int64_t, float)
 CONVERT_TEMPLATE(int64_t, double)
 CONVERT_TO_BOOL_TEMPLATE(int64_t)
-CONVERT_TEMPLATE(float, uint8_t)
 CONVERT_TEMPLATE(float, int8_t)
 CONVERT_TEMPLATE(float, int16_t)
 CONVERT_TEMPLATE(float, int32_t)
@@ -341,6 +354,59 @@ struct VecConvert<
   }
 };
 
+template <int src_n>
+inline uint8x16_t convert_float_to_uint8(const VectorizedN<float, src_n>& src) {
+  // Widening to double before truncating puts the saturation point at the
+  // int64_t bounds rather than the int32_t ones, so every input that is not
+  // astronomically large contributes its true low byte, as the scalar
+  // float -> int64_t -> uint8_t narrowing in c10::convert does. Converting via
+  // int32_t instead would be cheaper but would report 0xff rather than the
+  // true low byte across [2^31, 2^63), where FCVTZS saturates.
+  const auto lo_i64 = [](const float32x4_t f) {
+    return vcvtq_s64_f64(vcvt_f64_f32(vget_low_f32(f)));
+  };
+  const auto hi_i64 = [](const float32x4_t f) {
+    return vcvtq_s64_f64(vcvt_high_f64_f32(f));
+  };
+  // The eight indices past the 64-byte table are out of range and read as
+  // zero, so only the low half of the result carries bytes.
+  const auto low_bytes =
+      [](int64x2_t a, int64x2_t b, int64x2_t c, int64x2_t d) {
+        const uint8x16x4_t table = {
+            vreinterpretq_u8_s64(a),
+            vreinterpretq_u8_s64(b),
+            vreinterpretq_u8_s64(c),
+            vreinterpretq_u8_s64(d)};
+        const uint8x16_t low_byte_of_each_i64 = {
+            0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120};
+        return vqtbl4q_u8(table, low_byte_of_each_i64);
+      };
+
+  // Lanes past the source are zeroed, matching the VectorizedN::loadu(buf,
+  // count) that the generic fallback ends with.
+  if constexpr (src_n == 4) {
+    return vcombine_u8(
+        vget_low_u8(low_bytes(
+            lo_i64(src[0]), hi_i64(src[0]), lo_i64(src[1]), hi_i64(src[1]))),
+        vget_low_u8(low_bytes(
+            lo_i64(src[2]), hi_i64(src[2]), lo_i64(src[3]), hi_i64(src[3]))));
+  } else if constexpr (src_n >= 2) {
+    return low_bytes(
+        lo_i64(src[0]), hi_i64(src[0]), lo_i64(src[1]), hi_i64(src[1]));
+  } else {
+    const int64x2_t zero = vdupq_n_s64(0);
+    return low_bytes(lo_i64(src[0]), hi_i64(src[0]), zero, zero);
+  }
+}
+
+template <int src_n>
+struct VecConvert<uint8_t, 1, float, src_n> {
+  static inline VectorizedN<uint8_t, 1> apply(
+      const VectorizedN<float, src_n>& src) {
+    return Vectorized<uint8_t>(convert_float_to_uint8(src));
+  }
+};
+
 template <>
 struct VecConvert<float, 2, BFloat16, 1> {
   static inline VectorizedN<float, 2> apply(
@@ -394,7 +460,7 @@ struct VecConvert<Half, 1, float, 2> {
 };
 
 #endif // !defined(C10_MOBILE)
-
-#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+#endif // !defined(CPU_CAPABILITY_SVE256)
+#endif // defined(__aarch64__)
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
