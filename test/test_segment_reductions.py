@@ -8,6 +8,8 @@ import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
+    dtypesIfMPS,
+    onlyMPS,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -19,6 +21,7 @@ from torch.testing._internal.common_utils import (
 
 
 reductions = ["max", "mean", "min", "sum", "prod"]
+mps_dtypes = tuple(product((torch.half, torch.bfloat16, torch.float), (torch.int, torch.int64)))
 
 
 def get_default_value(initial_value, reduction):
@@ -125,6 +128,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*mps_dtypes)
     def test_simple_1d(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [1, 2, 3, 0]
@@ -182,6 +186,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*mps_dtypes)
     def test_simple_zero_length(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [0, 0]
@@ -239,6 +244,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*mps_dtypes)
     def test_multi_d_simple(self, device, dtypes):
         val_dtype, _ = dtypes
         axis = 0
@@ -368,6 +374,7 @@ class TestSegmentReductions(TestCase):
         )
     )
     @parametrize("reduce", ['sum', 'prod', 'min', 'max', 'mean'])
+    @dtypesIfMPS(*mps_dtypes)
     def test_pytorch_scatter_test_cases(self, device, dtypes, reduce):
         val_dtype, length_dtype = dtypes
         # zero-length segments are filled with reduction inits contrary to pytorch_scatter.
@@ -489,6 +496,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*mps_dtypes)
     def test_multi_d(self, device, dtypes):
         val_dtype, _ = dtypes
         axis = 0
@@ -562,17 +570,211 @@ class TestSegmentReductions(TestCase):
         # test for error on 1-D lengths
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(data, 'sum', lengths=lengths, axis=0, unsafe=False)
+            if torch.device(device).type == "mps":
+                torch.mps.synchronize()
 
         # test for error on multi-D lengths
         nd_lengths = torch.tensor([[0, 3, 3, 0], [2, 3, 0, 0]], dtype=length_type, device=device)
         nd_data = torch.arange(12, dtype=torch.float, device=device).reshape(2, 6)
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
+            if torch.device(device).type == "mps":
+                torch.mps.synchronize()
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce", reductions)
+    @parametrize("mode", ["lengths", "offsets"])
+    @parametrize("initial", [None, 0., 2.])
+    @parametrize("inner", [1, 7])
+    def test_noncontiguous_forward_backward(self, device, dtype, reduce, mode, initial, inner):
+        source = torch.randint(1, 3, (2, inner, 12)).to(dtype)
+        source[0, :, 1] = 0
+        source[1, :, 3] = float("nan")
+        data_cpu = source[..., 1::2].transpose(1, 2).detach().requires_grad_()
+        data = source.to(device)[..., 1::2].transpose(1, 2).detach().requires_grad_()
+        lengths = torch.tensor([[0, 2, 1, 3], [3, 0, 2, 1]], dtype=torch.int32)
+        metadata = lengths
+        if mode == "offsets":
+            metadata = torch.cat((lengths.new_zeros(2, 1), lengths), -1).cumsum(-1)
+        storage = torch.zeros((*metadata.shape[:-1], metadata.size(-1) * 2), dtype=metadata.dtype)
+        storage[..., ::2] = metadata
+        kwargs = dict(axis=-2, initial=initial)
+        expected = torch.segment_reduce(data_cpu, reduce, **{mode: storage[..., ::2]}, **kwargs)
+        actual = torch.segment_reduce(data, reduce, **{mode: storage.to(device)[..., ::2]}, **kwargs)
+        self.assertEqual(actual, expected, equal_nan=True)
+        grad = torch.randn(2, inner, 4, dtype=dtype).transpose(1, 2)
+        expected.backward(grad)
+        actual.backward(grad.to(device))
+        self.assertEqual(data.grad, data_cpu.grad, equal_nan=True)
+
+    @dtypes(torch.float32)
+    @dtypesIfMPS(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce", reductions)
+    @parametrize("mode", ["lengths", "offsets"])
+    def test_long_segments(self, device, dtype, reduce, mode):
+        data = torch.ones(4099, dtype=dtype, device=device, requires_grad=True)
+        lengths = torch.tensor([2048, 0, 2051], device=device)
+        metadata = lengths
+        if mode == "offsets":
+            metadata = torch.tensor([0, 2048, 2048, 4099], device=device)
+        actual = torch.segment_reduce(data, reduce, **{mode: metadata})
+        identity = get_default_value(None, reduce)
+        values = [2048, identity, 2051] if reduce == "sum" else [1, identity, 1]
+        self.assertEqual(actual, torch.tensor(values, dtype=dtype), equal_nan=True)
+        actual.backward(torch.ones_like(actual))
+        expected_grad = torch.ones_like(data)
+        if reduce in ("mean", "min", "max"):
+            expected_grad[:2048] /= 2048
+            expected_grad[2048:] /= 2051
+        self.assertEqual(data.grad, expected_grad)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce", reductions)
+    def test_partial_offsets(self, device, dtype, reduce):
+        data_cpu = torch.tensor([99., 1., 2., 0., 4., 99.], dtype=dtype, requires_grad=True)
+        data = data_cpu.detach().to(device).requires_grad_()
+        offsets = torch.tensor([1, 3, 3, 5], dtype=torch.int64)
+        expected = torch.segment_reduce(data_cpu, reduce, offsets=offsets, initial=2.)
+        actual = torch.segment_reduce(data, reduce, offsets=offsets.to(device), initial=2.)
+        self.assertEqual(actual, expected)
+        expected.sum().backward()
+        actual.sum().backward()
+        self.assertEqual(data.grad, data_cpu.grad)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce", reductions)
+    @parametrize("initial", [None, 0., 2.])
+    @parametrize("special", [0., float("nan"), float("inf"), -float("inf")])
+    def test_batched_parallel_nonfinite(self, device, dtype, reduce, initial, special):
+        data_cpu = torch.ones(2, 259, dtype=dtype)
+        data_cpu[0, 1] = special
+        data_cpu[0, 2] = special
+        data_cpu[1, 2] = special
+        data_cpu.requires_grad_()
+        data = data_cpu.detach().to(device).requires_grad_()
+        offsets = torch.tensor([[1, 65, 65, 259], [0, 64, 201, 259]], dtype=torch.int32)
+        expected = torch.segment_reduce(data_cpu, reduce, offsets=offsets, axis=1, initial=initial)
+        actual = torch.segment_reduce(data, reduce, offsets=offsets.to(device), axis=1, initial=initial)
+        self.assertEqual(actual, expected, equal_nan=True)
+        grad = torch.tensor([[1., 0., -1.], [2., 0., -2.]], dtype=dtype)
+        expected.backward(grad)
+        actual.backward(grad.to(device))
+        self.assertEqual(data.grad, data_cpu.grad, equal_nan=True)
+
+    @dtypes(torch.float16)
+    def test_initial_overflow(self, device, dtype):
+        data = torch.ones(3, dtype=dtype, device=device)
+        lengths = torch.tensor([3], device=device)
+        with self.assertRaisesRegex(RuntimeError, "cannot be converted"):
+            torch.segment_reduce(data, "sum", lengths=lengths, initial=1e10)
+
+    @dtypes(torch.float32)
+    @dtypesIfMPS(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce", reductions)
+    @parametrize("inner", [1, 33])
+    def test_random_segments(self, device, dtype, reduce, inner):
+        data_cpu = (torch.randn(2, 259, inner) * 0.025 + 1).to(dtype)
+        offsets = torch.tensor([[0, 32, 36, 259], [0, 128, 129, 259]])
+        data = data_cpu.to(device).requires_grad_()
+        actual = torch.segment_reduce(data, reduce, offsets=offsets.to(device), axis=1, initial=.3)
+        # MPS uses float32 accumulation for low-precision inputs.
+        reference = data_cpu.float() if torch.device(device).type == "mps" else data_cpu
+        initial = torch.tensor(.3, dtype=dtype).item()
+        expected = torch.segment_reduce(reference, reduce, offsets=offsets, axis=1, initial=initial).to(dtype)
+        self.assertEqual(actual, expected)
+        grad = torch.randn_like(expected)
+        expected_grad = torch.ops.aten._segment_reduce_backward(
+            grad, actual.detach().cpu(), data_cpu, reduce, offsets=offsets, axis=1, initial=.3)
+        actual.backward(grad.to(device))
+        self.assertEqual(data.grad, expected_grad)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce", ["sum", "mean"])
+    def test_empty_segment_signed_initial(self, device, dtype, reduce):
+        data = torch.ones(128, dtype=dtype, device=device)
+        offsets = torch.tensor([0, 0, 128], device=device)
+        actual = torch.segment_reduce(data, reduce, offsets=offsets, initial=-0.)
+        self.assertEqual(actual[0], 0.)
+        self.assertTrue(torch.signbit(actual[0]).item())
+
+    @dtypes(torch.float32)
+    @dtypesIfMPS(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce", ["sum", "mean", "prod"])
+    def test_long_reduction_accumulator(self, device, dtype, reduce):
+        value = 1 + torch.finfo(dtype).eps if reduce == "prod" else 1.
+        data = torch.full((4096, 8), value, dtype=dtype, device=device)
+        lengths = torch.tensor([4096], device=device)
+        actual = torch.segment_reduce(data, reduce, lengths=lengths)
+        expected = getattr(data, reduce)(0, keepdim=True)
+        self.assertEqual(actual, expected)
+
+    @onlyMPS
+    @parametrize("data_dtype", [
+        torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+        torch.uint16, torch.uint32, torch.uint64, torch.complex64, torch.float8_e4m3fn,
+    ])
+    def test_unsupported_mps_data_dtype(self, device, data_dtype):
+        data = torch.ones(4).to(data_dtype).to(device)
+        offsets = torch.tensor([0, 2, 4], device=device)
+        with self.assertRaisesRegex(RuntimeError, "supports float32, float16 and bfloat16"):
+            torch.segment_reduce(data, "sum", offsets=offsets)
+
+    @onlyMPS
+    @parametrize("metadata_dtype", [
+        torch.bool, torch.uint8, torch.int8, torch.int16, torch.uint16, torch.uint32,
+        torch.uint64, torch.float16, torch.bfloat16, torch.float32,
+    ])
+    @parametrize("mode", ["lengths", "offsets"])
+    def test_unsupported_mps_metadata_dtype(self, device, metadata_dtype, mode):
+        data = torch.ones(4, device=device)
+        values = [2, 2] if mode == "lengths" else [0, 2, 4]
+        metadata = torch.tensor(values).to(metadata_dtype).to(device)
+        with self.assertRaisesRegex(RuntimeError, "must have int32 or int64 dtype"):
+            torch.segment_reduce(data, "sum", **{mode: metadata}, unsafe=True)
+
+    @onlyMPS
+    @parametrize("mode, values, metadata_dtype", [
+        ("offsets", [0, 4, 2, 6], torch.int32),
+        ("offsets", [-1, 6], torch.int64),
+        ("offsets", [0, 7], torch.int32),
+        ("offsets", [0, 2**40], torch.int64),
+        ("lengths", [2, -1, 5], torch.int32),
+        ("lengths", [2**31 - 1, 2**31 - 1, 8], torch.int32),
+    ])
+    @parametrize("unsafe", [False, True])
+    def test_invalid_mps_boundaries(self, device, mode, values, metadata_dtype, unsafe):
+        data = torch.ones(6, device=device)
+        metadata = torch.tensor(values, device=device, dtype=metadata_dtype)
+        with self.assertRaisesRegex(RuntimeError, "segment_reduce|negative value"):
+            torch.segment_reduce(data, "sum", **{mode: metadata}, unsafe=unsafe)
+            torch.mps.synchronize()
+
+    @onlyMPS
+    @parametrize("shape, lengths, axis", [
+        ((2, 6, 0), [[2, 0, 4], [1, 3, 2]], 1),
+        ((0, 6, 7), [], 1),
+        ((0,), [], 0),
+    ])
+    @parametrize("mode", ["lengths", "offsets"])
+    def test_empty_mps_dimensions(self, device, shape, lengths, axis, mode):
+        data = torch.empty(shape, device=device, requires_grad=True)
+        metadata = torch.tensor(lengths, dtype=torch.int64, device=device)
+        if axis == 1 and shape[0] == 0:
+            metadata = metadata.reshape(0, 3)
+        segments = metadata.size(-1)
+        if mode == "offsets":
+            zero_shape = list(metadata.shape)
+            zero_shape[-1] = 1
+            metadata = torch.cat((metadata.new_zeros(zero_shape), metadata), -1).cumsum(-1)
+        actual = torch.segment_reduce(data, "sum", **{mode: metadata}, axis=axis)
+        expected_shape = list(shape)
+        expected_shape[axis] = segments
+        self.assertEqual(actual, torch.empty(expected_shape))
+        actual.sum().backward()
+        self.assertEqual(data.grad, torch.empty(shape))
 
 
-
-
-instantiate_device_type_tests(TestSegmentReductions, globals())
+instantiate_device_type_tests(TestSegmentReductions, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()
