@@ -440,6 +440,10 @@ sys.modules[_HELPER_MOD.__name__] = _HELPER_MOD
 helper_rows_fn = _HELPER_MOD.helper_rows_fn
 
 
+def tearDownModule():
+    sys.modules.pop(_HELPER_MOD.__name__, None)
+
+
 def calls_into_an_unnamed_scope(x):
     return ns_pool_fn(x)
 
@@ -2328,6 +2332,38 @@ from user code:
         self.assertFalse(result._has_global_guards)
         self.assertEqual(reloaded(x), x + _HELPER_MOD.HELPER_ROWS.sum(0))
         self.assertIs(globals()[alias], _HELPER_MOD)
+
+    def test_aot_compile_module_dropped_shape_guard_seeds_no_alias(self):
+        # A filter that drops SHAPE_ENV leaves the widened set nothing to read:
+        # the builder records shape_code_parts on the save pass only, which runs
+        # over the kept guards, so the artifact carries no lambda text and the
+        # load binds no alias for a guard that does not exist.
+        from torch._dynamo.source import ShapeEnvSource
+
+        alias = "__import_" + _HELPER_MOD.__name__
+        x = torch.randn(4)
+        model = torch.compile(
+            ImportedRowsModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        guards_state = load_guards_state(captured._artifacts.guards_state)
+        sources = [g.originating_source for g in guards_state.output_graph.guards]
+        self.assertFalse(any(isinstance(s, ShapeEnvSource) for s in sources))
+        self.assertIsNone(guards_state.shape_code_parts)
+        self.assertIn(alias, captured._artifacts.runtime_env.import_sources)
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        self._hide_leaked_dynamo_globals()
+        self.assertNotIn(alias, globals())
+        reloaded = AOTCompiledModel.deserialize(ImportedRowsModule(), data)
+        (result,) = reloaded.compiled_results
+        self.assertFalse(result._has_global_guards)
+        self.assertEqual(reloaded(x), x + _HELPER_MOD.HELPER_ROWS.sum(0))
+        self.assertNotIn(alias, globals())
 
     def test_aot_compile_module_shape_guard_unnamed_scope_key_is_seeded(self):
         # ..._unnamed_scope_key_is_seeded_from_the_artifact reached through the
