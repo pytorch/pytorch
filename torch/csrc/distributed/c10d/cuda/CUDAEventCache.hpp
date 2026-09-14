@@ -24,6 +24,7 @@ class TORCH_API CUDAEventCache
   // NOTE: We intentionally store raw pointers so that
   // we do not attempt to destroy the event objects on process exit,
   // because cuda may be gone.
+  // Index bits: bit 0 = timing, bit 1 = external.
   std::array<std::deque<at::cuda::CUDAEvent*>, 4> eventsArray_;
 };
 

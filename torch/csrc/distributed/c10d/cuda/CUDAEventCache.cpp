@@ -12,7 +12,7 @@ CUDAEventCache::CUDAEventCache() = default;
 std::shared_ptr<at::cuda::CUDAEvent> CUDAEventCache::create(
     bool timing,
     bool external) {
-  const size_t index = (timing ? 1 : 0) + (external ? 2 : 0);
+  const size_t index = (timing ? 1 : 0) | (external ? 2 : 0);
   // Register the deleter as a callback when the WorkNCCL object is destroyed.
   // Each deleter keeps a ref count to the cache object, so that even when
   // the thread that creates the cache is gone, the cache object won't be
