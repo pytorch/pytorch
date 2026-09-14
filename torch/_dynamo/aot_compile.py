@@ -558,9 +558,15 @@ class AOTCompiledFunction:
             if not isinstance(bound, (dict, types.ModuleType)):
                 # Name the parameter this dict arrived by: get_builtins_dict would
                 # otherwise raise a bare AttributeError out of Dynamo internals.
-                # The TYPE and not the value -- a repr on a load failure path runs
-                # user code.
-                param = "f_globals" if self._guard_globals is None else "guard_globals"
+                # load_compiled_function forwards one dict as both, so a dict that
+                # arrived by both routes is named by the public one -- guard_globals
+                # is not in that signature. The TYPE and not the value -- a repr on a
+                # load failure path runs user code.
+                arrived_as_f_globals = (
+                    self._guard_globals is None
+                    or self._guard_globals is self._extra_globals
+                )
+                param = "f_globals" if arrived_as_f_globals else "guard_globals"
                 raise TypeError(
                     f"{param}['__builtins__'] must be a dict or a module, got "
                     f"{type(bound).__name__}"
@@ -772,6 +778,10 @@ def aot_compile_fullgraph(
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
+                # NB: the is_global clause dropping every global guard is
+                # deliberate, not a gap: narrowing it would need every load to
+                # supply a scope binding every global a kept guard reads.
+                # Callers who need one guarded pass their own guard_filter_fn.
                 return [
                     (
                         not (
