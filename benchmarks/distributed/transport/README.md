@@ -4,6 +4,7 @@ Install the optional backend package matching the operation:
 
 ```bash
 uv pip install "ibverbs[gpunetio-triton]"
+uv pip install nixl
 uv pip install "ucxx-cu12==0.51.1"  # use ucxx-cu13 with CUDA 13
 ```
 
@@ -37,6 +38,20 @@ address, such as isolated network namespaces.
 Add `--cuda-graph` to capture one write and one read and benchmark graph
 replay. The `ibverbs` backend also needs `"cuda_graph":true` in each rank's
 options to select GPUNetIO.
+
+## NIXL transport
+
+The NIXL adapter uses UCX by default and accepts another installed NIXL plugin
+through `--options='{"plugin":"PLUGIN"}'`. Select the UCX device and transport
+with the usual UCX environment variables:
+
+```bash
+UCX_TLS=rc UCX_NET_DEVICES="$HCA:1" torchrun \
+  --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+  --master-addr="$MASTER_ADDR" --master-port=29500 \
+  benchmarks/distributed/transport/benchmark.py \
+  --backend nixl --device cuda --interfaces "$INTERFACE" --rdma-counters
+```
 
 ## UCXX transports
 

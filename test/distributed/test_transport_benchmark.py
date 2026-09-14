@@ -114,6 +114,11 @@ class TestTransportBenchmark(TestCase):
             self.assertRaises(SystemExit),
         ):
             benchmark.parse_args(["--backend", "ibverbs", "--one-way-connect"])
+        self.assertTrue(
+            benchmark.parse_args(
+                ["--backend", "nixl", "--one-way-connect"]
+            ).one_way_connect
+        )
 
     def test_output_metadata(self):
         args = benchmark.parse_args(
