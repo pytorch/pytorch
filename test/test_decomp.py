@@ -33,6 +33,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     is_iterable_of_tensors,
     run_tests,
     skipIfCrossRef,
@@ -576,6 +577,7 @@ comprehensive_failures = {
 
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     longMessage = True
 
     # NB: This actually overlaps with test_comprehensive, but it only
@@ -1178,6 +1180,8 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_softmax(self, device):
@@ -1536,6 +1540,8 @@ instantiate_device_type_tests(DecompOneOffTests, globals())
 
 
 class HasDecompTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.maxDiff = None
