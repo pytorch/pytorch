@@ -202,31 +202,18 @@ class TestInductorConfig(TestCase):
             ),
         )
 
-    @parametrize("value", (None, 0, 0.5))
-    def test_fusion_memory_timeline_peak_option_types(self, value):
-        key = "fusion_memory_timeline_peak_allowed_increase_mb"
-        self.assertIsNone(config.fusion_memory_timeline_peak_allowed_increase_mb)
+    @parametrize(
+        "key",
+        (
+            "fusion_memory_timeline_peak_memory_increase_gb",
+            "fusion_memory_timeline_peak_memory_pct_threshold",
+        ),
+    )
+    @parametrize("value", (None, 0.0, 0.5))
+    def test_fusion_memory_timeline_peak_options(self, key, value):
+        self.assertIsNone(getattr(config, key))
         optimized = torch.compile(dummy_fn, options={key: value})
         self.assertEqual(optimized.get_compiler_config()[key], value)
-
-    @parametrize("value", (-1, float("nan"), float("inf"), -float("inf"), True))
-    def test_fusion_memory_timeline_peak_option_validation(self, value):
-        from torch._inductor.scheduler import Scheduler
-
-        key = "fusion_memory_timeline_peak_allowed_increase_mb"
-        with (
-            config.patch({key: value}),
-            self.assertRaisesRegex(ValueError, "finite non-negative number"),
-        ):
-            Scheduler.fusion_memory_timeline_peak_allowed_increase_bytes()
-
-    def test_fusion_memory_timeline_peak_large_finite_option(self):
-        from torch._inductor.scheduler import Scheduler
-
-        with config.patch(fusion_memory_timeline_peak_allowed_increase_mb=1e308):
-            self.assertGreater(
-                Scheduler.fusion_memory_timeline_peak_allowed_increase_bytes(), 0
-            )
 
     def test_api_options(self):
         reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")

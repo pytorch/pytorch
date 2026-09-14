@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
-    from .memory import FreeableInputBuffer, SchedulerMemoryStorage
+    from .memory import FreeableInputBuffer
     from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
@@ -163,8 +163,7 @@ class PendingFusion:
 @dataclasses.dataclass(eq=False, slots=True)
 class _FusionMemoryCandidate:
     snodes: tuple[BaseSchedulerNode, ...]
-    operation_names: OrderedSet[str]
-    buffer_names: OrderedSet[str]
+    outputs: tuple[SchedulerBuffer, ...]
     unmet_dependencies: OrderedSet[Dep]
     mpi_node: MemoryPlanningInfoForNode = dataclasses.field(
         default_factory=MemoryPlanningInfoForNode
@@ -173,11 +172,8 @@ class _FusionMemoryCandidate:
     def get_nodes(self) -> tuple[BaseSchedulerNode, ...]:
         return self.snodes
 
-    def get_buffer_names(self) -> OrderedSet[str]:
-        return self.buffer_names
-
-    def get_operation_names(self) -> OrderedSet[str]:
-        return self.operation_names
+    def get_outputs(self) -> tuple[SchedulerBuffer, ...]:
+        return self.outputs
 
 
 @dataclasses.dataclass(slots=True)
@@ -191,9 +187,6 @@ class FusionMemoryUpdate:
     local_nodes: list[BaseSchedulerNode]
     live_before: list[int]
     live_after: list[int]
-    last_use_steps: dict[int, int | None]
-    candidate_outputs: Sequence[SchedulerBuffer]
-    candidate_alloc_size: int
 
 
 @dataclasses.dataclass(slots=True)
@@ -219,8 +212,13 @@ class ComboKernelMemoryContext:
     baseline_live_before: list[int] = dataclasses.field(default_factory=list)
 
 
+class FusionMemoryStateStatus(enum.Enum):
+    ACTIVE = enum.auto()
+    INVALIDATED = enum.auto()
+
+
 @dataclasses.dataclass(slots=True)
-class FusionMemoryDeviceState:
+class FusionMemoryState:
     nodes: list[BaseSchedulerNode | None]
     graph_outputs: OrderedSet[str]
     node_to_idx: dict[BaseSchedulerNode, int]
@@ -228,14 +226,7 @@ class FusionMemoryDeviceState:
     baseline_live_before: list[int]
     baseline_live_after: list[int]
     peak_limit: int
-    storage: SchedulerMemoryStorage
-    last_use_steps: dict[int, int | None] = dataclasses.field(default_factory=dict)
-    node_outputs: dict[BaseSchedulerNode, Sequence[SchedulerBuffer]] = (
-        dataclasses.field(default_factory=dict)
-    )
-    node_alloc_sizes: dict[BaseSchedulerNode, int] = dataclasses.field(
-        default_factory=dict
-    )
+    status: FusionMemoryStateStatus = FusionMemoryStateStatus.ACTIVE
 
     def update_boundaries_match(self, update: FusionMemoryUpdate) -> bool:
         start = update.region_start
@@ -266,9 +257,6 @@ class FusionMemoryDeviceState:
 
         self.baseline_live_after[start:end] = update.live_after
         self.baseline_live_before[start : end + 1] = update.live_before
-        self.last_use_steps.update(update.last_use_steps)
-        self.node_outputs[fused_node] = update.candidate_outputs
-        self.node_alloc_sizes[fused_node] = update.candidate_alloc_size
         self.baseline_peak = max(self.baseline_live_after)
 
         for idx, node in enumerate(region_nodes, start):
@@ -283,18 +271,6 @@ class FusionMemoryDeviceState:
             self.node_to_idx[node] = update.candidate_step
             for snode in node.get_nodes():
                 self.node_to_idx[snode] = update.candidate_step
-
-
-class FusionMemoryStateStatus(enum.Enum):
-    ACTIVE = enum.auto()
-    FAILED_CLOSED = enum.auto()
-
-
-@dataclasses.dataclass(slots=True)
-class FusionMemoryState:
-    device_states: dict[torch.device, FusionMemoryDeviceState]
-    status: FusionMemoryStateStatus = FusionMemoryStateStatus.ACTIVE
-
 
 def _is_gpu_triton_backend(
     node1: BaseSchedulerNode,
@@ -518,19 +494,12 @@ class MixOrderReduction:
             ):
                 return False
 
-            # We require more more row than columns since
-            # 1, we prefer doing persistent reduction for each row
-            # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, ncol * 2),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
-                return False
+            # Don't gate on the nrow/ncol ratio: mix-order reduction can also
+            # be helpful on relatively flat inputs, and a `nrow >= ncol * 2`
+            # gate would reject profitable shapes.
 
-            # When nrow is small, ncol should also be small (due to the check
-            # above). Thus the entire tensor should be well cached in L2.
-            # Mix order reduction is less beneficial.
+            # Need enough rows to split the other reduction across; too few
+            # gives insufficient parallelism to justify the fusion overhead.
             if not V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow, 4096),
                 size_oblivious=True,
@@ -632,11 +601,12 @@ class MixOrderReduction:
 # Note [Sub-parent reduction epilogues]
 #
 # Fusion-time planning proves that a derived sub-parent domain is safe to emit
-# and gives the fused group a FusedStagedReduction identity. Scheduler fusion is
-# followed by merge_loops(), which may change the node ranges, so codegen builds
-# the final plan from the post-fusion nodes rather than carrying the approval
-# plan across phases. The staged identity is the stable contract: codegen cannot
-# decline the fusion and treats a missing final plan as a compiler error.
+# and gives the fused group a FusedStagedReduction identity. Standalone staged
+# groups may be rewritten by merge_loops(), while nested groups preserve the loop
+# bodies used to approve their topology. Codegen rebuilds the final plan from the
+# final fused nodes in either case. The staged identity is the stable contract:
+# codegen cannot decline the fusion and treats a missing final plan as a compiler
+# error.
 class NestedReduction:
     """
     Detects when an outer reduction and a dependent grouped reduction can be
@@ -769,6 +739,51 @@ class NestedReduction:
         )
 
     @classmethod
+    def _mutations_survive_hoisting(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        group: Sequence[BaseSchedulerNode] | None = None,
+    ) -> bool:
+        """Whether ``nodes``' aliasing and mutation survive sub-parent hoisting.
+
+        Hoisting an epilogue into the parent kernel moves its stores relative to
+        the rest of the group, so a mutation is only safe when no other node
+        there touches that storage. ``group`` defaults to ``nodes`` and must
+        cover everything sharing the fused kernel, since a node outside the
+        hoisted set observes the reordering just the same; ordering against
+        nodes outside the kernel is already carried by dependency edges.
+
+        Both names for the storage are claimed. The mutator keeps the
+        pre-mutation one -- its own StarDep self-edge and any read-modify-write
+        hoist along with it, so only another node reading that name is a
+        hazard -- while later nodes see the post-mutation name via
+        Scheduler.mutation_renames. In practice functionalization leaves one
+        mutator per buffer and no post-mutation reader, so only the
+        pre-mutation read rejects today; the rest keep this conservative rather
+        than wrong if that ever changes. Aliasing stays rejected outright: the
+        lane index math assumes each store owns its destination.
+        """
+        owners: dict[str, BaseSchedulerNode] = {}
+        for node in nodes:
+            for buf in node.get_outputs():
+                if buf.get_aliases():
+                    return False
+                if not buf.get_mutations():
+                    continue
+                for name in (*buf.get_mutations(), buf.get_name()):
+                    # A second node on the same storage makes their relative
+                    # order load-bearing, which hoisting does not preserve.
+                    if owners.setdefault(name, node) is not node:
+                        return False
+        if not owners:
+            return True
+        return all(
+            owners.get(dep.name, node) is node
+            for node in (nodes if group is None else group)
+            for dep in node.read_writes.reads_and_writes()
+        )
+
+    @classmethod
     def sub_parent_epilogue_plan(
         cls,
         nodes: Sequence[BaseSchedulerNode],
@@ -782,8 +797,7 @@ class NestedReduction:
         [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
-        # TODO: No fundamental limitation; track aliases and mutation versions here.
-        if any(node.has_aliasing_or_mutation() for node in nodes):
+        if not cls._mutations_survive_hoisting(nodes):
             return None
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return None
@@ -1144,6 +1158,177 @@ class NestedReduction:
             and V.graph.sizevars.statically_known_equals(node_numel, expected_numel)
             and SIMDKernel.is_compatible(expected_groups, node.get_ranges())
         )
+
+    @classmethod
+    def _r_grouped_stage_accesses_match(
+        cls,
+        outer_node: BaseSchedulerNode,
+        grouped_node: BaseSchedulerNode,
+        domain_context: PointwiseDomainContext,
+        pointwise_domains: Sequence[tuple[SchedulerNode, PointwiseDomain]],
+    ) -> bool:
+        """Check cross-stage forwarding in the grouped R coordinate frame.
+
+        Codegen forwards internal values positionally. Reindex every ordinary
+        grouped-stage internal read, and its producer's write, into one frame
+        spanning the parent ``[X, R]`` and grouped ``[X, R/G, G]`` geometries,
+        and require them to address the same element. Sub-parent edges use the
+        separate lane and broadcast proofs in the sub-parent planner.
+        """
+        from .utils import sympy_index_symbol
+
+        if domain_context.grouped_axis is not cls.GroupedAxis.R:
+            return False
+        if not all(
+            isinstance(node, SchedulerNode) and isinstance(node.node, ComputedBuffer)
+            for node in (*outer_node.get_nodes(), *grouped_node.get_nodes())
+        ):
+            return False
+
+        parent_numel, parent_rnumel = domain_context.parent_full_domain
+        group_size = domain_context.group_size
+        group_count = FloorDiv(parent_rnumel, group_size)
+        parent_x = sympy_index_symbol("_nested_parent_x")
+        group_r = sympy_index_symbol("_nested_group_r")
+        local_r = sympy_index_symbol("_nested_local_r")
+        frame_ranges = {
+            parent_x: parent_numel,
+            group_r: group_count,
+            local_r: group_size,
+        }
+
+        grouped_reduction = domain_context.grouped_reduction
+        iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
+        if len(iter_ranges) == 2:
+            grouped_values = (parent_x, group_r, local_r)
+            reduced_values = (parent_x, group_r)
+        elif len(iter_ranges) == 1:
+            grouped_values = (parent_x * group_count + group_r, local_r)
+            reduced_values = (parent_x * group_count + group_r,)
+        else:
+            return False
+
+        # A coordinate with a single element is always zero. Keep it out of the
+        # comparison so a degenerate extent does not look like a stride.
+        unit_axes = {
+            axis: sympy.Integer(0)
+            for axis, extent in frame_ranges.items()
+            if V.graph.sizevars.statically_known_equals(extent, 1)
+        }
+
+        Frame = tuple[tuple[sympy.Expr, ...], tuple[sympy.Expr, ...]]
+        rw_by_node: dict[SchedulerNode, dependencies.ReadWrites] = {}
+
+        def read_writes(node: SchedulerNode) -> dependencies.ReadWrites:
+            """Dependencies in the node's own loop variables.
+
+            ``loop_ordering_after_fusion`` decides whether a node's cached
+            dependencies were canonicalized, which renames their variables away
+            from the domain the frame is built from. Re-extract instead.
+            """
+            if node not in rw_by_node:
+                rw = dependencies.extract_read_writes(
+                    node._body, *node._sizes, normalize=False
+                )
+                rw_by_node[node] = (
+                    rw.rename(node.mutation_renames) if node.mutation_renames else rw
+                )
+            return rw_by_node[node]
+
+        def frame_index(
+            node: SchedulerNode, dep: Dep, frame: Frame
+        ) -> sympy.Expr | None:
+            """Reindex one access into the shared frame, or None if it cannot be."""
+            if not isinstance(dep, MemoryDep):
+                return None
+            sizes, values = frame
+            # A dependency drops the dimensions its index does not use, so a
+            # broadcast access no longer spans the frame. Restore the node's own
+            # domain, which an unnormalized index is always expressed in.
+            var_ranges = read_writes(node).var_ranges
+            if var_ranges is None:
+                return None
+            dep = MemoryDep(
+                dep.name,
+                dep.index,
+                tuple(var_ranges),
+                tuple(var_ranges.values()),
+                dep.mode,
+            )
+            axes = tuple(
+                sympy_index_symbol(f"_nested_axis{i}") for i in range(len(sizes))
+            )
+            normalized = dep.normalize_with_ranges(axes, sizes)
+            if normalized is None:
+                return None
+            index = sympy_subs(normalized.index, dict(zip(axes, values, strict=True)))
+            index = index.replace(Identity, lambda x: x)
+            return V.graph.sizevars.simplify_with_ranges(
+                sympy_subs(index, unit_axes), frame_ranges
+            )
+
+        outer_nodes = typing.cast(
+            "tuple[SchedulerNode, ...]", tuple(outer_node.get_nodes())
+        )
+        grouped_nodes = typing.cast(
+            "tuple[SchedulerNode, ...]", tuple(grouped_node.get_nodes())
+        )
+        domains_by_node = dict(pointwise_domains)
+        parent_frame: Frame = (
+            (parent_numel, parent_rnumel),
+            (parent_x, group_r * group_size + local_r),
+        )
+        local_frame: Frame = ((*iter_ranges, *reduce_ranges), grouped_values)
+        reduced_frame: Frame = (tuple(iter_ranges), reduced_values)
+
+        frames_by_node: dict[SchedulerNode, Frame] = dict.fromkeys(
+            outer_nodes, parent_frame
+        )
+        for node, domain in pointwise_domains:
+            if domain is cls.PointwiseDomain.REDUCED:
+                frames_by_node[node] = reduced_frame
+            elif domain is cls.PointwiseDomain.PARENT_FULL:
+                frames_by_node[node] = parent_frame
+            elif domain is cls.PointwiseDomain.LOCAL_REDUCTION_INPUT:
+                frames_by_node[node] = local_frame
+        frames_by_node[grouped_reduction] = local_frame
+
+        writers_by_name: dict[str, list[SchedulerNode]] = defaultdict(list)
+        for node in (*outer_nodes, *grouped_nodes):
+            for name in node.get_buffer_names():
+                writers_by_name[name].append(node)
+
+        for consumer in grouped_nodes:
+            if domains_by_node.get(consumer) is cls.PointwiseDomain.SUB_PARENT:
+                continue
+            for dep in read_writes(consumer).reads:
+                # WeakDeps order mutations and carry no value to forward.
+                if isinstance(dep, WeakDep) or dep.name not in writers_by_name:
+                    continue
+                writers = writers_by_name[dep.name]
+                consumer_frame = frames_by_node.get(consumer)
+                if consumer_frame is None or len(writers) != 1:
+                    return False
+                writer_frame = frames_by_node.get(writers[0])
+                if writer_frame is None or writers[0] is consumer:
+                    return False
+                read = frame_index(consumer, dep, consumer_frame)
+                writes = [
+                    frame_index(writers[0], write, writer_frame)
+                    for write in read_writes(writers[0]).writes
+                    if write.name == dep.name
+                ]
+                if read is None or not writes or any(w is None for w in writes):
+                    return False
+                if not any(cls._index_exprs_equal(read, write) for write in writes):
+                    return False
+        return True
+
+    @staticmethod
+    def _index_exprs_equal(left: sympy.Expr, right: sympy.Expr) -> bool:
+        if left == right:
+            return True
+        return V.graph.sizevars.simplify(left - right) == 0
 
     @staticmethod
     def try_get_sub_parent_extent_subs(
@@ -1665,7 +1850,6 @@ class NestedReduction:
         grouped_reduction = domain_context.grouped_reduction
         reduction_names = grouped_reduction.get_operation_names()
         reduction_buffer_names = grouped_reduction.get_buffer_names()
-        reduction_source_names = cls._dependency_names((grouped_reduction,))
         full_numel = V.graph.sizevars.simplify(
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
@@ -1706,15 +1890,12 @@ class NestedReduction:
                 is_consumer
                 and cls._nested_sub_parent_rate(sn, domain_context) is not None
             )
-            # For one-output-lane rates where group_size == factor, REDUCED
-            # and SUB_PARENT have compatible shapes. A reduction-source read
-            # identifies lane-level processing.
-            reads_reduction_source = bool(
-                reduction_source_names & cls._dependency_names((sn,))
-            )
-            if sub_parent_compatible and (
-                not reduced_compatible or reads_reduction_source
-            ):
+            # Reachable only when group_size equals a sub-parent factor, so
+            # G is 2 or 4. unroll_reductions_threshold turns groups that small
+            # into pointwise ops, so this needs a lowered threshold to fire.
+            if reduced_compatible and sub_parent_compatible:
+                return None
+            if sub_parent_compatible:
                 domain = cls.PointwiseDomain.SUB_PARENT
             elif reduced_compatible:
                 domain = cls.PointwiseDomain.REDUCED
@@ -1751,8 +1932,8 @@ class NestedReduction:
         )
         if not sub_parent_nodes:
             return None
-        # TODO: No fundamental limitation; track aliases and mutation versions here.
-        if any(node.has_aliasing_or_mutation() for node in sub_parent_nodes):
+        kernel_nodes = (outer_node, *grouped_nodes)
+        if not cls._mutations_survive_hoisting(sub_parent_nodes, kernel_nodes):
             return None
 
         candidates: list[SubParentEpilogueCandidate] = []
@@ -1833,6 +2014,33 @@ class NestedReduction:
         )
         if not source_relations:
             return None
+        live_source_names = OrderedSet(
+            relation.consumer_access.name
+            for relation in source_relations
+            if relation.requires_live_source
+        )
+        local_input_nodes = OrderedSet(
+            node
+            for node, domain in pointwise_domains
+            if domain is cls.PointwiseDomain.LOCAL_REDUCTION_INPUT
+        )
+        parent_stage_writes = OrderedSet(
+            dep.name
+            for node in outer_nodes
+            if not node.is_reduction() and node not in local_input_nodes
+            for dep in node.read_writes.writes
+            if isinstance(dep, MemoryDep)
+        )
+        # Every outer pointwise node that is not displaced into the local stage
+        # runs inside the parent loop, so a looped parent cannot forward its
+        # value after the loop closes. Looping is a codegen choice made later
+        # from kernel features and RBLOCK limits, not the persistent_reductions
+        # config, so this cannot be narrowed to looped parents here: decline
+        # both until staged codegen can reload such a value.
+        # TODO: teach the sub-parent stage to reload these sources after the
+        # parent loop closes, as ordinary chained reductions do, and drop this.
+        if live_source_names & parent_stage_writes:
+            return None
         broadcast_relations = cls._sub_parent_broadcast_access_relations(
             parent_nodes,
             sub_parent_nodes,
@@ -1865,9 +2073,13 @@ class NestedReduction:
 
         if not isinstance(outer_node, (SchedulerNode, FusedSchedulerNode)):
             return True
+        # A node that is already staged carries a grouped [X, R/G] body, which
+        # the coalescing analysis cannot express in the parent's (numel, rnumel)
+        # frame. Score the tiling without it, as the config-off path does.
         coalesce_analysis = (
             outer_node.get_coalesce_analysis()
             if config.triton.coalesce_tiling_analysis
+            and not isinstance(outer_node, FusedStagedReduction)
             else None
         )
         node_schedule = list(outer_node.get_nodes())
@@ -1976,22 +2188,18 @@ class NestedReduction:
             group_size,
             outer_node=parent_reduction,
         )
-        if grouped_axis is None:
+        # Splitting X forces a minimum XBLOCK and has consistently lost to the
+        # unfused kernels. Keep nested codegen to one [X, R/G, G] geometry.
+        if grouped_axis is not cls.GroupedAxis.R:
             return None
-        parent_grouped_axis = (
-            parent_rnumel if grouped_axis is cls.GroupedAxis.R else parent_numel
-        )
         iter_ranges, _ = block_local_reduction.get_ranges()
         if len(iter_ranges) == 2:
-            grouped_axis_groups = (
-                iter_ranges[1] if grouped_axis is cls.GroupedAxis.R else iter_ranges[0]
-            )
             if not V.graph.sizevars.statically_known_equals(
-                FloorDiv(parent_grouped_axis, group_size), grouped_axis_groups
+                FloorDiv(parent_rnumel, group_size), iter_ranges[1]
             ):
                 return None
         elif not V.graph.sizevars.statically_known_equals(
-            sympy.Mod(parent_grouped_axis, group_size), 0
+            sympy.Mod(parent_rnumel, group_size), 0
         ):
             return None
         group_size_int = int(group_size)
@@ -2023,11 +2231,11 @@ class NestedReduction:
         group_size: sympy.Integer,
         grouped_axis: GroupedAxis,
     ) -> StagedReductionPlan | None:
-        """Rebuild mutable domains for an approved nested topology.
+        """Build domains for an approved nested topology.
 
-        ``merge_loops`` rewrites loop bodies after fusion, so grouped-axis
-        discovery can no longer recover every axis approved at fusion time.
-        The axis and group size remain stable; ranges and domains do not.
+        Nested fused nodes preserve their loop bodies, but append fusion may
+        extend the grouped topology. The approved axis and group size remain
+        stable while ranges and domains are rebuilt from the final nodes.
         """
         _, (outer_numel, outer_rnumel) = outer_node.group
         _, (grouped_numel, grouped_rnumel) = grouped_node.group
@@ -2052,6 +2260,24 @@ class NestedReduction:
             for node, domain in pointwise_domains
             if domain is cls.PointwiseDomain.LOCAL_REDUCTION_INPUT
         )
+        parent_nodes = tuple(
+            node
+            for node in outer_node.get_nodes()
+            if node not in local_reduction_input_nodes
+        )
+        local_stage_names = OrderedSet(
+            name
+            for node in local_reduction_input_nodes
+            for name in node.get_operation_names()
+        )
+        # Ancestors include both value and mutation-order dependencies. Moving
+        # the local nodes after a dependent parent node would reverse that edge.
+        if any(node.ancestors & local_stage_names for node in parent_nodes):
+            return None
+        if not cls._r_grouped_stage_accesses_match(
+            outer_node, grouped_node, domain_context, pointwise_domains
+        ):
+            return None
         sub_parent_nodes = OrderedSet(
             node
             for node, domain in pointwise_domains
@@ -2075,11 +2301,7 @@ class NestedReduction:
             if sn not in sub_parent_nodes
         )
         return StagedReductionPlan(
-            parent_nodes=tuple(
-                sn
-                for sn in outer_node.get_nodes()
-                if sn not in local_reduction_input_nodes
-            ),
+            parent_nodes=parent_nodes,
             parent_numel=outer_numel,
             parent_rnumel=outer_rnumel,
             nested_stage=NestedReductionStage(
@@ -3440,7 +3662,7 @@ class WhyNoFuse:
         )
 
 
-def pformat(obj: Any) -> str:
+def pformat(obj: object) -> str:
     if isinstance(obj, (OrderedSet, set)):  # noqa: set_linter
         # pformat has trouble with sets of sympy exprs
         obj = sorted(obj, key=str)
@@ -5534,7 +5756,7 @@ class _LoopStateSnapshot:
             refresh_group_node_dependencies(node)
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class _LoopMutationTracker:
     """Rollback scope for speculative loop mutations during can_fuse().
 
@@ -5543,6 +5765,9 @@ class _LoopMutationTracker:
     this tracker restores the original loop structure so later fusion
     candidates do not inherit a speculative layout chosen for a fusion
     that did not happen.
+
+    Recursive can_fuse() calls chain their listeners so each scope captures its
+    own decision boundary while the outer scope still sees nested mutations.
 
     Use finish(rollback=False) to keep mutations or finish(rollback=True) to
     restore the original state. If no mutation occurred, finish() is a no-op.
@@ -5555,13 +5780,6 @@ class _LoopMutationTracker:
     previous_listeners: dict[SchedulerNode, Callable[[SchedulerNode], None] | None] = (
         dataclasses.field(default_factory=dict)
     )
-    fusion_memory_scheduler: Scheduler | None = None
-    fusion_memory_original_generations: dict[SchedulerNode, int] = dataclasses.field(
-        default_factory=dict
-    )
-    fusion_memory_cache_keys: OrderedSet[tuple[Any, ...]] = dataclasses.field(
-        default_factory=OrderedSet
-    )
     state: _LoopStateSnapshot | None = None
 
     @classmethod
@@ -5573,40 +5791,6 @@ class _LoopMutationTracker:
             if isinstance(node, SchedulerNode):
                 tracker.watch(node)
         return tracker
-
-    @classmethod
-    def create_fusion_memory(
-        cls, nodes: tuple[BaseSchedulerNode, ...]
-    ) -> _LoopMutationTracker:
-        tracker = cls.create(nodes)
-        schedulers = OrderedSet(sn.scheduler for sn in tracker.watched_nodes)
-        if len(schedulers) > 1:
-            raise AssertionError("expected one scheduler for a fusion trial")
-        if schedulers:
-            tracker._register_fusion_memory_cache(next(iter(schedulers)))
-        return tracker
-
-    def _register_fusion_memory_cache(self, scheduler: Scheduler) -> None:
-        if self.fusion_memory_scheduler is scheduler:
-            return
-        if self.fusion_memory_scheduler is not None:
-            raise AssertionError("fusion trial cannot span schedulers")
-        self.fusion_memory_scheduler = scheduler
-        self.fusion_memory_original_generations = {
-            sn: sn._loop_state_gen for sn in self.watched_nodes
-        }
-        trackers = getattr(scheduler, "_fusion_memory_cache_trackers", None)
-        if trackers is None:
-            trackers = scheduler._fusion_memory_cache_trackers = []
-        trackers.append(self)
-
-    def track_fusion_memory_cache_key(self, cache_key: tuple[Any, ...]) -> None:
-        if any(
-            sn in self.fusion_memory_original_generations
-            and generation != self.fusion_memory_original_generations[sn]
-            for sn, generation in cache_key
-        ):
-            self.fusion_memory_cache_keys.add(cache_key)
 
     def watch(self, sn: SchedulerNode) -> None:
         """Install this scope as the mutation listener for a leaf node."""
@@ -5635,19 +5819,9 @@ class _LoopMutationTracker:
         """Detach listeners and restore captured state if rolling back."""
         for sn in self.watched_nodes:
             sn._loop_mutation_listener = self.previous_listeners[sn]
-        if rollback and self.state is not None:
-            self.state.restore()
-        if self.fusion_memory_scheduler is not None:
-            self.fusion_memory_scheduler._fusion_memory_cache_trackers.remove(self)
-            if rollback:
-                for cache_key in self.fusion_memory_cache_keys:
-                    self.fusion_memory_scheduler._tiling_memory_cache.pop(
-                        cache_key, None
-                    )
-
-    def finish_fusion_memory(self, *, rollback: bool) -> None:
-        """Finish a memory-guard trial and discard rejected trial cache entries."""
-        self.finish(rollback=rollback)
+        if not rollback or self.state is None:
+            return
+        self.state.restore()
 
 
 # Distinguishes "not cached" from a cached None in _tiling_memory_cache.
@@ -5678,9 +5852,7 @@ class Scheduler:
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
         self._fusion_memory_state: FusionMemoryState | None = None
-        self._fusion_memory_buffer_sizes: dict[str, tuple[int, int]] | None = None
-        self._fusion_memory_peak_limits: dict[torch.device, int] = {}
-        self._fusion_memory_cache_trackers: list[_LoopMutationTracker] = []
+        self._fusion_memory_peak_limit: int | None = None
 
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
@@ -6745,6 +6917,9 @@ class Scheduler:
             return
 
         for node in self.nodes:
+            # Nested-reduction plans depend on the bodies used during fusion.
+            if isinstance(node, FusedNestedReductions):
+                continue
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
@@ -6774,7 +6949,7 @@ class Scheduler:
         with dynamo_timed(
             "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
         ):
-            self._fusion_memory_peak_limits.clear()
+            self._fusion_memory_peak_limit = None
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -6801,7 +6976,7 @@ class Scheduler:
                 or config.loop_index_inversion_in_fusion
             ):
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
-            self._fusion_memory_peak_limits.clear()
+            self._fusion_memory_peak_limit = None
             return nodes
 
     def process_grouped_nodes(self) -> None:
@@ -7690,23 +7865,43 @@ class Scheduler:
 
         return node3
 
-    def _fuse_two_nodes_with_memory_update(
+    def _apply_fusion_memory_update(
+        self,
+        fused: BaseSchedulerNode,
+        memory_update: FusionMemoryUpdate | None,
+    ) -> None:
+        state = self._fusion_memory_state
+        if state is not None and memory_update is not None:
+            state.apply_accepted_fusion(memory_update, fused)
+            fused.mpi_node = memory_update.candidate.mpi_node
+        elif state is not None:
+            state.status = FusionMemoryStateStatus.INVALIDATED
+
+    def _can_fuse_for_attempt(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        fused_nodes: OrderedSet[BaseSchedulerNode],
-        state: FusionMemoryState | None,
-        memory_updates: dict[torch.device, FusionMemoryUpdate] | None,
-    ) -> BaseSchedulerNode:
-        fused = self.fuse_two_nodes(node1, node2, fused_nodes)
-        if state is not None and memory_updates:
-            for device, update in memory_updates.items():
-                state.device_states[device].apply_accepted_fusion(update, fused)
-            fused.mpi_node = next(iter(memory_updates.values())).candidate.mpi_node
-            fused.mpi_node.size = sum(
-                update.candidate_alloc_size for update in memory_updates.values()
+        *,
+        can_reorder: bool = False,
+    ) -> tuple[bool, FusionMemoryUpdate | None]:
+        memory_update = None
+
+        def final_check() -> bool:
+            nonlocal memory_update
+            if self.will_fusion_create_cycle(node1, node2):
+                return False
+            rejected, memory_update = self._check_fusion_memory(
+                self._fusion_memory_state, node1, node2
             )
-        return fused
+            return not rejected
+
+        can_fuse = self.can_fuse(
+            node1,
+            node2,
+            can_reorder=can_reorder,
+            final_check=final_check,
+        )
+        return can_fuse, memory_update
 
     def fuse_if_speedup(
         self,
@@ -7714,51 +7909,18 @@ class Scheduler:
         node2: BaseSchedulerNode,
         speedup_fn: Callable[[], bool],
         fused_nodes: OrderedSet[BaseSchedulerNode],
+        *,
+        can_reorder: bool = False,
     ):
-        if (
-            self.can_fuse(node1, node2)
-            and not self.will_fusion_create_cycle(node1, node2)
-            and speedup_fn()
-        ):
-            self.fuse_two_nodes(node1, node2, fused_nodes)
+        can_fuse, memory_update = self._can_fuse_for_attempt(
+            node1, node2, can_reorder=can_reorder
+        )
+        if can_fuse and speedup_fn():
+            fused = self.fuse_two_nodes(node1, node2, fused_nodes)
+            self._apply_fusion_memory_update(fused, memory_update)
             return True
 
         return False
-
-    def _fuse_if_speedup_with_memory(
-        self,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-        speedup_fn: Callable[[], bool],
-        fused_nodes: OrderedSet[BaseSchedulerNode],
-        *,
-        can_reorder: bool,
-    ):
-        state = self._fusion_memory_state
-        if state is None:
-            raise AssertionError("expected fusion memory state")
-
-        loop_tracker = _LoopMutationTracker.create_fusion_memory((node1, node2))
-        can_fuse = self._can_fuse_impl(
-            node1,
-            node2,
-            can_reorder=can_reorder,
-            allow_mix_order_reduction=True,
-        )
-        if not can_fuse or self.will_fusion_create_cycle(node1, node2):
-            loop_tracker.finish_fusion_memory(rollback=True)
-            return False
-
-        rejected, memory_updates = self._check_fusion_memory(state, node1, node2)
-        if rejected or not speedup_fn():
-            loop_tracker.finish_fusion_memory(rollback=True)
-            return False
-
-        self._fuse_two_nodes_with_memory_update(
-            node1, node2, fused_nodes, state, memory_updates
-        )
-        loop_tracker.finish(rollback=False)
-        return True
 
     def _evaluate_pending_template_fusions(
         self,
@@ -7822,39 +7984,25 @@ class Scheduler:
                     future_to_pending_fusion[f] = (pending_fusion, candidate)
                 else:
                     # Non AsyncCompile path, perform fusion
-                    if self._fusion_memory_state is None:
-                        fused = self.fuse_if_speedup(
-                            node1, node2, pending_fusion.callable_fn, fused_nodes
-                        )
-                    else:
-                        fused = self._fuse_if_speedup_with_memory(
-                            node1,
-                            node2,
-                            pending_fusion.callable_fn,
-                            fused_nodes,
-                            can_reorder=pending_fusion.can_reorder,
-                        )
-                    if fused:
-                        fusions_to_remove.add(candidate)
-
-            # Evaluate fusion candidates as async_compile completes
-            for f in as_completed(template_futures):
-                pending_fusion, cand = future_to_pending_fusion[f]
-                node1 = self.get_fused_node(pending_fusion.node1)
-                node2 = self.get_fused_node(pending_fusion.node2)
-                if self._fusion_memory_state is None:
-                    fused = self.fuse_if_speedup(
-                        node1, node2, pending_fusion.callable_fn, fused_nodes
-                    )
-                else:
-                    fused = self._fuse_if_speedup_with_memory(
+                    if self.fuse_if_speedup(
                         node1,
                         node2,
                         pending_fusion.callable_fn,
                         fused_nodes,
                         can_reorder=pending_fusion.can_reorder,
-                    )
-                if fused:
+                    ):
+                        fusions_to_remove.add(candidate)
+
+            # Evaluate fusion candidates as async_compile completes
+            for f in as_completed(template_futures):
+                pending_fusion, cand = future_to_pending_fusion[f]
+                if self.fuse_if_speedup(
+                    self.get_fused_node(pending_fusion.node1),
+                    self.get_fused_node(pending_fusion.node2),
+                    pending_fusion.callable_fn,
+                    fused_nodes,
+                    can_reorder=pending_fusion.can_reorder,
+                ):
                     fusions_to_remove.add(cand)
 
             for f in fusions_to_remove:
@@ -7894,18 +8042,13 @@ class Scheduler:
                 if self.get_fused_node(node_key2) is not node_key2:
                     raise AssertionError("expected node_key2 to be its own fused node")
 
-                if self._fusion_memory_state is None:
-                    if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
-                        continue
-                    self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
-                else:
-                    self._fuse_if_speedup_with_memory(
-                        node_key1,
-                        node_key2,
-                        is_speedup,
-                        fused_nodes,
-                        can_reorder=pending_fusion.can_reorder,
-                    )
+                self.fuse_if_speedup(
+                    node_key1,
+                    node_key2,
+                    is_speedup,
+                    fused_nodes,
+                    can_reorder=pending_fusion.can_reorder,
+                )
 
         for node1, node2 in possible_fusion_pairs:
             # if either node is in a pending fusion, resolve it.
@@ -7921,44 +8064,18 @@ class Scheduler:
             ):
                 continue
 
-            memory_state = self._fusion_memory_state
-            loop_tracker = (
-                _LoopMutationTracker.create_fusion_memory((node1, node2))
-                if memory_state is not None
-                else None
+            can_fuse, memory_update = self._can_fuse_for_attempt(
+                node1, node2, can_reorder=is_reorder_round
             )
-            can_fuse = (
-                self.can_fuse(node1, node2, is_reorder_round)
-                if memory_state is None
-                else self._can_fuse_impl(
-                    node1,
-                    node2,
-                    can_reorder=is_reorder_round,
-                    allow_mix_order_reduction=True,
-                )
-            )
-            if can_fuse and not self.will_fusion_create_cycle(node1, node2):
-                if memory_state is None:
-                    rejected = False
-                    memory_updates = None
-                else:
-                    rejected, memory_updates = self._check_fusion_memory(
-                        memory_state, node1, node2
-                    )
-                if rejected:
-                    if loop_tracker is not None:
-                        loop_tracker.finish_fusion_memory(rollback=True)
-                    continue
+            if can_fuse:
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
-                    if loop_tracker is not None:
-                        loop_tracker.finish_fusion_memory(rollback=True)
                     pending_fusion = PendingFusion(
                         callable_fn=fusion_res.callable_fn,
                         node1=node1,
                         node2=node2,
+                        can_reorder=is_reorder_round,
                         future=fusion_res.future,
-                        can_reorder=is_reorder_round and memory_state is not None,
                     )
 
                     if is_template_fusion(node1, node2):
@@ -7979,20 +8096,10 @@ class Scheduler:
                     continue
 
                 if not fusion_res.should_fuse:
-                    if loop_tracker is not None:
-                        loop_tracker.finish_fusion_memory(rollback=True)
                     continue
 
-                if memory_state is None:
-                    self.fuse_two_nodes(node1, node2, fused_nodes)
-                else:
-                    self._fuse_two_nodes_with_memory_update(
-                        node1, node2, fused_nodes, memory_state, memory_updates
-                    )
-                if loop_tracker is not None:
-                    loop_tracker.finish(rollback=False)
-            elif loop_tracker is not None:
-                loop_tracker.finish_fusion_memory(rollback=True)
+                fused = self.fuse_two_nodes(node1, node2, fused_nodes)
+                self._apply_fusion_memory_update(fused, memory_update)
 
     def _finish_pending_fusions(
         self,
@@ -8018,16 +8125,13 @@ class Scheduler:
             if self.get_fused_node(node_key2) is not node_key2:
                 raise AssertionError("expected node_key2 to be its own fused node")
 
-            if self._fusion_memory_state is None:
-                self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
-            else:
-                self._fuse_if_speedup_with_memory(
-                    node_key1,
-                    node_key2,
-                    is_speedup_fn,
-                    fused_nodes,
-                    can_reorder=pending_fusion.can_reorder,
-                )
+            self.fuse_if_speedup(
+                node_key1,
+                node_key2,
+                is_speedup_fn,
+                fused_nodes,
+                can_reorder=pending_fusion.can_reorder,
+            )
 
     def _handle_template_overlap(
         self,
@@ -8082,14 +8186,7 @@ class Scheduler:
             tuple[BaseSchedulerNode, BaseSchedulerNode]
         ] = []
 
-        fusion_memory_state = None
-        if (
-            nodes
-            and self.fusion_memory_timeline_peak_allowed_increase_bytes() is not None
-        ):
-            fusion_memory_state = self._init_fusion_memory_state(nodes)
-        self._fusion_memory_state = fusion_memory_state
-
+        self._fusion_memory_state = None
         possible_fusions = self.get_possible_fusions(
             nodes,
             is_reorder_round,
@@ -8099,6 +8196,14 @@ class Scheduler:
             possible_fusions = self._handle_template_overlap(
                 possible_fusions, deferred_prologue_fusions
             )
+
+        fusion_memory_state = None
+        if nodes and (
+            config.fusion_memory_timeline_peak_memory_increase_gb is not None
+            or config.fusion_memory_timeline_peak_memory_pct_threshold is not None
+        ):
+            fusion_memory_state = self._init_fusion_memory_state(nodes)
+        self._fusion_memory_state = fusion_memory_state
 
         self._try_fusion_pairs(
             possible_fusions,
@@ -8567,16 +8672,13 @@ class Scheduler:
         # therefore the original-schedule live memory before this region starts.
         cur_memory = mem_ctx.baseline_live_before[region_start]
 
-        region_peak = typing.cast(
-            int,
-            estimate_region_peak_memory(
-                local_nodes,
-                region_start=region_start,
-                region_end=region_end - 1,
-                step_of=step_of,
-                graph_outputs=mem_ctx.graph_outputs,
-                cur_memory=cur_memory,
-            ),
+        region_peak = estimate_region_peak_memory(
+            local_nodes,
+            region_start=region_start,
+            region_end=region_end - 1,
+            step_of=step_of,
+            graph_outputs=mem_ctx.graph_outputs,
+            cur_memory=cur_memory,
         )
 
         # Compare against the *original* baseline peak (not the running
@@ -8688,11 +8790,6 @@ class Scheduler:
         """
         possible_fusions = []
         seen = OrderedSet[tuple[BaseSchedulerNode, BaseSchedulerNode]]()
-        can_fuse = (
-            self._can_fuse_for_search
-            if self._fusion_memory_state is not None
-            else self.can_fuse
-        )
 
         def check_all_pairs(nodes: list[BaseSchedulerNode]) -> None:
             for node1_index, node1 in enumerate(nodes):
@@ -8706,13 +8803,13 @@ class Scheduler:
                         continue
                     seen.add(key)
 
-                    if can_fuse(node1, node2, is_reorder_round):
+                    if self.can_fuse(node1, node2, is_reorder_round):
                         possible_fusions.append(key)
                     elif (
                         node2.is_template()
                         or node2.is_foreach()
                         or isinstance(node2, FusedNestedReductions)
-                    ) and can_fuse(node2, node1, is_reorder_round):
+                    ) and self.can_fuse(node2, node1, is_reorder_round):
                         # These fusions are order dependent. Fused nested reductions
                         # must remain the producer for scheduler bookkeeping.
                         possible_fusions.append((node2, node1))
@@ -8741,23 +8838,6 @@ class Scheduler:
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
-
-    def _can_fuse_for_search(
-        self,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-        can_reorder: bool,
-    ) -> bool:
-        tracker = _LoopMutationTracker.create_fusion_memory((node1, node2))
-        try:
-            return self._can_fuse_impl(
-                node1,
-                node2,
-                can_reorder=can_reorder,
-                allow_mix_order_reduction=True,
-            )
-        finally:
-            tracker.finish_fusion_memory(rollback=True)
 
     def will_fusion_create_cycle(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -8881,173 +8961,59 @@ class Scheduler:
         from .memory import (
             assign_memory_planning_info_for_scheduler_buffers,
             assign_memory_planning_info_for_scheduler_nodes,
-            build_scheduler_memory_storage,
-            compute_size_for_scheduler_buffer,
-            estimate_region_peak_memory,
+            compute_memory_timeline,
             get_freeable_input_buf,
+            live_memory_before_steps_from_buf_info_list,
+            peak_memory_from_buf_info_list,
         )
 
-        # TODO: Support ResizeStorageBytes in the fusion memory model. Its storage
-        # changes are not represented in the timeline, so fail closed for now.
-        if any(
-            isinstance(getattr(snode, "node", None), ir.ResizeStorageBytes)
-            for node in nodes
-            for snode in node.get_nodes()
-        ):
-            torch._logging.warning_once(log, "ResizeStorageBytes disables all fusion.")
-            counters["inductor"]["fusion_memory_timeline_resize_unsupported"] += 1
-            return FusionMemoryState({}, status=FusionMemoryStateStatus.FAILED_CLOSED)
-
-        graph_inputs = OrderedSet(V.graph.graph_inputs_original.keys())
+        graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
         graph_outputs = OrderedSet(V.graph.get_output_names())
-        name_to_freeable = get_freeable_input_buf(
-            nodes, graph_inputs, use_allocation_storage_size=True
-        )
-        if self._fusion_memory_buffer_sizes is None:
-            self._fusion_memory_buffer_sizes = compute_size_for_scheduler_buffer(
-                self.name_to_buf, use_allocation_storage_size=True
-            )
+        name_to_freeable = get_freeable_input_buf(nodes, graph_inputs)
         assign_memory_planning_info_for_scheduler_buffers(nodes, self.name_to_buf)
-        for name, (size_alloc, size_free) in self._fusion_memory_buffer_sizes.items():
-            self.name_to_buf[name].mpi_buffer.size_alloc = size_alloc
-            self.name_to_buf[name].mpi_buffer.size_free = size_free
-        storage = build_scheduler_memory_storage(
-            self.name_to_buf,
-            graph_outputs,
-            self.mutation_real_name,
-            name_to_freeable,
-        )
         assign_memory_planning_info_for_scheduler_nodes(
             nodes, self.name_to_fused_node, self.name_to_buf, name_to_freeable
         )
-        for record in storage.records:
-            if record.lifetime_starts_at_allocation:
-                for successor in record.successor_nodes:
-                    successor.mpi_node.pred_buffers.add(record.lifetime_buffer)
-        node_to_idx: dict[BaseSchedulerNode, int] = {}
-        for idx, node in enumerate(nodes):
-            node_to_idx[node] = idx
-            for snode in node.get_nodes():
-                node_to_idx[snode] = idx
-
-        allowed_increase = self.fusion_memory_timeline_peak_allowed_increase_bytes()
-        if allowed_increase is None:
-            raise AssertionError("expected fusion memory guard to be enabled")
-
-        devices = OrderedSet[torch.device]()
-        for node in nodes:
-            if (device := node.get_device()) is not None:
-                devices.add(device)
-        for name in name_to_freeable:
-            devices.add(V.graph.graph_inputs[name].get_device())
-        for record in storage.records:
-            if (device := record.lifetime_buffer.node.get_device()) is not None:
-                devices.add(device)
-        device_states: dict[torch.device, FusionMemoryDeviceState] = {}
-        for device in devices:
-            device_storage = storage.for_device(device)
-            device_inputs = {
-                name: buffer
-                for name, buffer in name_to_freeable.items()
-                if V.graph.graph_inputs[name].get_device() == device
-            }
-            if not device_storage.records and not device_inputs:
-                continue
-            node_memory = {
-                node: device_storage.materialize(node.get_operation_names())
-                for node in nodes
-            }
-            node_outputs: dict[BaseSchedulerNode, Sequence[SchedulerBuffer]] = {
-                node: memory.lifetime_buffers for node, memory in node_memory.items()
-            }
-            node_alloc_sizes = {
-                node: memory.size_alloc for node, memory in node_memory.items()
-            }
-            buffer_free_sizes = dict(device_storage.buffer_free_sizes)
-            for input_buffer in device_inputs.values():
-                buffer_free_sizes[id(input_buffer.mpi_buffer)] = (
-                    input_buffer.mpi_buffer.size_free
-                )
-            device_storage.buffer_free_sizes = buffer_free_sizes
-            last_use_steps: dict[int, int | None] = {}
-            lifetime_buffers = [
-                *device_inputs.values(),
-                *(buffer for outputs in node_outputs.values() for buffer in outputs),
-            ]
-            for buffer in lifetime_buffers:
-                successors = buffer.mpi_buffer.succ_nodes
-                last_use_steps[id(buffer.mpi_buffer)] = (
-                    max(node_to_idx[node] for node in successors)
-                    if successors
-                    else None
-                )
-            initial_memory = sum(
-                buffer.mpi_buffer.size_free for buffer in device_inputs.values()
-            )
-            baseline_peak, baseline_live_before, baseline_live_after = typing.cast(
-                tuple[int, list[int], list[int]],
-                estimate_region_peak_memory(
-                    nodes,
-                    region_start=0,
-                    region_end=len(nodes) - 1,
-                    step_of=lambda node: node_to_idx[node],
-                    graph_outputs=device_storage.graph_outputs,
-                    cur_memory=initial_memory,
-                    known_last_use_steps=last_use_steps,
-                    node_outputs=node_outputs,
-                    node_alloc_sizes=node_alloc_sizes,
-                    buffer_free_sizes=buffer_free_sizes,
-                    allocation_operation_by_buffer=(
-                        device_storage.allocation_operation_by_buffer
-                    ),
-                    return_live_memory=True,
-                ),
-            )
-            peak_limit = self._fusion_memory_peak_limits.get(device)
-            if peak_limit is None:
-                peak_limit = baseline_peak + allowed_increase
-                self._fusion_memory_peak_limits[device] = peak_limit
-
-            device_state = FusionMemoryDeviceState(
-                nodes=list(nodes),
-                graph_outputs=device_storage.graph_outputs,
-                node_to_idx=dict(node_to_idx),
-                baseline_peak=baseline_peak,
-                baseline_live_before=baseline_live_before,
-                baseline_live_after=baseline_live_after,
-                peak_limit=peak_limit,
-                storage=device_storage,
-                last_use_steps=last_use_steps,
-                node_outputs=node_outputs,
-                node_alloc_sizes=node_alloc_sizes,
-            )
-            device_states[device] = device_state
-        return FusionMemoryState(device_states)
-
-    @staticmethod
-    def fusion_memory_timeline_peak_allowed_increase_bytes() -> int | None:
-        allowed_mb = config.fusion_memory_timeline_peak_allowed_increase_mb
-        if allowed_mb is None:
-            return None
-        valid = (
-            not isinstance(allowed_mb, bool)
-            and isinstance(allowed_mb, (int, float))
-            and allowed_mb >= 0
-            and (not isinstance(allowed_mb, float) or math.isfinite(allowed_mb))
+        buffer_info, node_to_idx, _ = compute_memory_timeline(
+            nodes, name_to_freeable, graph_outputs
         )
-        if not valid:
-            raise ValueError(
-                "fusion_memory_timeline_peak_allowed_increase_mb must be "
-                "a finite non-negative number or None"
-            )
-        if isinstance(allowed_mb, int):
-            return allowed_mb * 1024 * 1024
-        numerator, denominator = allowed_mb.as_integer_ratio()
-        return numerator * 1024 * 1024 // denominator
+        for node in nodes:
+            for snode in node.get_nodes():
+                node_to_idx[snode] = node_to_idx[node]
+
+        baseline_peak, memory_at_nodes = peak_memory_from_buf_info_list(
+            buffer_info, len(nodes)
+        )
+        baseline_live_before = live_memory_before_steps_from_buf_info_list(
+            buffer_info, len(nodes)
+        )
+
+        abs_thr_gb = config.fusion_memory_timeline_peak_memory_increase_gb
+        pct_thr = config.fusion_memory_timeline_peak_memory_pct_threshold
+        if abs_thr_gb is None and pct_thr is None:
+            raise AssertionError("expected fusion memory guard to be enabled")
+        peak_limit = self._fusion_memory_peak_limit
+        if peak_limit is None:
+            limits = [float(abs_thr_gb) * (1024**3)] if abs_thr_gb is not None else []
+            if pct_thr is not None:
+                limits.append(pct_thr * baseline_peak)
+            peak_limit = baseline_peak + int(min(limits))
+            self._fusion_memory_peak_limit = peak_limit
+
+        state = FusionMemoryState(
+            nodes=list(nodes),
+            graph_outputs=graph_outputs,
+            node_to_idx=node_to_idx,
+            baseline_peak=baseline_peak,
+            baseline_live_before=baseline_live_before,
+            baseline_live_after=memory_at_nodes[:-1],
+            peak_limit=peak_limit,
+        )
+        return state
 
     @staticmethod
     def _fusion_node_step(
-        state: FusionMemoryDeviceState, node: BaseSchedulerNode | OutputNode
+        state: FusionMemoryState, node: BaseSchedulerNode | OutputNode
     ) -> int | None:
         if isinstance(node, OutputNode):
             return None
@@ -9059,97 +9025,73 @@ class Scheduler:
         return min(steps) if steps else None
 
     @staticmethod
-    def _fusion_pred_buffers(
-        node: BaseSchedulerNode,
-    ) -> OrderedSet[SchedulerBuffer | FreeableInputBuffer]:
-        if hasattr(node, "mpi_node"):
-            return node.mpi_node.pred_buffers
-        pred_buffers = OrderedSet()
-        for snode in node.get_nodes():
-            pred_buffers.update(snode.mpi_node.pred_buffers)
-        return pred_buffers
-
-    @staticmethod
     def _make_fusion_memory_candidate(
         node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> _FusionMemoryCandidate:
         snodes = tuple(OrderedSet([*node1.get_nodes(), *node2.get_nodes()]))
-        operation_names = node1.get_operation_names() | node2.get_operation_names()
         buffer_names = node1.get_buffer_names() | node2.get_buffer_names()
+        outputs = tuple(
+            buffer for node in (node1, node2) for buffer in node.get_outputs()
+        )
         unmet_dependencies = OrderedSet(
             dep
             for node in (node1, node2)
             for dep in node.unmet_dependencies
             if dep.name not in buffer_names
         )
-        return _FusionMemoryCandidate(
+        candidate = _FusionMemoryCandidate(
             snodes=snodes,
-            operation_names=operation_names,
-            buffer_names=buffer_names,
+            outputs=outputs,
             unmet_dependencies=unmet_dependencies,
         )
-
-    def _assign_fusion_memory_planning_info(
-        self,
-        state: FusionMemoryDeviceState,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-        candidate: _FusionMemoryCandidate,
-    ) -> tuple[Sequence[SchedulerBuffer], int]:
-        candidate_buffers = candidate.get_buffer_names()
-        candidate_memory = state.storage.materialize(candidate.operation_names)
-        candidate_outputs = candidate_memory.lifetime_buffers
         input_buffers = OrderedSet()
         for node in (node1, node2):
-            input_buffers.update(self._fusion_pred_buffers(node))
+            input_buffers.update(node.mpi_node.pred_buffers)
         candidate.mpi_node = MemoryPlanningInfoForNode(
-            size=candidate_memory.size_alloc,
+            size=sum(buffer.mpi_buffer.size_alloc for buffer in candidate.outputs),
             pred_buffers=OrderedSet(
-                buf for buf in input_buffers if buf.get_name() not in candidate_buffers
+                buf for buf in input_buffers if buf.get_name() not in buffer_names
             ),
         )
-        return candidate_outputs, candidate_memory.size_alloc
+        return candidate
 
     def _check_fusion_memory(
         self,
         state: FusionMemoryState | None,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        *,
-        materialize_update: bool = True,
-    ) -> tuple[bool, dict[torch.device, FusionMemoryUpdate] | None]:
+    ) -> tuple[bool, FusionMemoryUpdate | None]:
         if state is None:
             return False, None
-        if state.status is FusionMemoryStateStatus.FAILED_CLOSED:
-            return True, None
-        if not state.device_states:
+        if state.status is FusionMemoryStateStatus.INVALIDATED:
             return False, None
 
-        updates: dict[torch.device, FusionMemoryUpdate] = {}
-        for device, device_state in state.device_states.items():
-            rejected, update = self._fusion_memory_update(
-                device_state,
-                node1,
-                node2,
-                return_live_memory=materialize_update,
-                peak_limit=device_state.peak_limit,
+        rejected, update = self._fusion_memory_update(
+            state,
+            node1,
+            node2,
+            peak_limit=state.peak_limit,
+        )
+        if rejected:
+            return True, None
+        if update is None:
+            raise AssertionError("expected a fusion memory update")
+        if not state.update_boundaries_match(update):
+            fusion_log.debug(
+                "memory-timeline fusion check skipped for %s with %s: "
+                "unable to preserve the timeline boundary",
+                node1.get_name(),
+                node2.get_name(),
             )
-            if rejected:
-                return True, None
-            if not materialize_update:
-                continue
-            if update is None or not device_state.update_boundaries_match(update):
-                fusion_log.debug(
-                    "memory-timeline fusion rejected %s with %s: "
-                    "unable to preserve the %s timeline boundary",
-                    node1.get_name(),
-                    node2.get_name(),
-                    device,
-                )
-                state.status = FusionMemoryStateStatus.FAILED_CLOSED
-                return True, None
-            updates[device] = update
-        return False, updates if materialize_update else None
+            counters["inductor"]["fusion_memory_timeline_fail_open"] += 1
+            torch._logging.warning_once(
+                log,
+                "Disabling fusion memory checks for this fusion round because "
+                "the modeled timeline boundary could not be preserved.",
+            )
+            state.status = FusionMemoryStateStatus.INVALIDATED
+            return False, None
+        return False, update
 
     def _fusion_dep_producer(self, dep: Dep) -> BaseSchedulerNode | None:
         buf = self.name_to_buf.get(dep.name)
@@ -9161,27 +9103,26 @@ class Scheduler:
 
     def _fusion_memory_update(
         self,
-        state: FusionMemoryDeviceState,
+        state: FusionMemoryState,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         *,
-        return_live_memory: bool,
         peak_limit: int | None,
     ) -> tuple[bool, FusionMemoryUpdate | None]:
-        from .memory import estimate_region_peak_memory
+        from .memory import estimate_region_memory
 
         step1 = self._fusion_node_step(state, node1)
         step2 = self._fusion_node_step(state, node2)
         if step1 is None or step2 is None:
-            return False, None
+            missing = node1 if step1 is None else node2
+            raise AssertionError(
+                f"expected {missing.get_name()} in the fusion memory timeline"
+            )
 
         region_start = min(step1, step2)
         region_end = max(step1, step2)
 
         candidate = self._make_fusion_memory_candidate(node1, node2)
-        candidate_outputs, candidate_alloc_size = (
-            self._assign_fusion_memory_planning_info(state, node1, node2, candidate)
-        )
         candidate_node = typing.cast(BaseSchedulerNode, candidate)
 
         local_nodes: list[BaseSchedulerNode] = [candidate_node]
@@ -9191,6 +9132,7 @@ class Scheduler:
                 continue
             local_nodes.append(node)
 
+        needs_topological_sort = False
         for dep in candidate.unmet_dependencies:
             producer = self._fusion_dep_producer(dep)
             if producer is None or producer is node1 or producer is node2:
@@ -9200,26 +9142,28 @@ class Scheduler:
                 producer_step is not None
                 and region_start <= producer_step <= region_end
             ):
-                local_set = OrderedSet(local_nodes)
-                seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
-                ordered_nodes: list[BaseSchedulerNode] = []
-
-                def visit(node: BaseSchedulerNode) -> None:
-                    if node in seen:
-                        return
-                    seen.add(node)
-                    for node_dep in sorted(
-                        node.unmet_dependencies, key=lambda d: d.name
-                    ):
-                        dep_producer = self._fusion_dep_producer(node_dep)
-                        if dep_producer is not None and dep_producer in local_set:
-                            visit(dep_producer)
-                    ordered_nodes.append(node)
-
-                visit(candidate_node)
-                ordered_nodes.extend(node for node in local_nodes if node not in seen)
-                local_nodes = ordered_nodes
+                needs_topological_sort = True
                 break
+
+        if needs_topological_sort:
+            local_set = OrderedSet(local_nodes)
+            seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
+            ordered_nodes: list[BaseSchedulerNode] = []
+
+            def visit(node: BaseSchedulerNode) -> None:
+                if node in seen:
+                    return
+                seen.add(node)
+                for node_dep in sorted(node.unmet_dependencies, key=lambda d: d.name):
+                    dep_producer = self._fusion_dep_producer(node_dep)
+                    if dep_producer is not None and dep_producer in local_set:
+                        visit(dep_producer)
+                ordered_nodes.append(node)
+
+            visit(candidate_node)
+            ordered_nodes.extend(node for node in local_nodes if node not in seen)
+            local_nodes = ordered_nodes
+
         new_step = {node: region_start + idx for idx, node in enumerate(local_nodes)}
         candidate_step = new_step[candidate_node]
         for node in local_nodes:
@@ -9229,66 +9173,29 @@ class Scheduler:
         for node in (node1, node2):
             new_step[node] = candidate_step
 
-        node_to_idx = state.node_to_idx
         step_cache = {}
 
         def step_of(node: BaseSchedulerNode) -> int:
             if node not in step_cache:
                 if node in new_step:
                     step_cache[node] = new_step[node]
-                elif node in node_to_idx:
-                    step_cache[node] = node_to_idx[node]
                 else:
-                    steps = [new_step[n] for n in node.get_nodes() if n in new_step]
-                    step_cache[node] = min(steps) if steps else node_to_idx[node]
+                    step = self._fusion_node_step(state, node)
+                    if step is None:
+                        raise AssertionError(
+                            f"expected {node.get_name()} in the fusion memory timeline"
+                        )
+                    step_cache[node] = step
             return step_cache[node]
 
-        candidate_last_use_steps: dict[int, int | None] = {}
-        affected_buffers: OrderedSet[SchedulerBuffer | FreeableInputBuffer] = (
-            OrderedSet(candidate_outputs)
-        )
-        for node, step in new_step.items():
-            if node_to_idx.get(node) != step and hasattr(node, "mpi_node"):
-                affected_buffers.update(node.mpi_node.pred_buffers)
-        for buf in affected_buffers:
-            last_step = None
-            for succ in buf.mpi_buffer.succ_nodes:
-                step = step_of(succ)
-                if last_step is None or step > last_step:
-                    last_step = step
-            candidate_last_use_steps[id(buf.mpi_buffer)] = last_step
-
-        node_outputs = collections.ChainMap(
-            {candidate_node: candidate_outputs}, state.node_outputs
-        )
-        node_alloc_sizes = collections.ChainMap(
-            {candidate_node: candidate_alloc_size}, state.node_alloc_sizes
-        )
-        memory_estimate = estimate_region_peak_memory(
+        region_peak, live_before, live_after = estimate_region_memory(
             local_nodes,
             region_start=region_start,
             region_end=region_end,
             step_of=step_of,
             graph_outputs=state.graph_outputs,
             cur_memory=state.baseline_live_before[region_start],
-            last_use_step_cache=candidate_last_use_steps,
-            known_last_use_steps=state.last_use_steps,
-            node_outputs=node_outputs,
-            node_alloc_sizes=node_alloc_sizes,
-            buffer_free_sizes=state.storage.buffer_free_sizes,
-            allocation_operation_by_buffer=(
-                state.storage.allocation_operation_by_buffer
-            ),
-            max_peak=peak_limit,
-            return_live_memory=return_live_memory,
         )
-        if return_live_memory:
-            region_peak, live_before, live_after = typing.cast(
-                tuple[int, list[int], list[int]], memory_estimate
-            )
-        else:
-            region_peak = typing.cast(int, memory_estimate)
-            live_before = live_after = []
         if peak_limit is not None and region_peak > peak_limit:
             fusion_log.debug(
                 "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
@@ -9297,8 +9204,6 @@ class Scheduler:
                 region_peak - state.baseline_peak,
             )
             return True, None
-        if not return_live_memory:
-            return False, None
         update = FusionMemoryUpdate(
             node1=node1,
             node2=node2,
@@ -9309,9 +9214,6 @@ class Scheduler:
             local_nodes=local_nodes,
             live_before=live_before,
             live_after=live_after,
-            last_use_steps=candidate_last_use_steps,
-            candidate_outputs=candidate_outputs,
-            candidate_alloc_size=candidate_alloc_size,
         )
         return False, update
 
@@ -9865,7 +9767,10 @@ class Scheduler:
             return None
 
         snodes = [subnode for node in nodes for subnode in node.get_nodes()]
-        if not snodes or not all(isinstance(node, SchedulerNode) for node in snodes):
+        if not snodes or not all(
+            isinstance(node, SchedulerNode) and node._body is not None
+            for node in snodes
+        ):
             return None
 
         if any(node.is_cpu() for node in snodes):
@@ -9884,16 +9789,16 @@ class Scheduler:
             return cached
 
         analysis = analyze_memory_coalescing_for_nodes(snodes)
-        result = None
-        if analysis is not None:
-            reduction = max(snodes, key=lambda node: int(node.is_reduction()))
-            _, (numel, rnumel) = reduction.group
-            result = SIMDScheduling.select_tiling_with_memory(
-                snodes, numel, rnumel, analysis
-            ).memory
+        if analysis is None:
+            self._tiling_memory_cache[cache_key] = None
+            return None
+
+        reduction = max(snodes, key=lambda node: int(node.is_reduction()))
+        _, (numel, rnumel) = reduction.group
+        result = SIMDScheduling.select_tiling_with_memory(
+            snodes, numel, rnumel, analysis
+        ).memory
         self._tiling_memory_cache[cache_key] = result
-        for tracker in self._fusion_memory_cache_trackers:
-            tracker.track_fusion_memory_cache_key(cache_key)
         return result
 
     def _reindexing_regresses_memory_coalescing(
@@ -9981,7 +9886,10 @@ class Scheduler:
         red_rnumel = typing.cast(sympy.Expr, groups[1])
         target_numel = red_numel * red_rnumel
 
-        if not all(isinstance(sn, SchedulerNode) for sn in pw_node.get_nodes()):
+        if not all(
+            isinstance(sn, SchedulerNode) and sn._body is not None
+            for sn in pw_node.get_nodes()
+        ):
             return False
         snodes = typing.cast(list[SchedulerNode], pw_node.get_nodes())
 
@@ -10372,6 +10280,8 @@ class Scheduler:
         node2: BaseSchedulerNode,
         can_reorder: bool = False,
         allow_mix_order_reduction: bool = True,
+        *,
+        final_check: Callable[[], bool] | None = None,
     ) -> bool:
         """Determine if node1 and node2 can be combined into a single fused node.
 
@@ -10385,6 +10295,8 @@ class Scheduler:
             can_reorder=can_reorder,
             allow_mix_order_reduction=allow_mix_order_reduction,
         )
+        if can_fuse and final_check is not None:
+            can_fuse = final_check()
         tracker.finish(rollback=not can_fuse)
         return can_fuse
 
@@ -10440,6 +10352,11 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+        if not self.get_backend(node1.get_device()).can_fuse_reduction_pair(
+            node1, node2
+        ):
+            why("incompatible reduction contracts")
+            return False
 
         if node1.is_template() and node2.has_strict_reduction():
             why("template fusion does not preserve strict reduction ordering")
@@ -10457,11 +10374,12 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
-        if node1.is_template() and self.get_backend(
-            node1.get_device()
-        ).can_fuse_reduction_epilogue(node1, node2):
+        if (
+            node1.is_template() or isinstance(node1, FusedSchedulerNode)
+        ) and self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
+            node1, node2
+        ):
             return True
-
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -11546,34 +11464,15 @@ class Scheduler:
                 possible_fusions_group_by_priority[fusion_pair_priority].append(
                     (node1, node2)
                 )
-        memory_state = self._fusion_memory_state
-        if memory_state is None:
-            possible_fusions_with_highest_priority = min(
-                possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
-            )[1]
-            if not possible_fusions_with_highest_priority:
-                raise AssertionError(
-                    "expected at least one possible fusion with highest priority"
-                )
-            return possible_fusions_with_highest_priority
-
-        for _, possible_fusions_with_highest_priority in sorted(
+        # return the possible fusions with highest priority
+        possible_fusions_with_highest_priority = min(
             possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
-        ):
-            possible_fusions_with_highest_priority = [
-                (node1, node2)
-                for node1, node2 in possible_fusions_with_highest_priority
-                if not self._check_fusion_memory(
-                    memory_state,
-                    node1,
-                    node2,
-                    materialize_update=False,
-                )[0]
-            ]
-            if possible_fusions_with_highest_priority:
-                return possible_fusions_with_highest_priority
-
-        return []
+        )[1]
+        if len(possible_fusions_with_highest_priority) <= 0:
+            raise AssertionError(
+                "expected at least one possible fusion with highest priority"
+            )
+        return possible_fusions_with_highest_priority
 
     def score_fusion_key(
         self, nodes: tuple[BaseSchedulerNode, BaseSchedulerNode]
@@ -12999,6 +12898,11 @@ class BaseScheduling:  # noqa: docstring_linter
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return False
+
+    def can_fuse_reduction_pair(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return True
 
     def can_fuse_multi_outputs_template(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

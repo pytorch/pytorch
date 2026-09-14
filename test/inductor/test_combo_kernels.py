@@ -22,6 +22,7 @@ from torch._inductor.codegen.triton_combo_kernel import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -507,9 +508,14 @@ class ComboKernelTests(TestCase):
         # meta keys (XBLOCK, YBLOCK) but SequentialFlattenComboKernelGrid looks
         # up XBLOCK_0, XBLOCK_1 etc. — dict.get returns None, and ceildiv treats
         # None as block=1, hardcoding the grid to xnumel*ynumel per subkernel.
+        # kineto_available: CI runs this file with TORCHINDUCTOR_CPP_WRAPPER=1, so on a
+        # USE_KINETO=0 build both halves above are true and the GPU-only profile below
+        # raises. Extending the condition rather than gating the whole method keeps the
+        # eager-path coverage above.
         if (
             torch._inductor.config.cpp_wrapper
             and self.combo_kernel_per_subkernel_blocks
+            and kineto_available()
         ):
             from torch.profiler import ProfilerActivity
 
@@ -855,6 +861,7 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
@@ -934,6 +941,7 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -1076,6 +1084,7 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
@@ -1243,7 +1252,7 @@ class ComboKernelTests(TestCase):
     def test_combo_kernel_split_large_reductions(self):
         # squeezenet1_1 backward (combo regression sum_sum_8bcd6e12dcd4):
         # two very large reductions (sum over [0,2,3] of [512,64,55,55]) must NOT be
-        # co-fused into one combo kernel -- each is split out (5 kernels, vs 4 if fused).
+        # co-fused into one combo kernel -- each is split out into its own kernel.
         import torch._inductor.inductor_prims
 
         class Model(torch.nn.Module):
@@ -1287,12 +1296,22 @@ class ComboKernelTests(TestCase):
 
         m = Model()
         torch._dynamo.reset()
-        torch._inductor.metrics.reset()
         out_eager = m(*inps)
-        out_compiled = torch.compile(m)(*inps)
+        with fresh_cache():
+            out_compiled, code = run_and_get_code(torch.compile(m), *inps)
         torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
-        # Very-large reductions split out instead of co-fused: 5 kernels (4 = the regression).
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        # The total kernel count is device dependent: reduction_split_factor only
+        # splits these 64-output reductions into a second phase when
+        # 2 * multi_processor_count > 64, so a low-SM GPU legitimately emits one
+        # kernel fewer. Assert the invariant instead -- each very-large reduction
+        # (the same numel gate the partitioner uses) gets a kernel of its own.
+        # Co-fusing them emits both sub-kernels in a single async_compile block.
+        separated = 0
+        for kernel_src in " ".join(code).split("async_compile.triton(")[1:]:
+            numels = re.findall(r"xnumel = (\d+)\s+r0_numel = (\d+)", kernel_src)
+            if any(int(x) * int(r) > LARGE_NUMELS for x, r in numels):
+                separated += 1
+        self.assertEqual(separated, 2)
 
     @requires_gpu_and_triton
     @skipIfXpu(
@@ -3190,43 +3209,21 @@ class _PeakMemFakeNode:
             return out
         return self._outputs
 
-    def get_nodes(self):
-        return self.snodes if self.snodes is not None else [self]
-
-    def get_operation_names(self):
-        if self.snodes is not None:
-            return OrderedSet(
-                name for node in self.snodes for name in node.get_operation_names()
-            )
-        return OrderedSet([self.name])
-
     def get_buffer_names(self):
         return OrderedSet(buf.get_name() for buf in self.get_outputs())
 
 
 class _PeakMemFakeBuffer:
-    def __init__(
-        self,
-        name: str,
-        succ_nodes,
-        size_alloc: int,
-        size_free: int,
-        defining_op: str | None = None,
-    ) -> None:
+    def __init__(self, name: str, succ_nodes, size_alloc: int, size_free: int) -> None:
         self.name = name
-        self.defining_op = defining_op or name
         self.mpi_buffer = SimpleNamespace(
             size_alloc=size_alloc,
             size_free=size_free,
-            succ_nodes=OrderedSet(succ_nodes),
-            succ_nodes_for_ordering=OrderedSet(succ_nodes),
+            succ_nodes=succ_nodes,
         )
 
     def get_name(self) -> str:
         return self.name
-
-    def defining_op_name(self) -> str:
-        return self.defining_op
 
 
 class _PeakMemFakeScheduler:
@@ -3294,235 +3291,7 @@ class _ScheduleFirstFakeCombo:
 
 @instantiate_parametrized_tests
 class ComboKernelPeakMemoryTests(InductorTestCase):
-    def test_scheduler_memory_uses_physical_allocation_size(self):
-        from torch._inductor import memory as memory_module
-
-        buffer = _PeakMemFakeBuffer("padded", set(), 0, 0)
-        buffer.node = SimpleNamespace(
-            layout=object(),
-            get_dtype=lambda: torch.float32,
-            get_numel=lambda: 6,
-        )
-        graph = SimpleNamespace(
-            scheduler=SimpleNamespace(mutation_real_name={}),
-            sizevars=SimpleNamespace(optimization_hint=lambda value, fallback: value),
-            get_allocation_storage_size=lambda _: 32,
-        )
-
-        with V.set_graph_handler(graph):
-            sizes = memory_module.compute_size_for_scheduler_buffer(
-                {"padded": buffer}, use_allocation_storage_size=True
-            )
-
-        self.assertEqual(sizes["padded"], (128, 128))
-
-        input_buffer = SimpleNamespace(get_dtype=lambda: torch.float32)
-        graph = SimpleNamespace()
-        graph.graph_inputs_original = {"input": input_buffer}
-        graph.get_allocation_storage_size = lambda _: 13
-        graph.sizevars = SimpleNamespace(
-            optimization_hint=lambda value, fallback: value
-        )
-        node = _PeakMemFakeNode("node")
-        node.read_writes = SimpleNamespace(reads=[SimpleNamespace(name="input")])
-
-        with (
-            V.set_graph_handler(graph),
-            patch.object(memory_module, "is_nonfreeable_buffers", return_value=False),
-        ):
-            inputs = memory_module.get_freeable_input_buf(
-                [node],
-                OrderedSet(["input"]),
-                use_allocation_storage_size=True,
-            )
-
-        self.assertEqual(inputs["input"].mpi_buffer.size_free, 52)
-
-    def test_scheduler_memory_clamps_negative_physical_size_hints(self):
-        from torch._inductor import memory as memory_module
-
-        buffer = _PeakMemFakeBuffer("dynamic", set(), 0, 0)
-        buffer.node = SimpleNamespace(
-            layout=object(),
-            get_dtype=lambda: torch.float32,
-            get_numel=lambda: 1,
-        )
-        input_buffer = SimpleNamespace(get_dtype=lambda: torch.float32)
-        graph = SimpleNamespace(
-            scheduler=SimpleNamespace(mutation_real_name={}),
-            graph_inputs_original={"input": input_buffer},
-            sizevars=SimpleNamespace(optimization_hint=lambda value, fallback: -3),
-            get_allocation_storage_size=lambda _: object(),
-        )
-        node = _PeakMemFakeNode("node")
-        node.read_writes = SimpleNamespace(reads=[SimpleNamespace(name="input")])
-
-        with (
-            V.set_graph_handler(graph),
-            patch.object(memory_module, "is_nonfreeable_buffers", return_value=False),
-        ):
-            sizes = memory_module.compute_size_for_scheduler_buffer(
-                {"dynamic": buffer}, use_allocation_storage_size=True
-            )
-            inputs = memory_module.get_freeable_input_buf(
-                [node], OrderedSet(["input"]), use_allocation_storage_size=True
-            )
-
-        self.assertEqual(sizes["dynamic"], (0, 0))
-        self.assertEqual(inputs["input"].mpi_buffer.size_free, 0)
-
-    def test_scheduler_memory_storage_filters_per_device(self):
-        from torch._inductor.memory import MemoryStorageInfo, SchedulerMemoryStorage
-
-        records = []
-        records_by_operation = {}
-        for name, device, size in (
-            ("cpu", torch.device("cpu"), 4),
-            ("cuda", torch.device("cuda", 1), 8),
-        ):
-            buffer = _PeakMemFakeBuffer(name, set(), size, size)
-            buffer.node = SimpleNamespace(get_device=lambda device=device: device)
-            record = MemoryStorageInfo(
-                size, buffer, buffer, frozenset([name]), (), False
-            )
-            records.append(record)
-            records_by_operation[name] = (record,)
-
-        free_sizes = {
-            id(record.lifetime_buffer.mpi_buffer): record.size for record in records
-        }
-        storage = SchedulerMemoryStorage(
-            tuple(records),
-            records_by_operation,
-            OrderedSet(),
-            free_sizes,
-        )
-
-        cpu_storage = storage.for_device(torch.device("cpu"))
-        cuda_storage = storage.for_device(torch.device("cuda", 1))
-        self.assertEqual([record.size for record in cpu_storage.records], [4])
-        self.assertEqual([record.size for record in cuda_storage.records], [8])
-
-    def test_mixed_alias_multi_output_tracks_fresh_leaf_storage(self):
-        from torch._inductor import ir
-        from torch._inductor.memory import build_scheduler_memory_storage
-
-        extractor = _PeakMemFakeNode("extractor")
-        alias_consumer = _PeakMemFakeNode("alias_consumer")
-        fresh_consumer = _PeakMemFakeNode("fresh_consumer")
-        source_a = _PeakMemFakeBuffer("source_a", set(), 100, 100, "source_a_op")
-        source_b = _PeakMemFakeBuffer("source_b", set(), 80, 80, "source_b_op")
-        parent = _PeakMemFakeBuffer("parent", {extractor}, 0, 0, "parent_op")
-        library = self._test_stack.enter_context(
-            torch.library._scoped_library(
-                "inductor_test_fusion_memory_mixed", "FRAGMENT"
-            )
-        )
-        library.define(
-            "mixed(Tensor(a) x, Tensor(b) y) -> (Tensor(a), Tensor(b), Tensor)"
-        )
-        op = torch.ops.inductor_test_fusion_memory_mixed.mixed.default
-        alias_a = _PeakMemFakeBuffer("alias_a", set(), 0, 100, "alias_a_op")
-        alias_b = _PeakMemFakeBuffer("alias_b", {alias_consumer}, 0, 80, "alias_b_op")
-        fresh = _PeakMemFakeBuffer("fresh", {fresh_consumer}, 0, 40, "fresh_op")
-        extractor._outputs = [alias_b, fresh]
-        for source in (source_a, source_b):
-            source.node = SimpleNamespace(
-                layout=object(),
-                get_inputs_that_alias_output=lambda: (),
-                should_allocate=lambda: True,
-            )
-        input_a = SimpleNamespace(get_name=lambda: "source_a")
-        input_b = SimpleNamespace(get_name=lambda: "source_b")
-        parent.node = object.__new__(ir.FallbackKernel)
-        parent.node.layout = ir.MultiOutputLayout(device=torch.device("cpu"))
-        parent.node.op_overload = op
-        parent.node.inputs = (input_a, input_b)
-        parent.node.constant_args = ()
-        parent.node.unflatten_args = lambda inputs, constants: (inputs, {})
-        parent.node.alias_names = ["source_a", "source_b"]
-        for index, leaf in enumerate((alias_a, alias_b, fresh)):
-            leaf.node = object.__new__(ir.MultiOutput)
-            leaf.node.layout = ir.FixedLayout(
-                torch.device("cpu"), torch.float32, [25 if index == 0 else 20], [1]
-            )
-            leaf.node.inputs = [parent.node]
-            leaf.node.indices = [(tuple, index)]
-            leaf.node.get_inputs_that_alias_output = lambda: ("parent",)
-        parent.users = [SimpleNamespace(node=extractor)]
-
-        with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
-            storage = build_scheduler_memory_storage(
-                {
-                    "source_a": source_a,
-                    "source_b": source_b,
-                    "parent": parent,
-                    "alias_a": alias_a,
-                    "alias_b": alias_b,
-                    "fresh": fresh,
-                },
-                OrderedSet(),
-                {},
-            )
-
-        self.assertEqual(len(storage.records), 3)
-        self.assertEqual(storage.materialize({"parent_op", "fresh_op"}).size_alloc, 40)
-        records = {
-            record.lifetime_buffer.get_name(): record for record in storage.records
-        }
-        self.assertTrue(records["source_a"].is_graph_output)
-        self.assertFalse(records["source_b"].is_graph_output)
-        self.assertIn(extractor, source_a.mpi_buffer.succ_nodes)
-        self.assertNotIn(alias_consumer, source_a.mpi_buffer.succ_nodes)
-        self.assertIn(alias_consumer, source_b.mpi_buffer.succ_nodes)
-
-    def test_multi_output_storage_tracks_dead_fallback_outputs(self):
-        from torch._inductor.scheduler import Scheduler
-
-        library = self._test_stack.enter_context(
-            torch.library._scoped_library("inductor_test_dead_outputs", "FRAGMENT")
-        )
-        library.define("three(Tensor x) -> (Tensor, Tensor, Tensor)")
-
-        def implementation(x):
-            return x.clone(), x.clone(), x.clone()
-
-        library.impl("three", implementation, "CPU")
-        library.impl("three", implementation, "Meta")
-        op = torch.ops.inductor_test_dead_outputs.three.default
-        captured_states = []
-        init_memory_state = Scheduler._init_fusion_memory_state
-
-        def capture_records(scheduler, nodes):
-            state = init_memory_state(scheduler, nodes)
-            captured_states.append(state)
-            return state
-
-        def fn(x):
-            return op(x)[1]
-
-        torch._dynamo.reset()
-        x = torch.randn(4)
-        with patch.object(Scheduler, "_init_fusion_memory_state", capture_records):
-            actual = torch.compile(
-                fn,
-                options={
-                    "fx_graph_cache": False,
-                    "fusion_memory_timeline_peak_allowed_increase_mb": 0,
-                },
-            )(x)
-
-        self.assertEqual(actual, fn(x))
-        self.assertTrue(captured_states)
-        device_state = captured_states[0].device_states[torch.device("cpu")]
-        records = device_state.storage.records
-        self.assertEqual(sorted(record.size for record in records), [16] * 3)
-        self.assertEqual(
-            sum(record.lifetime_starts_at_allocation for record in records), 2
-        )
-        self.assertEqual(device_state.baseline_peak, 48)
-        expected_final_live = 48 if torch._inductor.config.cpp_wrapper else 16
-        self.assertEqual(device_state.baseline_live_before[-1], expected_final_live)
+    """Coverage for memory-aware combo-kernel acceptance and commit logic."""
 
     def setUp(self):
         super().setUp()
@@ -4638,13 +4407,12 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         steps = {a1: 1, a2: 2, a3: 3, a100: 100, b3: 3, b5: 5}
         nodes_in_window = [a1, a2, a3, b3, b5]
 
-        peak, live_before, live_after = mem_mod.estimate_region_peak_memory(
+        peak = mem_mod.estimate_region_peak_memory(
             nodes_in_window,
             region_start=0,
             region_end=5,
             step_of=lambda n: steps[n],
             graph_outputs={"bufC"},
-            return_live_memory=True,
         )
         # Walk per slot (alloc -> peak check -> free):
         #   slot 0: nothing                                 -> cur=0
@@ -4656,47 +4424,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         # a100 (step 100) is outside the window, so bufD is never seen.
         # bufC is a graph output, so it is never freed.
         self.assertEqual(peak, 350)
-        self.assertEqual(live_before, [0, 0, 100, 300, 250, 250, 50])
-        self.assertEqual(live_after, [0, 100, 300, 350, 250, 250])
-
-        last_use_step_cache = {}
-        cached_result = mem_mod.estimate_region_peak_memory(
-            nodes_in_window,
-            region_start=0,
-            region_end=5,
-            step_of=lambda n: steps[n],
-            graph_outputs={"bufC"},
-            last_use_step_cache=last_use_step_cache,
-            known_last_use_steps={
-                id(bufA.mpi_buffer): 3,
-                id(bufB.mpi_buffer): 5,
-            },
-            return_live_memory=True,
-        )
-        self.assertEqual(cached_result, (peak, live_before, live_after))
-        self.assertEqual(last_use_step_cache[id(bufA.mpi_buffer)], 3)
-        self.assertEqual(last_use_step_cache[id(bufB.mpi_buffer)], 5)
-
-        peak_only = mem_mod.estimate_region_peak_memory(
-            nodes_in_window,
-            region_start=0,
-            region_end=5,
-            step_of=lambda n: steps[n],
-            graph_outputs={"bufC"},
-        )
-        self.assertEqual(peak_only, peak)
-
-        early_peak, early_before, early_after = mem_mod.estimate_region_peak_memory(
-            nodes_in_window,
-            region_start=0,
-            region_end=5,
-            step_of=lambda n: steps[n],
-            graph_outputs={"bufC"},
-            max_peak=299,
-            return_live_memory=True,
-        )
-        self.assertGreater(early_peak, 299)
-        self.assertEqual((early_before, early_after), ([], []))
 
 
 if __name__ == "__main__":
