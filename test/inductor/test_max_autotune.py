@@ -7281,7 +7281,7 @@ class TestTDMEndToEnd(TestCase):
         x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
         y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
         result, code = self._compile_generic_and_get_code(fn, x, y)
-        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        self.assertIn("tl.make_tensor_descriptor(in_ptr", "\n".join(code))
         torch.testing.assert_close(result, fn(x, y), atol=1e-3, rtol=1e-3)
 
     def test_tdm_generic_reduction_correctness_and_selection(self):
@@ -7290,7 +7290,7 @@ class TestTDMEndToEnd(TestCase):
 
         x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float32)
         result, code = self._compile_generic_and_get_code(fn, x)
-        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        self.assertIn("tl.make_tensor_descriptor(in_ptr", "\n".join(code))
         torch.testing.assert_close(result, fn(x), atol=1e-3, rtol=1e-3)
 
     @parametrize(
@@ -7310,7 +7310,7 @@ class TestTDMEndToEnd(TestCase):
         x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=dtype)
         y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=dtype)
         result, code = self._compile_generic_and_get_code(fn, x, y)
-        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        self.assertIn("tl.make_tensor_descriptor(in_ptr", "\n".join(code))
         torch.testing.assert_close(result, fn(x, y), atol=tol, rtol=tol)
 
     @parametrize("rows,cols", ((1024, 1000), (1000, 1024), (1000, 1000)))
@@ -7335,7 +7335,7 @@ class TestTDMEndToEnd(TestCase):
 
         view = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)[:512]
         result, code = self._compile_generic_and_get_code(fn, view)
-        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        self.assertIn("tl.make_tensor_descriptor(in_ptr", "\n".join(code))
         torch.testing.assert_close(result, fn(view), atol=1e-3, rtol=1e-3)
 
     def test_tdm_generic_unsuitable_layout_falls_back(self):
