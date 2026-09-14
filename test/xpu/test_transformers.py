@@ -234,15 +234,9 @@ class TestSDPAXpuOnly(NNTestCase):
 
     @parametrize("dtype", [torch.half, torch.bfloat16])
     def test_onednn_attention_pure_mqa_without_enable_gqa(self, device, dtype):
-        """Verify that pure MQA (a single, shared key/value head) can use the
-        OneDNN overrideable SDPA backend even when the caller never passes
-        enable_gqa=True.
-
-        Some pure-MQA models, such as Falcon-7B, call
-        scaled_dot_product_attention() directly and never set enable_gqa.
-        Previously, such inputs with different query and key/value head counts
-        were rejected by the overrideable backend. This test verifies that the
-        single shared key/value head is recognized as a supported MQA case.
+        """
+        Pure MQA (single shared K/V head, e.g. Falcon-7B) should work on the
+        OVERRIDEABLE backend even without enable_gqa=True.
         """
         tol = Tolerances(1e-2, 1e-2)
         if dtype is torch.bfloat16:
