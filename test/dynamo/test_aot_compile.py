@@ -79,10 +79,14 @@ AOT_TEST_TYPEVAR = typing.TypeVar("AOT_TEST_TYPEVAR")
 # when a later mint tries that exact name -- same prefix, at the index the
 # counter is on -- which is what a test pre-binding the next minted name needs;
 # an __import_* leftover reaches no counter, and is listed because it is
-# indistinguishable from the alias a load has to bind.
+# indistinguishable from the alias a load has to bind; a ___unnamed_scope_* one,
+# minted by install_global_by_id off id() and compile id rather than a counter,
+# is listed for the same reason, bound to the live dict it stands in for the key
+# a load has to seed.
 _MINTED_PREFIXES = (
     "__import_",
     "__builtins_dict__",
+    "___unnamed_scope",
     "__compiled_fn",
     "__resume_at",
     "__comprehension_",
@@ -397,22 +401,38 @@ class Transformer(nn.Module):
 # A namespace that belongs to no module, so Dynamo has no import source for it:
 # an inlined frame reading a global from here is guarded through a minted
 # ___unnamed_scope_<id(dict)>_c<n> key rather than through a module alias.
-_UNNAMED_SCOPE_NS = {"__name__": "aot_compile_not_a_registered_module"}
+_UNNAMED_SCOPE_NS = {
+    "__name__": "aot_compile_not_a_registered_module",
+    # A tensor, so a graph reading it LIFTS it and records the minted key in
+    # used_globals, where the str above is only specialized on.
+    "AOT_NS_SCALE": torch.full((8,), 2.0),
+}
 exec(
     "AOT_NS_POOL_MODE = 'sum'\n"
     "def ns_pool_fn(x):\n"
     "    if AOT_NS_POOL_MODE == 'sum':\n"
     "        return x.sum(1)\n"
-    "    return x.mean(1)\n",
+    "    return x.mean(1)\n"
+    "def ns_scale_fn(x):\n"
+    "    return x * AOT_NS_SCALE\n",
     _UNNAMED_SCOPE_NS,
 )
 
 
 ns_pool_fn = _UNNAMED_SCOPE_NS["ns_pool_fn"]
+ns_scale_fn = _UNNAMED_SCOPE_NS["ns_scale_fn"]
 
 
 def calls_into_an_unnamed_scope(x):
     return ns_pool_fn(x)
+
+
+class UnnamedScopeModule(torch.nn.Module):
+    # One global reached through the unnamed scope's minted key and one, EPS,
+    # a kept guard's own source IS, so a load has to seed the first and read
+    # the second live.
+    def forward(self, x):
+        return ns_scale_fn(x) + EPS
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -2564,6 +2584,20 @@ from user code:
         self.assertLess(fix, add)
         self.assertIn("not a guard failure", lines[fix])
 
+    def _install_global_probe(self, name, misses=0):
+        # Re-keys this module's global `name` under a CountedKey. Restored by
+        # cleanups, not a finally: nothing between the pop and the insert may
+        # leave this dict without the name. addCleanup is LIFO, so the probe is
+        # registered second to be removed first; reversed, the re-insert would
+        # find the probe by __eq__ and store under it, and the pop would then
+        # drop the name for good.
+        g = globals()
+        probe, saved = CountedKey(name, misses), g.pop(name)
+        self.addCleanup(g.__setitem__, name, saved)
+        self.addCleanup(g.pop, probe, None)
+        g[probe] = saved
+        return probe, saved
+
     def test_module_dispatch_evaluates_a_matching_tree_once(self):
         # The scan calls the matching result's declared `fn` field rather than the
         # result, whose __call__ would evaluate the guards that just passed a
@@ -2577,14 +2611,7 @@ from user code:
         )
         x = torch.randn(4, 8)
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        g = globals()
-        probe = CountedKey("GLOBAL_POOLING_CONFIG")
-        saved = g.pop("GLOBAL_POOLING_CONFIG")
-        # Restored by cleanup, not a finally: nothing between the pop and the
-        # insert may leave this dict without the name. LIFO, so probe goes first.
-        self.addCleanup(g.__setitem__, "GLOBAL_POOLING_CONFIG", saved)
-        self.addCleanup(g.pop, probe, None)
-        g[probe] = saved
+        probe, _ = self._install_global_probe("GLOBAL_POOLING_CONFIG")
         out = model(x)
         # Read before the cleanup: deleting probe from g looks it up, and only
         # CPython's identity-first key compare keeps that off the count.
@@ -2655,7 +2682,8 @@ from user code:
         combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
-        # Bound from [0], mode reads 1 and [1]'s `mode == 0` guard rejects it.
+        # Without the re-decision this call would be bound from [0], where mode
+        # reads 1, and [1]'s `mode == 0` guard would reject it.
         self.assertEqual(combined(x.double()), x.double() * 2)
         self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
@@ -2670,7 +2698,7 @@ from user code:
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results[1] = aot_compile_forward(mod, doubles, x.double(), 1)
         self.assertEqual(combined(x.double(), 1), x.double() * 3)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
             combined(x.double())
         self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
@@ -2694,7 +2722,7 @@ from user code:
             return check(f_locals)
 
         with patch.object(manager, "check", appending_check):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
                 combined(x.double())
         self.assertIs(combined.compiled_results[1], later)
         self.assertEqual(combined(x.double(), 1), x.double() * 3)
@@ -2703,9 +2731,9 @@ from user code:
     def test_module_dispatch_never_pairs_new_contents_with_a_stale_verdict(self):
         # A call entering while another thread is still deciding over the
         # appended list must not find the new contents already published beside
-        # the old True: the decider is held inside its first _binding_key, where
-        # the contents had been stored ahead of the verdict, and the call made in
-        # that window has to bind [1] from its own default.
+        # the old True: the decider is held inside its first _binding_key, before
+        # it publishes anything, and the call made in that window decides for
+        # itself and binds [1] from its own default.
         mod, x = ScaleModule(), torch.randn(3, 3)
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
@@ -2728,11 +2756,55 @@ from user code:
         with patch("torch._dynamo.aot_compile._binding_key", held):
             decider.start()
             self.assertTrue(entered.wait(timeout=60))
-            # Bound from [0], mode reads 1 and [1]'s `mode == 0` guard rejects it.
+            # A stale True here would bind from [0], where mode reads 1, and [1]'s
+            # `mode == 0` guard would reject the call.
             self.assertEqual(combined(x.double()), x.double() * 2)
             release.set()
             decider.join()
         self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+
+    def test_module_dispatch_never_pairs_old_contents_with_a_new_verdict(self):
+        # The mirror: this call snapshots [0] and [1] and, before it decides, [1]
+        # is popped and another thread decides True over the one-result list. Held
+        # right after its first attribute store, whatever that thread has
+        # published so far must not turn this call into a shared bind. With the
+        # verdict and the contents in two fields the verdict landed first, so the
+        # call identity-matched the contents still published beside it, bound [1]
+        # from [0]'s `mode=1` default and served x * 3 for a call eager answers
+        # x * 2; judged on its own binding, [1]'s `mode == 1` guard rejects it.
+        mod, x = ScaleModule(), torch.randn(3, 3)
+        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
+        first = aot_compile_forward(mod, triples, x)
+        second = aot_compile_forward(mod, doubles, x.double(), 1)
+        entered, release = threading.Event(), threading.Event()
+        decider = threading.Thread(target=lambda: combined._binds_alike((first,)))
+        self.addCleanup(release.set)
+
+        class Held(AOTCompiledModel):
+            def __setattr__(self, name, value):
+                super().__setattr__(name, value)
+                if threading.current_thread() is decider and not entered.is_set():
+                    entered.set()
+                    release.wait()
+
+        combined = Held(mod, [first, second])
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+        binds_alike = AOTCompiledModel._binds_alike
+
+        def racing(model, results):
+            if threading.current_thread() is decider:
+                return binds_alike(model, results)
+            self.assertIs(combined.compiled_results.pop(), second)
+            decider.start()
+            self.assertTrue(entered.wait(timeout=60))
+            return binds_alike(model, results)
+
+        with patch.object(AOTCompiledModel, "_binds_alike", racing):
+            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
+                combined(x.double())
+            release.set()
+            decider.join()
+        self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_serves_a_call_the_guard_tree_accepts(self):
         # A first check() can reject a call the same tree accepts on its next
@@ -2757,12 +2829,7 @@ from user code:
                 ModelInput(args=(x, 1), kwargs={}, contexts=[]),
             ]
         )
-        g = globals()
-        probe = CountedKey("AOT_BRANCH_SCALE", misses=1)
-        saved = g.pop("AOT_BRANCH_SCALE")
-        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
-        self.addCleanup(g.pop, probe, None)
-        g[probe] = saved
+        probe, saved = self._install_global_probe("AOT_BRANCH_SCALE", misses=1)
         out = model(x, 1)
         compares = probe.compares
         self.assertEqual(out, x * saved)
@@ -2791,12 +2858,7 @@ from user code:
         )
         for result in model.forward.compiled_results:
             result.disable_guard_check()
-        g = globals()
-        probe = CountedKey("AOT_BRANCH_SCALE", misses=1)
-        saved = g.pop("AOT_BRANCH_SCALE")
-        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
-        self.addCleanup(g.pop, probe, None)
-        g[probe] = saved
+        probe, saved = self._install_global_probe("AOT_BRANCH_SCALE", misses=1)
         out = model(x, 1)
         compares = probe.compares
         self.assertEqual(out, x * saved)
@@ -2838,12 +2900,7 @@ from user code:
             ]
         )
         model.forward.compiled_results[0].disable_guard_check()
-        g = globals()
-        probe = CountedKey("AOT_BRANCH_SCALE", misses=1)
-        saved = g.pop("AOT_BRANCH_SCALE")
-        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
-        self.addCleanup(g.pop, probe, None)
-        g[probe] = saved
+        probe, saved = self._install_global_probe("AOT_BRANCH_SCALE", misses=1)
         out = model(x, 1)
         compares = probe.compares
         self.assertEqual(out, x * saved)
@@ -4341,7 +4398,7 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         model._aot_compile([ModelInput(args=(x.double(),), kwargs={}, contexts=[])])
         combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
-        self.assertFalse(combined._shared_binding)
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
         binds = []
         bind = AOTCompiledFunction.prepare_f_locals
 
@@ -5474,6 +5531,47 @@ from user code:
         self.assertEqual(actual.dtype, torch.float32)
         self.assertEqual(actual, x * EPS + saved_param)
         self.assertNotEqual(actual.tolist(), (x * saved_eps + saved_param).tolist())
+
+    def test_aot_compile_module_unnamed_scope_key_is_seeded_from_the_artifact(self):
+        # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict in the tracing
+        # process, so the live scope a module load resolves never carries it,
+        # and the guard rooted there failed every call where the parent's
+        # rebuilt scope, built from used_globals, answered. The load now seeds
+        # that recording -- the same object the bytecode reads -- and the other
+        # guarded global keeps its live read.
+        global EPS
+
+        self.addCleanup(globals().__setitem__, "EPS", EPS)
+        x = torch.randn(4, 8)
+        model = torch.compile(
+            UnnamedScopeModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        output_graph = load_guards_state(captured._artifacts.guards_state).output_graph
+        (key,) = [n for n in output_graph.global_scope if "___unnamed_scope" in n]
+        # Armed: the graph lifted AOT_NS_SCALE, so the artifact carries the dict.
+        self.assertIn(key, captured._artifacts.runtime_env.used_globals)
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        # The capture bound the key to the live dict here; a loading process
+        # never has it, and the seeding must not replace a binding it finds.
+        self.assertIs(globals()[key], _UNNAMED_SCOPE_NS)
+        reloaded = AOTCompiledModel.deserialize(UnnamedScopeModule(), data)
+        self.assertEqual(reloaded(x), x * 2.0 + EPS)
+        self.assertIs(globals()[key], _UNNAMED_SCOPE_NS)
+        self._hide_leaked_dynamo_globals()
+        self.assertNotIn(key, globals())
+
+        EPS = torch.tensor(3.0)
+        reloaded = AOTCompiledModel.deserialize(UnnamedScopeModule(), data)
+        self.assertEqual(reloaded(x), x * 2.0 + EPS)
+        (result,) = reloaded.compiled_results
+        self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
+        self.assertIs(globals()[key], result._artifacts.runtime_env.used_globals[key])
 
     def test_aot_compile_module_sub_path_global_is_not_read_live(self):
         # A guard rooted at a SUB-PATH of a global certifies that path, not the
