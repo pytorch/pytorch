@@ -111,19 +111,6 @@ result.sum().backward()
 print(model.linear.weight.grad)
 ```
 
-**Private, unstable -- may change or disappear without notice.** A module can
-also be compiled for several calls at once, gated on
-`torch._dynamo.config.enable_aot_compile`:
-`torch.compile(model, fullgraph=True)._aot_compile(inputs)` takes a list of
-`torch._dynamo.aot_compile.ModelInput`, compiles one graph per input and
-replaces the wrapper's `forward` with a dispatcher over their guards. It serves
-the first input whose guards match, and evaluates the guards of an input opted
-out through `model.forward.compiled_results[i].disable_guard_check()` as well:
-opting out here suppresses the failure, not the evaluation, so such an input is
-served on a match like any other, and on the strength of its opt-out alone only
-when nothing matched -- one opt-out replaces the
-`No AOT compiled graph matched this call` error for the whole model.
-
 ## API reference
 
 ### `torch.compile(...).aot_compile(example_inputs)`
@@ -143,7 +130,8 @@ original function but runs the pre-compiled code. It also exposes:
 - `disable_guard_check()` -- Disable runtime guard validation (advanced use).
   On this function path the compiled function then runs whatever it is called
   with, without evaluating its guards; module dispatch over several compiled
-  inputs still evaluates them, as described above.
+  inputs still evaluates them, as described under
+  {ref}`Developer notes <aot-compile-developer-notes>`.
 
 **Requirements:**
 
@@ -347,7 +335,6 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 )
 
-
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim):
         super().__init__()
@@ -356,7 +343,6 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         return self.linear2(F.relu(self.linear1(x)))
-
 
 def main():
     dist.init_process_group(backend="nccl")
@@ -398,7 +384,6 @@ def main():
 
     dist.destroy_process_group()
 
-
 if __name__ == "__main__":
     main()
 ```
@@ -418,3 +403,21 @@ artifact can be loaded on every rank without per-rank compilation.
   explicitly disabled.
 - **Not all backends are supported.** Custom backends must implement the
   `SerializableCallable` interface to be compatible with save/load.
+
+(aot-compile-developer-notes)=
+
+## Developer notes
+
+**Private, unstable -- may change or disappear without notice.** A module can
+also be compiled for several calls at once:
+`torch.compile(model, fullgraph=True)._aot_compile(inputs)` takes a list of
+`torch._dynamo.aot_compile.ModelInput`, compiles one graph per input and
+replaces the wrapper's `forward` with a dispatcher over their guards. It needs
+`torch._dynamo.config.enable_aot_compile`, which is on by default, so only a
+caller who turned it off has to restore it. The dispatcher serves the first
+input whose guards match, and evaluates the guards of an input opted out
+through `model.forward.compiled_results[i].disable_guard_check()` as well:
+opting out here suppresses the failure, not the evaluation, so such an input is
+served on a match like any other, and on the strength of its opt-out alone only
+when nothing matched -- one opt-out replaces the
+`No AOT compiled graph matched this call` error for the whole model.
