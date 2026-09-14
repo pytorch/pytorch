@@ -16793,15 +16793,16 @@ class TestFusedRMSNormOverrideRouting(TestCase):
     covered by test/python_native/.
     """
 
-    def test_sm12x_supported(self):
+    @parametrize_test("capability", [(12, 0), (12, 1)])
+    def test_sm12x_supported(self, capability):
         from torch._native.ops.norm.rmsnorm_impl import _is_supported
 
         x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
-        for capability in ((12, 0), (12, 1)):
-            with mock.patch(
-                "torch.cuda.get_device_capability", return_value=capability
-            ):
-                self.assertTrue(_is_supported(x))
+        with mock.patch(
+            "torch._native.ops.norm.rmsnorm_impl._device_properties",
+            return_value=mock.Mock(major=capability[0], minor=capability[1]),
+        ):
+            self.assertTrue(_is_supported(x))
 
     def test_fwd_cond_fires_supported_fp16(self):
         from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
