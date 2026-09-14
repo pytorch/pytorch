@@ -260,14 +260,31 @@ class PythonCode:
     _prologue_start: int = 0
 
 
+def _format_attr_literal(name: str) -> str:
+    """Return a Python string literal that evaluates to exactly ``name``.
+
+    Historically this emitted ``"{name}"`` unconditionally, which produces
+    invalid source when ``name`` contains a quote, a backslash, or a
+    non-printable character. Keep the double-quoted spelling whenever it is
+    safe -- it is by far the common case (e.g. ``nn.Sequential`` children are
+    addressed as ``"0"``, ``"1"``, ...) and preserving it keeps generated code
+    unchanged -- and fall back to ``repr`` otherwise.
+    """
+    if '"' not in name and "\\" not in name and name.isprintable():
+        return f'"{name}"'
+    return repr(name)
+
+
 def _format_target(base: str, target: str) -> str:
     elems = target.split(".")
     r = base
     for e in elems:
-        if not e.isidentifier():
-            r = f'getattr({r}, "{e}")'
-        else:
+        # Keywords satisfy ``str.isidentifier()`` but cannot be used with dot
+        # syntax, so they have to go through ``getattr`` as well.
+        if e.isidentifier() and not keyword.iskeyword(e):
             r = f"{r}.{e}"
+        else:
+            r = f"getattr({r}, {_format_attr_literal(e)})"
     return r
 
 
