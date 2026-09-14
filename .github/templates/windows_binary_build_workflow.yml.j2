@@ -176,13 +176,12 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_build.sh"
-      - uses: !{{ common.upload_artifact_action }}
-        if: always()
-        with:
-          name: ${{ matrix.build_name }}
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+      !{{ common.upload_artifact_with_retry(
+            step_id="upload-wheel",
+            name="${{ matrix.build_name }}",
+            path='"${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"',
+            retention_days=14,
+            always=True) }}
 {%- if os != "windows-arm64" %}
       !{{ common.wait_and_kill_ssh_windows() }}
 {% endif %}
@@ -376,13 +375,12 @@ jobs:
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
             --arch !{{ lt_config["arch"] }}
-      - uses: !{{ common.upload_artifact_action }}
-        if: always()
-        with:
-          name: !{{ lt_config["build_name"] }}
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ runner.temp }}/libtorch_output/"
+      !{{ common.upload_artifact_with_retry(
+            step_id="upload-libtorch",
+            name=lt_config["build_name"],
+            path='"${{ runner.temp }}/libtorch_output/"',
+            retention_days=14,
+            always=True) }}
   {%- if branches == "nightly" %}
   !{{ upload.upload_extracted_libtorch(lt_config, True) }}
   {%- endif %}

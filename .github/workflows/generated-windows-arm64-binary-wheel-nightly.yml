@@ -137,12 +137,27 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-wheel
+        continue-on-error: true
         if: always()
         with:
           name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: always() && steps.upload-wheel.outcome == 'failure'
+        with:
+          name: ${{ matrix.build_name }}
+          retention-days: 14
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
 
   wheel-test:
@@ -302,12 +317,27 @@ jobs:
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
             --arch arm64
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-libtorch
+        continue-on-error: true
         if: always()
         with:
           name: libtorch-arm64-cpu-shared-with-deps-release
           retention-days: 14
           if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: always() && steps.upload-libtorch.outcome == 'failure'
+        with:
+          name: libtorch-arm64-cpu-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
           path: "${{ runner.temp }}/libtorch_output/"
   libtorch-arm64-cpu-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}

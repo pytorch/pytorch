@@ -193,10 +193,30 @@ jobs:
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .ci/pytorch/binary_populate_env.sh"
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
 
-      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+      # actions/upload-artifact aborts with "Upload progress stalled." after 300s
+      # with no upload progress and does not retry the aborted upload, so a single
+      # stalled upload throws away a build that already succeeded. The first
+      # attempt is continue-on-error so the job survives it; the retry is not, so
+      # a genuine failure still fails the job.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        id: upload-artifact
+        continue-on-error: true
         with:
           name: ${{ inputs.build_name }}
           if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/*
+
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.upload-artifact.outcome == 'failure'
+        with:
+          name: ${{ inputs.build_name }}
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
           path: ${{ runner.temp }}/artifacts/*
 
       - name: Cleanup docker

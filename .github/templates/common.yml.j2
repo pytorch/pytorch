@@ -1,10 +1,50 @@
 {%- set upload_artifact_s3_action = "seemethere/upload-artifact-s3@v5" -%}
 {%- set download_artifact_s3_action = "seemethere/download-artifact-s3@v4" -%}
-{%- set upload_artifact_action = "actions/upload-artifact@v4.4.0" -%}
+{%- set upload_artifact_action = "actions/upload-artifact@v4.6.2" -%}
 {%- set download_artifact_action = "actions/download-artifact@v4.1.7" -%}
 
 {%- set timeout_minutes = 280 -%}
 {%- set timeout_minutes_windows_binary = 360 -%}
+
+{#-
+  Upload an artifact, retrying once if the upload fails.
+
+  actions/upload-artifact aborts with "Upload progress stalled." after 300s with
+  no upload progress and does not retry the aborted upload, so a single stalled
+  upload throws away a binary build that already succeeded. The first attempt is
+  continue-on-error so the job survives it; the retry is not, so a genuine
+  failure still fails the job.
+-#}
+{%- macro upload_artifact_with_retry(step_id, name, path, retention_days="", always=False) -%}
+      - uses: !{{ upload_artifact_action }}
+        id: !{{ step_id }}
+        continue-on-error: true
+{%- if always %}
+        if: always()
+{%- endif %}
+        with:
+          name: !{{ name }}
+{%- if retention_days %}
+          retention-days: !{{ retention_days }}
+{%- endif %}
+          if-no-files-found: error
+          path: !{{ path }}
+      - name: Retry artifact upload
+        uses: !{{ upload_artifact_action }}
+        if: !{{ "always() && " if always else "" }}steps.!{{ step_id }}.outcome == 'failure'
+        with:
+          name: !{{ name }}
+{%- if retention_days %}
+          retention-days: !{{ retention_days }}
+{%- endif %}
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: !{{ path }}
+{%- endmacro -%}
 
 {%- macro concurrency(build_environment) -%}
 concurrency:
