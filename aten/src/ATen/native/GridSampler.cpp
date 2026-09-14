@@ -9,6 +9,8 @@
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <c10/util/irange.h>
 
+#include <limits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -47,8 +49,8 @@ namespace {
   // forms the same bounds as compute_coordinates and clips the same way, so the
   // two answer alike wherever the merged helper is defined, and the CUDA twin
   // reaches the same voxel where it is not.
-  template <typename scalar_t, typename index_t>
-  static inline scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
+  template <typename scalar_t>
+  static inline scalar_t compute_coordinates_sized(scalar_t coord, int64_t size,
                                                    GridSamplerPadding padding_mode,
                                                    bool align_corners) {
     if (padding_mode == GridSamplerPadding::Border) {
@@ -235,15 +237,17 @@ namespace {
     if (coeffs_grad != nullptr) {
       get_cubic_coefficients_grad<opmath_t>(coeffs_grad, t);
     }
+    const coord_t index_limit =
+        static_cast<coord_t>(std::numeric_limits<index_t>::max());
     for (const auto i : c10::irange(4)) {
       const coord_t tap =
           compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
-      // the comparison decides, not the cast: a coordinate that is not finite fails
-      // both sides, where converting it is undefined. Where the type runs out of
-      // integers the bound stays conservative
-      indices[i] = (tap >= 0 && tap < static_cast<coord_t>(size))
+      // the comparison guards the cast: a coordinate that is not finite, or past the
+      // index type, fails it. The extent is exact only as an integer
+      const index_t index = (tap >= 0 && tap < index_limit)
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
+      indices[i] = index < size ? index : static_cast<index_t>(-1);
     }
   }
 
@@ -265,15 +269,17 @@ namespace {
     if (coeffs_grad != nullptr) {
       get_cubic_coefficients_grad_a<opmath_t>(coeffs_grad, t, a);
     }
+    const coord_t index_limit =
+        static_cast<coord_t>(std::numeric_limits<index_t>::max());
     for (const auto i : c10::irange(4)) {
       const coord_t tap =
           compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
-      // the comparison decides, not the cast: a coordinate that is not finite fails
-      // both sides, where converting it is undefined. Where the type runs out of
-      // integers the bound stays conservative
-      indices[i] = (tap >= 0 && tap < static_cast<coord_t>(size))
+      // the comparison guards the cast: a coordinate that is not finite, or past the
+      // index type, fails it. The extent is exact only as an integer
+      const index_t index = (tap >= 0 && tap < index_limit)
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
+      indices[i] = index < size ? index : static_cast<index_t>(-1);
     }
   }
 
@@ -338,13 +344,16 @@ namespace {
               coord_t z = grid_ptr_NDHW[2 * grid_sCoor];
 
               // in pixel units the grid already is the source index, so only the
-              // padding mapping is applied
-              coord_t ix = pixel_coords ? pixel_source_index(x, inp_W, padding_mode, align_corners)
-                                        : grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
-              coord_t iy = pixel_coords ? pixel_source_index(y, inp_H, padding_mode, align_corners)
-                                        : grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
-              coord_t iz = pixel_coords ? pixel_source_index(z, inp_D, padding_mode, align_corners)
-                                        : grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
+              // padding mapping is applied; bicubic reads the raw coordinates instead
+              coord_t ix{}, iy{}, iz{};
+              if (interpolation_mode != GridSamplerInterpolation::Bicubic) {
+                ix = pixel_coords ? pixel_source_index(x, inp_W, padding_mode, align_corners)
+                                  : grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+                iy = pixel_coords ? pixel_source_index(y, inp_H, padding_mode, align_corners)
+                                  : grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
+                iz = pixel_coords ? pixel_source_index(z, inp_D, padding_mode, align_corners)
+                                  : grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
+              }
 
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
                 // get corner pixel values from (x, y, z)
@@ -442,8 +451,8 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-                // The taps are placed around the unclipped index, so this branch samples at the
-                // raw x, y, z rather than at the clipped ix, iy, iz above. It works in the
+                // The taps are placed around the unclipped index, so this branch samples at
+                // the raw x, y, z and never forms a clipped source index. It works in the
                 // accumulate type: the coefficients and the reflection arithmetic need more
                 // precision than a half carries, and CUDA computes every mode in it.
                 using tap_t = at::opmath_type<grid_t>;
@@ -928,17 +937,19 @@ namespace {
               coord_t z = grid_ptr_NDHW[2 * grid_sCoor];
 
               // multipliers for gradients on ix, iy, and iz; in pixel units only
-              // the padding mapping contributes to them
-              coord_t gix_mult, giy_mult, giz_mult;
-              coord_t ix, iy, iz;
-              if constexpr (pixel_coords) {
-                ix = pixel_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-                iy = pixel_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
-                iz = pixel_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
-              } else {
-                ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-                iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
-                iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
+              // the padding mapping contributes to them; bicubic reads the raw coordinates
+              coord_t gix_mult{}, giy_mult{}, giz_mult{};
+              coord_t ix{}, iy{}, iz{};
+              if (interpolation_mode != GridSamplerInterpolation::Bicubic) {
+                if constexpr (pixel_coords) {
+                  ix = pixel_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+                  iy = pixel_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+                  iz = pixel_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
+                } else {
+                  ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+                  iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+                  iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
+                }
               }
 
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
@@ -1077,9 +1088,9 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-                // The taps are placed around the unclipped index, so the clipping ix, iy, iz went
-                // through above is undone here; their multipliers are the unnormalize ones,
-                // and the identity in pixel units.
+                // The taps are placed around the unclipped index, so this branch forms no
+                // clipped source index; the grid multipliers are the unnormalize ones, and
+                // the identity in pixel units.
                 using tap_t = at::opmath_type<grid_t>;
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
                 opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];

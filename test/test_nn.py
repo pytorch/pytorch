@@ -12424,6 +12424,47 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(bool(d_input.isfinite().all()))
         self.assertTrue(bool(d_grid.isfinite().all()))
 
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_grid_sample_pixel_bicubic_double_backward_low_precision(self, device, dtype):
+        # The kernels place a sample in the accumulate type, so the double backward has to
+        # take the same one. The reference runs the same quantised values in double.
+        # 5-D in normalized units is covered by test_grid_sample_3d_bicubic_double_backward_low_precision.
+        for dim, pixel_coords in ((2, False), (2, True), (3, True)):
+            shape = (1, 1, 5, 512) if dim == 2 else (1, 1, 4, 5, 512)
+            volume = (torch.randn(*shape, device=device) * 0.01).to(dtype)
+            point = [281.3, 2.4, 1.6] if pixel_coords else [0.1, 0.2, 0.3]
+            grid = torch.tensor(point[:dim], device=device).reshape((1,) * (dim + 1) + (dim,)).to(dtype)
+
+            def second_order(volume, grid):
+                volume = volume.detach().requires_grad_()
+                grid = grid.detach().requires_grad_()
+                out = F.grid_sample(volume, grid, mode='bicubic', padding_mode='border',
+                                    align_corners=False, pixel_coords=pixel_coords)
+                d_grid = torch.autograd.grad(out.sum(), grid, create_graph=True)[0]
+                return torch.autograd.grad(d_grid.sum(), [volume, grid])
+
+            expected = second_order(volume.double(), grid.double())
+            for got, want in zip(second_order(volume, grid), expected):
+                self.assertEqual(got.dtype, dtype)
+                self.assertEqual(got.double(), want, rtol=1e-2, atol=0)
+
+    @parametrize_test("size", [2 ** 24 + 1, 2 ** 53 + 1])
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_bicubic_last_voxel_of_a_wide_axis(self, device, size):
+        # Neither size is a float32, and the second is not a double: converted, the extent
+        # equals the last valid index, which a bound taken in that type drops. The views
+        # store a single element.
+        for dim in (2, 3):
+            volume = torch.ones((1,) * (dim + 2), device=device).expand((1,) * (dim + 1) + (size,))
+            grid = torch.tensor([float(size - 1)] + [0.0] * (dim - 1), device=device)
+            grid = grid.reshape((1,) * (dim + 1) + (dim,))
+            for padding_mode in ('zeros', 'border', 'reflection'):
+                out = F.grid_sample(volume, grid, mode='bicubic', padding_mode=padding_mode,
+                                    align_corners=True, pixel_coords=True)
+                self.assertEqual(out.item(), 1.0)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
