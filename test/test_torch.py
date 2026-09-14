@@ -52,7 +52,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    onlyCUDA, onlyCPU,
+    onlyCUDA,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator)
