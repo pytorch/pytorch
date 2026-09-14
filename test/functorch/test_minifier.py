@@ -7,11 +7,23 @@ import torch
 from functorch import make_fx
 from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
-from torch._functorch.fx_minifier import dump_state
+from torch._functorch.fx_minifier import dump_state, MinifierSanityCheckFailed
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestMinifier(TestCase):
+    def test_sanity_check_failure_type(self):
+        def f(x):
+            return torch.sin(x)
+
+        inputs = [torch.randn(3)]
+        graph = make_fx(f)(*inputs)
+
+        with self.assertRaisesRegex(
+            MinifierSanityCheckFailed, "Input graph did not fail the tester"
+        ):
+            minifier(graph, inputs, lambda gm, args: False)
+
     def test_has_mul_minifier(self):
         def failing_f(x, y):
             y = y / 3

@@ -20,6 +20,7 @@ struct PoolingParams {
   ::c10::metal::array<idx_type_t, N - 2> padding;
   ::c10::metal::array<idx_type_t, N - 2> dilation;
   bool return_indices;
+  bool adaptive;
 };
 
 template <unsigned N = 5, typename idx_type_t = int32_t>

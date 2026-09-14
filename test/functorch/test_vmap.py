@@ -4039,6 +4039,94 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             )
 
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    def test_sdpa_unbatched_inputs(self, device, backend):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+
+        query = torch.randn(
+            3, 4, 32, 64, dtype=torch.float16, device=device, requires_grad=True
+        )
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+
+        def loss(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v).sum()
+
+        loss_grad = grad(loss, argnums=(0, 1, 2))
+        with sdpa_kernel([backend]):
+            expected = F.scaled_dot_product_attention(query, key, value)
+            actual = vmap(F.scaled_dot_product_attention)(query, key, value)
+            grad_output = torch.randn_like(expected)
+            expected_backward_grads = torch.autograd.grad(
+                expected, (query, key, value), grad_output
+            )
+            actual_backward_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_output
+            )
+            expected_grads = loss_grad(query, key, value)
+            actual_grads = vmap(loss_grad)(query, key, value)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_backward_grads, expected_backward_grads)
+        self.assertEqual(actual_grads, expected_grads)
+
+    def test_sdpa_unbatched_inputs_cpu(self, device):
+        if device != "cpu":
+            raise unittest.SkipTest("This test is only for CPU")
+
+        query = torch.randn(3, 4, 32, 64, device=device, requires_grad=True)
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+
+        def loss(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v).sum()
+
+        loss_grad = grad(loss, argnums=(0, 1, 2))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=FALLBACK_REGEX)
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                expected = F.scaled_dot_product_attention(query, key, value)
+                actual = vmap(F.scaled_dot_product_attention)(query, key, value)
+                grad_output = torch.randn_like(expected)
+                expected_backward_grads = torch.autograd.grad(
+                    expected, (query, key, value), grad_output
+                )
+                actual_backward_grads = torch.autograd.grad(
+                    actual, (query, key, value), grad_output
+                )
+                expected_grads = loss_grad(query, key, value)
+                actual_grads = vmap(loss_grad)(query, key, value)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_backward_grads, expected_backward_grads)
+        self.assertEqual(actual_grads, expected_grads)
+
+    @parametrize(
+        "backend",
+        [
+            backend
+            for backend in PLATFORM_SPECIFIC_SDPA
+            if backend != SDPBackend.FLASH_ATTENTION
+        ],
+    )
+    def test_sdpa_unbatched_inputs_with_mask(self, device, backend):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+
+        query = torch.randn(3, 4, 32, 64, dtype=torch.float16, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+        attn_mask = torch.randn(3, 1, 32, 32, dtype=torch.float16, device=device)
+
+        with sdpa_kernel([backend]):
+            expected = F.scaled_dot_product_attention(query, key, value, attn_mask)
+            actual = vmap(F.scaled_dot_product_attention)(
+                query, key, value, attn_mask[:, 0]
+            )
+
+        self.assertEqual(actual, expected)
+
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
     def test_randomness(self, device, randomness, backend):
         if device == "cpu":
@@ -4659,7 +4747,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("as_strided_scatter", ""),
                 xfail("equal", ""),
                 xfail("linalg.lu", ""),
-                xfail("linalg.polar"),  # no batch rule
                 skip("linalg.ldl_solve", ""),
                 skip("_softmax_backward_data"),
                 # One or more of the overload doesn't have a Batch rule.

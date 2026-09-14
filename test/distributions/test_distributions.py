@@ -3516,7 +3516,7 @@ class TestDistributions(DistributionsTestCase):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
         loc_1d = torch.randn(1, requires_grad=True)
-        scale_1d = torch.randn(1, requires_grad=True)
+        scale_1d = torch.randn(1).abs().requires_grad_()
         loc_delta = torch.tensor([1.0, 0.0])
         scale_delta = torch.tensor([1e-5, 1e-5])
         self.assertEqual(Laplace(loc, scale).sample().size(), (5, 5))
@@ -6030,6 +6030,29 @@ class TestKL(DistributionsTestCase):
             MultivariateNormal(loc[1], scale_tril=scale_tril[1]),
         )
         self.assertEqual(expected_kl, actual_kl)
+
+    @skipIfTorchDynamo("This test explicitly invokes torch.compile")
+    def test_compile_kl_multivariate_normal(self):
+        def fn(p_mu, p_log_var, q_mu, q_log_var):
+            q_var = torch.diag_embed(torch.exp(q_log_var))
+            p_var = torch.diag_embed(torch.exp(p_log_var))
+            p = MultivariateNormal(p_mu, p_var)
+            q = MultivariateNormal(q_mu, q_var)
+            return kl_divergence(p, q).mean()
+
+        set_rng_seed(0)
+        p_mu = torch.randn(4, 3)
+        p_log_var = torch.randn(4, 3)
+        q_mu = torch.randn(4, 3)
+        q_log_var = torch.randn(4, 3)
+
+        expected = fn(p_mu, p_log_var, q_mu, q_log_var)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                actual = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=dynamic
+                )(p_mu, p_log_var, q_mu, q_log_var)
+                self.assertEqual(actual, expected)
 
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]

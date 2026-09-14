@@ -36,6 +36,8 @@ _P = ParamSpec("_P")
 
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
+    output_grad_dtypes: "tuple[torch.dtype | None, ...] | None"
+
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.backward`.
 
@@ -230,6 +232,46 @@ class FunctionCtx:
 
         """
         self.non_differentiable = args
+
+    def set_output_grad_dtype(self, *dtypes: "torch.dtype | None") -> None:
+        r"""Declare the gradient dtype for each of this Function's outputs.
+
+        This should be called at most once, from either the
+        :func:`setup_context` or :func:`forward` methods. The number of
+        declarations must match the number of returned values, and each argument
+        corresponds positionally to the output at the same index.
+
+        For each output, pass the dtype your backward should receive its
+        gradient in:
+
+        - Pass a :class:`torch.dtype` and the engine guarantees the gradient
+          handed to backward has that dtype. This is only valid for a
+          differentiable Tensor output.
+        - Pass ``None`` and the gradient is handed to backward with whatever
+          dtype it already has. This is also the only valid choice for a
+          non-Tensor or non-differentiable output, which has no gradient.
+        - Omit this call (or pass the output's own dtype) and the gradient is
+          handed to backward in the output's dtype, which is the default.
+
+        For example::
+
+            >>> # xdoctest: +SKIP
+            >>> @staticmethod
+            >>> def forward(ctx, x):
+            >>>     t1 = x.sin()
+            >>>     t2 = x.cos()
+            >>>     t3 = x.tan()
+            >>>     ctx.set_output_grad_dtype(torch.float32, t2.dtype, None, None)
+            >>>     return t1, t2, t3, "not a tensor"
+
+        This ensures that backward receives ``t1``'s gradient in ``float32``,
+        keeps the default behavior for ``t2``'s gradient via ``t2.dtype``,
+        passes ``t3``'s gradient through uncast with ``None``, and uses ``None``
+        as the placeholder for the trailing non-Tensor output.
+        """
+        if self.output_grad_dtypes is not None:
+            raise RuntimeError("set_output_grad_dtype can only be called once")
+        self.output_grad_dtypes = dtypes
 
     def set_materialize_grads(self, value: bool):
         r"""Set whether to materialize grad tensors. Default is ``True``.
@@ -443,6 +485,11 @@ class _SingleLevelFunction(
         and each returned value should be the gradient w.r.t. the
         corresponding input. If an input is not a Tensor or is a Tensor not
         requiring grads, you can just pass None as a gradient for that input.
+
+        The strides of the gradients passed to :func:`backward` are undefined:
+        they are not guaranteed to be contiguous or to match the strides of the
+        corresponding forward outputs, so implementations must not assume a
+        particular memory layout.
 
         The context can be used to retrieve tensors saved during the forward
         pass. It also has an attribute :attr:`ctx.needs_input_grad` as a tuple

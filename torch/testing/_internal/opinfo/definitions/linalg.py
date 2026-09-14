@@ -1137,13 +1137,23 @@ def sample_inputs_linalg_polar(op_info, device, dtype, requires_grad=False, **kw
     # No zero-size dims here: they trip generic coverage suites (e.g. vmap can't
     # batch over a size-0 dim). Empty/degenerate shapes are covered separately by
     # the dedicated test_polar_empty test in test_linalg.py.
-    make_arg = partial(
-        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
-    )
+    # Gradient tests need full-rank, well-conditioned samples because the
+    # decomposition is differentiable only for full column rank A, and
+    # near-singular samples amplify float32 round-off past test tolerances.
+    if requires_grad:
+        make_arg = partial(
+            make_fullrank_matrices_with_distinct_singular_values,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+    else:
+        make_arg = partial(make_tensor, dtype=dtype, device=device, low=-2, high=2)
     batches = [(), (2,), (1, 1)]
     sizes = [(5, 5), (5, 3), (2, 2)]
     for batch, (m, n) in product(batches, sizes):
-        yield SampleInput(make_arg(*(batch + (m, n)), low=-2, high=2))
+        shape = batch + (m, n)
+        yield SampleInput(make_arg(*shape) if requires_grad else make_arg(shape))
 
 
 def sample_inputs_tensorsolve(op_info, device, dtype, requires_grad, **kwargs):
@@ -1212,18 +1222,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver],
         check_batched_gradgrad=False,
-        skips=(
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
     ),
     OpInfo(
         "linalg.diagonal",
@@ -1272,19 +1270,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_cholesky,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
-        skips=(
-            # linalg.solve.triangular(); Only float is supported!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            # Exception: linalg.cholesky: The factorization could not be completed because the input is not positive-definite
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
     ),
     OpInfo(
         "linalg.cholesky_ex",
@@ -1297,23 +1282,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_cholesky,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
-        skips=(
-            # The following dtypes worked in forward but are not listed by the
-            # OpInfo: {torch.bfloat16, torch.float16}. The following dtypes did
-            # not work in backward but are listed by the OpInfo:
-            # {torch.complex64}.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            # RuntimeError: linalg.solve.triangular(); Only float is supported!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
     ),
     OpInfo(
         "linalg.vecdot",
@@ -1955,8 +1923,8 @@ op_db: list[OpInfo] = [
         aten_name="linalg_polar",
         op=torch.linalg.polar,
         dtypes=floating_and_complex_types(),
-        # Forward op only; autograd is a follow-up.
-        supports_autograd=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_polar,
         decorators=[
             # torch-xpu-ops/issues/4162
@@ -1968,6 +1936,14 @@ op_db: list[OpInfo] = [
             # nvmath on CUDA so coverage is meaningful (CPU still runs the SVD
             # kernel, hence the skip is scoped to CUDA only).
             DecorateInfo(skipIfNoNvmath, device_type="cuda"),
+            # The gradient goes through SVD/eigh, whose MPS results differ
+            # slightly between contiguous and non-contiguous inputs.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=3e-4, rtol=2e-3)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
         ],
     ),
     OpInfo(
@@ -1979,18 +1955,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
-        skips=(
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
     ),
     OpInfo(
         "linalg.vander",
@@ -2046,16 +2010,6 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
-            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
         ),
     ),
     OpInfo(
@@ -2076,16 +2030,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
-            ),
-            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
     ),
@@ -2108,16 +2052,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
-            ),
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
             # https://github.com/pytorch/pytorch/issues/137684
             DecorateInfo(
@@ -2145,13 +2079,6 @@ op_db: list[OpInfo] = [
                 unittest.skip("Tests different backward paths"),
                 "TestCommon",
                 "test_floating_inputs_are_differentiable",
-            ),
-            # RuntimeError: linalg.solve.triangular(); Only float is supported!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver],
@@ -2264,16 +2191,6 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cpu",
             ),
-            # Exception: linalg.lu_factor(): MPS only supports floats.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
         ],
         skips=(
             DecorateInfo(
@@ -2339,16 +2256,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: linalg.lu_factor(): MPS only supports floats.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
         ),
     ),
     OpInfo(
@@ -2358,23 +2265,7 @@ op_db: list[OpInfo] = [
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_solve_triangular,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            skipCPUIfNoLapack,
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-            # Exception: linalg.solve.triangular(); Only float is supported!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
+        skips=(skipCPUIfNoLapack,),
         # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
         supports_forward_ad=True,
     ),
@@ -2454,6 +2345,14 @@ op_db: list[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
                 device_type="cuda",
+            ),
+            # https://github.com/intel/torch-xpu-ops/issues/1963
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_autocast",
+                device_type="xpu",
+                dtypes=[torch.float32],
             ),
         ),
     ),
@@ -2658,6 +2557,14 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
+            # torch-xpu-ops/issues/4313
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="xpu",
+                dtypes=(torch.float64,),
+            ),
             # The test is flaky on AMX with Inductor
             DecorateInfo(
                 unittest.skip,
@@ -2705,16 +2612,6 @@ op_db: list[OpInfo] = [
             ),
         ],
         skips=(
-            # Exception: linalg.lu_factor(): MPS only supports floats.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
             # The test is flaky on AMX with Inductor
             DecorateInfo(
                 unittest.skip,

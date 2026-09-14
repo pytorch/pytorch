@@ -1,3 +1,48 @@
+# PyTorch build overview
+#
+# This file is the entry point of the native build. It is normally driven by
+# scikit-build-core through `pip install -e . -v --no-build-isolation`
+# (`spin develop`) rather than by invoking cmake directly; the exception is the
+# standalone libtorch build in tools/build_libtorch.py. The stages below appear
+# in the order they are executed in this file.
+#
+# 1. Bootstrap: forward the toolchain env vars needed before project() (cross
+#    compilation), call project() with the version from version.txt, then
+#    cmake/EnvVarForwarding.cmake turns the remaining build env vars into CMake
+#    cache variables. That module is the reference for the environment
+#    variables that configure the build: look there first for an env var to
+#    set, and document new ones there. The exceptions are third-party locations
+#    such as MKLROOT or ROCM_PATH and a handful of niche flags, which are read
+#    directly where they are used.
+# 2. Pre-build (cmake/PreBuildSteps.cmake): initialize and verify the git
+#    submodules, and fetch the pinned NCCL for distributed CUDA builds.
+# 3. Options: declare every build knob (USE_*, BUILD_*). An option added here
+#    must also be added to cmake/Summary.cmake.
+# 4. Dependencies (cmake/Dependencies.cmake): find or build the third-party
+#    libraries and set up the accelerator toolchains (CUDA/ROCm/XPU). The
+#    global compile and link flags are resolved inline right after.
+# 5. Code generation, all driven from caffe2/CMakeLists.txt: cmake/Codegen.cmake
+#    runs torchgen over native_functions.yaml to emit the ATen operator headers
+#    and sources, and tools/setup_helpers/generate_code.py emits the autograd
+#    and Python binding sources. The .pyi stubs are generated later, in
+#    torch/CMakeLists.txt.
+# 6. Main build: add_subdirectory() of torch/headeronly, c10 and caffe2 (which
+#    in turn adds torch/). This builds c10, torch_cpu, the per-accelerator
+#    torch_cuda/torch_hip/torch_xpu, the umbrella torch library and
+#    torch_python, plus the C++ tests; those subdirectories also carry the
+#    install rules for the headers and libraries.
+# 7. Export and extras: generate the Caffe2Config.cmake / Caffe2Targets.cmake
+#    files that downstream C++ projects consume, then the optional binaries/
+#    and JNI bindings, which link against the libraries built above.
+# 8. Python packaging: cmake/FileMirroring.cmake copies sources into
+#    torchgen/packaged and into the torch/ subpackages that need files vendored
+#    out of third_party/, cmake/PackageData.cmake installs the non-Python
+#    package data (stubs, headers, templates) into torch/, and
+#    cmake/PostBuildSteps.cmake merges compile_commands.json and registers the
+#    install-time fixups (TORCH_STABLE_ONLY header wrapping, Windows runtime
+#    DLL and macOS OpenMP bundling).
+# 9. Summary (cmake/Summary.cmake): print the resolved configuration.
+
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 cmake_policy(SET CMP0126 OLD)
@@ -49,6 +94,42 @@ project(${SKBUILD_PROJECT_NAME}
 # When built via scikit-build-core, Python_EXECUTABLE is already set.
 # For standalone cmake invocations, find it via find_package.
 find_package(Python COMPONENTS Interpreter REQUIRED)
+
+# ---[ Where the Python packages go.
+# scikit-build-core exports each wheel tree to CMake as SKBUILD_<TREE>_DIR, and
+# wheel.install-dir picks which one becomes CMAKE_INSTALL_PREFIX. We set it to
+# "torch" so the C++ distribution lands at torch/lib and torch/include, as the
+# install rpath and torch/__init__.py both require; the prefix therefore sits
+# one level below platlib, and the Python-side install rules address
+# SKBUILD_PLATLIB_DIR directly instead of reaching it through the prefix.
+#
+# Those rules are guarded on SKBUILD, so a build scikit-build-core does not
+# drive (libtorch, tools/build_libtorch.py, downstream cmake --install) installs
+# the C++ distribution alone and keeps package data out of a conventional prefix
+# (see gh-191102). SKBUILD is set for every scikit-build-core configure,
+# editable installs included, where platlib is a per-build staging directory.
+#
+# The extension modules resolve the C++ tree through an $ORIGIN/lib install
+# rpath and torch/__init__.py resolves bin/ and lib/ off its own __file__, so
+# the prefix has to be the torch package directory. Enforce it rather than let
+# a mismatch produce an install that only fails at import time.
+if(SKBUILD)
+  get_filename_component(_torch_pkg_dir "${SKBUILD_PLATLIB_DIR}/torch" ABSOLUTE)
+  get_filename_component(_torch_prefix "${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
+  if(NOT _torch_pkg_dir STREQUAL _torch_prefix)
+    message(FATAL_ERROR
+      "CMAKE_INSTALL_PREFIX must be the torch package directory: the "
+      "extension modules load the C++ libraries through an $ORIGIN/lib rpath "
+      "relative to themselves.\n"
+      "  SKBUILD_PLATLIB_DIR  : ${SKBUILD_PLATLIB_DIR}\n"
+      "  expected prefix      : ${_torch_pkg_dir}\n"
+      "  CMAKE_INSTALL_PREFIX : ${_torch_prefix}\n"
+      "Keep wheel.install-dir = \"torch\" in pyproject.toml, which is what "
+      "makes the two agree.")
+  endif()
+  unset(_torch_pkg_dir)
+  unset(_torch_prefix)
+endif()
 
 # Forward environment variables to CMake variables, replicating the behavior
 # previously handled by setup.py / tools/setup_helpers/cmake.py.
@@ -310,6 +391,9 @@ cmake_dependent_option(
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
+# Off by default because enabling gfx12 adds CK SDPA code generation and compile
+# cost to ROCm builds that already target gfx1200/gfx1201.
+cmake_dependent_option(USE_ROCM_CK_SDPA_GFX12 "Also build ROCm Composable Kernel SDPA for gfx12 (RDNA4)" OFF "USE_ROCM_CK_SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -317,8 +401,7 @@ cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_HIPSPARSELT "Use hipSPARSELt" ON "USE_ROCM" OFF)
 cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
-# USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
-cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
+cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA OR USE_ROCM;NOT WIN32" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -439,6 +522,22 @@ cmake_dependent_option(
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
+cmake_dependent_option(
+  USE_CMAKE_INSTRUMENTATION
+  "Use cmake-instrumentation to collect build metrics"
+  OFF # disabled by default because it causes CI timeouts
+  "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
+  OFF
+)
+if(USE_CMAKE_INSTRUMENTATION)
+  cmake_instrumentation(
+    API_VERSION 1
+    DATA_VERSION 1.0
+    HOOKS postCMakeBuild
+    OPTIONS trace
+    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
+  )
+endif()
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
 # prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
@@ -448,6 +547,26 @@ if(LINUX AND CPU_AARCH64)
 endif()
 cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
   "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+
+# LLVM BOLT post-link binary optimization. Visible on AArch64, x86 and ppc64le.
+# Defaults ON for aarch64+linux+CUDA builds that also apply the linker script
+# optimization and a suitable llvm-bolt (>=21) is available. Depends on the
+# linker script because the committed profiles were collected with it enabled.
+function(check_llvm_bolt_version var item)
+  execute_process(COMMAND ${item} --version OUTPUT_VARIABLE _cmd_out)
+  string(REGEX MATCH "[0-9]+\.[0-9]+\.[0-9]+" _bolt_version "${_cmd_out}")
+  if(${_bolt_version} VERSION_LESS 21)
+    set(${var} FALSE PARENT_SCOPE)
+  endif()
+endfunction()
+find_program(LLVM_BOLT_EXECUTABLE NAMES llvm-bolt VALIDATOR check_llvm_bolt_version)
+
+set(USE_LLVM_BOLT_DEFAULT OFF)
+if(LINUX AND USE_CUDA AND CPU_AARCH64 AND USE_PRIORITIZED_TEXT_FOR_LD AND LLVM_BOLT_EXECUTABLE)
+  set(USE_LLVM_BOLT_DEFAULT ON)
+endif()
+cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT."
+  "${USE_LLVM_BOLT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
@@ -795,40 +914,52 @@ endif()
 
 # Prioritized Text Linker Optimization
 if(USE_PRIORITIZED_TEXT_FOR_LD)
-
-  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
-  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
-
-  execute_process(
-    COMMAND ${Python_EXECUTABLE}
-            ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py
-            --filein "${LINKER_SCRIPT_FILE_IN}"
-            --fout  "${LINKER_SCRIPT_FILE_OUT}"
-    RESULT_VARIABLE _gen_result
-    OUTPUT_VARIABLE _gen_output
-    ERROR_VARIABLE  _gen_error
-  )
-
-  if(NOT _gen_result EQUAL 0)
-    message(FATAL_ERROR
-      "Failed to generate linker script:\n${_gen_output}\n${_gen_error}")
-  endif()
-
   append_cxx_flag_if_supported("-ffunction-sections" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fdata-sections" CMAKE_CXX_FLAGS)
   append_c_flag_if_supported("-ffunction-sections" CMAKE_C_FLAGS)
   append_c_flag_if_supported("-fdata-sections" CMAKE_C_FLAGS)
 
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
+  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
+  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+  set(LINKER_SCRIPT_PATH "${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py")
+  add_custom_command(
+    OUTPUT "${LINKER_SCRIPT_FILE_OUT}"
+    COMMAND ${Python_EXECUTABLE}
+            "${LINKER_SCRIPT_PATH}"
+            --filein "${LINKER_SCRIPT_FILE_IN}"
+            --fout   "${LINKER_SCRIPT_FILE_OUT}"
+    DEPENDS "${LINKER_SCRIPT_PATH}"
+            "${LINKER_SCRIPT_FILE_IN}"
+    VERBATIM
+  )
+  add_custom_target(generate_linker_script DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+elseif(LINUX AND CPU_AARCH64)
+  message(WARNING [[
+  It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
+  To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+  ]])
+endif()
 
-else()
-  if(LINUX AND CPU_AARCH64)
-    message(WARNING [[
-    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
-    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-    ]])
-  endif()
+if(USE_LLVM_BOLT)
+  # In addition to the flags below, BOLT also requires --emit-relocs for the
+  # linker. Since --emit-relocs increases the binary size, we limit the use to
+  # libraries that are actually optimized by BOLT instead of applying globally
+  # (see torch_optimize_layout_if_enabled)
+  list(APPEND _bolt_flags
+    "-fno-plt" # shows a perf boost in NVIDIA internal CI
+    "-fno-reorder-blocks-and-partition" # required by BOLT when using GCC>=8
+  )
+  foreach(_flag IN LISTS _bolt_flags)
+    append_c_flag_if_supported("${_flag}" CMAKE_C_FLAGS)
+    append_cxx_flag_if_supported("${_flag}" CMAKE_CXX_FLAGS)
+  endforeach()
+
+  # Extract the committed BOLT profiles for the build-time optimization
+  # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
+  set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+  file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
+  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+       DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
@@ -988,6 +1119,22 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
+# Flash Attention needs sm80+; disable it if no resolved arch reaches that.
+if(USE_FLASH_ATTENTION AND USE_CUDA AND NOT USE_ROCM)
+  string(REPLACE " " ";" _flash_attn_archs "${NVCC_FLAGS_EXTRA_readable}")
+  set(_flash_attn_has_sm80 OFF)
+  foreach(_arch IN LISTS _flash_attn_archs)
+    if(_arch MATCHES "^(sm|compute)_([0-9]+)" AND CMAKE_MATCH_2 GREATER_EQUAL 80)
+      set(_flash_attn_has_sm80 ON)
+    endif()
+  endforeach()
+  if(_flash_attn_archs AND NOT _flash_attn_has_sm80)
+    message(STATUS
+      "Disabling USE_FLASH_ATTENTION: it needs a CUDA architecture >= 8.0, "
+      "but the resolved CUDA architectures are '${_flash_attn_archs}'")
+    set(USE_FLASH_ATTENTION OFF)
+  endif()
+endif()
 
 IF(USE_ROCM AND ("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
   message(WARNING "Setting USE_MSLK for gfx942/gfx950 to ON by default, doing ROCM build")
@@ -1106,15 +1253,6 @@ endif()
 
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
-
-# ---[ Set link flag, handle additional deps for gcc 4.8 and above
-if(CMAKE_COMPILER_IS_GNUCXX AND NOT ANDROID)
-  message(
-    STATUS
-      "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line"
-  )
-  list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
-endif()
 
 # ---[ Build flags Re-include to override append_cxx_flag_if_supported from
 # third_party/FBGEMM
@@ -1488,17 +1626,17 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
-# File mirroring: copy source files into torchgen/packaged/, vendored
-# inductor templates, and symlink-replacement copies.  Previously handled
-# by setup.py; now consolidated here for both scikit-build-core and
-# setuptools builds.
-include(cmake/FileMirroring.cmake)
+if(SKBUILD)
+  # File mirroring: copy source files into torchgen/packaged/, vendored
+  # inductor templates, and symlink-replacement copies.  Previously handled
+  # by setup.py.
+  include(cmake/FileMirroring.cmake)
 
-# Package data: install non-Python data files (type stubs, templates,
-# headers, etc.) into the torch package.  Previously declared via
-# setup.py package_data; now consolidated here for both scikit-build-core
-# and setuptools builds.
-include(cmake/PackageData.cmake)
+  # Package data: install non-Python data files (type stubs, templates,
+  # headers, etc.) into the torch package.  Previously declared via
+  # setup.py package_data.
+  include(cmake/PackageData.cmake)
+endif()
 
 include(cmake/PostBuildSteps.cmake)
 

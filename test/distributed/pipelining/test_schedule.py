@@ -19,7 +19,10 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
+from torch.distributed.pipelining._utils import (
+    generate_stage_to_rank_mapping,
+    InferenceMode,
+)
 from torch.distributed.pipelining.schedules import (
     _Action,
     _add_reduce_grad,
@@ -521,6 +524,42 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
+    @parametrize("rank", [0, 1])
+    def test_fake_pg_cross_rank_uses_static_metadata(self, rank):
+        """
+        With a fake process group, the cross-rank warm-up vote cannot exchange
+        real data, so the schedule must infer the metadata mode locally:
+        STATIC when complete metadata is supplied, and a clear error when
+        dynamic inference would be required.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=rank, world_size=2, store=store
+        )
+        d_hid, batch_size = 16, 8
+        n_stages, num_microbatches = 2, 2
+        device = torch.device("cpu")
+        mod = MultiMLP(d_hid, n_layers=n_stages).get_submodule(f"layers.{rank}")
+
+        x = torch.randn(batch_size, d_hid, device=device)
+        mb = torch.randn(batch_size // num_microbatches, d_hid, device=device)
+        try:
+            stage = PipelineStage(
+                mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
+            )
+            schedule = ScheduleGPipe(stage, num_microbatches)
+            schedule.step(x) if rank == 0 else schedule.step()
+            self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+
+            # Without static metadata, dynamic inference is required, which
+            # cannot work over a fake group and must fail loudly.
+            stage_dyn = PipelineStage(mod, rank, n_stages, device)
+            schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
+            with self.assertRaisesRegex(RuntimeError, "fake process group"):
+                schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
+        finally:
+            torch.distributed.destroy_process_group()
+
     @parametrize(
         "ScheduleClass",
         [
@@ -640,6 +679,31 @@ class TestSchedulePlan(TestCase):
                     stage_to_rank=stage_to_rank,
                     num_stages=num_stages,
                 )
+
+    def test_max_active_stages_is_used_for_lowering(self):
+        stages = [
+            MockPipelineStage(group_size=4, group_rank=3, num_stages=16)
+            for _ in range(4)
+        ]
+
+        default_schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+        )
+        retained_schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+            max_active_stages=4,
+        )
+
+        def count_stage_15_unshards(schedule):
+            return sum(
+                action.stage_index == 15 and action.computation_type == UNSHARD
+                for action in schedule.pipeline_order_with_comms[3]
+            )
+
+        self.assertEqual(count_stage_15_unshards(default_schedule), 4)
+        self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
 
     @parametrize(
         "ScheduleClass",

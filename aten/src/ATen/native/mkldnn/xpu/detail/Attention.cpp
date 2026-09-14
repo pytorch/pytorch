@@ -2,6 +2,9 @@
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/where.h>
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace {
@@ -126,8 +129,22 @@ struct SDPALogicalParams {
         reshaped_logsumexp = reshaped_logsumexp.view(
             {batch_size, group_num, group_size, seq_len_q, 1});
       }
-      if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
-        reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
+      if (attn_mask_.has_value() && reshaped_attn_mask.dim() == 4) {
+        // check_attn_mask_shape restricts a 4D mask's head
+        // dim to 1 or num_head_q. GQA target shape is
+        // [batch, group_num, group_size, seq_q, seq_k]. When mask head == 1
+        // we rely on implicit broadcast; when mask head == num_head_q we must
+        // split it into [group_num, group_size].
+        if (reshaped_attn_mask.size(1) == num_head_q) {
+          reshaped_attn_mask = reshaped_attn_mask.reshape(
+              {reshaped_attn_mask.size(0),
+               group_num,
+               group_size,
+               reshaped_attn_mask.size(2),
+               reshaped_attn_mask.size(3)});
+        } else {
+          reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
+        }
       }
     }
 
@@ -544,22 +561,31 @@ struct SDPABackwardLogicalParams {
       // [batch_size, num_head_q / num_head_kv, num_head_kv, seq_len_q,
       // head_dim_qk]. Please refer to
       // https://uxlfoundation.github.io/oneDNN/dev_guide_graph_gqa.html#gqa-pattern
-      reshaped_query = query_.view(
+      reshaped_query = reshaped_query.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
-      reshaped_grad_query = grad_query_.view(
+      reshaped_grad_query = reshaped_grad_query.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
-      reshaped_key = key_.unsqueeze(2);
-      reshaped_grad_key = grad_key_.unsqueeze(2);
-      reshaped_value = value_.unsqueeze(2);
-      reshaped_grad_value = grad_value_.unsqueeze(2);
-      reshaped_out =
-          out_.view({batch_size, group_num, group_size, seq_len_q, head_dim_v});
-      reshaped_grad_out = grad_out_.view(
+      reshaped_key = reshaped_key.unsqueeze(2);
+      reshaped_grad_key = reshaped_grad_key.unsqueeze(2);
+      reshaped_value = reshaped_value.unsqueeze(2);
+      reshaped_grad_value = reshaped_grad_value.unsqueeze(2);
+      reshaped_out = reshaped_out.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_v});
+      reshaped_grad_out = reshaped_grad_out.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_v});
       reshaped_logsumexp = reshaped_logsumexp.view(
           {batch_size, group_num, group_size, seq_len_q, 1});
-      if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
-        reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
+      if (attn_mask_.has_value() && reshaped_attn_mask.dim() == 4) {
+        if (reshaped_attn_mask.size(1) == num_head_q) {
+          reshaped_attn_mask = reshaped_attn_mask.reshape(
+              {reshaped_attn_mask.size(0),
+               group_num,
+               group_size,
+               reshaped_attn_mask.size(2),
+               reshaped_attn_mask.size(3)});
+        } else {
+          reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
+        }
       }
     }
 

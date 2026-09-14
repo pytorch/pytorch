@@ -17,6 +17,7 @@ from typing import Any, cast, Literal, NamedTuple, Protocol
 import torch
 import torch.distributed as dist
 from torch._dynamo import OptimizedModule
+from torch.cuda.graph_annotations import mark_kernels
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
@@ -358,6 +359,40 @@ class _PipelineSchedule(ABC):
                 (avoids redundant init on eval↔train mode switches).
         """
         if all(isinstance(stage, PipelineStage) for stage in stages):
+            # A fake process group cannot exchange real data: a cross-rank
+            # vote recv reads zeros and selects DYNAMIC, which then fails in
+            # `_recv_meta` (nothing was actually sent). Since dynamic
+            # inference can never work across ranks of a fake group, decide
+            # locally in that case: STATIC if every local stage has complete
+            # metadata, else error. Same-rank-only pipelines (e.g. a
+            # single-rank fake world) don't communicate, so the normal vote
+            # still works and DYNAMIC remains usable there.
+            pp_stages = cast(list[PipelineStage], stages)
+            has_cross_rank = any(
+                (not st.is_first and not st._is_same_rank(st.stage_index - 1))
+                or (not st.is_last and not st._is_same_rank(st.stage_index + 1))
+                for st in pp_stages
+            )
+            if has_cross_rank and any(
+                dist.get_backend(st.group) == "fake" for st in pp_stages
+            ):
+                for st in pp_stages:
+                    if InferenceMode.needs_dynamic(st._user_meta, has_backward):
+                        raise RuntimeError(
+                            f"Stage {st.stage_index} requires dynamic shape "
+                            "inference, which is not supported with a fake "
+                            "process group. Provide complete static metadata "
+                            "(inputs/outputs, plus input_grads/output_grads "
+                            "for DTensors with backward) to the PipelineStage "
+                            "constructor."
+                        )
+                    st._inference_mode = InferenceMode.STATIC
+                logger.debug(
+                    "Fake process group detected; set inference_mode=static "
+                    "for %d stage(s) without voting",
+                    len(stages),
+                )
+                return
             acc: torch.Tensor | None = None
             for stage in cast(list[PipelineStage], stages):
                 acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
@@ -2447,6 +2482,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
     def __init__(self, *args, **kwargs):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
+        self._max_active_stages: int = kwargs.pop("max_active_stages", 3)
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2539,7 +2575,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # Perform schedule lowering
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
-                    actions[rank]
+                    actions[rank], max_active_stages=self._max_active_stages
                 )
                 self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
                     self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
@@ -2841,7 +2877,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 action,
             )
             try:
-                with record_function(_get_profiler_function_name(action)):
+                profiler_name = _get_profiler_function_name(action)
+                # backward=False: each backward action gets its own scope below, so
+                # letting a forward scope also claim its backward kernels would
+                # double-attribute them.
+                with (
+                    record_function(profiler_name),
+                    mark_kernels(profiler_name, backward=False),
+                ):
                     if action.computation_type in self._comp_type_to_function_map:
                         ctx = _PipelineContext(
                             self,
@@ -2904,6 +2947,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        max_active_stages: int = 3,
     ):
         super().__init__(
             stages=stages,
@@ -2913,6 +2957,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            max_active_stages=max_active_stages,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -3141,6 +3186,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        max_active_stages: int = 3,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3153,6 +3199,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            max_active_stages=max_active_stages,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3250,6 +3297,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        max_active_stages: int = 3,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3264,6 +3312,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            max_active_stages=max_active_stages,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3447,6 +3496,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        max_active_stages: int = 3,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3461,6 +3511,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            max_active_stages=max_active_stages,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3633,6 +3684,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        max_active_stages: int = 3,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3647,6 +3699,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            max_active_stages=max_active_stages,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
