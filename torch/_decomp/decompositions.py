@@ -5925,6 +5925,106 @@ def floor_divide(self, other):
     return torch.div(self, other, rounding_mode="floor")
 
 
+def _associative_scan_combine(combine_mode, lhs, rhs):
+    if combine_mode == "add":
+        return [l + r for l, r in zip(lhs, rhs)]
+    if combine_mode == "mul":
+        return [l * r for l, r in zip(lhs, rhs)]
+    if combine_mode == "max":
+        return [torch.maximum(l, r) for l, r in zip(lhs, rhs)]
+    if combine_mode == "min":
+        return [torch.minimum(l, r) for l, r in zip(lhs, rhs)]
+    if combine_mode == "linear_recurrence":
+        (a1, b1), (a2, b2) = lhs, rhs
+        return [a1 * a2, a2 * b1 + b2]
+    raise NotImplementedError(
+        f"associative_scan: unsupported combine_mode '{combine_mode}'"
+    )
+
+
+def _associative_scan_tree(xs, combine_mode, dim):
+    # Blelloch-style inclusive scan tree built from pointwise ops. Used as a
+    # fallback for backends without scan codegen support.
+    dim = utils.canonicalize_dim(xs[0].dim(), dim)
+    n = xs[0].size(dim)
+    if n < 2:
+        return [x.clone() for x in xs]
+    idx = (slice(None),) * dim
+    reduced = _associative_scan_combine(
+        combine_mode,
+        [x[idx + (slice(0, -1, 2),)] for x in xs],
+        [x[idx + (slice(1, None, 2),)] for x in xs],
+    )
+    odd_elems = _associative_scan_tree(reduced, combine_mode, dim)
+    if n % 2 == 0:
+        even_elems = _associative_scan_combine(
+            combine_mode,
+            [
+                e[
+                    idx
+                    + (
+                        slice(
+                            0,
+                            -1,
+                        ),
+                    )
+                ]
+                for e in odd_elems
+            ],
+            [x[idx + (slice(2, None, 2),)] for x in xs],
+        )
+    else:
+        even_elems = _associative_scan_combine(
+            combine_mode,
+            odd_elems,
+            [x[idx + (slice(2, None, 2),)] for x in xs],
+        )
+    even_elems = [
+        torch.cat([x[idx + (slice(0, 1),)], e], dim) for x, e in zip(xs, even_elems)
+    ]
+    res = []
+    for ev, od in zip(even_elems, odd_elems):
+        if n % 2 == 0:
+            interleaved = torch.flatten(
+                torch.stack([ev, od], dim=dim + 1),
+                start_dim=dim,
+                end_dim=dim + 1,
+            )
+        else:
+            interleaved_prefix = torch.flatten(
+                torch.stack([ev[idx + (slice(0, -1),)], od], dim=dim + 1),
+                start_dim=dim,
+                end_dim=dim + 1,
+            )
+            interleaved = torch.cat(
+                [interleaved_prefix, ev[idx + (slice(-1, None),)]], dim=dim
+            )
+        res.append(interleaved)
+    return res
+
+
+@register_decomposition(aten.associative_scan.default)
+def associative_scan(self, combine_mode, dim=0, reverse=False):
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    if reverse:
+        self = torch.flip(self, [dim])
+    out = _associative_scan_tree([self], combine_mode, dim)
+    if reverse:
+        out = [torch.flip(o, [dim]) for o in out]
+    return out[0]
+
+
+@register_decomposition(aten.associative_scan.TensorList)
+def associative_scan_tensor_list(xs, combine_mode, dim=0, reverse=False):
+    dim = utils.canonicalize_dim(xs[0].dim(), dim)
+    if reverse:
+        xs = [torch.flip(x, [dim]) for x in xs]
+    out = _associative_scan_tree(list(xs), combine_mode, dim)
+    if reverse:
+        out = [torch.flip(o, [dim]) for o in out]
+    return out
+
+
 @register_decomposition(aten.sym_numel)
 def sym_numel(t):
     return functools.reduce(operator.mul, t.shape, 1)

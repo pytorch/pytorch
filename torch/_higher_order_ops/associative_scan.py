@@ -150,6 +150,50 @@ class AssociativeScanOp(HigherOrderOperator):
 associative_scan_op = AssociativeScanOp()
 
 
+# Built-in pointwise combines that the native aten::associative_scan kernels
+# can evaluate directly. Keyed by the single call_function target of the
+# combine graph.
+_NATIVE_COMBINE_MODES = {
+    "aten.add.Tensor": "add",
+    "aten.mul.Tensor": "mul",
+    "aten.maximum": "max",
+    "aten.minimum": "min",
+}
+
+
+def _classify_native_combine(combine_fn, leaves_xs):
+    """Return a native combine_mode if combine_fn is a single-elementwise
+    builtin over a single leaf (e.g. ``lambda x, y: x + y``), else None."""
+    if (
+        torch.compiler.is_compiling()
+        or torch.compiler.is_exporting()
+        or torch.compiler.is_dynamo_compiling()
+        or torch._guards.TracingContext.try_get() is not None
+        or torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
+    ):
+        return None
+    if len(leaves_xs) != 1:
+        return None
+    sample = (
+        first_slice_copy(leaves_xs[0]),
+        first_slice_copy(leaves_xs[0]),
+    )
+    try:
+        combine_gm = materialize_as_graph(combine_fn, sample)
+    except Exception:
+        return None
+    call_nodes = [n for n in combine_gm.graph.nodes if n.op == "call_function"]
+    if len(call_nodes) != 1:
+        return None
+    node = call_nodes[0]
+    if not isinstance(node.target, torch._ops.OpOverload):
+        return None
+    tensor_args = [a for a in node.args if isinstance(a, torch.fx.Node)]
+    if len(tensor_args) != 2:
+        return None
+    return _NATIVE_COMBINE_MODES.get(str(node.target))
+
+
 def associative_scan(
     combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
     xs: pytree.PyTree,
@@ -280,21 +324,31 @@ def associative_scan(
         out = generic_associative_scan(combine_fn, leaves_xs, additional_inputs=())
         out = pytree.tree_unflatten(out, spec_xs)
     else:
-        combine_fn = functools.partial(
-            wrap_combine_fn_flat,
-            combine_fn=combine_fn,
-            spec=spec_xs,
-            num_leaves=len(leaves_xs),
-        )
+        native_combine_mode = _classify_native_combine(combine_fn, leaves_xs)
+        if native_combine_mode is not None:
+            # Fast path: `leaves_xs` already has the scan dim moved to 0 and
+            # is flipped for reverse, so scan dim 0 without reversing.
+            out = [
+                torch.ops.aten.associative_scan(x, native_combine_mode, 0, False)
+                for x in leaves_xs
+            ]
+            out = pytree.tree_unflatten(out, spec_xs)
+        else:
+            combine_fn = functools.partial(
+                wrap_combine_fn_flat,
+                combine_fn=combine_fn,
+                spec=spec_xs,
+                num_leaves=len(leaves_xs),
+            )
 
-        def run_flattened_associative_scan(combine_fn, leaves_xs):
-            return associative_scan_op(combine_fn, leaves_xs, additional_inputs=())
+            def run_flattened_associative_scan(combine_fn, leaves_xs):
+                return associative_scan_op(combine_fn, leaves_xs, additional_inputs=())
 
-        out = _maybe_compile_and_run_fn(
-            run_flattened_associative_scan,
-            combine_fn,
-            leaves_xs,
-        )
+            out = _maybe_compile_and_run_fn(
+                run_flattened_associative_scan,
+                combine_fn,
+                leaves_xs,
+            )
 
     if reverse:
         out = pytree.tree_map(lambda elem: elem.flip([0]), out)
