@@ -281,7 +281,11 @@ class MultiKernelTest(TestCase):
             inductor_meta={},
         )
 
-        with self.assertRaisesRegex(NotImplementedError, "per-call-zeroed workspaces"):
+        graph = SimpleNamespace(cpp_wrapper=False)
+        with (
+            V.set_graph_handler(graph),
+            self.assertRaisesRegex(NotImplementedError, "per-call-zeroed workspaces"),
+        ):
             MultiKernelPlan([[kernel], [kernel, kernel]])
 
     def test_multi_kernel_plan_benchmark_holds_gpu_lock_across_plans(self):
