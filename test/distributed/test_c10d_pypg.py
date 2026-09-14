@@ -43,7 +43,7 @@ class MyWork(dist._Work):
         self.future_.set_result(result)
         self.pg_ = weakref.ref(pg)
 
-    def wait(self, timeout):
+    def wait(self, timeout=timedelta(0)):
         self.pg_().wait_count += 1
         return True
 
