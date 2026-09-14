@@ -47,7 +47,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import format_source_range, istype
+from ..utils import format_source_range, istype, no_keywords
 
 
 _RICHCOMPARE_OPS = frozenset(
@@ -868,6 +868,21 @@ def _wrap_init(
     return func(self, tx, args, kwargs)
 
 
+def _wrap_new(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_new via __new__: variadic, forwards kwargs. Unlike every other
+    # tp_*_impl, `self` stays the type __new__ was found on (e.g.
+    # BuiltinVariable(set)), not an instance -- `args[0]` is the actual
+    # `cls` (possibly a subclass, e.g. via super().__new__(cls, ...)).
+    # See tp_new_impl's docstring for the full calling convention.
+    return func(self, tx, args, kwargs)
+
+
 def _wrap_setattr(
     self: VariableTracker,
     tx: InstructionTranslatorBase,
@@ -1290,7 +1305,7 @@ _SLOTDEFS: list[SlotDef] = [
         _wrap_descr_delete,
     ),
     TPSLOT("__init__", "tp_init_impl", PyTypeSlots.TP_INIT, _wrap_init),
-    # SlotDef("__new__", ...), # missing
+    TPSLOT("__new__", "tp_new_impl", PyTypeSlots.TP_NEW, _wrap_new),
     # SlotDef("__del__", ...), # missing
     # SlotDef("__buffer__", ...), # missing
     # SlotDef("__release_buffer__", ...), # missing
@@ -2358,13 +2373,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         receiver, so callers must not forward it to `args[0].call_method`.
         VTs representing a constructible type (BuiltinVariable,
         DictBuiltinVariable, ListBuiltinVariable, UserDefinedClassVariable)
-        override this to implement `cls.__new__(cls, ...)`.
+        override this to implement `cls.__new__(cls, ...)`. The default here
+        implements `object.__new__(cls)`, the ultimate fallback every type's
+        `__new__` chain bottoms out at.
         """
-        unimplemented(
-            gb_type="missing tp_new",
-            context=f"tp_new_impl not implemented for {self.python_type_name()}",
-            explanation=f"Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
-            hints=[*graph_break_hints.DYNAMO_BUG],
+        if len(args) != 1:
+            unimplemented(
+                gb_type="missing tp_new",
+                context=f"tp_new_impl not implemented for {self.python_type_name()}",
+                explanation=f"Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+                hints=[*graph_break_hints.DYNAMO_BUG],
+            )
+        no_keywords(tx, "object", kwargs)
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], args[1:], tx=tx
         )
 
     def call_function(

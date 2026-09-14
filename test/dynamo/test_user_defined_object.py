@@ -857,6 +857,22 @@ class TestClassSetattr(TestCase):
         MyModule.x = 10
 
 
+class TestObjectNew(TestCase):
+    def test_object_new_on_plain_class(self):
+        def fn():
+            return object.__new__(Plain)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertIsInstance(opt_fn(), Plain)
+
+    def test_object_new_rejects_kwargs(self):
+        def fn():
+            return object.__new__(Plain, extra=1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(Unsupported, opt_fn)
+
+
 # ---------------------------------------------------------------------------
 # __setitem__ on user-defined classes / metaclasses
 # ---------------------------------------------------------------------------

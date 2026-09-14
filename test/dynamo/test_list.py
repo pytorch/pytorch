@@ -209,6 +209,52 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, [tree, tree])
 
 
+class CustomNewTupleTests(torch._dynamo.test_case.TestCase):
+    # tuple subclasses overriding __new__ and calling super().__new__(cls, arg)
+    class CustomTupleWithNew(tuple):  # noqa: SLOT001
+        def __new__(cls, arg, newarg=None):
+            self = super().__new__(cls, arg)
+            self.newarg = newarg
+            return self
+
+    class GrandchildTupleWithNew(CustomTupleWithNew):
+        pass
+
+    def setUp(self):
+        self.old = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self.old
+        return super().tearDown()
+
+    def assertEqual(self, a, b):
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
+
+    @make_dynamo_test
+    def test_tuple_subclass_new_via_super(self):
+        t = self.CustomTupleWithNew([1, 2], newarg=5)
+        self.assertTrue(type(t) is self.CustomTupleWithNew)
+        self.assertTrue(tuple(t) == (1, 2))
+        self.assertTrue(t.newarg == 5)
+
+    @make_dynamo_test
+    def test_tuple_subclass_new_via_super_multilevel(self):
+        t = self.GrandchildTupleWithNew([1, 2, 3])
+        self.assertTrue(type(t) is self.GrandchildTupleWithNew)
+        self.assertTrue(tuple(t) == (1, 2, 3))
+
+    @make_dynamo_test
+    def test_tuple_new_exact_type(self):
+        t = tuple.__new__(tuple, [1, 2])
+        self.assertTrue(t == (1, 2))
+
+    @make_dynamo_test
+    def test_tuple_new_rejects_kwargs(self):
+        self.assertRaises(TypeError, lambda: tuple.__new__(tuple, [1, 2], extra=1))
+
+
 class ListTests(TupleTests):
     # List methods
     # + append
@@ -539,6 +585,59 @@ class ListTests(TupleTests):
         # Valid iterable assignments are unaffected.
         p[1:3] = ["x", "y"]
         self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
+
+
+class CustomNewListTests(torch._dynamo.test_case.TestCase):
+    # list subclasses overriding __new__ and calling super().__new__(cls)
+    class CustomListWithNew(list):
+        def __new__(cls, arg, newarg=None):
+            self = super().__new__(cls)
+            self.newarg = newarg
+            return self
+
+        def __init__(self, arg, newarg=None):
+            super().__init__(arg)
+
+    class GrandchildListWithNew(CustomListWithNew):
+        pass
+
+    def setUp(self):
+        self.old = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self.old
+        return super().tearDown()
+
+    def assertEqual(self, a, b):
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
+
+    @make_dynamo_test
+    def test_list_subclass_new_via_super(self):
+        lst = self.CustomListWithNew([1, 2, 3], newarg=7)
+        self.assertTrue(type(lst) is self.CustomListWithNew)
+        self.assertTrue(list(lst) == [1, 2, 3])
+        self.assertTrue(lst.newarg == 7)
+
+    @make_dynamo_test
+    def test_list_subclass_new_via_super_multilevel(self):
+        lst = self.GrandchildListWithNew([1, 2, 3])
+        self.assertTrue(type(lst) is self.GrandchildListWithNew)
+        self.assertTrue(list(lst) == [1, 2, 3])
+
+    @make_dynamo_test
+    def test_list_new_exact_type(self):
+        lst = list.__new__(list)
+        lst.append(1)
+        self.assertTrue(lst == [1])
+
+    @make_dynamo_test
+    def test_list_new_ignores_kwargs(self):
+        # list.__new__ (PyType_GenericNew) silently ignores extra args/kwargs
+        # -- only list.__init__ (called separately) actually populates it.
+        lst = list.__new__(list, [1, 2], extra="ignored")
+        self.assertTrue(lst == [])
 
 
 class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
