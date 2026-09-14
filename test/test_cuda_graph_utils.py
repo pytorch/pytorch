@@ -2421,27 +2421,35 @@ class TestCuptiAnnotationBackend(TestCase):
         self.assertEqual(seen, ["edge_walk"])
         self.assertEqual(len(self._annotations()), 1)
 
-    def test_source_keying_needs_a_new_enough_cupti(self):
-        # A 13.4 driver with an older CUPTI is the quiet failure: the driver would report
-        # source node ids but the consumer's CUPTI has no field to carry them, so
-        # annotations kept on the capture graph resolve to nothing. Both ends are checked.
+    def test_rejected_key_by_leaves_nothing_registered(self):
+        # The key_by gate runs before the CUPTI callbacks are registered, so a capture it
+        # rejects arms nothing, and the retry the error suggests is not met with
+        # "graph-node callbacks are already registered".
         import torch.cuda._graph_annotations as _ga
 
+        x = self._warm(torch.randn(64, 64, device="cuda"))
         with unittest.mock.patch.object(
-            _ga, "_loaded_cupti_version", return_value=130301
+            _ga, "source_node_ids_available", return_value=False
         ):
-            self.assertFalse(_ga.source_node_ids_available())
-        # No CUPTI in the process yet: nothing to be wrong about, so the driver alone
-        # decides -- the same answer a new-enough CUPTI gives.
-        with unittest.mock.patch.object(
-            _ga, "_loaded_cupti_version", return_value=None
+            with self.assertRaisesRegex(RuntimeError, "key_by.*source"):
+                with torch.cuda.graph(
+                    torch.cuda.CUDAGraph(),
+                    enable_annotations=True,
+                    annotation_config={"backend": "cupti", "key_by": "source"},
+                ):
+                    pass
+
+        seen = []
+        with torch.cuda.graph(
+            torch.cuda.CUDAGraph(),
+            enable_annotations=True,
+            annotation_config={"backend": "cupti"},
         ):
-            absent = _ga.source_node_ids_available()
-        with unittest.mock.patch.object(
-            _ga, "_loaded_cupti_version", return_value=130400
-        ):
-            new_enough = _ga.source_node_ids_available()
-        self.assertEqual(absent, new_enough)
+            seen.append(_ga._annotation_backend)
+            with mark_kernels("phase"):
+                x = x + 1
+        self.assertEqual(seen, ["cupti"])
+        self.assertEqual(len(self._annotations()), 1)
 
     def test_invalid_backend_rejected(self):
         with self.assertRaisesRegex(ValueError, r"annotation_config\['backend'\]"):

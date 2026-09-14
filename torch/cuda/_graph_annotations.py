@@ -43,9 +43,7 @@ control (e.g. resolving once before remapping several graphs).
 
 from __future__ import annotations
 
-import ctypes
 import importlib.metadata
-import os
 import threading
 import warnings
 from collections.abc import Mapping
@@ -314,25 +312,22 @@ _MIN_SOURCE_NODE_CUPTI_VERSION = 130400
 _MIN_SOURCE_NODE_DRIVER_VERSION = 13040
 
 
-def _loaded_cupti_version() -> int | None:
-    """CUPTI's version if libcupti is already in this process, else ``None``.
+def _cupti_version() -> int | None:
+    """CUPTI's version, or ``None`` when it cannot be asked: no cupti-python, or no
+    libcupti to load (which includes every platform whose CUPTI is not ``libcupti.so``).
 
-    RTLD_NOLOAD so the probe never pulls CUPTI in: loading it is a side effect a capture
-    should not have, and a process that has not loaded it has no consumer of source node
-    ids to be wrong about yet. ``torch`` front-loads the CUPTI wheel at import (see
-    ``_preload_cuda_deps``), so in practice the check does run. Not a public API."""
+    Asks Cuspy's process-wide wrapper rather than dlopening libcupti here: ``torch``
+    front-loads the CUPTI wheel at import (``_preload_cuda_deps``), so this is the copy
+    already mapped into the process, and its soname stays defined in one place. Not a
+    public API."""
     try:
-        lib = ctypes.CDLL("libcupti.so.13", mode=os.RTLD_NOLOAD)
-    except OSError:
+        from torch.profiler._cuspy.cupti_python import pylibcupti
+    except ImportError:
         return None
     try:
-        version = ctypes.c_uint32()
-        lib.cuptiGetVersion.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
-        if lib.cuptiGetVersion(ctypes.byref(version)) != 0:  # CUPTI_SUCCESS
-            return None
-    except AttributeError:
+        return pylibcupti().get_version()
+    except (OSError, RuntimeError):
         return None
-    return version.value
 
 
 def source_node_ids_available() -> bool:
@@ -344,7 +339,7 @@ def source_node_ids_available() -> bool:
     CUPTI reports nothing and the annotations resolve to nothing. Not a public API."""
     if not _HAS_CUDA_BINDINGS:
         return False
-    cupti_version = _loaded_cupti_version()
+    cupti_version = _cupti_version()
     if cupti_version is not None and cupti_version < _MIN_SOURCE_NODE_CUPTI_VERSION:
         return False
     rt = _cuda_runtime
@@ -1062,17 +1057,21 @@ def discard_capture_annotations(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     ``resolve_pending_annotations`` runs before ``capture_end`` because the rekey in
     ``instantiate()`` consumes what it writes, so entries land keyed by the capture
     graph's id. If ``capture_end`` then raises, that rekey never happens and the entries
-    keep an id no exec graph will ever hold: ``remove_kernel_annotations`` matches exec
-    ids, so the graph-destroy path cannot reach them and they last for the life of the
-    process. Only called on that error path. Not a public API."""
+    keep an id no exec graph will ever hold: the graph-destroy path is handed the ids the
+    graph recorded under, which only happens at instantiate, so nothing would ever reach
+    them and they last for the life of the process. Body graph ids go too -- they are keys
+    of the same kind, recorded under ``key_by="source"``. Only called on that error path.
+    Not a public API."""
     _pending_scopes.clear()
     capture_graph_id = torch_cuda_graph._capture_graph_id
-    # A remap already happened (keep_graph=False instantiates inside capture_end), so the
-    # entries are on a real exec id and are the graph's to purge on destroy, not ours.
-    if capture_graph_id is None or torch_cuda_graph._remapped_exec_id is not None:
+    # An exec graph exists (keep_graph=False instantiates inside capture_end, and a later
+    # hook is what raised), so the entries -- rekeyed to it under "exec", still on the
+    # capture graph under "source" -- are live and the graph's to purge on destroy.
+    if capture_graph_id is None or torch_cuda_graph._has_graph_exec:
         return
-    for key in [k for k in _kernel_annotations if k >> 32 == capture_graph_id]:
-        del _kernel_annotations[key]
+    remove_kernel_annotations(
+        {capture_graph_id} | torch_cuda_graph._annotated_body_graph_ids
+    )
 
 
 def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
