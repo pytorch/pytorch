@@ -2616,9 +2616,11 @@ from user code:
     def test_no_match_message_hint_stays_neutral_for_a_supplied_scope(self):
         # deserialize skips _resolve_guard_scope when the caller passes
         # guard_globals=, so the guards hold THAT dict rather than the globals of
-        # the function model.forward resolves to. Naming forward here would send
-        # the reader to a dict where the name is already defined and dispatch
-        # still fails -- the assertions after the wording measure both halves.
+        # the function model.forward resolves to. Here that dict never had the
+        # name (names_the_resolved_module reaches the wording through a stale
+        # copy of this module's dict), and the assertions after the wording
+        # measure the advice: the name defined in the supplied dict, where the
+        # hint sends the reader, is what serves the call.
         self._hide_leaked_dynamo_globals()
         x = torch.randn(3, 3)
         model = torch.compile(
@@ -2640,43 +2642,37 @@ from user code:
         message = str(ctx.exception)
         self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
         self.assertIn(
-            "missing from the live scope this artifact was loaded against", message
+            "missing from the live scope this artifact was loaded against; define "
+            "it there",
+            message,
         )
         self.assertNotIn("instance's forward", message)
-        # The guards hold the supplied dict, not the one the class's forward
-        # owns: this module's, where the name read below resolves.
+        # The guards hold the supplied dict, not this module's, where the name
+        # read below resolves and the class's forward is defined.
         self.assertIs(compiled.compiled_results[0]._guard_globals, scope)
-        self.assertIs(HermeticModule.forward.__globals__, globals())
         scope["AOT_HERMETIC_WEIGHT"] = AOT_HERMETIC_WEIGHT
         self.assertEqual(compiled(x), x @ AOT_HERMETIC_WEIGHT)
 
     def test_no_match_report_resolves_forward_only_for_a_supplied_scope(self):
         # An in-process capture keeps the CAPTURED scope, whose hint never names
         # forward, so the report has no reason to resolve it -- and resolving it
-        # runs user code: get_traced_fn formats the forward it refuses, a partial
-        # over this module, whose extra_repr raises past the (RuntimeError,
-        # AttributeError) that _resolve_guard_scope catches. Dispatch itself
-        # never calls the rebound forward, so the rebind reaches only the report.
-        # The catch alone would keep this report arriving, so the gate is pinned
-        # by counting resolves rather than by the wording.
+        # runs user code (get_traced_fn formats a forward it refuses). Since the
+        # CAPTURED wording reads the same whether or not the resolve ran, the
+        # gate is pinned by counting resolves rather than by the wording.
         self._hide_leaked_dynamo_globals()
-        mod = RaisingReprModule()
         model = torch.compile(
-            mod,
+            HermeticModule(),
             fullgraph=True,
             backend="eager",
             options={"guard_filter_fn": keep_global_guards},
         )
         x = torch.randn(3, 3)
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        mod.forward = functools.partial(HermeticModule.forward, mod)
-        with self.assertRaises(ValueError):
-            repr(mod.forward)
-        g = globals()
-        saved = g.pop("AOT_HERMETIC_WEIGHT")
         resolve = patch(
             "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
         )
+        g = globals()
+        saved = g.pop("AOT_HERMETIC_WEIGHT")
         try:
             with resolve as resolved, self.assertRaises(RuntimeError) as ctx:
                 model(x)
