@@ -228,6 +228,7 @@ class profile:
         custom_trace_id_callback=None,
         post_processing_timeout_s: float | None = None,
         activity_filters: dict[ProfilerActivity, set[str]] | None = None,
+        _profiler_extensions: dict[str, str] | None = None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -291,6 +292,7 @@ class profile:
         self.custom_trace_id_callback = custom_trace_id_callback
         self.post_processing_timeout_s = post_processing_timeout_s
         self.activity_filters = activity_filters or {}
+        self._profiler_extensions = _profiler_extensions or {}
         self.trace_id = ""
         if not self.use_cpu:
             if not use_kineto:
@@ -418,6 +420,7 @@ class profile:
             self.config(create_trace_id=True),
             self.kineto_activities,
             activity_filter=self.activity_filters,
+            profiler_extensions=self._profiler_extensions,
         )
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
