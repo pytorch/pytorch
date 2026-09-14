@@ -5,6 +5,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/complex.h>
 
 // This header implements various unary operations using a MKL VML style
@@ -105,10 +106,36 @@ IMPLEMENT_VML(lgamma)
 static_assert(
     std::is_same_v<MKL_INT, int32_t> || std::is_same_v<MKL_INT, int64_t>,
     "MKL_INT is assumed to be int32_t or int64_t");
+
+// MKL VML resolves each function's (ISA, accuracy) kernel dispatch lazily on
+// its first call. If that first call runs concurrently on several intra-op
+// worker threads (these functions are called per-chunk from parallel_for), a
+// thread can transiently execute a mismatched kernel and silently return
+// low-precision results for its whole chunk (observed on oneMKL 2024.2: AVX2
+// EP kernel served despite VML_HA requested, on AVX512 hardware). A
+// serialized warm-up call resolves the dispatch before any concurrent use.
+// Reproduces on oneMKL 2024.2.0 through 2024.2.2; not reproducible on
+// >= 2025.0, so this can be dropped once the minimum supported oneMKL moves
+// past 2024.2.x. See https://github.com/pytorch/pytorch/issues/188792.
+#define IMPLEMENT_VML_MKL_WARMUP(mklop, type, mkltype)                  \
+  {                                                                     \
+    static c10::once_flag vml_dispatch_resolved;                        \
+    c10::call_once(vml_dispatch_resolved, []() {                        \
+      type warmup_in = static_cast<type>(0.5);                          \
+      type warmup_out = static_cast<type>(0);                           \
+      vm##mkltype##mklop(                                               \
+          1,                                                            \
+          &warmup_in,                                                   \
+          &warmup_out,                                                  \
+          VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE);                \
+    });                                                                 \
+  }
+
 #define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
   inline void v##op(type * out, const type * in, int64_t size) {        \
     auto constexpr max_mkl_ind = std::numeric_limits<MKL_INT>::max();   \
+    IMPLEMENT_VML_MKL_WARMUP(mklop, type, mkltype)                      \
     if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
       vm##mkltype##mklop(                                               \
           size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE); \
