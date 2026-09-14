@@ -21,10 +21,10 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_TRITON
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT") == "1" or DO_PERF_TEST
-SCALAR_ONLINE_SOFTMAX_CONFIG = {
+SCALAR_ACCUMULATOR_CONFIG = {
     "triton.persistent_reductions": False,
     "split_reductions": False,
-    "triton.scalar_online_softmax_accumulators": True,
+    "triton.scalar_accumulators": True,
 }
 requires_nvidia_cuda = unittest.skipUnless(
     GPU_TYPE == "cuda" and torch.version.hip is None,
@@ -537,12 +537,13 @@ class TestOnlineSoftmax(TestCase):
 
 
 @requires_nvidia_cuda
-@inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
+@inductor_config.patch(SCALAR_ACCUMULATOR_CONFIG)
 @instantiate_parametrized_tests
-class TestScalarOnlineSoftmax(TestCase):
-    """Per-row max/sum accumulators for large non-persistent online softmax."""
+class TestScalarAccumulators(TestCase):
+    """Per-row accumulators for large non-persistent inner reductions."""
 
     MARKER = "online_softmax_reduce_scalar_combine"
+    HINT = "AutotuneHint.SCALAR_ACCUMULATORS"
     COMBO_KERNEL_CONFIG = {
         "combo_kernels": True,
         "combo_kernel_per_subkernel_blocks": True,
@@ -551,16 +552,15 @@ class TestScalarOnlineSoftmax(TestCase):
         "combo_kernel_peak_memory_pct_threshold": None,
     }
 
-    def check_codegen(self, fn, *args, uses_scalar=True, rtol=1e-3, atol=1e-3):
+    def check_codegen(
+        self, fn, *args, uses_scalar=True, rtol=1e-3, atol=1e-3, marker=MARKER
+    ):
         act, (code,) = run_and_get_code(torch.compile(fn), *args)
-        self.assertEqual(fn(*args), act, rtol=rtol, atol=atol)
-        if uses_scalar:
-            self.assertIn(self.MARKER, code)
-        else:
-            self.assertNotIn(self.MARKER, code)
+        self.assertEqual(fn(*args), act, rtol=rtol, atol=atol, equal_nan=True)
+        (self.assertIn if uses_scalar else self.assertNotIn)(marker, code)
         return act, code
 
-    @inductor_config.patch("triton.scalar_online_softmax_accumulators", False)
+    @inductor_config.patch("triton.scalar_accumulators", False)
     def test_disabled(self):
         x = torch.randn(1024, 8192, device=GPU_TYPE)
         _, code = self.check_codegen(_prepare_softmax, x, -1, uses_scalar=False)
@@ -576,7 +576,7 @@ class TestScalarOnlineSoftmax(TestCase):
         _, code = self.check_codegen(
             _prepare_softmax, storage[:, :50265], -1, rtol=1e-2, atol=1e-2
         )
-        self.assertIn("AutotuneHint.SCALAR_ONLINE_SOFTMAX", code)
+        self.assertIn(self.HINT, code)
 
     @parametrize("reduction_numel,uses_scalar", [(4096, False), (4097, True)])
     def test_reduction_size_threshold(self, reduction_numel, uses_scalar):
@@ -658,14 +658,81 @@ class TestScalarOnlineSoftmax(TestCase):
         self.assertNotIn(self.MARKER, code)
         self.assertIn("online_softmax_combine(", code)
 
-    def test_skips_extra_reductions(self):
+    def test_extra_reduction_stays_scalar(self):
         def f(x):
             xmax, xsum = _prepare_softmax(x, -1)
             return xmax, xsum, (x - xmax).sum(dim=-1, keepdim=True)
 
         x = torch.randn(128, 8192, device=GPU_TYPE)
-        _, code = self.check_codegen(f, x, uses_scalar=False)
-        self.assertIn("online_softmax_combine(", code)
+        _, code = self.check_codegen(f, x)
+        self.assertNotIn("online_softmax_combine(", code)
+        self.assertIn("tl.full([XBLOCK, 1], ", code)
+
+    def test_plain_reductions_stay_vector(self):
+        def f(x):
+            return x.sum(-1), x.amax(-1), (x * x).amin(-1)
+
+        x = torch.randn(32, 16385, device=GPU_TYPE)
+        _, code = self.check_codegen(f, x, uses_scalar=False, marker=self.HINT)
+        self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
+
+    def test_arg_reductions(self):
+        def f(x):
+            xmax, xsum = _prepare_softmax(x, -1)
+            values, indices = torch.min(x, -1)
+            return xmax, xsum, x.argmax(-1), values, indices, x.sum(-1)
+
+        x = torch.randn(64, 8193, device=GPU_TYPE)
+        x[3, 4097] = float("nan")
+        x[5].fill_(2.0)
+        x[7, 8192] = x[7].amax() + 1
+        x[8].fill_(float("inf"))
+        x[9, 8192] = float("nan")
+        _, code = self.check_codegen(f, x, marker=self.HINT)
+        self.assertIn("_block = triton_helpers.max_with_first_index(", code)
+        self.assertIn("_block = triton_helpers.min_with_index(", code)
+        self.assertIn("tl.full([XBLOCK, 1], ", code)
+
+    def test_arg_reductions_alone_stay_vector(self):
+        x = torch.randn(64, 8193, device=GPU_TYPE)
+        f = lambda t: (t.argmax(-1), t.sum(-1))  # noqa: E731
+        _, code = self.check_codegen(f, x, uses_scalar=False, marker=self.HINT)
+        self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
+
+    def test_scalar_loop_ops(self):
+        def f(x):
+            xmax, xsum = _prepare_softmax(x, -1)
+            y = (1 + x / 4096).double()
+            return xmax, xsum, x.amax(-1), x.amin(-1), y.prod(-1)
+
+        x = torch.randn(16, 8200, device=GPU_TYPE)
+        _, code = self.check_codegen(f, x, marker=self.HINT)
+        self.assertEqual(code.count("tl.full([XBLOCK, 1], "), 3)
+
+    def test_narrow_int_sum_beside_softmax(self):
+        def f(x):
+            xmax, xsum = _prepare_softmax(x.float(), -1)
+            return xmax, xsum, x.sum(-1, dtype=torch.uint8), x.amax(-1)
+
+        x = torch.randint(0, 256, (16, 8200), device=GPU_TYPE, dtype=torch.uint8)
+        self.check_codegen(f, x, marker=self.HINT)
+
+    @parametrize("dtype", [torch.int32, torch.int64, torch.bfloat16])
+    def test_reductions_beside_softmax(self, dtype):
+        def f(x):
+            xmax, xsum = _prepare_softmax(x.float(), -1)
+            return xmax, xsum, torch.max(x, -1).values, x.argmin(-1), x.sum(-1)
+
+        x = torch.randint(-50, 50, (16, 8200), device=GPU_TYPE).to(dtype)
+        if dtype.is_floating_point:
+            x[2, 100] = float("nan")
+        _, code = self.check_codegen(f, x, marker=self.HINT)
+        self.assertIn("_block = triton_helpers.max_with_index(", code)
+
+    def test_welford_stays_vector(self):
+        x = torch.randn(64, 8193, device=GPU_TYPE)
+        f = lambda t: (*_prepare_softmax(t, -1), *torch.var_mean(t, -1))  # noqa: E731
+        self.check_codegen(f, x, uses_scalar=False, marker=self.HINT)
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
     def test_nan_and_inf_rows(self, dtype):
@@ -711,8 +778,19 @@ class TestScalarOnlineSoftmax(TestCase):
         x[0, 1::2] = -0.0
         x[1, ::2] = -0.0
         ref_max = torch.compile(lambda t: t.amax(dim=-1, keepdim=True))(x)
-        act, _ = self.check_codegen(_prepare_softmax, x, -1, uses_scalar=False)
+        f = lambda t: (*_prepare_softmax(t, -1), t.amax(-1))  # noqa: E731
+        act, code = self.check_codegen(f, x, uses_scalar=False)
         self.assertEqual(ref_max.view(torch.int32), act[0].view(torch.int32))
+        self.assertNotIn(self.HINT, code)
+
+    @parametrize("n", [33, 8193])
+    def test_max_value_signed_zero_tie(self, n):
+        x = torch.zeros(2, n, device=GPU_TYPE)
+        x[:, 0] = -0.0
+        f = lambda t: (*_prepare_softmax(t, -1), *torch.max(t, -1))  # noqa: E731
+        _, _, values, indices = torch.compile(f)(x)
+        self.assertTrue(torch.signbit(values).all())
+        self.assertEqual(indices, torch.zeros_like(indices))
 
     @inductor_config.patch({"triton.max_tiles": 3, "triton.prefer_nd_tiling": True})
     def test_3d_tiling(self):
