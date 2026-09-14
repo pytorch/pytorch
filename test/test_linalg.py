@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     TEST_WITH_SLOW,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 
@@ -195,6 +196,8 @@ class TestLinalgSharedHelpers(TestCase):
         self.assertEqual(X, out)
 
 class TestLinalg(TestLinalgSharedHelpers):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
@@ -846,6 +849,8 @@ class TestLinalg(TestLinalgSharedHelpers):
         check_correctness(torch.dot, torch.bfloat16, a, b)
         check_correctness(torch.dot, torch.half, a, b)
 class TestLinalgDevice(TestLinalg):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(torch.float, torch.cfloat)
     @precisionOverride({torch.float: 1e-06, torch.cfloat: 1e-06})
     @tf32_on_and_off(5e-3)
@@ -8293,6 +8298,7 @@ class TestLinalgDevice(TestLinalg):
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 class TestLinalgCpu(TestLinalg):
+    hw_classification = HardwareClassification.CPU
 
 
 
@@ -8826,6 +8832,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
 
 class TestLinalgCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
     def setUp(self):
