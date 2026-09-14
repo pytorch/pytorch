@@ -197,11 +197,11 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.14
     CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
+  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3.11)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
     else
-      ANACONDA_PYTHON_VERSION=3.12
+      ANACONDA_PYTHON_VERSION=3.11
     fi
     GCC_VERSION=13
     ROCM_VERSION=10.0
@@ -213,7 +213,7 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
-  pytorch-linux-noble-rocm-preview-py3)
+  pytorch-linux-noble-rocm-preview-py3.12)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
     ROCM_VERSION=10.1.0a20260903
