@@ -934,12 +934,12 @@ ldl_diagonal_panel_fused_kernel(
     // We follow p192 of
     // Golub, G. H., & Van Loan, C. F. (2013).
     // Matrix computations (4th ed.). Johns Hopkins University Press. {
-    const auto diag_abs = ldl::abs(dLD[LinOff(curr_step, curr_step, lda)]);
     // off-diagonal max. Argmax index is global!
     const auto [lambda, ilambda] = ldl::find_pivot_row<scalar_t, BS>(
       dLD, lda, n, curr_step, curr_step,
       /*exclude_idx=*/curr_step
     );
+    const auto diag_abs = ldl::abs(dLD[LinOff(curr_step, curr_step, lda)]);
 
     if (diag_abs >= ALPHA * lambda) {
       // No permutation, 1x1 pivot
@@ -1041,55 +1041,55 @@ ldl_diagonal_panel_fused_kernel(
     // The remaining part of B is handled by a GEMM. {
     auto curr_nb = nb - (curr_step + pivot_rank - panel_start);
     auto curr_dim = n - (curr_step + pivot_rank);
-    //if (curr_nb > 0 && curr_dim > 0) {
-    //  auto* L21 = dLD + LinOff(curr_step + pivot_rank, curr_step, lda);
-    //  auto* U12 = dLD + LinOff(curr_step, curr_step + pivot_rank, lda);
-    //  auto* B   = dLD + LinOff(curr_step + pivot_rank, curr_step + pivot_rank, lda);
+    if (curr_nb > 0 && curr_dim > 0) {
+      auto* L21 = dLD + LinOff(curr_step + pivot_rank, curr_step, lda);
+      auto* U12 = dLD + LinOff(curr_step, curr_step + pivot_rank, lda);
+      auto* B   = dLD + LinOff(curr_step + pivot_rank, curr_step + pivot_rank, lda);
 
-    //  auto numel = curr_nb * curr_dim;
+      auto numel = curr_nb * curr_dim;
 
-    //  if (pivot_rank = 1) {
-    //    // Update B[:, :curr_nb]
-    //    for (int linidx = tid; linidx < numel; linidx += BS) {
-    //      auto r = linidx % curr_dim;
-    //      auto c = linidx / curr_dim;
-    //      B[LinOff(r, c, lda)] -= L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)];
-    //    }
-    //    // Update B[:curr_nb, curr_nb:]
-    //    curr_dim -= curr_nb;
-    //    if (curr_dim > 0) {
-    //      B   += LinOff(0, curr_nb, lda);
-    //      U12 += LinOff(0, curr_nb, lda);
-    //      numel = curr_dim * curr_nb;
-    //      for (int linidx = tid; linidx < numel; linidx += BS) {
-    //        auto r = linidx % curr_nb;
-    //        auto c = linidx / curr_nb;
-    //        B[LinOff(r, c, lda)] -= L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)];
-    //      }
-    //    }
-    //  } else { // pivot_rank == 2
-    //    // Update B[:, :curr_nb]
-    //    for (int linidx = tid; linidx < numel; linidx += BS) {
-    //      auto r = linidx % curr_dim;
-    //      auto c = linidx / curr_dim;
-    //      B[LinOff(r, c, lda)] -= (L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)]
-    //                             + L21[LinOff(r, 1, lda)] * U12[LinOff(1, c, lda)]);
-    //    }
-    //    // Update B[:curr_nb, curr_nb:]
-    //    curr_dim -= curr_nb;
-    //    if (curr_dim > 0) {
-    //      B   += LinOff(0, curr_nb, lda);
-    //      U12 += LinOff(0, curr_nb, lda);
-    //      numel = curr_dim * curr_nb;
-    //      for (int linidx = tid; linidx < numel; linidx += BS) {
-    //        auto r = linidx % curr_nb;
-    //        auto c = linidx / curr_nb;
-    //        B[LinOff(r, c, lda)] -= (L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)]
-    //                               + L21[LinOff(r, 1, lda)] * U12[LinOff(1, c, lda)]);
-    //      }
-    //    }
-    //  }
-    //}
+      if (pivot_rank = 1) {
+        // Update B[:, :curr_nb]
+        for (int linidx = tid; linidx < numel; linidx += BS) {
+          auto r = linidx % curr_dim;
+          auto c = linidx / curr_dim;
+          B[LinOff(r, c, lda)] -= L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)];
+        }
+        // Update B[:curr_nb, curr_nb:]
+        curr_dim -= curr_nb;
+        if (curr_dim > 0) {
+          B   += LinOff(0, curr_nb, lda);
+          U12 += LinOff(0, curr_nb, lda);
+          numel = curr_dim * curr_nb;
+          for (int linidx = tid; linidx < numel; linidx += BS) {
+            auto r = linidx % curr_nb;
+            auto c = linidx / curr_nb;
+            B[LinOff(r, c, lda)] -= L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)];
+          }
+        }
+      } else { // pivot_rank == 2
+        // Update B[:, :curr_nb]
+        for (int linidx = tid; linidx < numel; linidx += BS) {
+          auto r = linidx % curr_dim;
+          auto c = linidx / curr_dim;
+          B[LinOff(r, c, lda)] -= (L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)]
+                                 + L21[LinOff(r, 1, lda)] * U12[LinOff(1, c, lda)]);
+        }
+        // Update B[:curr_nb, curr_nb:]
+        curr_dim -= curr_nb;
+        if (curr_dim > 0) {
+          B   += LinOff(0, curr_nb, lda);
+          U12 += LinOff(0, curr_nb, lda);
+          numel = curr_dim * curr_nb;
+          for (int linidx = tid; linidx < numel; linidx += BS) {
+            auto r = linidx % curr_nb;
+            auto c = linidx / curr_nb;
+            B[LinOff(r, c, lda)] -= (L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)]
+                                   + L21[LinOff(r, 1, lda)] * U12[LinOff(1, c, lda)]);
+          }
+        }
+      }
+    }
     // }
 
     // Finish iteration
