@@ -16182,8 +16182,6 @@ def transform_opinfo_sample_to_cpu(sample, dtype=None):
         rc = x.detach()
         if dtype:
             rc = rc.to(dtype=dtype)
-        elif x.dtype == torch.float8_e4m3fn:
-            rc = rc.float()
         rc = rc.cpu() if not conjugated else x.conj().cpu().conj()
         return rc.requires_grad_(x.requires_grad)
 
@@ -16399,17 +16397,23 @@ class TestConsistency(TestCaseMPS):
                 # TODO: Handle list inputs later
                 if not isinstance(mps_out, torch.Tensor):
                     raise
-                if mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
+                if mps_sample.input.dtype in [torch.float16, torch.bfloat16, torch.float8_e4m3fn]:
                     dtype = torch.float32
                 elif mps_sample.input.dtype == torch.bool:
                     dtype = torch.uint8
 
                 # Often CPU ops are not implemented for low precision dtypes
                 # In that case, upcast to higher precision and try again
-                cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                if mps_sample.input.dtype == torch.float8_e4m3fn:
+                    # Promote unsupported FP8 inputs to float32; preserve integer indices.
+                    cpu_sample = cpu_sample.transform(
+                        lambda x: x.float() if isinstance(x, torch.Tensor) and x.dtype == torch.float8_e4m3fn else x
+                    )
+                else:
+                    cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
                 cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
 
-        if dtype is not None or (isinstance(mps_out, torch.Tensor) and mps_out.dtype == torch.float8_e4m3fn):
+        if dtype is not None:
             cpu_out = cpu_out.to(dtype=mps_out.dtype)
 
         return mps_out, cpu_out, cpu_sample
