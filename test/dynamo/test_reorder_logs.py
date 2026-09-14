@@ -16,6 +16,11 @@ from torch.testing._internal.common_utils import (
 )
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 logger = logging.getLogger(__name__)
 logger_test = logging.getLogger("test")
 
@@ -216,14 +221,14 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
             x3 = x2 + x2
             return (x1, x3)
 
-        x = torch.ones(3, 3)
+        x = torch.ones(3, 3, device=device_type)
         opt_f = torch.compile(backend="eager", fullgraph=True)(f)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             opt_out = opt_f(x)
             printed_output = mock_stdout.getvalue().strip()
             orig_out = f(x)
 
-        self.assertEqual(printed_output, f"moo\n{torch.ones(3, 3) * 2}\n1 2 3")
+        self.assertEqual(printed_output, f"moo\n{torch.ones(3, 3, device=device_type) * 2}\n1 2 3")
         self.assertTrue(same(orig_out, opt_out))
 
     def test_reorder_logger_method(self):
@@ -304,14 +309,14 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
             print(1, 2, 3)
             return x3
 
-        x = torch.ones(3, 3)
+        x = torch.ones(3, 3, device=device_type)
         opt_f = torch.compile(backend="eager")(f)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             opt_out = opt_f(x)
             printed_output = mock_stdout.getvalue().strip()
             orig_out = f(x)
 
-        self.assertEqual(printed_output, f"res: {torch.ones(3, 3) * 2}\n1 2 3")
+        self.assertEqual(printed_output, f"res: {torch.ones(3, 3, device=device_type) * 2}\n1 2 3")
         self.assertTrue(same(orig_out, opt_out))
 
     def test_reorder_custom_log_fn(self):
@@ -327,7 +332,7 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
             custom_log(f"{x1}")
             return x + x
 
-        x = torch.ones(3, 3)
+        x = torch.ones(3, 3, device=device_type)
         counters.clear()
         with torch._dynamo.config.patch(reorderable_logging_functions={custom_log}):
             opt_f = torch.compile(backend="eager")(f)
@@ -335,7 +340,7 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(sum(counters["graph_break"].values()), 1)
         self.assertEqual(custom_logs[0], "moo")
-        self.assertEqual(custom_logs[1], f"{torch.ones(3, 3) * 2}")
+        self.assertEqual(custom_logs[1], f"{torch.ones(3, 3, device=device_type) * 2}")
 
     @torch._dynamo.config.patch(reorderable_logging_functions={print})
     def test_constant_mutation(self):
@@ -349,7 +354,7 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
             res.sum().item()  # graph break
             return res
 
-        inputs = (torch.tensor([1]),)
+        inputs = (torch.tensor([1], device=device_type),)
         counters.clear()
         opt_f = torch.compile(backend="eager")(f)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
