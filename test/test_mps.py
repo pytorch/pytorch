@@ -9852,6 +9852,27 @@ class TestMPS(TestCaseMPS):
         b = torch.empty(n, device="mps")
         del b
 
+    def test_mps_namespace_key_validation(self):
+        """The MPS parser must police only its own `mps_` namespace.
+        PYTORCH_ALLOC_CONF is one global string that every backend's parser
+        reads, so a key belonging to another accelerator must not make MPS
+        throw: registering this hook previously turned
+        `PYTORCH_ALLOC_CONF=backend:native` into a hard failure on any MPS
+        allocation. A typo inside our own namespace must still be rejected."""
+        self._reset_large_alloc_threshold()
+        # Either layer may report it: the shared AcceleratorAllocatorConfig
+        # validates first once a device hook is registered, and the MPS parser
+        # catches it on the PYTORCH_ALLOC_CONF path.
+        with self.assertRaisesRegex(
+            (RuntimeError, ValueError), "Unrecognized key 'mps_larg_alloc_threshold_mb'"
+        ):
+            torch._C._accelerator_setAllocatorSettings("mps_larg_alloc_threshold_mb:64")
+        self._reset_large_alloc_threshold()
+        # Our own key still parses and applies.
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:64")
+        self.assertEqual(torch.empty(1, device="mps").numel(), 1)
+        self._reset_large_alloc_threshold()
+
     def test_heap_mode_restored(self):
         """Setting the threshold to 0 should revert to default 1 GB heap behaviour."""
         self._reset_large_alloc_threshold()

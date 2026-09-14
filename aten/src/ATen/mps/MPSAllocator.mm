@@ -69,9 +69,15 @@ class MPSAllocatorConfig {
         tokenizer.checkToken(++i, ":");
         m_large_alloc_threshold_bytes.store(tokenizer.toSizeT(++i) * 1024ull * 1024ull);
       } else {
-        const auto& shared_keys = c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
-        TORCH_CHECK(
-            shared_keys.find(key) != shared_keys.end(), "Unrecognized key '", key, "' in MPS allocator config.");
+        // PYTORCH_ALLOC_CONF is one global string every backend's parser reads,
+        // so a key belonging to another accelerator (e.g. CUDA's `backend`) is
+        // not an error here: registering this hook must not make a setting that
+        // worked before start throwing on a Mac. Only police our own namespace,
+        // so a typo like `mps_larg_alloc_threshold_mb` is still caught.
+        TORCH_CHECK(key.compare(0, 4, "mps_") != 0,
+                    "Unrecognized key '",
+                    key,
+                    "' in MPS allocator config. Known MPS keys: mps_large_alloc_threshold_mb.");
         i = tokenizer.skipKey(i);
       }
       if (i + 1 < tokenizer.size()) {
