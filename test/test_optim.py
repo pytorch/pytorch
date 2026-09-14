@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -100,6 +101,55 @@ def _bf16_state_init_hook(optimizer, args, kwargs):
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
+    @skipIfTorchDynamo("Sparse optimizers not supported, see #117184")
+    @skipMPS
+    @dtypes(torch.complex64, torch.complex128)
+    @parametrize("sparse_dim", [1, 2])
+    @parametrize("maximize", [False, True])
+    def test_sparse_adam_complex_masked_updates(
+        self, device, dtype, sparse_dim, maximize
+    ):
+        param = torch.randn(4, 3, device=device, dtype=dtype).t().requires_grad_()
+        real = param.real.detach().clone().requires_grad_()
+        imag = param.imag.detach().clone().requires_grad_()
+        optimizer = torch.optim.SparseAdam([param], maximize=maximize)
+        reference = torch.optim.SparseAdam([real, imag], maximize=maximize)
+        indices = torch.tensor(
+            [[0, 2]] if sparse_dim == 1 else [[0, 1, 2], [0, 2, 1]], device=device
+        )
+        shape = (indices.size(1),) + tuple(param.shape[sparse_dim:])
+
+        for step in range(3):
+            values = torch.randn(shape, device=device, dtype=dtype)
+            values[0] = 0
+            # Duplicate indices exercise coalescing; the last update has an empty gradient.
+            active_indices = torch.cat([indices, indices], dim=1)
+            active_values = torch.cat([values / 2, values / 2])
+            if step == 2:
+                active_indices = active_indices[:, :0]
+                active_values = active_values[:0]
+            param.grad = torch.sparse_coo_tensor(
+                active_indices, active_values, param.shape, device=device
+            )
+            real.grad = torch.sparse_coo_tensor(
+                active_indices, active_values.real, real.shape, device=device
+            )
+            imag.grad = torch.sparse_coo_tensor(
+                active_indices, active_values.imag, imag.shape, device=device
+            )
+            optimizer.step()
+            reference.step()
+
+            self.assertEqual(param.real, real)
+            self.assertEqual(param.imag, imag)
+            for key in ("exp_avg", "exp_avg_sq"):
+                self.assertEqual(
+                    optimizer.state[param][key].real, reference.state[real][key]
+                )
+                self.assertEqual(
+                    optimizer.state[param][key].imag, reference.state[imag][key]
+                )
+
     """
     This test class validates the core optimizers and is structured as the correctness of:
     - The update algorithms (forloop implementation)
@@ -613,7 +663,11 @@ class TestOptimRenewed(TestCase):
             def real_closure():
                 for param in real_params:
                     grad = torch.randn_like(param)
-                    param.grad = grad
+                    param.grad = (
+                        grad.to_sparse()
+                        if optim_info.only_supports_sparse_grads
+                        else grad
+                    )
                     real_steps.append(param.detach().clone())
                     grads_losses.append(grad.clone())
                 loss = torch.randn(1)
@@ -628,7 +682,11 @@ class TestOptimRenewed(TestCase):
                     else:
                         grad = grads_losses.pop(0)
                         complex_steps.append(param.detach().clone())
-                    param.grad = grad
+                    param.grad = (
+                        grad.to_sparse()
+                        if optim_info.only_supports_sparse_grads
+                        else grad
+                    )
                 return grads_losses.pop(0)
 
             for _ in range(3):
@@ -701,6 +759,8 @@ class TestOptimRenewed(TestCase):
                 a1_imags.add(a1.imag)
                 a1_grad_reals.add(a1.grad.real)
                 a1_grad_imags.add(a1.grad.imag)
+                if optim_info.only_supports_sparse_grads:
+                    a1.grad = a1.grad.to_sparse()
 
                 losses.add(loss)
 
@@ -716,6 +776,9 @@ class TestOptimRenewed(TestCase):
                 loss.backward()
                 a1_grad_reals.pop_check_set(a1_real.grad, self)
                 a1_grad_imags.pop_check_set(a1_imag.grad, self)
+                if optim_info.only_supports_sparse_grads:
+                    a1_real.grad = a1_real.grad.to_sparse()
+                    a1_imag.grad = a1_imag.grad.to_sparse()
                 return loss
 
             for _ in range(3):
