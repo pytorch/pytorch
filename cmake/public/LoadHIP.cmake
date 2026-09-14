@@ -363,9 +363,11 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
-    # hipFile is Linux-only and ships with ROCm 7.14 and later, where it is required.
+    # hipFile and amd_smi are Linux-only dependencies and ship with
+    # ROCm 7.14 and later, where they are required.
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
       find_package_and_print_version(hipfile REQUIRED)
+      find_package_and_print_version(amd_smi REQUIRED)
     endif()
   endif()
 
@@ -374,11 +376,6 @@ if(PYTORCH_FOUND_HIP)
   # ROCm 8.0 and later requires libhipcxx! This should be marked as
   # 'REQUIRED' once minimal ROCm version is bumped to 8.0 or later.
   find_package_and_print_version(libhipcxx)
-
-  # amd_smi is linked directly on ROCm >= 7.14; see intra_node_comm.cpp.
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
-    find_package_and_print_version(amd_smi REQUIRED)
-  endif()
 
   list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
 

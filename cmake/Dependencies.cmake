@@ -1149,8 +1149,8 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::host MIOpen hiprtc::hiprtc)
 
-    if(TARGET amd_smi)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS amd_smi)
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
+      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS amd_smi)
     endif()
 
     # Math libraries
