@@ -59,8 +59,12 @@ class PaddingPlan:
 
     @property
     def name(self) -> str:
-        if self.pad_m:
+        if self.pad_m and self.pad_k and self.pad_n:
             return "legacy-all"
+        if self.pad_m and self.pad_n:
+            return "m+n"
+        if self.pad_m:
+            return "m"
         if self.pad_k and self.pad_n:
             return "k+n"
         if self.pad_k:
@@ -71,15 +75,25 @@ class PaddingPlan:
 
 
 NO_PADDING = PaddingPlan()
+M_PADDING = PaddingPlan(pad_m=True)
 K_PADDING = PaddingPlan(pad_k=True)
 N_PADDING = PaddingPlan(pad_n=True)
+M_N_PADDING = PaddingPlan(pad_m=True, pad_n=True)
 K_N_PADDING = PaddingPlan(pad_k=True, pad_n=True)
 LEGACY_ALL_PADDING = PaddingPlan(pad_m=True, pad_k=True, pad_n=True)
 FORCE_PADDING = LEGACY_ALL_PADDING
 
 _PADDING_PLANS_BY_NAME = {
     plan.name: plan
-    for plan in (NO_PADDING, K_PADDING, N_PADDING, K_N_PADDING, LEGACY_ALL_PADDING)
+    for plan in (
+        NO_PADDING,
+        M_PADDING,
+        K_PADDING,
+        N_PADDING,
+        M_N_PADDING,
+        K_N_PADDING,
+        LEGACY_ALL_PADDING,
+    )
 }
 
 # Replacement graphs are retraced immediately after their extra_check succeeds.
@@ -128,7 +142,7 @@ def _padding_plan_result_decoder_factory(
         del args, kwargs
 
         def decode(value: object) -> PaddingPlan:
-            # Unknown values and pre-v3 boolean results fail closed.
+            # Unknown values and pre-v4 results fail closed.
             if not isinstance(value, str):
                 return NO_PADDING
             return _PADDING_PLANS_BY_NAME.get(value, NO_PADDING)
@@ -297,12 +311,43 @@ def get_padding_lengths(
     )
 
 
+def _m_padding_repairs_mat1_stride(
+    mat1: Tensor,
+    *,
+    m_pad: int,
+    k_pad: int,
+) -> bool:
+    """Whether M padding is the only plan that fixes A's leading stride."""
+    from torch._prims_common import is_contiguous_or_false
+
+    if not m_pad or k_pad or is_contiguous_or_false(mat1):
+        return False
+
+    row_stride, col_stride = mat1.stride()[-2:]
+    if statically_known_true(col_stride == 1):
+        leading_stride = row_stride
+    elif statically_known_true(row_stride == 1):
+        leading_stride = col_stride
+    else:
+        return False
+
+    k = mat1.shape[-1]
+    if not isinstance(leading_stride, int) or not isinstance(k, int):
+        return False
+
+    element_size = mat1.element_size()
+    return (
+        leading_stride * element_size % 16 != 0
+        and k * element_size % 16 == 0
+    )
+
+
 def get_normal_padding_plans(
     mat1: Tensor,
     mat2: Tensor,
     op: torch._ops.OpOverloadPacket,
 ) -> tuple[PaddingPlan, ...]:
-    """Return non-M subsets plus the one legacy all-required-dim plan."""
+    """Return bounded non-M subsets plus one guarded M layout-repair plan."""
     m_pad, k_pad, n_pad = get_padding_lengths(
         mat1, mat2, op, LEGACY_ALL_PADDING
     )
@@ -313,10 +358,12 @@ def get_normal_padding_plans(
         plans.append(N_PADDING)
     if k_pad and n_pad:
         plans.append(K_N_PADDING)
-    if m_pad and (k_pad or n_pad):
-        # Keep the old combined candidate without introducing M-only subsets.
-        # Appending it makes exact ties prefer the less invasive non-M plan.
-        plans.append(LEGACY_ALL_PADDING)
+    if _m_padding_repairs_mat1_stride(mat1, m_pad=m_pad, k_pad=k_pad):
+        # M padding materializes A contiguously.  Offer it only when it repairs
+        # an otherwise unaligned leading stride and K padding is not already
+        # performing the same materialization.
+        plans.append(M_N_PADDING if n_pad else M_PADDING)
+    assert len(plans) <= 4
     return tuple(plans)
 
 
@@ -475,8 +522,10 @@ def get_cached_padding_plan(key: str) -> PaddingPlan | None:
         return None
     return {
         "none": NO_PADDING,
+        "m": M_PADDING,
         "k": K_PADDING,
         "n": N_PADDING,
+        "m+n": M_N_PADDING,
         "k+n": K_N_PADDING,
         "legacy-all": LEGACY_ALL_PADDING,
     }.get(value)
@@ -546,7 +595,7 @@ def should_pad_bench_key(
     )
 
     if not is_base_time_key:
-        key = ("padding_plan_v3", *key)
+        key = ("padding_plan_v4", *key)
 
     key = str(key)
     if is_base_time_key:
@@ -827,9 +876,12 @@ def _select_padding_plan_uncached(
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
             and should_pad_mm_bf16(mat1.dtype, m_concrete, n_concrete, k_concrete)
         ):
+            m_pad, k_pad, n_pad = get_padding_lengths(
+                mat1, mat2, op, LEGACY_ALL_PADDING
+            )
             return (
                 LEGACY_ALL_PADDING
-                if LEGACY_ALL_PADDING in plans
+                if m_pad and (k_pad or n_pad)
                 else get_full_non_m_padding_plan(plans)
             )
 

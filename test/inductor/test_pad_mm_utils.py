@@ -17,6 +17,8 @@ from torch._inductor.fx_passes.pad_mm import (
     get_padding_lengths,
     K_N_PADDING,
     K_PADDING,
+    M_N_PADDING,
+    M_PADDING,
     mm_replace,
     NO_PADDING,
     N_PADDING,
@@ -53,14 +55,13 @@ class PadMMUtilsTest(TestCase):
                 K_N_PADDING,
             ),
             (True, False, False): (NO_PADDING,),
-            (True, False, True): (NO_PADDING, N_PADDING, FORCE_PADDING),
-            (True, True, False): (NO_PADDING, K_PADDING, FORCE_PADDING),
+            (True, False, True): (NO_PADDING, N_PADDING),
+            (True, True, False): (NO_PADDING, K_PADDING),
             (True, True, True): (
                 NO_PADDING,
                 K_PADDING,
                 N_PADDING,
                 K_N_PADDING,
-                FORCE_PADDING,
             ),
         }
         for mask, plans in expected.items():
@@ -71,11 +72,64 @@ class PadMMUtilsTest(TestCase):
             mat2 = torch.randn(k, n)
             actual = get_normal_padding_plans(mat1, mat2, torch.ops.aten.mm)
             self.assertEqual(actual, plans, msg=f"mask={mask}")
-            self.assertLessEqual(len(actual), 5)
-            self.assertEqual(
-                [plan for plan in actual if plan.pad_m],
-                [FORCE_PADDING] if mask[0] and (mask[1] or mask[2]) else [],
-            )
+            self.assertLessEqual(len(actual), 4)
+            self.assertFalse(any(plan.pad_m for plan in actual))
+
+    def test_m_plan_requires_stride_repair_without_k_padding(self):
+        dtype = torch.bfloat16
+        mat2_n_tail = torch.empty(4096, 1157, dtype=dtype)
+
+        # Production layout: M padding materializes an A whose column-major
+        # leading stride is not 16-byte aligned.
+        transposed = torch.empty(4096, 1157, dtype=dtype).t()
+        self.assertEqual(
+            get_normal_padding_plans(
+                transposed, mat2_n_tail, torch.ops.aten.mm
+            ),
+            (NO_PADDING, N_PADDING, M_N_PADDING),
+        )
+
+        # Contiguous A does not need a layout-repair candidate.
+        self.assertEqual(
+            get_normal_padding_plans(
+                torch.empty(1157, 4096, dtype=dtype),
+                mat2_n_tail,
+                torch.ops.aten.mm,
+            ),
+            (NO_PADDING, N_PADDING),
+        )
+
+        # K padding already materializes A, so adding M would duplicate that
+        # layout repair and grow the family beyond four choices.
+        k_tail_a = torch.empty(4097, 1157, dtype=dtype).t()
+        self.assertEqual(
+            get_normal_padding_plans(
+                k_tail_a,
+                torch.empty(4097, 1157, dtype=dtype),
+                torch.ops.aten.mm,
+            ),
+            (NO_PADDING, K_PADDING, N_PADDING, K_N_PADDING),
+        )
+
+        # The physical column-major leading stride is already aligned.
+        aligned_storage = torch.empty(4096, 1160, dtype=dtype)
+        aligned_leading_stride = aligned_storage[:, :1157].t()
+        self.assertEqual(aligned_leading_stride.stride(), (1, 1160))
+        self.assertEqual(
+            get_normal_padding_plans(
+                aligned_leading_stride, mat2_n_tail, torch.ops.aten.mm
+            ),
+            (NO_PADDING, N_PADDING),
+        )
+
+        # The same matrix-layout predicate applies to the final two BMM dims.
+        bmm_a = torch.empty(2, 128, 290, dtype=dtype).transpose(1, 2)
+        bmm_b = torch.empty(2, 128, 128, dtype=dtype)
+        self.assertEqual(bmm_a.stride(), (37120, 1, 290))
+        self.assertEqual(
+            get_normal_padding_plans(bmm_a, bmm_b, torch.ops.aten.bmm),
+            (NO_PADDING, M_PADDING),
+        )
 
     def test_dimension_specific_plan_correctness(self):
         cases = (
@@ -88,7 +142,14 @@ class PadMMUtilsTest(TestCase):
         )
         for op, mat1, mat2 in cases:
             expected = op(mat1, mat2)
-            for plan in (K_PADDING, N_PADDING, K_N_PADDING, FORCE_PADDING):
+            for plan in (
+                M_PADDING,
+                K_PADDING,
+                N_PADDING,
+                M_N_PADDING,
+                K_N_PADDING,
+                FORCE_PADDING,
+            ):
                 lengths = get_padding_lengths(mat1, mat2, op, plan)
                 actual = (
                     pad_bmm(mat1, mat2, *lengths)
@@ -101,7 +162,14 @@ class PadMMUtilsTest(TestCase):
         mat1 = torch.randn(17, 33)
         mat2 = torch.randn(33, 65)
         expected = torch.addmm(bias, mat1, mat2)
-        for plan in (K_PADDING, N_PADDING, K_N_PADDING, FORCE_PADDING):
+        for plan in (
+            M_PADDING,
+            K_PADDING,
+            N_PADDING,
+            M_N_PADDING,
+            K_N_PADDING,
+            FORCE_PADDING,
+        ):
             lengths = get_padding_lengths(mat1, mat2, torch.ops.aten.addmm, plan)
             torch.testing.assert_close(
                 pad_addmm(bias, mat1, mat2, *lengths), expected
@@ -111,8 +179,10 @@ class PadMMUtilsTest(TestCase):
         mat1 = torch.randn(17, 33)
         mat2 = torch.randn(33, 65)
         for plan, expected_lengths in (
+            (M_PADDING, (3, 0, 0)),
             (K_PADDING, (0, 3, 0)),
             (N_PADDING, (0, 0, 3)),
+            (M_N_PADDING, (3, 0, 3)),
             (K_N_PADDING, (0, 3, 3)),
         ):
             token = _selected_padding_plan.set(plan)
@@ -173,7 +243,7 @@ class PadMMUtilsTest(TestCase):
         self.assertNotEqual(first_key, second_key)
         self.assertNotEqual(first_encoded, second_encoded)
 
-    def test_padding_cache_keys_include_device_identity_and_v3(self):
+    def test_padding_cache_keys_include_device_identity_and_v4(self):
         mat1 = torch.randn(16, 17)
         mat2 = torch.randn(17, 16)
         match = mock.MagicMock()
@@ -213,8 +283,8 @@ class PadMMUtilsTest(TestCase):
 
         self.assertNotEqual(first_key, second_key)
         self.assertNotEqual(first_encoded, second_encoded)
-        self.assertIn("padding_plan_v3", first_key)
-        self.assertEqual(first_encoded["padding_plan_version"], 3)
+        self.assertIn("padding_plan_v4", first_key)
+        self.assertEqual(first_encoded["padding_plan_version"], 4)
 
     @inductor_config.patch(force_shape_pad=True)
     def test_force_padding_bypasses_plan_benchmark(self):
@@ -331,7 +401,7 @@ class PadMMUtilsTest(TestCase):
                 torch.randn(32, 65),
                 (10.0, 9.0, 5.0),
             ),
-            FORCE_PADDING,
+            M_N_PADDING,
         )
         # The non-M N plan wins for the contiguous control.
         self.assertEqual(
@@ -343,17 +413,17 @@ class PadMMUtilsTest(TestCase):
             ),
             N_PADDING,
         )
-        # Exact ties prefer the earlier, less invasive non-M plan.
+        # Exact ties prefer the earlier, less invasive non-M plan over M+N.
         self.assertEqual(
             select(
                 torch.ops.aten.mm,
-                torch.randn(17, 32),
+                torch.randn(32, 17).t(),
                 torch.randn(32, 65),
                 (10.0, 5.0, 5.0),
             ),
             N_PADDING,
         )
-        # M-only is never benchmarked or selected in normal mode.
+        # M-only is not offered for an ordinary contiguous operand.
         self.assertEqual(
             select(
                 torch.ops.aten.mm,
@@ -367,8 +437,18 @@ class PadMMUtilsTest(TestCase):
     def test_padding_plan_result_codec(self):
         encode = _padding_plan_result_encoder_factory(lambda: NO_PADDING)()
         decode = _padding_plan_result_decoder_factory(lambda: NO_PADDING)()
-        for plan in (NO_PADDING, K_PADDING, N_PADDING, K_N_PADDING, FORCE_PADDING):
+        for plan in (
+            NO_PADDING,
+            M_PADDING,
+            K_PADDING,
+            N_PADDING,
+            M_N_PADDING,
+            K_N_PADDING,
+            FORCE_PADDING,
+        ):
             self.assertEqual(decode(encode(plan)), plan)
+        self.assertEqual(encode(M_PADDING), "m")
+        self.assertEqual(encode(M_N_PADDING), "m+n")
         self.assertEqual(encode(FORCE_PADDING), "legacy-all")
         self.assertEqual(decode(True), NO_PADDING)
         self.assertEqual(decode("unknown"), NO_PADDING)
@@ -438,11 +518,11 @@ class PadMMUtilsTest(TestCase):
         ):
             plan = _select_padding_plan_uncached(
                 mock.MagicMock(),
-                torch.randn(17, 32),
+                torch.randn(32, 17).t(),
                 torch.randn(32, 65),
                 torch.ops.aten.mm,
             )
-        self.assertEqual(plan, FORCE_PADDING)
+        self.assertEqual(plan, M_N_PADDING)
         autoheuristic.assert_not_called()
 
     @inductor_config.patch(deterministic=True)

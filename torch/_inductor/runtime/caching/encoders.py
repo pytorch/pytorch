@@ -100,7 +100,7 @@ def should_pad_params_encoder(
         mat1_exclude_padding_time=should_exclude_padding_time(match, "mat1"),
         mat2_exclude_padding_time=should_exclude_padding_time(match, "mat2"),
         fp32_precision=get_matmul_precision_for_cache(mat1),
-        padding_plan_version=3,
+        padding_plan_version=4,
         addmm_scalars=(
             (match.kwargs.get("beta", 1.0), match.kwargs.get("alpha", 1.0))
             if op is torch.ops.aten.addmm

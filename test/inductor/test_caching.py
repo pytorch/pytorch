@@ -2435,13 +2435,23 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
             FORCE_PADDING,
             K_N_PADDING,
             K_PADDING,
+            M_N_PADDING,
+            M_PADDING,
             NO_PADDING,
             N_PADDING,
             PaddingPlan,
         )
         from torch._inductor.runtime.caching import encoders
 
-        plans = (NO_PADDING, K_PADDING, N_PADDING, K_N_PADDING, FORCE_PADDING)
+        plans = (
+            NO_PADDING,
+            M_PADDING,
+            K_PADDING,
+            N_PADDING,
+            M_N_PADDING,
+            K_N_PADDING,
+            FORCE_PADDING,
+        )
         mock_match = self._create_mock_match()
         mat1 = torch.randn(8, 16)
         mat2 = torch.randn(16, 32)
