@@ -1,10 +1,13 @@
 # Owner(s): ["module: inductor"]
+import contextlib
+import re
 import unittest
 from unittest import mock
 
 import torch
 from torch._C import FileCheck
 from torch._dynamo.utils import same
+from torch._higher_order_ops.effects import _EffectType
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
@@ -553,6 +556,177 @@ class TestOperatorReorderForPeakMemory(TestCase):
                     f"because different ranks may execute collectives in different orders."
                 ),
             )
+
+
+# Every knob here decides whether a free is emitted for an intermediate buffer,
+# or how that free is spelled, so pin them instead of inheriting whatever the
+# shard happens to run with.
+@config.patch(
+    {
+        # cpp_wrapper spells a free "buf.reset();" rather than "del buf", and CI
+        # has TORCHINDUCTOR_CPP_WRAPPER=1 shards.
+        "cpp_wrapper": False,
+        # A reused buffer is freed as part of its reuse line ("buf1 = buf0; del
+        # buf0"); with reuse off every free is its own "del buf" line.
+        "allow_buffer_reuse": False,
+        # Pooled allocation frees several buffers on a single "del a, b" line.
+        "memory_planning": False,
+        "memory_pool": "none",
+        # Reordering rewrites the very schedule whose frees are asserted below.
+        "reorder_for_peak_memory": False,
+    }
+)
+class TestEffectfulOpMemory(TestCase):
+    """
+    An ORDERED effectful op does not extend the lifetime of its tensor inputs, so
+    those buffers must still be freed once the op has run. Adding them to
+    ``never_reuse_buffers`` makes ``codegen_free`` skip the free entirely -- it
+    early-returns for any buffer ``can_reuse`` rejects -- and peak memory then
+    grows with the number of effectful ops in the graph.
+    """
+
+    # Enough steps that a leak is unambiguous: with the frees dropped, the graph
+    # holds this many intermediates at once instead of one.
+    NUM_EFFECTFUL_OPS = 8
+
+    # 8M elements, i.e. 32 MiB at the float32 the tests use, so that one leaked
+    # intermediate is far larger than any allocator noise in the peak-memory test
+    # below. The bound there is computed from the dtype, not from this constant.
+    INPUT_NUMEL = 1024 * 1024 * 8
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _observe_op():
+        """An ORDERED effectful op that ignores its input."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::observe", "(Tensor x) -> ()", lib=lib)
+            lib.impl("observe", lambda x: None, "CompositeExplicitAutograd")
+            torch.library._register_effectful_op(
+                "mylib::observe", _EffectType.ORDERED, lib=lib
+            )
+            yield
+
+    @staticmethod
+    def _make_fn(num_effectful_ops):
+        def fn(x):
+            # Seed the chain with a reduction rather than a constant: `x + 0` is
+            # folded away, which would hand the first op the graph input itself
+            # instead of an intermediate.
+            total = x.mean()
+            for _ in range(num_effectful_ops):
+                # Each step depends on a reduction over the previous one, so only
+                # one of them can be live at a time. Independent steps would be
+                # fused into a single multi-output kernel and be co-resident
+                # regardless of how they are freed.
+                step = x + total
+                torch.ops.mylib.observe(step)
+                total = total + step.mean()
+            return total
+
+        return fn
+
+    def _compile_serial_chain(self, x):
+        """
+        Compile and run the chain on ``x``, returning ``(compiled, code,
+        observed_buffers)`` where ``observed_buffers`` are the intermediate
+        buffers the effectful op is called on, in program order.
+
+        Also asserts the shape the callers' assertions depend on: one effectful op
+        per step, each called on its own intermediate buffer. An op handed a graph
+        input exercises nothing -- ``codegen_free`` writes an unconditional
+        ``FreeLine`` for an ``InputBuffer`` and returns before it ever consults
+        ``never_reuse_buffers`` -- so without this the callers could be asserting
+        against a graph that no longer reproduces the regression at all. It is
+        not a fusion detector: a multi-output fusion would still emit one
+        distinct buffer per step and satisfy all three checks.
+        """
+        torch._dynamo.reset()
+        compiled = torch.compile(self._make_fn(self.NUM_EFFECTFUL_OPS), fullgraph=True)
+        code = run_and_get_triton_code(compiled, x)
+
+        observed = re.findall(r"observe\.default\((\w+)\)", code)
+        self.assertEqual(
+            len(observed),
+            self.NUM_EFFECTFUL_OPS,
+            f"expected one effectful op per step, got {observed}\n\n{code}",
+        )
+        # Each op must be called on an intermediate buffer. A graph input would
+        # not exercise the regression at all: codegen_free writes an
+        # unconditional FreeLine for an InputBuffer and returns before it ever
+        # consults never_reuse_buffers.
+        self.assertEqual(
+            [b for b in observed if not re.fullmatch(r"buf\d+", b)],
+            [],
+            f"effectful op called on something other than an intermediate "
+            f"buffer: {observed}\n\n{code}",
+        )
+        self.assertEqual(
+            len(set(observed)),
+            self.NUM_EFFECTFUL_OPS,
+            f"the steps did not stay separate buffers: {observed}\n\n{code}",
+        )
+        return compiled, code, observed
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_effectful_op_inputs_are_freed(self):
+        # Assert the free directly in the generated wrapper. That is the property
+        # which regressed, and unlike a memory measurement it cannot be perturbed
+        # by anything else running in the process.
+        with self._observe_op():
+            x = torch.ones(self.INPUT_NUMEL, device=GPU_TYPE)
+            _, code, observed = self._compile_serial_chain(x)
+
+        for buf in observed:
+            # Match the trailing newline so that "del buf1" is not satisfied by a
+            # "del buf12" line.
+            FileCheck().check(f"observe.default({buf})").check(f"del {buf}\n").run(code)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @serialTest()
+    # This test does not read the generated code for frees, so unlike the codegen
+    # test it does not need them spelled any particular way -- what it needs is
+    # the schedule production actually runs. So restore every class pin that sits
+    # off its default and the measurement is taken at stock config; the two that
+    # remain (cpp_wrapper, memory_planning) already are the defaults and are
+    # pinned only so a shard cannot move them from the environment. cudagraphs is
+    # pinned for the same reason but is specific to this test: cudagraph trees
+    # allocate from a private pool, which perturbs the measurement rather than
+    # the codegen.
+    @config.patch(
+        {
+            "allow_buffer_reuse": True,
+            "reorder_for_peak_memory": True,
+            "memory_pool": "intermediates",
+            "triton.cudagraphs": False,
+        }
+    )
+    def test_effectful_op_peak_memory_does_not_scale(self):
+        # The user-visible symptom of the missing frees (the regression showed up
+        # as training OOMs), asserted end to end.
+        with self._observe_op():
+            x = torch.ones(self.INPUT_NUMEL, device=GPU_TYPE)
+            compiled, _, _ = self._compile_serial_chain(x)
+
+            device_module = torch.get_device_module(GPU_TYPE)
+            device_module.synchronize()
+            device_module.reset_peak_memory_stats()
+            allocated_before = device_module.memory_allocated()
+            compiled(x)
+            device_module.synchronize()
+            peak_mem = device_module.max_memory_allocated() - allocated_before
+
+        # Only one `x + total` is live at a time and everything else in the graph
+        # is a scalar, so the call holds one intermediate however many effectful
+        # ops there are. Allow two for slack; a dropped free costs
+        # NUM_EFFECTFUL_OPS of them.
+        intermediate = self.INPUT_NUMEL * x.dtype.itemsize
+        self.assertLess(
+            peak_mem,
+            2 * intermediate,
+            f"peak memory scaled with the effectful op count: {peak_mem} bytes "
+            f"for {self.NUM_EFFECTFUL_OPS} ops, expected roughly one "
+            f"{intermediate}-byte intermediate",
+        )
 
 
 if __name__ == "__main__":
