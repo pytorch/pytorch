@@ -281,7 +281,9 @@ class Guard:
     stack: CapturedTraceback | None = None
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
-    _unserializable: bool = False
+    # The local-scope type a TYPE_MATCH or FAKE_SCRIPT_TYPE_MATCH found, if any;
+    # serialize_guards refuses it.
+    _unserializable: type | None = None
     _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
