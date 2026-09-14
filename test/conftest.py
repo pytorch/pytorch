@@ -401,8 +401,11 @@ def _spawns_multiple_processes(
 
 @functools.cache
 def _cpu_backend_tokens() -> tuple[str, ...]:
-    """Registered backend names that drive a CPU (non-accelerator) transport,
-    derived from the backend registry so no hand-maintained list can drift."""
+    """Non-accelerator backend name tokens for filename matching.
+
+    Computed as ``Backend.backend_list`` minus ``ACCELERATOR_DIST_BACKENDS``; a
+    heuristic (gloo/mpi/ucc are not CPU-only per the registry) but avoids a
+    hand-maintained list that can drift."""
     from torch.distributed.distributed_c10d import Backend
     from torch.testing._internal.common_distributed import ACCELERATOR_DIST_BACKENDS
 
@@ -417,7 +420,7 @@ def _cpu_backend_tokens() -> tuple[str, ...]:
 def _safe_obj(item: Any) -> object | None:
     try:
         return item.obj
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         return None
 
 
@@ -439,11 +442,24 @@ def _decorator_gpu_requirement(func: object | None) -> int:
 def _probe_world_size(cls: type | None) -> int:
     """Read the class ``world_size`` without running ``__init__`` (which spawns
     processes at runtime, not collection). Returns 0 when it cannot be resolved
-    to a positive value (e.g. MultiProcContinuousTest's ``-2`` sentinel)."""
+    to a positive value.
+
+    ``MultiProcContinuousTest`` and ``min(N, device_count())`` patterns are
+    evaluated against the collecting process's device count; distributed CI
+    forces serial collection when ``TEST_CONFIG`` contains ``distributed``."""
+    if cls is None:
+        return 0
     try:
         resolved = int(cls.__new__(cls).world_size)
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError):
         return 0
+    if resolved == -2:
+        try:
+            import torch
+
+            return max(int(torch.accelerator.device_count()), 0)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return 0
     return max(0, resolved)
 
 
@@ -484,7 +500,7 @@ def _is_local_tensor_simulation(cls: type | None) -> bool:
     signal -- False (or absent) everywhere else."""
     try:
         return bool(cls.__new__(cls).is_local_tensor_enabled)  # type: ignore[union-attr]
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError):
         return False
 
 
@@ -500,18 +516,20 @@ def _resolve_gpu_requirement(item: Any, cls: type | None) -> int:
     Combines the two GPU-count signals and takes the larger: the
     ``skip_if_lt_x_gpu``/``requires_world_size`` decorator and the multi-process
     base-class ``world_size`` -- so a test decorated ``skip_if_lt_x_gpu(2)``
-    whose class hardcodes ``world_size = 4`` still resolves to 4. Returns 0 for
-    tests that do not scale with GPU count (CPU-backed, which spawn ranks not
-    GPUs; single-process; LocalTensor simulations on one GPU) and a very large
-    value on unresolvable ``world_size`` to favor coverage."""
+    whose class hardcodes ``world_size = 4`` still resolves to 4. On CPU-backend
+    files the class ``world_size`` is a rank count, but an explicit GPU decorator
+    is still honored. Returns 0 for tests that do not scale with GPU count
+    (single-process; LocalTensor simulations on one GPU) and a very large value
+    on unresolvable ``world_size`` to favor coverage."""
     if not _spawns_multiple_processes(cls) or _is_local_tensor_simulation(cls):
         return 0
+    dec = _decorator_gpu_requirement(_safe_obj(item))
     if _is_cpu_backed(item):
-        return 0
+        return dec
     world_size = _probe_world_size(cls)
     if world_size == 0:
-        return _UNRESOLVED_GPU_REQUIREMENT
-    return max(_decorator_gpu_requirement(_safe_obj(item)), world_size)
+        return dec if dec > 0 else _UNRESOLVED_GPU_REQUIREMENT
+    return max(dec, world_size)
 
 
 def pytest_itemcollected(item: Any) -> None:
@@ -537,8 +555,6 @@ class MultiGpuMinFilterPlugin:
         self.min_gpus = min_gpus
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
-        if self.min_gpus <= 0:
-            return
         selected, deselected = [], []
         for item in items:
             is_multigpu = any(m.name == "multigpu" for m in item.iter_markers())
@@ -550,6 +566,22 @@ class MultiGpuMinFilterPlugin:
         if deselected:
             config.hook.pytest_deselected(items=deselected)
             items[:] = selected
+        if config.getoption("verbose") >= 0:
+            print(
+                f"multigpu-min-gpus={self.min_gpus}: kept {len(selected)}, "
+                f"deselected {len(deselected)}",
+                flush=True,
+            )
+        if not selected:
+            import sys
+
+            print(
+                f"ERROR: --multigpu-min-gpus {self.min_gpus} deselected every "
+                f"collected test ({len(deselected)} items); refusing empty run.",
+                file=sys.stderr,
+                flush=True,
+            )
+            pytest.exit("multigpu-min-gpus filter matched no tests", returncode=1)
 
 
 class StepcurrentPlugin:

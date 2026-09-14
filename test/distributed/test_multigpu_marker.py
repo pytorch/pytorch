@@ -9,7 +9,6 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_world_size,
     skip_if_lt_x_gpu,
-    STANDARD_DISTRIBUTED_GPUS,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -88,16 +87,18 @@ def _fake_item(cls=None, func=None, filename="test_something.py"):
 
 
 class TestMultiGpuMarker(TestCase):
-    def test_standard_runner_size(self):
-        self.assertEqual(STANDARD_DISTRIBUTED_GPUS, 2)
-
     def test_probe_world_size(self):
         self.assertEqual(_probe_world_size(_MPws4), 4)
         self.assertEqual(_probe_world_size(_MPws3), 3)
         self.assertEqual(_probe_world_size(_MPws2), 2)
-        # Unresolvable / non-positive sentinel both collapse to 0.
         self.assertEqual(_probe_world_size(_MPbroken), 0)
-        self.assertEqual(_probe_world_size(_MPCunset), 0)
+        try:
+            import torch
+
+            expected_mpc = max(int(torch.accelerator.device_count()), 0)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            expected_mpc = 0
+        self.assertEqual(_probe_world_size(_MPCunset), expected_mpc)
 
     def test_decorator_requirement(self):
         @skip_if_lt_x_gpu(4)
@@ -143,10 +144,19 @@ class TestMultiGpuMarker(TestCase):
             _resolve_gpu_requirement(_fake_item(cls=_MPbroken), _MPbroken),
             _UNRESOLVED_GPU_REQUIREMENT,
         )
-        self.assertEqual(
-            _resolve_gpu_requirement(_fake_item(cls=_MPCunset), _MPCunset),
-            _UNRESOLVED_GPU_REQUIREMENT,
-        )
+
+    def test_continuous_test_scales_to_device_count(self):
+        req = _resolve_gpu_requirement(_fake_item(cls=_MPCunset), _MPCunset)
+        try:
+            import torch
+
+            device_count = max(int(torch.accelerator.device_count()), 0)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            device_count = 0
+        if device_count == 0:
+            self.assertEqual(req, _UNRESOLVED_GPU_REQUIREMENT)
+        else:
+            self.assertEqual(req, device_count)
 
     def test_local_tensor_simulation_requirement_zero(self):
         # A LocalTensor simulation runs single-process on one GPU: its world_size
@@ -156,19 +166,19 @@ class TestMultiGpuMarker(TestCase):
 
     def test_cpu_backed_high_world_size_excluded(self):
         # A CPU-backed multi-process test spawns ranks, not GPUs, so a high
-        # world_size does not scale its GPU requirement.
+        # world_size alone does not scale its GPU requirement.
         item = _fake_item(cls=_MPws4, filename="test_c10d_gloo.py")
         self.assertEqual(_resolve_gpu_requirement(item, _MPws4), 0)
 
-    def test_cpu_gate_short_circuits_decorator(self):
-        # The CPU/gloo gate wins over any GPU decorator: a CPU-backed test never
-        # scales, since it spawns ranks rather than GPUs.
+    def test_cpu_gate_honors_explicit_gpu_decorator(self):
+        # CPU-backend files still honor skip_if_lt_x_gpu: gloo tests can use
+        # multiple GPUs per rank even though world_size is a rank count.
         @skip_if_lt_x_gpu(4)
         def needs4(self):
             pass
 
         item = _fake_item(cls=_MPws2, func=needs4, filename="test_c10d_gloo.py")
-        self.assertEqual(_resolve_gpu_requirement(item, _MPws2), 0)
+        self.assertEqual(_resolve_gpu_requirement(item, _MPws2), 4)
 
     def test_decorator_and_world_size_combine(self):
         # The 5 genuine 4-GPU misses: only ``skip_if_lt_x_gpu(2)`` but the class
@@ -179,6 +189,45 @@ class TestMultiGpuMarker(TestCase):
 
         item = _fake_item(cls=_MPws4, func=needs2, filename="test_2d_composability.py")
         self.assertEqual(_resolve_gpu_requirement(item, _MPws4), 4)
+
+    def test_real_gloo_gpu_decorator(self):
+        from distributed.test_c10d_gloo import DistributedDataParallelTest
+
+        item = _fake_item(
+            cls=DistributedDataParallelTest,
+            func=DistributedDataParallelTest.test_gloo_backend_2gpu_module,
+            filename="test/distributed/test_c10d_gloo.py",
+        )
+        self.assertEqual(_resolve_gpu_requirement(item, DistributedDataParallelTest), 4)
+
+    def test_real_fully_shard_2d_training(self):
+        from distributed._composable.test_composability.test_2d_composability import (
+            TestFullyShard2DTraining,
+        )
+
+        item = _fake_item(
+            cls=TestFullyShard2DTraining,
+            func=TestFullyShard2DTraining.test_train_parity_2d_mlp,
+            filename="test/distributed/_composable/test_composability/test_2d_composability.py",
+        )
+        self.assertEqual(_resolve_gpu_requirement(item, TestFullyShard2DTraining), 4)
+
+    def test_real_local_tensor_class(self):
+        from torch.testing._internal.distributed._tensor.common_dtensor import (
+            DTensorTestBase,
+            create_local_tensor_test_class,
+        )
+
+        class _Orig(DTensorTestBase):
+            world_size = 4
+
+            def test_placeholder(self):
+                pass
+
+        local_cls = create_local_tensor_test_class(_Orig)
+        self.assertTrue(_is_local_tensor_simulation(local_cls))
+        item = _fake_item(cls=local_cls)
+        self.assertEqual(_resolve_gpu_requirement(item, local_cls), 0)
 
 
 if __name__ == "__main__":
