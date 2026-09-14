@@ -93,27 +93,44 @@ class RmsNormBackward:
         )
         norm(x, mW, dout, None, rstd, None, dx, partial, None, None, blocks, stream)
         if cutlass.const_expr(self.compute_dw):
-            self.weight_grad(partial, mdW).launch(
-                grid=[self.n // 32, 1, 1], block=[128, 1, 1], stream=stream
-            )
+            if blocks <= 32:
+                self.weight_grad(partial, mdW, 32, 128).launch(
+                    grid=[self.n // 32, 1, 1], block=[128, 1, 1], stream=stream
+                )
+            else:
+                cols = 4 if self.n <= 1024 else 8 if self.n <= 4096 else 16
+                self.weight_grad(partial, mdW, cols, 256).launch(
+                    grid=[self.n // cols, 1, 1], block=[256, 1, 1], stream=stream
+                )
 
     @cute.kernel
-    def weight_grad(self, partial: cute.Tensor, out: cute.Tensor):
+    def weight_grad(
+        self,
+        partial: cute.Tensor,
+        out: cute.Tensor,
+        cols: cutlass.Constexpr,
+        threads: cutlass.Constexpr,
+    ):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         lane, warp = tidx % 32, tidx // 32
-        col = bidx * 32 + lane
+        col = bidx * cols + tidx % cols
         acc = Float32(0)
-        for row in cutlass.range(warp, partial.shape[0], 4):
+        for row in cutlass.range(tidx // cols, partial.shape[0], threads // cols):
             acc += partial[row, col]
+        for i in cutlass.range_constexpr((32 // cols).bit_length() - 1):
+            acc += cute.arch.shuffle_sync_bfly(acc, offset=(1 << i) * cols)
         smem = cutlass.utils.SmemAllocator()
-        sums = smem.allocate_tensor(Float32, cute.make_layout((4, 32), stride=(32, 1)))
-        sums[warp, lane] = acc
+        sums = smem.allocate_tensor(
+            Float32, cute.make_layout((threads // 32, cols), stride=(cols, 1))
+        )
+        if lane < cols:
+            sums[warp, lane] = acc
         cute.arch.barrier()
-        if warp == 0:
-            for i in cutlass.range_constexpr(1, 4):
-                acc += sums[i, lane]
-            out[col] = out.element_type(acc)
+        if tidx < cols:
+            for i in cutlass.range_constexpr(1, threads // 32):
+                acc += sums[i, tidx]
+            out[bidx * cols + tidx] = out.element_type(acc)
 
 
 def kernel_spec(direction, dtype, n, has_weight, compute_dw=False, *, jit=False):
