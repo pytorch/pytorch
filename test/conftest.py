@@ -103,14 +103,22 @@ def pytest_addoption(parser: Parser) -> None:
         type=str.upper,
         help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
     )
+    parser.addoption(
+        "--hw-required-devices",
+        type=int,
+        default=None,
+        dest="hw_required_devices",
+        help="only run tests needing at most N devices",
+    )
     shard_addoptions(parser)
 
 
 class HardwareClassificationPytestPlugin:
-    """Pytest plugin to filter collected tests by hw_classification."""
+    """Pytest plugin to filter collected tests by hw_classification and device count."""
 
-    def __init__(self, hw_classification):
+    def __init__(self, hw_classification, device_count=None):
         self.hw_classification = self._resolve_hw_classification(hw_classification)
+        self.device_count = device_count
 
     @staticmethod
     def _resolve_hw_classification(hw_classification):
@@ -121,16 +129,18 @@ class HardwareClassificationPytestPlugin:
         return {HardwareClassification[name] for name in hw_classification}
 
     def pytest_collection_modifyitems(self, items):
-        if self.hw_classification is None:
+        if self.hw_classification is None and self.device_count is None:
             return
         import torch.testing._internal.common_utils as _cu
 
+        requirement = self.hw_classification or set(_cu.HardwareClassification)
         filtered = []
         _cu.filter_by_hw_classification(
             items,
-            self.hw_classification,
+            requirement,
             get_class=lambda item: getattr(item, "cls", None),
             on_match=filtered.append,
+            device_count=self.device_count,
         )
         items[:] = filtered
 
@@ -160,9 +170,11 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
-    if config.getoption("hw_classification"):
+    hw_cls = config.getoption("hw_classification")
+    hw_dev = config.getoption("hw_required_devices")
+    if hw_cls or hw_dev is not None:
         config.pluginmanager.register(
-            HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
+            HardwareClassificationPytestPlugin(hw_cls, hw_dev),
             "hw_classification_plugin",
         )
 
