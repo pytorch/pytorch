@@ -15,6 +15,7 @@ from typing import NamedTuple
 
 import torch
 import torch.cuda.comm as comm
+from torch.cuda import nccl
 from torch.nn.parallel import scatter_gather
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
@@ -1320,6 +1321,47 @@ t2.start()
 
 
 class TestCudaComm(TestCase):
+    def test_broadcast_fallback_supports_autograd(self):
+        input = torch.randn(5, 5, requires_grad=True)
+
+        output = comm.broadcast(input, (0,))[0]
+        output.sum().backward()
+
+        self.assertEqual(input.grad, torch.ones_like(input))
+
+    def test_nccl_broadcasts_reject_autograd(self):
+        input = torch.ones(4, device=0, requires_grad=True)
+        if not nccl.is_available([input]):
+            self.skipTest("NCCL is not available")
+
+        collectives = {
+            "broadcast": lambda: comm.broadcast(input, (0,)),
+            "broadcast_coalesced": lambda: comm.broadcast_coalesced([input], (0,)),
+        }
+        for name, collective in collectives.items():
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(RuntimeError, "does not support autograd"):
+                    collective()
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_nccl_multigpu_collectives_reject_autograd(self):
+        input = torch.ones(4, device=0, requires_grad=True)
+        other = torch.ones(4, device=1)
+        if not nccl.is_available([input, other]):
+            self.skipTest("NCCL is not available")
+
+        collectives = {
+            "broadcast_out": lambda: comm.broadcast(input, out=[other]),
+            "reduce_add": lambda: comm.reduce_add([input, other]),
+            "reduce_add_coalesced": lambda: comm.reduce_add_coalesced(
+                [[input], [other]]
+            ),
+        }
+        for name, collective in collectives.items():
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(RuntimeError, "does not support autograd"):
+                    collective()
+
     def _test_broadcast(self, input):
         if not TEST_MULTIGPU:
             raise unittest.SkipTest("only one GPU detected")
