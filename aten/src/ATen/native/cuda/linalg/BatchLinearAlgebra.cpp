@@ -579,7 +579,9 @@ void ldl_factor_kernel(
     bool upper,
     bool hermitian) {
   // DEBUG: dispatch unconditionally for now!
-  ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+  std::cout << "calling custom" << std::endl;
+  ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+  std::cout << "done" << std::endl;
   return;
 
   auto preferred_backend = at::globalContext().linalgPreferredBackend();

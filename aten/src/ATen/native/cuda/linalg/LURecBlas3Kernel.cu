@@ -949,7 +949,7 @@ ldl_diagonal_panel_fused_kernel(
         dLD, lda, n, curr_step, ilambda,
         /*exclude_idx=*/ilambda
       );
-      if (sigma * diag_abs >= ALPHA * diag_abs * diag_abs) {
+      if (sigma * diag_abs >= ALPHA * lambda * lambda) {
         // No permutation, 1x1 pivot
         piv = curr_step;
       } else if (ldl::abs(dLD[LinOff(ilambda, ilambda, lda)]) >= ALPHA * sigma) {
