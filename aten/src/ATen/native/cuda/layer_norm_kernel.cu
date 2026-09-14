@@ -1178,11 +1178,15 @@ void LayerNormKernelImplInternal(
   bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
   bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
 
-  if ((std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) &&
-  N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
-  can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
-    launch_vectorized_layer_norm_kernel<T, T_ACC, rms_norm>(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
-  } else {
+  if constexpr (std::is_same_v<T, float> || std::is_same_v<T, at::Half> ||
+      std::is_same_v<T, at::BFloat16>) {
+    if (N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) &&
+        N % num_vec_elems == 0 &&
+        can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
+      launch_vectorized_layer_norm_kernel<T, T_ACC, rms_norm>(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
+      return;
+    }
+  }
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 #ifdef USE_ROCM
   // ROCm rejects launches where gridDim.x * blockDim.x exceeds uint32_t max.
@@ -1206,7 +1210,6 @@ void LayerNormKernelImplInternal(
       M, N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
-  }
 }
 
 void LayerNormKernelImpl(
@@ -1741,20 +1744,26 @@ void LayerNormBackwardKernelImplInternal(
     int nshared = (num_threads() / warp_size) * sizeof(T_ACC);
 
     bool bVectorSizeMultiple = (N % vec_size == 0);
-    bool bTargetDataTypes = (std::is_same_v<T, float> || std::is_same_v<T, at::Half> ||
+    constexpr bool bTargetDataTypes = (std::is_same_v<T, float> || std::is_same_v<T, at::Half> ||
       std::is_same_v<T, at::BFloat16>);
     const unsigned int alignment = sizeof(T) * vec_size;
     bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
       can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
-    if (bAlignedBuffers && bTargetDataTypes && bVectorSizeMultiple) {
-      layer_norm_grad_input_kernel_vectorized<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
-          X_data, mean_data, rstd_data, gamma_data, dX_data, N);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    } else {
+    // if constexpr keeps layer_norm_grad_input_kernel_vectorized uninstantiated
+    // for T outside bTargetDataTypes, so it never reaches the fatbin.
+    bool bUsedVectorized = false;
+    if constexpr (bTargetDataTypes) {
+      if (bAlignedBuffers && bVectorSizeMultiple) {
+        layer_norm_grad_input_kernel_vectorized<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+            X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+        bUsedVectorized = true;
+      }
+    }
+    if (!bUsedVectorized) {
       layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
           X_data, mean_data, rstd_data, gamma_data, dX_data, N);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
   }
 

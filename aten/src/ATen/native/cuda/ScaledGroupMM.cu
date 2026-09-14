@@ -458,19 +458,13 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
         cute::_128,
         cute::_128>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
-  } else if (large && FastAccum::value) {
+  } else if (large) {
+    // slow accum spills with the bigger tile
+    using TileM = cute::conditional_t<FastAccum::value, cute::_256, cute::_128>;
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
         /*Pong*/ std::false_type,
-        cute::_256,
-        cute::_128,
-        cute::_128>(
-        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
-  } else if (large) { // use smaller tile for slow accum to avoid spilling
-    f8f8bf16_grouped_gemm_impl_sm90<
-        FastAccum,
-        /*Pong*/ std::false_type,
-        cute::_128,
+        TileM,
         cute::_128,
         cute::_128>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
