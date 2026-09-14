@@ -130,7 +130,6 @@ from .object_protocol import (
     mro_lookup,
     pynumber_as_ssize_t,
     pynumber_index,
-    resolve_descriptor_owner,
     type_disallows_instantiation,
     type_implements_nb_slot,
 )
@@ -240,6 +239,57 @@ def is_forbidden_context_manager(ctx: object) -> bool:
         f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
     return ctx in f_ctxs
+
+
+def is_reconstructable_decorator_ctx_manager_clone(
+    func: Callable[..., Any], obj_cls: type[Any]
+) -> bool:
+    return (
+        func is torch.utils._contextlib._DecoratorContextManager.clone
+        and obj_cls
+        in (
+            torch.no_grad,
+            torch.enable_grad,
+            torch.autograd.forward_ad.dual_level,
+        )
+    ) or (
+        func is torch.autograd.grad_mode.inference_mode.clone
+        and obj_cls is torch.autograd.grad_mode.inference_mode
+    )
+
+
+def maybe_reconstruct_decorator_ctx_manager_clone(
+    tx: "InstructionTranslatorBase",
+    func: Callable[..., Any],
+    obj: Any,
+    obj_source: "Source | None",
+    args: "list[VariableTracker]",
+    kwargs: "dict[str, VariableTracker]",
+    /,
+) -> "VariableTracker | None":
+    """Reconstruct an allowlisted bound _DecoratorContextManager.clone call.
+
+    The positive allowlist excludes subclasses whose constructor arity is not
+    compatible with clone(). inference_mode.clone also requires obj_source so
+    self.mode can be guarded rather than baked into the graph. Unsupported
+    cases return None for the caller to handle.
+    """
+    if (
+        args
+        or kwargs
+        or not is_reconstructable_decorator_ctx_manager_clone(func, obj.__class__)
+    ):
+        return None
+    if func is torch.utils._contextlib._DecoratorContextManager.clone:
+        return variables.TorchCtxManagerClassVariable(obj.__class__).call_function(
+            tx, [], {}
+        )
+    if obj_source is None:
+        return None
+    mode_var = VariableTracker.build(tx, obj.mode, AttrSource(obj_source, "mode"))
+    return variables.TorchCtxManagerClassVariable(obj.__class__).call_function(
+        tx, [mode_var], {}
+    )
 
 
 def is_generic_ctx_manager_cls(cls: type) -> bool:
@@ -427,6 +477,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 _in_graph_class_list.add(event_class)
 
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
+
+    @staticmethod
+    def _is_privateuse1_tensor_class(value: type[object]) -> bool:
+        privateuse1_module = getattr(
+            torch, torch._C._get_privateuse1_backend_name(), None
+        )
+        return privateuse1_module is not None and any(
+            value is getattr(privateuse1_module, tensor_type.__name__, None)
+            for tensor_type in tensortype_to_dtype
+        )
 
     @staticmethod
     @functools.cache
@@ -693,6 +753,40 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, resolved)
         return variables.GetAttrVariable(self, name, type(resolved), source=source)
 
+    def _descriptor_defining_class_vt(
+        self,
+        tx: "InstructionTranslatorBase",
+        descriptor: types.WrapperDescriptorType | types.MethodDescriptorType,
+    ) -> VariableTracker:
+        """VT for the class that actually implements an unbound C descriptor.
+
+        Consider the following example:
+
+            # Metaclass defines __neg__, so `-SomeClass` would call Meta.__neg__(cls).
+            class Meta(type):
+                def __neg__(cls):
+                    return 999
+
+
+            class Base(metaclass=Meta):
+                # Alias int's unary __neg__ slot wrapper into this class's dict under a
+                # different name. __objclass__ == int, __name__ == '__neg__', but looked
+                # up on Base, whose metaclass separately defines __neg__.
+                sneaky = int.__neg__
+
+        This helper function determines the correct owner of the descriptor based on the `__objclass__` attribute.
+
+            class Foo(int):
+                ...
+
+            assert Foo.__neg__ == int.__neg__
+            assert Foo.__neg__.__objclass__ is int
+        """
+        objclass = descriptor.__objclass__
+        if objclass is self.value:
+            return self
+        return VariableTracker.build(tx, objclass)
+
     def resolve_cls_descriptor(
         self,
         tx: "InstructionTranslatorBase",
@@ -783,7 +877,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return variables.WrapperDescriptorVariable(
                 cls_attr,
-                owner=resolve_descriptor_owner(tx, cls_attr, self, self.value),
+                owner=self._descriptor_defining_class_vt(tx, cls_attr),
                 source=source,
             )
 
@@ -795,7 +889,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return variables.MethodDescriptorVariable(
                 cls_attr,
-                owner=resolve_descriptor_owner(tx, cls_attr, self, self.value),
+                owner=self._descriptor_defining_class_vt(tx, cls_attr),
                 source=source,
             )
 
@@ -1529,6 +1623,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif (
             self.value in self._in_graph_classes()
+            or self._is_privateuse1_tensor_class(self.value)
             or is_traceable_wrapper_subclass_type(self.value)
         ):
             # torch.LongTensor cannot accept a list of FakeTensors.
@@ -1537,7 +1632,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             if (
                 np
-                and self.value in tensortype_to_dtype
+                and (
+                    self.value in tensortype_to_dtype
+                    or self._is_privateuse1_tensor_class(self.value)
+                )
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
                 and len(args[0].items) > 1
@@ -3280,26 +3378,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
-            if (
-                func is torch.utils._contextlib._DecoratorContextManager.clone
-                and variables.TorchCtxManagerClassVariable.is_matching_cls(
-                    obj.__class__
-                )
-                and not (args or kwargs)
-            ):
-                return variables.TorchCtxManagerClassVariable(
-                    obj.__class__
-                ).call_function(tx, args, kwargs)
-
-            if (
-                func is torch.autograd.grad_mode.inference_mode.clone
-                and obj.__class__ is torch.autograd.grad_mode.inference_mode
-            ):
-                # simulate the inference_mode.clone implementation
-                var = VariableTracker.build(tx, obj.mode)  # type: ignore[attr-defined]
-                return variables.TorchCtxManagerClassVariable(
-                    obj.__class__
-                ).call_function(tx, [var], kwargs)
+            obj_source = (
+                AttrSource(self.source, "__self__") if self.source is not None else None
+            )
+            reconstructed = maybe_reconstruct_decorator_ctx_manager_clone(
+                tx, func, obj, obj_source, args, kwargs
+            )
+            if reconstructed is not None:
+                return reconstructed
 
             if self.source is None:
                 unimplemented(

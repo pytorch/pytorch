@@ -25,7 +25,7 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import _RICHCOMPARE_OPS, ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -394,6 +394,7 @@ class ConstantVariable(VariableTracker):
                     )
             if (
                 hasattr(operator, name)
+                and name not in _RICHCOMPARE_OPS
                 and len(args) == 1
                 and args[0].is_python_constant()
             ):

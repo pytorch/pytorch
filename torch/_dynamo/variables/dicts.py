@@ -1355,8 +1355,11 @@ class DictKeysVariable(DictViewVariable):
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
+        # dictkeys_contains hands dv_dict to PyDict_Contains, a struct lookup,
+        # so a dict subclass's __contains__ never runs -- call the base slot
+        # rather than dispatching on dv_dict's type.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
-        return self.dv_dict.sq_contains_impl(tx, item)
+        return ConstDictVariable.sq_contains_impl(self.dv_dict, tx, item)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str

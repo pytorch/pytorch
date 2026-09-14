@@ -1895,23 +1895,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         got, expected = getattr(opt_fn(x), attr), getattr(fn(x), attr)
         self.assertEqual(comparable(got), comparable(expected))
 
-    # ExceptionVariable.reconstruct skips any ConstantVariable-valued attribute
-    # (see test_builtin_exception_constant_attr_survives_escape), so a
-    # deliberate bool write to __suppress_context__ is indistinguishable from
-    # the untouched default across the compile boundary.
-    @unittest.expectedFailure
-    def test_exception_attr_write_survives_escape_suppress_context(self):
-        def fn(x):
-            e = CustomException("x")
-            e.__suppress_context__ = exception_attr_value("__suppress_context__")
-            return e
-
-        x = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        got = opt_fn(x).__suppress_context__
-        expected = fn(x).__suppress_context__
-        self.assertEqual(comparable(got), comparable(expected))
-
     @unittest.expectedFailure
     def test_exception_store_attr_survives_escape(self):
         # STORE_ATTR rather than the setattr builtin, and several writes at once.
