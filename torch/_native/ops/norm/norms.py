@@ -16,6 +16,11 @@ from torch._native.instrumentation import instrument_cutedsl_compile
 from .rmsnorm_launch import backward_launch, NORMALIZED_SIZES
 
 
+@functools.cache
+def _device_properties(device: torch.device):
+    return torch.cuda.get_device_properties(device)
+
+
 # quack's rmsnorm compile fns are vendored, so we can't decorate them in
 # place. Wrap them once at the call site instead -- they're @jit_cache so
 # the instrumentation reads their cache_info(). Memoized so the wrapper (and
@@ -92,7 +97,8 @@ def _aligned_weight(w: torch.Tensor, N: int) -> torch.Tensor:
     # Same trap as _reshape_2d: reshape(N).contiguous() is a no-op for a
     # contiguous-but-offset weight, leaving a misaligned base. Weight is only
     # N elements, so always clone rather than perf-gating like the input.
-    w = w.reshape(N).contiguous()
+    if w.ndim != 1 or w.shape[0] != N or not w.is_contiguous():
+        w = w.reshape(N).contiguous()
     if _const_data_ptr(w) % _required_align_bytes(w, N) != 0:
         w = w.clone()
     return w
@@ -107,7 +113,7 @@ def _flatten_rstd(t: torch.Tensor, M: int) -> torch.Tensor:
 
 
 def _uses_shared_kernel(x: torch.Tensor, weight: torch.Tensor | None, n: int) -> bool:
-    props = torch.cuda.get_device_properties(x.device)
+    props = _device_properties(x.device)
     return (
         n in NORMALIZED_SIZES
         and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
@@ -144,8 +150,8 @@ def quack_rmsnorm_fwd(
     if _uses_shared_kernel(x, weight, N):
         from .rmsnorm_kernels import compile_rmsnorm_forward, stream
 
-        rstd = torch.empty(M, device=x.device, dtype=torch.float32)
-        props = torch.cuda.get_device_properties(x.device)
+        rstd = torch.empty((M, 1), device=x.device, dtype=torch.float32)
+        props = _device_properties(x.device)
         arch = (props.major, props.minor)
         kernel = compile_rmsnorm_forward(
             str(x.dtype).removeprefix("torch."), N, weight is not None, arch
@@ -156,7 +162,10 @@ def quack_rmsnorm_fwd(
         stat_shape = list(input_shape[: -len(normalized_shape)]) + [1] * len(
             normalized_shape
         )
-        return out.view(input_shape), rstd.view(stat_shape)
+        return (
+            out if out.shape == input_shape else out.view(input_shape),
+            rstd if rstd.shape == tuple(stat_shape) else rstd.view(stat_shape),
+        )
 
     rstd = torch.empty(M, device=x.device, dtype=torch.float32)
     dtype = _torch2cute(x)
@@ -213,9 +222,13 @@ def quack_rmsnorm_bwd(
     ):
         from .rmsnorm_kernels import compile_rmsnorm_backward, stream
 
-        rstd_flat = _flatten_rstd(rstd, M)
+        rstd_2d = (
+            rstd
+            if rstd.shape == (M, 1) and rstd.is_contiguous()
+            else rstd.detach().reshape(M, 1).contiguous()
+        )
         compute_dw = weight is not None and dw_mask
-        props = torch.cuda.get_device_properties(x.device)
+        props = _device_properties(x.device)
         blocks = backward_launch(N, compute_dw).blocks(M, props.multi_processor_count)
         partial = (
             torch.empty(blocks, N, device=x.device, dtype=torch.float32)
@@ -234,7 +247,7 @@ def quack_rmsnorm_bwd(
             _read_only(x),
             _read_only(weight),
             _read_only(dout),
-            _read_only(rstd_flat),
+            _read_only(rstd_2d),
             dx,
             partial,
             dw,
@@ -242,8 +255,9 @@ def quack_rmsnorm_bwd(
             blocks,
             stream(x.device.index),
         )
-        dx = dx.view(input.shape)
-        if dw is not None:
+        if dx.shape != input.shape:
+            dx = dx.view(input.shape)
+        if dw is not None and len(normalized_shape) != 1:
             dw = dw.view(normalized_shape)
         return dx, dw
 

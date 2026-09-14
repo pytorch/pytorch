@@ -141,7 +141,8 @@ def kernel_spec(direction, dtype, n, has_weight, compute_dw=False, *, jit=False)
     )
     rstd = cute.runtime.make_fake_compact_tensor(
         Float32,
-        (cute.sym_int(),) if jit else (1,),
+        (cute.sym_int(), 1) if jit else (1,),
+        stride_order=(1, 0) if jit else None,
         assumed_align=4,
     )
     tensor_args = [{"name": "mX", "read_only": True}]
