@@ -11695,7 +11695,7 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
-instantiate_device_type_tests(TestLinalgDevice, globals())
+instantiate_device_type_tests(TestLinalgDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestLinalgCpu, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestLinalgCuda, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
