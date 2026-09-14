@@ -7,6 +7,7 @@ import subprocess
 import sys
 import textwrap
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch.compiler.config as compiler_config
@@ -18,6 +19,8 @@ from torch.distributed.tensor.parallel import parallelize_module, RowwiseParalle
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -269,6 +272,7 @@ def _current_device_nodes(gm):
     return [n for n in gm.graph.nodes if n.op == "call_function" and n.target is target]
 
 
+@instantiate_parametrized_tests
 class TestCompileOnOneRankDeviceAsParameter(TestCase):
     """Device-as-parameter for the make_fx tracing path used by graph_trainer/CooR.
 
@@ -642,6 +646,457 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             "a tensor on the new current device should reuse the existing compile",
         )
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_cloned_tensor_guard_tracks_current_device_under_coor(self):
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def f(x):
+            return x + 1
+
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            compiled = torch.compile(f, backend="eager")
+            compiled(torch.zeros(1, device="cuda:0"))
+            root = _debug_get_cache_entry_list(f)[0].guard_manager.root
+            cloned_root = root.clone_manager(lambda _: True)
+
+        with torch.cuda.device(1):
+            inputs = {"x": torch.zeros(1, device="cuda:1")}
+            self.assertTrue(cloned_root.check(inputs))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("origin", ("input", "intermediate"))
+    def test_device_passthrough_still_reuses_compile_under_coor(self, origin):
+        # The payoff of the relaxed index guard, measured the only way it shows up:
+        # a recompile count. A tensor's device handed straight to a factory has to
+        # keep serving every rank from one artifact, whether it came off an input or
+        # off an intermediate.
+        #
+        # The inductor tests nearby check that the *generated code* is
+        # device-agnostic, which anything that merely re-pinned the guard would not
+        # change -- only counting frames catches that.
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(x):
+            y = x + 1 if origin == "intermediate" else x
+            return torch.zeros(4, y.shape[1], device=y.device, dtype=y.dtype) + y.sum()
+
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            compiled = torch.compile(f, backend=cnt)
+            compiled(torch.randn(2, 8, device="cuda:0"))
+            before = cnt.frame_count
+        with torch.cuda.device(1):
+            out = compiled(torch.randn(2, 8, device="cuda:1"))
+        self.assertEqual(out.device, torch.device("cuda:1"))
+        self.assertEqual(
+            cnt.frame_count,
+            before,
+            "passing a device to a factory is not an observation and must not guard",
+        )
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_passthrough_custom_backend_tracks_current_device_under_coor(self):
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            return torch.zeros(x.shape[0], device=x.device)
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.ones(1, device="cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.ones(1, device="cuda:1")
+            actual = compiled(x)
+            expected = f(x)
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(actual.device, expected.device)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("origin", ("input", "factory"))
+    def test_device_observations_track_current_device_under_coor(self, origin):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(x):
+            y = torch.zeros(x.shape, device=x.device) if origin == "factory" else x
+            return (
+                y + y.device.index,
+                y.device == torch.device("cuda:1"),
+                torch.device("cuda:1") == y.device,
+                y.device != torch.device("cuda"),
+                y.device,
+            )
+
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            x = torch.zeros(1, device="cuda:0")
+            self.assertEqual(compiled(x), f(x))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("consumer", ("synchronize", "current_stream", "get_device_module"))
+    def test_current_device_consumers_under_coor(self, consumer):
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            if consumer == "synchronize":
+                torch.cuda.synchronize(x.device)
+                return x + 1
+            if consumer == "current_stream":
+                return x + 1, torch.accelerator.current_stream(x.device)
+            module = torch.get_device_module(x.device)
+            return x + (1 if module is torch.cuda else 2)
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.zeros(1, device="cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            if consumer == "synchronize":
+                with patch.object(torch.accelerator, "synchronize") as synchronize:
+                    actual = compiled(x)
+                self.assertEqual(actual, x + 1)
+                self.assertEqual(synchronize.call_args.args, (torch.device("cuda"),))
+            else:
+                self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_device_context_under_coor(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(x):
+            with torch.cuda.device(x.device):
+                return torch.ones(1, device="cuda")
+
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.zeros(1, device="cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_device_context_preserves_type_under_coor(self):
+        def f(x):
+            ctx = torch.cuda.device(x.device)
+            return x + (1 if isinstance(ctx, torch.cuda.device) else 2)
+
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+        def make_context(x):
+            return torch.cuda.device(x.device)
+
+        ctx = torch.compile(make_context, backend="eager", fullgraph=True)(x)
+        self.assertIsInstance(ctx, torch.cuda.device)
+
+        def make_context_across_graph_break(x):
+            ctx = torch.cuda.device(x.device)
+            torch._dynamo.graph_break()
+            return ctx
+
+        ctx = torch.compile(make_context_across_graph_break, backend="eager")(x)
+        self.assertIsInstance(ctx, torch.cuda.device)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_device_context_restores_device_across_graph_break(self):
+        def f(x):
+            with torch.cuda.device(x.device):
+                torch._dynamo.graph_break()
+                torch.cuda.set_device(1)
+                return x + 1
+
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager")
+        with torch.cuda.device(0):
+            x = torch.zeros(1, device="cuda:0")
+            self.assertEqual(compiled(x), x + 1)
+            self.assertEqual(torch.cuda.current_device(), 0)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("stream_kind", ("cuda", "generic"))
+    @parametrize("use_kwarg", (True, False))
+    def test_current_device_stream_constructor_under_coor(self, stream_kind, use_kwarg):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(x):
+            if stream_kind == "cuda":
+                stream = (
+                    torch.cuda.Stream(device=x.device)
+                    if use_kwarg
+                    else torch.cuda.Stream(x.device)
+                )
+            else:
+                stream = (
+                    torch.Stream(device=x.device)
+                    if use_kwarg
+                    else torch.Stream(x.device)
+                )
+            return x + 1, stream
+
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            _, stream = compiled(torch.zeros(1, device="cuda:0"))
+            self.assertEqual(stream.device, torch.device("cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            result, stream = compiled(x)
+            self.assertEqual(result, x + 1)
+            self.assertEqual(stream.device, torch.device("cuda:1"))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize(
+        "origin",
+        (
+            "constructor",
+            "generic_default_constructor",
+            "generic_none_constructor",
+            "generic_bare_constructor",
+            "generic_cpu_constructor",
+            "cuda_default_constructor",
+            "cuda_negative_constructor",
+            "accelerator_current",
+            "cuda_current",
+        ),
+    )
+    @parametrize("attr", ("device", "device_index", "device_index_via_device"))
+    def test_current_device_stream_observation_under_coor(self, origin, attr):
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            if origin == "constructor":
+                stream = torch.Stream(device=x.device)
+            elif origin == "generic_default_constructor":
+                stream = torch.Stream()
+            elif origin == "generic_none_constructor":
+                stream = torch.Stream(device=None)
+            elif origin == "generic_bare_constructor":
+                stream = torch.Stream(device="cuda")
+            elif origin == "generic_cpu_constructor":
+                stream = torch.Stream(device="cpu")
+            elif origin == "cuda_default_constructor":
+                stream = torch.cuda.Stream()
+            elif origin == "cuda_negative_constructor":
+                stream = torch.cuda.Stream(device=-1)
+            elif origin == "accelerator_current":
+                stream = torch.accelerator.current_stream(x.device)
+            else:
+                stream = torch.cuda.current_stream(x.device)
+            observation = (
+                stream.device.index
+                if attr == "device_index_via_device"
+                else getattr(stream, attr)
+            )
+            return x + 1, observation
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.zeros(1, device="cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("stream_kind", ("generic", "cuda"))
+    @parametrize("comparison", ("eq", "ne"))
+    @parametrize("matches_current", (True, False))
+    def test_current_stream_equality_under_coor(
+        self, stream_kind, comparison, matches_current
+    ):
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x, stream):
+            current = (
+                torch.accelerator.current_stream(x.device)
+                if stream_kind == "generic"
+                else torch.cuda.current_stream(x.device)
+            )
+            matches = stream == current if comparison == "eq" else stream != current
+            return x + (1 if matches else 2)
+
+        def make_stream(matches):
+            if stream_kind == "generic":
+                return torch.accelerator.current_stream() if matches else torch.Stream()
+            return torch.cuda.current_stream() if matches else torch.cuda.Stream()
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            x = torch.zeros(1, device="cuda:0")
+            stream = make_stream(matches_current)
+            compiled(x, stream)
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            stream = make_stream(matches_current)
+            self.assertEqual(compiled(x, stream), f(x, stream))
+
+            opposite = make_stream(not matches_current)
+            self.assertEqual(compiled(x, opposite), f(x, opposite))
+
+        self.assertEqual(cnt.frame_count, 2)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("stream_kind", ("generic", "cuda"))
+    def test_nested_current_device_stream_observation_under_coor(self, stream_kind):
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            stream = (
+                torch.Stream(device=x.device)
+                if stream_kind == "generic"
+                else torch.cuda.Stream(device=x.device)
+            )
+            with stream:
+                current = (
+                    torch.accelerator.current_stream(x.device)
+                    if stream_kind == "generic"
+                    else torch.cuda.current_stream(x.device)
+                )
+                return x + current.device.index, current == stream
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.zeros(1, device="cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_predicate_is_data_dependent_under_coor(self):
+        def f(x):
+            return x + (1 if x.device.index == 0 else 2)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(
+                torch.zeros(1, device="cuda")
+            )
+
+        torch._dynamo.reset()
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(f, backend="eager")(x), f(x))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("origin", ("input", "intermediate"))
+    def test_get_device_tracks_current_device_under_coor(self, origin):
+        # get_device() returns an int, and an int has no index-less form. Folding the
+        # tracing rank's index would make every rank sharing the artifact report
+        # cuda:0 -- no guard fails, nothing recompiles, and the answer is just wrong.
+        #
+        # Both assertions matter and neither prejudges the fix. Correctness rules
+        # out folding the index; the single cache entry rules out "fixing" it with
+        # an exact device guard, which would trade a wrong answer for a per-rank
+        # artifact and give up what CooR is for.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def f(x):
+            y = x + 1 if origin == "intermediate" else x
+            return y + y.get_device()
+
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager")
+        with torch.cuda.device(0):
+            compiled(torch.zeros(1, device="cuda:0"))
+
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            self.assertEqual(
+                compiled(x),
+                f(x),
+                "get_device() folded the tracing rank's index, so rank 1 was told "
+                "it is on cuda:0",
+            )
+        self.assertLessEqual(
+            len(_debug_get_cache_entry_list(f)),
+            1,
+            "the traced frame must stay rank-portable; a second cache entry means a "
+            "device guard forced a per-rank recompile",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_get_device_predicate_is_data_dependent_under_coor(self):
+        # Branching on the index is the one thing that cannot be honoured. The value
+        # is unknown until the artifact runs, so under fullgraph=True there is no
+        # answer to fold and the data-dependent error is the correct outcome -- an
+        # error is what should happen, not something to be worked around. Pinned
+        # because the tempting "fix" is to specialize the branch, which silently
+        # hands every rank the tracing rank's answer.
+        def branch(x):
+            return x + (1 if x.get_device() == 0 else 2)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            torch.compile(branch, backend="eager", fullgraph=True)(
+                torch.zeros(1, device="cuda")
+            )
+
+        # Without fullgraph the same predicate is a graph break, not an error, and
+        # the eager continuation answers it against the device actually in use.
+        torch._dynamo.reset()
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(branch, backend="eager")(x), branch(x))
+
+        # A predicate the index bound already settles must still fold. get_device()
+        # is emitted with a non-negative range, so this is provable for every rank
+        # and erroring on it would be over-eager.
+        def provable(x):
+            return x + (1 if x.get_device() >= 0 else 2)
+
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(provable, backend="eager", fullgraph=True)(x), provable(x)
+        )
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_guard_still_rejects_device_type_under_coor(self):
@@ -745,11 +1200,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     def test_inductor_template_no_baked_device(self):
         # A Triton template must not bake the rank-specific device index either.
         #
-        # The device-index drop is applied where TritonKernel builds triton_meta
-        # (codegen/triton.py), but a template's triton_meta is built separately in
-        # select_algorithm.py and calls DeviceProperties.create() on the concrete
-        # device, so it still emits DeviceProperties(..., index=N). The same gap
-        # exists in triton_combo_kernel.py.
+        # Templates build triton_meta separately from TritonKernel, so this guards
+        # the select_algorithm.py construction path.
         #
         # test_inductor_compiles_under_coor does not catch this: _coor_inductor_fn
         # is a factory plus a reduction, which only produces inductor-generated
@@ -760,10 +1212,40 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         compiled = torch.compile(
             self._coor_template_fn, backend="inductor", fullgraph=True
         )
-        a = torch.randn(256, 256, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(256, 256, device="cuda", dtype=torch.bfloat16)
+        # The metadata path is dtype-independent; float32 keeps it covered on pre-SM80.
+        a = torch.randn(256, 256, device="cuda")
+        b = torch.randn(256, 256, device="cuda")
         _, codes = run_and_get_code(compiled, a, b)
-        self._assert_no_baked_device("\n".join(codes))
+        code = "\n".join(codes)
+        self.assertIn("triton_tem_fused", code)
+        self._assert_no_baked_device(code)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch(
+        combo_kernels=True,
+        benchmark_combo_kernel=False,
+        combo_kernel_peak_memory_increase_gb=None,
+        combo_kernel_peak_memory_pct_threshold=None,
+    )
+    def test_inductor_combo_kernel_no_baked_device(self):
+        # Combo kernels build triton_meta separately from ordinary pointwise kernels.
+        # Disable benchmarking and memory gating to isolate that codegen path.
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b):
+            return a.sin(), b.cos()
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        args = (
+            torch.randn(8192, device="cuda"),
+            torch.randn(4096, device="cuda"),
+        )
+        _, codes = run_and_get_code(compiled, *args)
+        code = "\n".join(codes)
+        self.assertIn("combo_grid_meta", code)
+        self._assert_no_baked_device(code)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
