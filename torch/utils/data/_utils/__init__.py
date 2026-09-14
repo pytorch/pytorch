@@ -1,9 +1,8 @@
 r"""Utility classes & functions for data loading. Code in this folder is mostly used by ../dataloader.py.
 
-A lot of multiprocessing is used in data loading, which only supports running
-functions defined in global environment (py2 can't serialize static methods).
-Therefore, for code tidiness we put these functions into different files in this
-folder.
+Data loading uses multiprocessing. Under the 'spawn'/'forkserver' start methods,
+worker functions must be at module scope to be pickled by qualified name, so we
+split them across the files in this folder.
 """
 
 import atexit
