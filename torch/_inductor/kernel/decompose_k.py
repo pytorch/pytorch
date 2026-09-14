@@ -14,6 +14,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
+from ..virtualized import V
 from .bmm import (
     blackwell_ws_persistent_tma_bmm_template,
     BlackwellBMMConfig,
@@ -33,6 +34,55 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
 )
+
+
+def get_cat2_fp32_prologue_sources(input_node) -> tuple[str, str] | None:
+    """Return sources from an explicitly tagged FP32 cat-to-BF16 lowering."""
+    node = input_node
+    while isinstance(node, (ir.TensorBox, ir.StorageBox)):
+        node = node.data
+    if isinstance(node, ir.ComputedBuffer):
+        node = node.data
+    if not isinstance(node, ir.Pointwise):
+        return None
+
+    size = tuple(V.graph.sizevars.simplify(s) for s in node.get_size())
+    if (
+        len(size) != 2
+        or node.get_dtype() != torch.bfloat16
+        or not V.graph.sizevars.statically_known_equals(size[1], 128)
+    ):
+        return None
+
+    source_names = node.annotations.get(ir.CAT2_FP32_TO_BF16_SOURCES)
+    if not (
+        isinstance(source_names, tuple)
+        and len(source_names) == 2
+        and all(isinstance(name, str) for name in source_names)
+        and tuple(node.get_read_names()) == source_names
+    ):
+        return None
+    for source_name in source_names:
+        source = V.graph.try_get_buffer(source_name)
+        if source is None:
+            return None
+        source_size = tuple(V.graph.sizevars.simplify(s) for s in source.get_size())
+        source_stride = tuple(V.graph.sizevars.simplify(s) for s in source.get_stride())
+        if (
+            source.get_dtype() != torch.float32
+            or len(source_size) != 2
+            or not V.graph.sizevars.statically_known_equals(source_size[0], size[0])
+            or not V.graph.sizevars.statically_known_equals(source_size[1], 64)
+            or not V.graph.sizevars.statically_known_equals(source_stride[1], 1)
+            or not V.graph.sizevars.statically_known_equals(
+                source_stride[0], source_size[1]
+            )
+            or not V.graph.sizevars.statically_known_equals(
+                source.get_layout().offset, 0
+            )
+        ):
+            return None
+    return source_names
 
 
 def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
