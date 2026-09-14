@@ -1990,6 +1990,25 @@ def unique_id(name: str, with_uuid: bool = False) -> str:
     return ret
 
 
+def unique_id_unbound_in(prefix: str, scope: dict[str, Any]) -> str:
+    """
+    Mint a name that is free in `scope`, not merely unused by this process.
+
+    unique_id's counter never repeats within a process, but a name installed into
+    a module dict also has to miss whatever a DIFFERENT process baked in there:
+    CompilePackage.install() seeds a captured __builtins_dict___N key into the
+    live module globals and re-installs a loaded entry's __resume_at_* globals,
+    and a process that only loads starts counting from zero, so it regenerates
+    those names and would collide (CleanupHook.create raises). Skip forward past
+    the bound ones; each retry steps over one name already bound under this
+    prefix, so a counter already past them does not retry at all.
+    """
+    name = unique_id(prefix)
+    while name in scope:
+        name = unique_id(prefix)
+    return name
+
+
 COMPILED_FN_PREFIX = "__compiled_fn"
 _COMPILED_FN_NAME_RE = re.compile(
     rf"^{COMPILED_FN_PREFIX}_\d+_"
