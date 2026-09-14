@@ -2,7 +2,15 @@
 #include <ATen/ATen.h>
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <ranges>
 #include <string>
+
+namespace {
+using DictIterator = c10::Dict<int64_t, std::string>::iterator;
+
+static_assert(std::forward_iterator<DictIterator>);
+static_assert(std::ranges::forward_range<c10::Dict<int64_t, std::string>>);
+} // namespace
 
 using std::string;
 using c10::Dict;
