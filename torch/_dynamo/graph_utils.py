@@ -84,11 +84,6 @@ def _detect_cycles(
 # type has one (there is no .mps() or .hpu()).
 _DEVICE_NAMING_METHODS = ("cpu", "cuda", "xpu", "ipu", "mtia")
 
-# The device types SystemInfo.check_compatibility checks a host for; every other
-# recorded string skips that check. Defined here because package.py imports
-# this module.
-_CHECK_GPUS = ("cuda", "xpu")
-
 
 def _graph_device_types(
     graph: Graph | None, _seen: set[Graph] | None = None
@@ -184,15 +179,3 @@ def _graph_device_types(
             if isinstance(sub, GraphModule):
                 devices |= _graph_device_types(sub.graph, _seen)
     return frozenset(devices) - {"meta"}
-
-
-def _collapse_device_types(device_types: frozenset[str]) -> str:
-    """The single device type a package or an AOT artifact records: an
-    accelerator wins over cpu, and naming no device reads as cpu. Among several
-    accelerators one that `SystemInfo.check_compatibility` checks wins, since
-    any other name skips the load check; the rest tie alphabetically.
-    """
-    for device_type in _CHECK_GPUS:
-        if device_type in device_types:
-            return device_type
-    return next((d for d in sorted(device_types) if d != "cpu"), "cpu")

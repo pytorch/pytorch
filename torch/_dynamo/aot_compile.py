@@ -14,8 +14,13 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
-from torch._dynamo.graph_utils import _collapse_device_types, _graph_device_types
-from torch._dynamo.package import FunctionPicklerBase, SerializedCode, SystemInfo
+from torch._dynamo.graph_utils import _graph_device_types
+from torch._dynamo.package import (
+    _collapse_device_types,
+    FunctionPicklerBase,
+    SerializedCode,
+    SystemInfo,
+)
 
 from . import convert_frame
 from .aot_compile_types import (

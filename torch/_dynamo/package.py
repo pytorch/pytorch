@@ -32,11 +32,7 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import (
-    _CHECK_GPUS,
-    _collapse_device_types,
-    _graph_device_types,
-)
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -758,7 +754,7 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
-    CHECK_GPUS = _CHECK_GPUS
+    CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
     def current(cls) -> "SystemInfo":
@@ -824,6 +820,20 @@ class SystemInfo:
                     f"Compile package was created with different GPU: "
                     f"cached={self.gpu_name}, current={other.gpu_name}"
                 )
+
+
+def _collapse_device_types(device_types: frozenset[str]) -> str:
+    """The single device type a package or an AOT artifact records: an
+    accelerator wins over cpu, and naming no device reads as cpu. Among several
+    accelerators one in `SystemInfo.CHECK_GPUS` wins, since any other name skips
+    the load check; the rest tie alphabetically. One string cannot say that a
+    graph needs two accelerators: it records the preferred one, and the load
+    check is for that one.
+    """
+    for device_type in SystemInfo.CHECK_GPUS:
+        if device_type in device_types:
+            return device_type
+    return next((d for d in sorted(device_types) if d != "cpu"), "cpu")
 
 
 @dataclasses.dataclass
@@ -1066,9 +1076,10 @@ class CompilePackage:
                         import_sources=dict(code.import_sources),
                     )
             # The codes come back, so the device they recorded must too, or one
-            # recompile after a reload re-saves the entry narrowed to what that
-            # frame alone named. The collapse is a maximum, so its string seeds
-            # the union without loss.
+            # recompile after a reload re-saves the entry as what that frame
+            # alone named. The collapse is a maximum under one order, so
+            # re-collapsing its string with later frames gives what the full
+            # set would: the re-saved string is never below the loaded one.
             self._device_types = frozenset((dynamo.device_type,))
         else:
             self._add_function(

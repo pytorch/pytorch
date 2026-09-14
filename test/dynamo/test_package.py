@@ -18,7 +18,12 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    _collapse_device_types,
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
@@ -137,6 +142,18 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    def test_collapse_device_types_prefers_an_accelerator(self):
+        # The single string both callers record. Among several accelerators
+        # one SystemInfo.check_compatibility checks wins: alphabetical order
+        # would record "mps" for {"mps", "xpu"}, and a name outside CHECK_GPUS
+        # skips every host check the way the old "cpu" did.
+        self.assertEqual(_collapse_device_types(frozenset()), "cpu")
+        self.assertEqual(_collapse_device_types(frozenset(("cpu",))), "cpu")
+        self.assertEqual(_collapse_device_types(frozenset(("cpu", "cuda"))), "cuda")
+        self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
+        self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
+        self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
