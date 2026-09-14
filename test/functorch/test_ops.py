@@ -2951,8 +2951,7 @@ class TestOperatorsGeneric(TestCase):
 
 instantiate_parametrized_tests(TestOperatorsGeneric)
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
+instantiate_device_type_tests(TestOperators, globals())
 
 if __name__ == "__main__":
     run_tests()
