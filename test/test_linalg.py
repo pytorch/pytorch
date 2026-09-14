@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
@@ -8295,7 +8295,6 @@ class TestLinalgCpu(TestLinalg):
 
 
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
@@ -8310,7 +8309,6 @@ class TestLinalgCpu(TestLinalg):
         expected_rank = torch.tensor([3, 2], device=device)
         self.assertEqual(result.rank, expected_rank)
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_eigh_lwork_lapack(self, device, dtype):
@@ -8319,7 +8317,6 @@ class TestLinalgCpu(TestLinalg):
         y = torch.linalg.eigh(t)
         self.assertEqual(y.eigenvalues.shape, (3000,))
 
-    @onlyCPU
     def test_norm_complexhalf(self, device):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
@@ -8345,7 +8342,6 @@ class TestLinalgCpu(TestLinalg):
                 self.assertEqual(res_out.dtype, torch.half, msg=msg)
                 self.assertEqual(res_out, res_float, msg=msg, exact_dtype=False)
 
-    @onlyCPU
     def test_powsum_dtype_kwarg_1d_reduction(self, device):
         # Test dtype kwarg on CPU with bfloat16 input and float32 computation
         # Tests both the 1D reduction path (explicit conversion) and larger reductions (kernel handles it)
@@ -8372,7 +8368,6 @@ class TestLinalgCpu(TestLinalg):
             self.assertEqual(result.dtype, torch.float32)
             self.assertEqual(result, expected)
 
-    @onlyCPU
     @dtypes(torch.float)
     @parametrize(
         "shape, stride",
@@ -8403,7 +8398,7 @@ class TestLinalgCpu(TestLinalg):
         self.assertIn("aten::mm", op_names)
         self.assertNotIn("aten::bmm", op_names)
 
-    @onlyCPU  # not supported by CUBLAS
+    # not supported by CUBLAS
     def test_blas_mv_large_input(self, device):
         # This would previously fail if the allocated output had NaNs, see:
         # https://github.com/pytorch/pytorch/issues/31663 and [NOTE: cpu_zero]
@@ -8416,7 +8411,6 @@ class TestLinalgCpu(TestLinalg):
 
         self.assertEqual(torch.mv(nm, _m), torch.mv(nm, _m, out=_m_out))
 
-    @onlyCPU
     def test_renorm_ps(self, device):
         # full reduction
         x = torch.randn(5, 5)
@@ -8426,7 +8420,6 @@ class TestLinalgCpu(TestLinalg):
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
             self.assertEqual(res, expected, msg=lambda msg: f"{msg}\nrenorm failed for {p}-norm")
 
-    @onlyCPU
     @dtypes(*floating_and_complex_types())
     def test_linalg_lu_cpu_errors(self, device, dtype):
         # Square tests
@@ -8483,7 +8476,6 @@ class TestLinalgCpu(TestLinalg):
             torch.lu_unpack(LU, pivots)
 
     @skipCPUIfNoLapack
-    @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_torchscript(self, device, dtype):
         from torch.testing._internal.common_utils import random_sparse_pd_matrix
@@ -8503,7 +8495,6 @@ class TestLinalgCpu(TestLinalg):
                      "Scipy not found or older than 1.4.1")
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
-    @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
         """Compare torch and scipy.sparse.linalg implementations of lobpcg
@@ -8667,7 +8658,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 ---(input size: {m:4}, eigenpairs:{k:2}, units: relative error, maxiter={niter:4})---
 ''')
 
-    @onlyCPU
     @parametrize("m", [0, 8, 17])
     @parametrize("k", [0, 16, 32])
     @parametrize("n", [16, 32])
@@ -8712,7 +8702,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-    @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_cpu_unaligned(self, device, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
@@ -8739,7 +8728,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             start = offs[i]
 
     @slowTest
-    @onlyCPU
     @largeTensorTest('12GB', device='cpu')
     def test__int8_mm_large_shape(self, device):
         torch.manual_seed(1)
@@ -8764,7 +8752,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # should pass without segfault
         weight_int8pack_mm(a, b_int8pack, b_scales)
 
-    @onlyCPU
     @parametrize("m", [32, 35, 36, 40, 64])
     @parametrize("k", [32, 35, 36, 40, 64])
     # NOTE: This is intended to cover fp16_gemv_trans in
@@ -8788,7 +8775,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         finally:
             torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.complex64)
     def test_linalg_matrix_exp_no_warnings(self, device, dtype):
@@ -8801,7 +8787,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 tens.imag = torch.matrix_exp(tens.imag)
                 self.assertFalse(len(w))
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_ldl_solve_cpu_errors(self, device, dtype):
