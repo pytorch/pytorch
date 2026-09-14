@@ -1334,8 +1334,33 @@ class TestFlyDSLMXFPMetadata(TestCase):
         derived = mxfp_gemm_derived(mxfp_format, 64, 64, 256, 2, 1, 1)
         self.assertEqual(derived.block_k_bytes, block_k_bytes)
         self.assertEqual(derived.k_halves, 2)
-        with self.assertRaisesRegex(ValueError, "multiple of the MFMA K depth"):
-            mxfp_gemm_derived(mxfp_format, 64, 64, 64, 2, 1, 1)
+
+    @parametrize(
+        "overrides,error",
+        (
+            ({"block_k": 64}, "block_k must be a multiple of the MFMA K depth"),
+            ({"stages": 1}, "stages must be at least 2 for the staged LDS pipeline"),
+            ({"m_waves": 3}, "block_m/block_n must be divisible by m_waves/n_waves"),
+            ({"block_m": 144}, "accumulator repeats exceed the register budget"),
+        ),
+    )
+    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
+    def test_invalid_tile_config(self, overrides, error):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            mxfp_gemm_derived,
+        )
+
+        config = {
+            "block_m": 128,
+            "block_n": 128,
+            "block_k": 128,
+            "stages": 2,
+            "m_waves": 1,
+            "n_waves": 1,
+        }
+        config.update(overrides)
+        with self.assertRaisesRegex(ValueError, error):
+            mxfp_gemm_derived("mxfp4", **config)
 
     @parametrize(
         "mxfp_format,expected_tile_ks",
