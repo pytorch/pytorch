@@ -5805,6 +5805,7 @@ class ComputedBuffer(OperationBuffer):
         finally:
             self.data = old_data
             self.layout = old_layout
+            self.get_default_sizes_body.clear_cache(self)
 
     @staticmethod
     @contextlib.contextmanager

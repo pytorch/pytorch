@@ -3735,6 +3735,7 @@ class SIMDScheduling(BaseScheduling):
             list(node.get_nodes()),
             free_buffers=False,
         )
+        self._codegen_intermediate_hooks(one_pass_kernel, finals)
         self.free_buffers_in_scheduler()
 
     def _codegen_nested_reduction(self, node, plan):
@@ -4478,27 +4479,33 @@ class SIMDScheduling(BaseScheduling):
             free_buffers=False,
         )
 
-        if (
+        self._codegen_intermediate_hooks(kernels[0], kernel_features.scheduler_nodes())
+
+        self.free_buffers_in_scheduler()
+
+    @staticmethod
+    def _codegen_intermediate_hooks(kernel, nodes) -> None:
+        if not (
             V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
             and config.generate_intermediate_hooks
         ):
-            # Not every node in the schedule will actually be live on output;
-            # we can't check dead buffers.
-            live_outs = kernels[0].args.live_output_buffers()
-            for node in kernel_features.scheduler_nodes():
-                name = node.get_name()
-                if name not in live_outs:
-                    continue
-                if node.node is None:
-                    raise AssertionError("expected node.node to not be None")
-                origin_node = node.node.get_origin_node()
-                if origin_node is not None:
-                    counters["inductor"]["intermediate_hooks"] += 1
-                    V.graph.wrapper_code.writeline(
-                        f"run_intermediate_hooks({origin_node.name!r}, {name})"
-                    )
+            return
 
-        self.free_buffers_in_scheduler()
+        # Not every node in the schedule will actually be live on output;
+        # we can't check dead buffers.
+        live_outs = kernel.args.live_output_buffers()
+        for node in nodes:
+            name = node.get_name()
+            if name not in live_outs:
+                continue
+            if node.node is None:
+                raise AssertionError("expected node.node to not be None")
+            origin_node = node.node.get_origin_node()
+            if origin_node is not None:
+                counters["inductor"]["intermediate_hooks"] += 1
+                V.graph.wrapper_code.writeline(
+                    f"run_intermediate_hooks({origin_node.name!r}, {name})"
+                )
 
     def _launch_kernel_and_cleanup(
         self,

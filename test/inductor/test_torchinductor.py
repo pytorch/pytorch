@@ -19417,7 +19417,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         expected = f(x)
         actual, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), x)
-        self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+        self.assertEqual(expected, actual, atol=1e-2, rtol=1e-3)
         code = source_codes[0]
         self.assertIn("ReductionHint.OUTER_NO_SPLIT", code)
         self.assertEqual(code.count("@triton_heuristics.reduction("), 1)
@@ -19450,7 +19450,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual, source_codes = run_and_get_code(
             torch.compile(f, fullgraph=True), x, y, stats
         )
-        self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+        self.assertEqual(expected, actual, atol=1e-2, rtol=1e-3)
         code = source_codes[0]
         self.assertNotIn("ReductionHint.OUTER_NO_SPLIT", code)
         self.assertGreaterEqual(code.count("ReductionHint.OUTER"), 2)
@@ -19467,7 +19467,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual_simple, simple_source_codes = run_and_get_code(
             torch.compile(simple, fullgraph=True), x
         )
-        self.assertEqual(expected_simple, actual_simple, atol=0.125, rtol=0.01)
+        self.assertEqual(expected_simple, actual_simple, atol=1e-2, rtol=1e-3)
         simple_code = simple_source_codes[0]
         self.assertIn("ReductionHint.OUTER_NO_SPLIT", simple_code)
         self.assertEqual(simple_code.count("@triton_heuristics.reduction("), 1)
@@ -19511,14 +19511,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 actual, source_codes = run_and_get_code(
                     torch.compile(f, fullgraph=True), x, y, stats
                 )
-            self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+            self.assertEqual(expected, actual, atol=1e-2, rtol=1e-3)
             plan_outputs.append(actual)
-        self.assertEqual(plan_outputs[0], plan_outputs[1], atol=0.125, rtol=0.01)
+        self.assertEqual(plan_outputs[0], plan_outputs[1], atol=1e-2, rtol=1e-3)
         code = source_codes[0]
         self.assertIn("async_compile.multi_kernel_plan(", code)
         self.assertIn("ReductionHint.OUTER_NO_SPLIT", code)
         self.assertGreaterEqual(code.count("ReductionHint.OUTER"), 3)
         self.assertEqual(code.count("async_compile.triton("), 3)
+        self.assertIn("run_intermediate_hooks(", code)
 
         def multi_output(x, y, stats):
             producer = x.float() * y.float() * torch.rsqrt(stats + 1e-5)
@@ -19531,7 +19532,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             multi_actual, multi_source_codes = run_and_get_code(
                 torch.compile(multi_output, fullgraph=True), x, y, stats
             )
-        self.assertEqual(multi_expected, multi_actual, atol=0.125, rtol=0.01)
+        self.assertEqual(multi_expected, multi_actual, atol=1e-2, rtol=1e-3)
         self.assertEqual(
             multi_source_codes[0].count("async_compile.multi_kernel_plan("), 1
         )
@@ -19563,7 +19564,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ordinary_actual, ordinary_source_codes = run_and_get_code(
             torch.compile(ordinary_outer, fullgraph=True), ordinary_x
         )
-        self.assertEqual(ordinary_expected, ordinary_actual, atol=0.125, rtol=0.01)
+        self.assertEqual(ordinary_expected, ordinary_actual, atol=1e-2, rtol=1e-3)
         ordinary_code = ordinary_source_codes[0]
         self.assertIn("ReductionHint.OUTER", ordinary_code)
         self.assertNotIn("async_compile.multi_kernel_plan(", ordinary_code)
@@ -19577,7 +19578,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         trailing_actual, trailing_source_codes = run_and_get_code(
             torch.compile(trailing_reduction, fullgraph=True), trailing_x
         )
-        self.assertEqual(trailing_expected, trailing_actual, atol=0.125, rtol=0.01)
+        self.assertEqual(trailing_expected, trailing_actual, atol=1e-2, rtol=1e-3)
         self.assertNotIn("async_compile.multi_kernel_plan(", trailing_source_codes[0])
 
         simple_x = torch.randn(5247, 12288, device=self.device, dtype=torch.bfloat16)
@@ -19589,7 +19590,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         simple_actual, simple_source_codes = run_and_get_code(
             torch.compile(simple_large_outer, fullgraph=True), simple_x
         )
-        self.assertEqual(simple_expected, simple_actual, atol=0.125, rtol=0.01)
+        self.assertEqual(simple_expected, simple_actual, atol=1e-2, rtol=1e-3)
         self.assertIn("async_compile.multi_kernel_plan(", simple_source_codes[0])
 
     @config.patch(force_disable_caches=True)

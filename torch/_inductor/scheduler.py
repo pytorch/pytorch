@@ -5009,6 +5009,14 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d FusedStagedReduction nodes are filtered",
                 len(staged_reductions),
             )
+        outer_reduction_plans = [
+            x for x in nodes if isinstance(x, FusedOuterReductionPlans)
+        ]
+        if outer_reduction_plans:
+            log.debug(
+                "ComboKernels: %d FusedOuterReductionPlans nodes are filtered",
+                len(outer_reduction_plans),
+            )
 
         filtered_nodes = [
             x
@@ -5021,6 +5029,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     GroupedSchedulerNode,
                     FusedMixOrderReductions,
                     FusedStagedReduction,
+                    FusedOuterReductionPlans,
                 ),
             )
         ]
@@ -6954,6 +6963,8 @@ class Scheduler:
         for partial_owner in self.nodes:
             if partial_owner in claimed:
                 continue
+            if type(partial_owner) not in (SchedulerNode, FusedSchedulerNode):
+                continue
             partial_candidates = [
                 sn
                 for sn in partial_owner.get_nodes()
@@ -6997,6 +7008,11 @@ class Scheduler:
                     break
                 final_by_partial.append(final)
             if not valid or not final_owners:
+                continue
+            if any(
+                type(owner) not in (SchedulerNode, FusedSchedulerNode)
+                for owner in final_owners
+            ):
                 continue
             if partial_owner in final_owners or any(
                 owner in claimed for owner in final_owners

@@ -1968,8 +1968,8 @@ class triton:
     Config specific to codegen/triton.py
     """
 
-    # Select a bounded two-stage OUTER plan directly for eligible Blackwell
-    # leading-dimension reductions.
+    # With max-autotune, select a bounded two-stage OUTER plan directly for
+    # eligible Blackwell leading-dimension reductions.
     enable_experimental_large_output_outer_reductions = (
         os.environ.get(
             "TORCHINDUCTOR_ENABLE_EXPERIMENTAL_LARGE_OUTPUT_OUTER_REDUCTIONS", "0"
@@ -1977,9 +1977,10 @@ class triton:
         == "1"
     )
 
-    # Benchmark one-pass against one structural OUTER plan at first use. This
-    # takes precedence over direct selection if both experimental flags are set;
-    # unsupported AOT/C++ wrappers then keep the ordinary one-pass reduction.
+    # With max-autotune, benchmark one-pass against one structural OUTER plan at
+    # first use. This takes precedence over direct selection if both experimental
+    # flags are set; unsupported AOT/C++ wrappers then keep the ordinary one-pass
+    # reduction.
     autotune_experimental_large_output_outer_reductions = (
         os.environ.get(
             "TORCHINDUCTOR_AUTOTUNE_EXPERIMENTAL_LARGE_OUTPUT_OUTER_REDUCTIONS",
