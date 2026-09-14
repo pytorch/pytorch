@@ -678,7 +678,10 @@ def get_runner_prefix(
 
     # Fleet selection: the Meta (OSDC) fleet is the default; the lf experiment
     # switches to the Linux Foundation fleet.
-    prefix = LF_LABEL_PREFIX if lf_enabled else META_LABEL_PREFIX
+    if lf_enabled:
+        prefix = LF_LABEL_PREFIX
+    else:
+        prefix = META_CANARY_LABEL_PREFIX if is_canary else META_LABEL_PREFIX
 
     if len(scale_config_experiments) > 1:
         log.error(
