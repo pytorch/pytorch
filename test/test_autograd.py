@@ -15614,7 +15614,7 @@ class _TestAutogradStreamSynchronizationBase(TestCase):
 
 # Although this is written to be generic over all accelerators, non-cuda accelerators
 # are not fully tested since sleep is only supported on cuda.
-class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
+class TestAutogradStreamSynchronizationDevice(_TestAutogradStreamSynchronizationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
@@ -15949,7 +15949,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
                 do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
 
 
-class TestAutogradStreamSynchronizationCudaOnly(_TestAutogradStreamSynchronizationBase):
+class TestAutogradStreamSynchronizationCUDA(_TestAutogradStreamSynchronizationBase):
     hw_classification = HardwareClassification.CUDA
 
     # This test may spuriously fail on non-cuda accelerators (since we won't
@@ -17659,7 +17659,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             self.assertEqual(my_count[0], 9)
 
 
-class TestSelectiveActivationCheckpointCudaOnly(TestCase):
+class TestSelectiveActivationCheckpointCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_flops_and_mem(self):
@@ -19074,7 +19074,7 @@ Outer.apply(x).backward()
             self.fail(error.output.decode("utf-8"))
 
 
-class TestAutogradCudaOnly(TestCase):
+class TestAutogradCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_profiler_emit_nvtx(self, device):
@@ -19150,7 +19150,7 @@ from autograd.test_logging import TestAutogradLogging  # noqa: F401
 instantiate_device_type_tests(
     TestAutogradDeviceType, globals(), except_for=None, allow_xpu=True
 )
-instantiate_device_type_tests(TestAutogradCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(TestAutogradCUDA, globals(), only_for="cuda")
 
 instantiate_device_type_tests(
     TestMultithreadAutogradDevice, globals(), except_for="cpu"
@@ -19159,12 +19159,12 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(TestSACAmbientSavedTensorsHooksDeviceType, globals())
 
 instantiate_device_type_tests(TestAutogradMultipleDispatch, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestAutogradStreamSynchronization, globals())
+instantiate_device_type_tests(TestAutogradStreamSynchronizationDevice, globals())
 instantiate_device_type_tests(
-    TestAutogradStreamSynchronizationCudaOnly, globals(), only_for="cuda"
+    TestAutogradStreamSynchronizationCUDA, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(
-    TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
+    TestSelectiveActivationCheckpointCUDA, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInputGradBuffers, globals())
 

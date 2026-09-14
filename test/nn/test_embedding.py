@@ -2007,7 +2007,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
 
-class TestEmbeddingNNCudaOnly(NNTestCase):
+class TestEmbeddingNNCUDA(NNTestCase):
     hw_classification = HardwareClassification.CUDA
 
     # https://github.com/pytorch/pytorch/issues/192445
@@ -2160,7 +2160,7 @@ torch.cuda.synchronize()
 
 
 instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestEmbeddingNNCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(TestEmbeddingNNCUDA, globals(), only_for="cuda")
 instantiate_parametrized_tests(TestEmbeddingNN)
 
 if __name__ == "__main__":
