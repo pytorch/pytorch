@@ -4946,7 +4946,10 @@ class PyCodeCache:
 
     @classmethod
     def write(cls, source_code: str, extra: str = "") -> tuple[str, str]:
-        from torch._inductor.runtime.sqlite_cache import local_cache, sqlite_cache_enabled
+        from torch._inductor.runtime.sqlite_cache import (
+            local_cache,
+            sqlite_cache_enabled,
+        )
 
         if sqlite_cache_enabled():
             key = get_hash(source_code.strip(), extra)
@@ -4976,7 +4979,10 @@ class PyCodeCache:
         *,
         set_sys_modules: bool | None = None,
     ) -> ModuleType:
-        from torch._inductor.runtime.sqlite_cache import local_cache, sqlite_cache_enabled
+        from torch._inductor.runtime.sqlite_cache import (
+            local_cache,
+            sqlite_cache_enabled,
+        )
 
         if sqlite_cache_enabled():
             # A worker or deserialized graph may hold a previous process's path.

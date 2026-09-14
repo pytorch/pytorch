@@ -12,7 +12,7 @@ python train.py
 ```
 
 Set configuration before starting Python and compiler workers. The database is
-`cache-v1.sqlite3` inside `TORCHINDUCTOR_CACHE_DIR`; when that variable is unset,
+`inductor-cache-v1.sqlite3` inside `TORCHINDUCTOR_CACHE_DIR`; when that variable is unset,
 the existing default cache directory is used. `TORCHINDUCTOR_CACHE_BACKEND=file`
 or an unset backend variable selects the original filesystem behavior. Unknown
 backend names raise an error. Old file entries are not migrated or read by SQLite.
@@ -39,12 +39,43 @@ across hosts on NFS, Lustre, or other distributed filesystems is unsupported.
 SQLite transactions and a 30-second busy timeout coordinate concurrent local
 processes. Each operation closes its connection, so no connection is inherited
 by a worker or shared across threads. The default rollback journal is used; a
-transient `cache-v1.sqlite3-journal` can exist during writes. Database failures are
+transient `inductor-cache-v1.sqlite3-journal` can exist during writes. Database failures are
 reported rather than silently switching to file storage. Corrupt autotune JSON
 continues to be treated as a cache miss.
 
+## Shared filesystems and read-only snapshots
+
+Multiple processes on one node can share a database on local storage. A shared
+filesystem is not made local merely because only one node currently accesses it;
+SQLite still relies on the filesystem's locking and synchronization behavior.
+The backend does not detect filesystem types or certify NFS/Lustre deployments.
+See [SQLite's network-filesystem guidance](https://sqlite.org/useovernet.html).
+
+Lookups open only existing databases, without creating tables or cache files on
+a miss. SQLite can still need writable access to recover a hot rollback journal
+after an interrupted writer. A complete compilation can also write source records,
+autotune results, native files, or reconstructed FX-graph artifacts. Pointing
+`TORCHINDUCTOR_CACHE_DIR` at a read-only directory is therefore unsupported.
+Read-only permissions for one reader also do not prevent another client writing.
+
+For multi-node reuse, stop all writers and close their connections before copying
+the database, or create a consistent snapshot using SQLite's backup API. Publish
+that snapshot on shared storage, then stage a separate writable copy into each
+node's local cache before starting workers. Use node-local temporary storage too.
+Do not copy a live database without its required transactional state, and do not
+merge node copies by overwriting one another. A read-only base with automatic local
+write-through is not implemented. SQLite's `immutable=1` option is deliberately not
+enabled: it disables locking/change detection and requires a guarantee that the
+file cannot change, not just that this process cannot write it.
+
+The filename's `v1` identifies this backend's on-disk schema, not the PyTorch or
+SQLite release. The `inductor-` prefix prevents collisions with Triton's distinct
+schema when both cache roots happen to be the same directory. Earlier experimental
+`cache-v1.sqlite3` files are ignored; entries are rebuilt, and the old file can be
+removed after stopping its users.
+
 To clear SQLite entries, stop all processes using the cache and remove
-`cache-v1.sqlite3` and any associated journal files from the configured cache
+`inductor-cache-v1.sqlite3` and any associated journal files from the configured cache
 directory. Do not remove a journal while a writer is active. Other cache files
 can be cleared separately. `PyCodeCache.cache_clear(purge=True)` also removes
 SQLite source entries corresponding to its loaded modules.
@@ -55,10 +86,10 @@ Run `python benchmarks/dynamo/bench_sqlite_cache.py --entries 5000 --directory /
 to compare 5,000 Python sources and 5,000 autotune records with separate write
 and restart-read processes. One local run measured:
 
-| Backend | Persistent objects | Write seconds | Restart-read seconds | Peak temporary objects |
+| Backend | Persistent objects | Write seconds | Restart-read seconds | Live temporary objects |
 | --- | ---: | ---: | ---: | ---: |
-| File | 11,019 | 0.94 | 0.36 | 0 |
-| SQLite | 1 | 6.44 | 2.38 | 6,020 |
+| File | 11,019 | 0.86 | 0.34 | 0 |
+| SQLite | 1 | 6.87 | 2.42 | 6,020 |
 
 Temporary objects returned to zero after normal exit. Counts exclude containing
 directories and cache classes outside this backend's scope. Timings exclude

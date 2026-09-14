@@ -9,7 +9,9 @@ import os
 import shutil
 import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
+
 
 if TYPE_CHECKING:
     import sqlite3
@@ -26,32 +28,51 @@ def sqlite_cache_enabled() -> bool:
 class SQLiteCache:
     def __init__(self, root: str) -> None:
         self.root = os.path.abspath(root)
-        self.database = os.path.join(self.root, "cache-v1.sqlite3")
+        self.database = os.path.join(self.root, "inductor-cache-v1.sqlite3")
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
+    def _connect(self, *, initialize: bool = True) -> Iterator[sqlite3.Connection]:
         import sqlite3
 
-        os.makedirs(self.root, exist_ok=True)
-        connection = sqlite3.connect(self.database, timeout=30)
+        connection = None
         try:
-            with connection:
-                connection.execute(
-                    "CREATE TABLE IF NOT EXISTS entries ("
-                    "namespace TEXT NOT NULL, key TEXT NOT NULL, data BLOB NOT NULL, "
-                    "PRIMARY KEY (namespace, key)) WITHOUT ROWID"
+            if not initialize:
+                # Open only an existing database, while allowing hot-journal recovery.
+                connection = sqlite3.connect(
+                    Path(self.database).as_uri() + "?mode=rw", uri=True, timeout=30
                 )
+            else:
+                os.makedirs(self.root, exist_ok=True)
+                connection = sqlite3.connect(self.database, timeout=30)
+            with connection:
+                if initialize:
+                    connection.execute(
+                        "CREATE TABLE IF NOT EXISTS entries ("
+                        "namespace TEXT NOT NULL, key TEXT NOT NULL, data BLOB NOT NULL, "
+                        "PRIMARY KEY (namespace, key)) WITHOUT ROWID"
+                    )
                 yield connection
         except sqlite3.Error as error:
             raise RuntimeError(
                 f"SQLite cache failure at {self.database}: {error}. "
-                "Use a local filesystem; clear the cache with all users stopped if it is corrupt."
+                "Use writable local storage for compilation; stop all users before clearing a corrupt cache."
             ) from error
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
 
     def get(self, namespace: str, key: str) -> bytes | None:
-        with self._connect() as connection:
+        if not os.path.exists(self.database):
+            return None
+        with self._connect(initialize=False) as connection:
+            # Another process may have opened the file but not created its schema yet.
+            if (
+                connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'entries'"
+                ).fetchone()
+                is None
+            ):
+                return None
             row = connection.execute(
                 "SELECT data FROM entries WHERE namespace = ? AND key = ?",
                 (namespace, key),

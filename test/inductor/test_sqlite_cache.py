@@ -6,23 +6,24 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.remote_cache import (
+    create_local_cache_backend,
     LocalAutotuneCache,
     LocalCacheBackend,
     SQLiteLocalCacheBackend,
-    create_local_cache_backend,
 )
-from torch._inductor.runtime.sqlite_cache import SQLiteCache, sqlite_cache_enabled
+from torch._inductor.runtime.sqlite_cache import sqlite_cache_enabled, SQLiteCache
+from torch._inductor.test_case import run_tests, TestCase
 
 
-class TestSQLiteCache(unittest.TestCase):
+class TestSQLiteCache(TestCase):
     def setUp(self):
+        super().setUp()
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -50,6 +51,72 @@ class TestSQLiteCache(unittest.TestCase):
         self.assertEqual(self.cache.get("a", "same"), b"updated")
         self.cache.delete("a", "same")
         self.assertIsNone(self.cache.get("a", "same"))
+
+    def test_missing_lookup_does_not_create_storage(self):
+        cache = SQLiteCache(str(self.root / "absent"))
+        self.assertIsNone(cache.get("python", "missing"))
+        self.assertFalse(Path(cache.root).exists())
+
+    def test_database_name_isolated_from_triton(self):
+        other = self.root / "triton-cache-v1.sqlite3"
+        with sqlite3.connect(other) as connection:
+            connection.execute(
+                "CREATE TABLE entries (cache_key TEXT, filename TEXT, data BLOB)"
+            )
+        before = other.read_bytes()
+        self.cache.put("python", "key", b"value")
+        self.assertEqual(self.cache.get("python", "key"), b"value")
+        self.assertEqual(other.read_bytes(), before)
+
+    def test_lookup_during_schema_initialization(self):
+        connection = sqlite3.connect(self.cache.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "CREATE TABLE entries (namespace TEXT, key TEXT, data BLOB)"
+            )
+            self.assertIsNone(self.cache.get("python", "key"))
+            connection.rollback()
+        finally:
+            connection.close()
+        self.cache.put("python", "key", b"value")
+        self.assertEqual(self.cache.get("python", "key"), b"value")
+
+    def test_readonly_lookup_and_connection_error(self):
+        self.cache.put("test", "key", b"value")
+        database = Path(self.cache.database)
+        before = database.read_bytes()
+        original_connect = sqlite3.connect
+
+        def connect(database_uri, **kwargs):
+            self.assertTrue(database_uri.endswith("?mode=rw"))
+            connection = original_connect(database_uri, **kwargs)
+            connection.set_authorizer(
+                lambda action, *args: sqlite3.SQLITE_OK
+                if action
+                in (
+                    sqlite3.SQLITE_SELECT,
+                    sqlite3.SQLITE_READ,
+                    sqlite3.SQLITE_TRANSACTION,
+                )
+                else sqlite3.SQLITE_DENY
+            )
+            return connection
+
+        with mock.patch("sqlite3.connect", side_effect=connect):
+            self.assertEqual(self.cache.get("test", "key"), b"value")
+        database.chmod(0o444)
+        try:
+            self.assertEqual(self.cache.get("test", "key"), b"value")
+        finally:
+            database.chmod(0o600)
+        self.assertEqual(database.read_bytes(), before)
+        self.assertEqual(list(self.root.iterdir()), [database])
+        with mock.patch(
+            "sqlite3.connect", side_effect=sqlite3.OperationalError("cannot open")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "SQLite cache failure"):
+                self.cache.get("test", "key")
 
     def test_default_backend(self):
         os.environ.pop("TORCHINDUCTOR_CACHE_BACKEND")
@@ -143,6 +210,7 @@ for i in range(30):
         script = """
 import os, sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
+c.execute('PRAGMA cache_size=5')
 c.execute('BEGIN IMMEDIATE')
 c.execute('DELETE FROM entries')
 os._exit(0)
@@ -150,6 +218,7 @@ os._exit(0)
         subprocess.run(
             [sys.executable, "-c", script, self.cache.database], check=True, timeout=30
         )
+        self.assertIsNotNone(self.cache.get("test", "0"))
         with sqlite3.connect(self.cache.database) as connection:
             self.assertEqual(
                 connection.execute("PRAGMA integrity_check").fetchone(), ("ok",)
@@ -190,4 +259,4 @@ os._exit(0)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

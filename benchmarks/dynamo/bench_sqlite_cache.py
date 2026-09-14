@@ -3,16 +3,16 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 
 def worker(args):
-    from torch._inductor.codecache import get_hash, get_path, PyCodeCache
     from torch._inductor import remote_cache
+    from torch._inductor.codecache import get_hash, get_path, PyCodeCache
 
     factory = getattr(
         remote_cache, "create_local_cache_backend", remote_cache.LocalCacheBackend
