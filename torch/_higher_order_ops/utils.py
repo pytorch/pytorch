@@ -513,7 +513,9 @@ def _has_potential_branch_input_mutation(gm, inputs, pre_dispatch=False):
     return len(inp_mutation) > 0
 
 
-def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
+def has_potential_input_alias_or_mutation(
+    gm, inputs, pre_dispatch=False, check_input_input_alias=True
+):
     (
         (
             inp_inp_alias_map,
@@ -525,7 +527,7 @@ def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     return (
         any(
             (
-                len(inp_inp_alias_map) > 0,
+                check_input_input_alias and len(inp_inp_alias_map) > 0,
                 len(inp_out_alias_map) > 0,
                 len(out_out_alias_map) > 0,
             )
@@ -590,9 +592,14 @@ def _collect_fake_inputs(inputs):
     return inputs_fake
 
 
-def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
+def _check_alias_and_mutation(
+    graph_module, inputs_fake, name, pre_dispatch, check_input_input_alias=True
+):
     aliases, inp_mutation = has_potential_input_alias_or_mutation(
-        graph_module, inputs_fake, pre_dispatch=pre_dispatch
+        graph_module,
+        inputs_fake,
+        pre_dispatch=pre_dispatch,
+        check_input_input_alias=check_input_input_alias,
     )
     if aliases:
         raise RuntimeError(f"{name} might be aliasing the input or the output!")
