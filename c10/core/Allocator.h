@@ -289,6 +289,10 @@ struct C10_API InefficientStdFunctionContext {
 C10_API void SetAllocator(DeviceType t, Allocator* alloc, uint8_t priority = 0);
 C10_API Allocator* GetAllocator(const DeviceType& t);
 
+// Returns true if ptr is a registered PyTorch allocator (not e.g. a tensor
+// data_ptr).
+C10_API bool isKnownAllocator(Allocator* ptr);
+
 template <DeviceType t>
 struct AllocatorRegisterer {
   explicit AllocatorRegisterer(Allocator* alloc) {
