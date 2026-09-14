@@ -12,7 +12,7 @@ from torch._C import FileCheck
 from torch._inductor import config, inductor_prims, ir, utils
 from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
 from torch._inductor.graph import GraphLowering
-from torch._inductor.kernel.mm import scaled_mm_v2_choice, scaled_mm_v2_constraint
+from torch._inductor.kernel.mm import scaled_mm_v2_constraint
 from torch._inductor.lowering import clone as lowering_clone, register_lowering
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
@@ -623,40 +623,6 @@ class TestFP8Types(TestCase):
             actual = compiled(a, b, scale_a, scale_b, scale_r)
 
         self.assertEqual(expected, actual, rtol=5e-2, atol=0.07)
-
-
-class TestScaledMMNativeChoice(TestCase):
-    def test_v2_native_choice_schema(self):
-        a, b, sa, sb, out = (object() for _ in range(5))
-        kernel = mock.Mock(return_value=out)
-        result = scaled_mm_v2_choice(
-            a,
-            b,
-            sa,
-            sb,
-            recipe_a=4,
-            recipe_b=5,
-            out_dtype=torch.float32,
-            use_fast_accum=False,
-            kernel=kernel,
-            out=out,
-        )
-        self.assertIs(result, out)
-        kernel.assert_called_once_with(
-            a,
-            b,
-            [sa],
-            [4],
-            [0],
-            [sb],
-            [5],
-            [0],
-            None,
-            torch.float32,
-            [],
-            False,
-            out=out,
-        )
 
 
 class TestScaledMMLayoutConstraint(TestCase):
@@ -1400,6 +1366,53 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not IS_SM90, "cuBLAS DeepSeek scaling requires SM90")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 9),
+        "cuBLAS blockwise scaling added in CUDA 12.9",
+    )
+    @config.patch({"max_autotune": True, "max_autotune_gemm_backends": "ATEN"})
+    def test_deepseek_v2_aten_routing(self, device):
+        m, n, k = 384, 128, 1280
+        # Dyadic inputs and integer scales make this product exact in FP32.
+        a = (torch.randint(-4, 5, (m, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        b = (torch.randint(-4, 5, (n, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        sa = torch.randint(1, 5, (m // 128, k // 128), device=device).float()
+        sb = torch.randint(1, 5, (n, k // 128), device=device).float()
+        reference = (
+            a.double() * sa.double().repeat_interleave(128, 0).repeat_interleave(128, 1)
+        ) @ (b.double() * sb.double().repeat_interleave(128, 1)).t()
+        sa = _prepare_blockwise_scale(sa, 128, 128, transposed=False)
+        # V2 RHS scales are [N, K/128], unlike v1's [K/128, N].
+        sb = sb.t().contiguous().t()
+
+        def fn(a, b, sa, sb):
+            return scaled_mm(
+                a,
+                b,
+                sa,
+                ScalingType.BlockWise128x128,
+                sb,
+                ScalingType.BlockWise1x128,
+                output_dtype=torch.float32,
+            )
+
+        expected = fn(a, b.t(), sa, sb)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), a, b.t(), sa, sb
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(actual.double(), reference, atol=0, rtol=0)
+        FileCheck().check("torch.ops.aten._scaled_mm_v2.default(").check_not(
+            "extern_kernels._scaled_mm("
+        ).run(code[0])
 
     @onlyCUDA
     @skipIfRocm
