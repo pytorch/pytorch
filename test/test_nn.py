@@ -9009,6 +9009,25 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(1, 1, 3, 3, 3, device=device)
             torch.ops.aten.reflection_pad3d(inp, (1, 1, 1, 1, 1, 1, 1))
 
+    @parametrize_test("mode,pad", (("reflect", 1024), ("replicate", 1)))
+    @parametrize_test("ndim", (1, 2, 3))
+    @parametrize_test("length", (65537, 95520, 200000))
+    @parametrize_test("batched", (False, True))
+    def test_pad_large_width(self, device, mode, pad, ndim, length, batched):
+        # https://github.com/pytorch/pytorch/issues/196949
+        dtype = torch.bfloat16
+        shape = ((2, 3) if batched else (3,)) + (2,) * (ndim - 1) + (length,)
+        padding = (pad, pad) + (0, 0) * (ndim - 1)
+        x = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        ref_x = x.detach().cpu().double().requires_grad_()
+        out = F.pad(x, padding, mode=mode)
+        ref_out = F.pad(ref_x, padding, mode=mode)
+        self.assertEqual(out, ref_out.to(dtype), atol=0, rtol=0)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        ref_out.backward(grad.cpu().double())
+        self.assertEqual(x.grad, ref_x.grad.to(dtype), atol=0, rtol=0)
+
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad2d_large(self, device):
         shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
