@@ -106,14 +106,14 @@ def _graph_device_types(
         return frozenset()
     _seen.add(graph)
 
-    def _device_type(x: Any) -> str | None:
+    def _device_type(x: object) -> str | None:
         if isinstance(x, torch.device):
             return x.type
         if isinstance(x, torch.Tensor):
             return x.device.type
         return None
 
-    def _device_from_spec(x: Any) -> str | None:
+    def _device_from_spec(x: object) -> str | None:
         # A bare string or index in a device position names a device, and
         # Dynamo emits both (device=0, x.to(0)); a value torch.device rejects
         # names no device rather than aborting the compile, and bool is kept out
@@ -130,19 +130,19 @@ def _graph_device_types(
                 return None
         return _device_type(x)
 
-    def _flatten_meta(node: Node, key: str) -> list[Any]:
+    def _flatten_meta(node: Node, key: str) -> list[object]:
         if key not in node.meta:
             return []
         flat, _ = tree_flatten(node.meta[key])
         return flat
 
-    def _device_specs(node: Node) -> list[Any]:
+    def _device_specs(node: Node) -> list[object]:
         # The only positions this scan reads as devices: a device anywhere else
         # (an autocast string, aten.to.device's positional Device) is not read
         # as one, though such a node's meta names the device it returns. Not
         # every real device position is here: x.type() takes a
         # "torch.cuda.FloatTensor", which torch.device does not parse.
-        specs: list[Any] = []
+        specs: list[object] = []
         if "device" in node.kwargs:
             specs.append(node.kwargs["device"])
         if node.op == "call_method" and node.target == "to" and len(node.args) >= 2:
@@ -173,7 +173,7 @@ def _graph_device_types(
         # body returned rather than the devices it used. A get_attr target is a
         # qualified name, so resolve it one atom at a time as FX does.
         if node.op == "get_attr" and (owner := graph.owning_module) is not None:
-            sub: Any = owner
+            sub: object = owner
             for atom in node.target.split("."):
                 sub = getattr(sub, atom, None)
             if isinstance(sub, GraphModule):

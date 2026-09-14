@@ -2116,14 +2116,19 @@ from user code:
         self.assertEqual(_collapse_device_types(devices), method)
 
     def test_graph_device_types_reads_the_privateuse1_method(self):
-        # rename_privateuse1_backend generates a method named after the backend
-        # (.npu()), so the scan reads the name instead of baking it in. This
-        # process has not renamed it, so the default name is what is exercised.
-        name = torch._C._get_privateuse1_backend_name()
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        graph.call_method(name, (x,))
-        self.assertEqual(_graph_device_types(graph), frozenset((name,)))
+        # generate_methods_for_privateuse1_backend() gives a renamed backend a
+        # method named after it (.npu()), so the scan reads the name rather than
+        # baking in the default. The getter is patched rather than the backend
+        # really renamed: a real rename is once-per-process and would leak into
+        # every later test, and asserting on the unrenamed default name would
+        # pass against a scan that hardcoded it.
+        with patch.object(
+            torch._C, "_get_privateuse1_backend_name", return_value="npu"
+        ):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            graph.call_method("npu", (x,))
+            self.assertEqual(_graph_device_types(graph), frozenset(("npu",)))
 
     def test_graph_device_types_reads_a_bare_device_index(self):
         # Dynamo emits a bare index in a device position (device=0, x.to(0)),
