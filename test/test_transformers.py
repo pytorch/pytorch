@@ -4620,7 +4620,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
         if torch.accelerator.get_memory_info()[1] < 80 * 2**30:
-            self.skipTest("This test requires substatnial GPU memory.")
+            self.skipTest("This test requires substantial GPU memory.")
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 1, 32, 64
         seq_len_q, seq_len_kv = 8192, 8192
