@@ -5698,6 +5698,7 @@ class TestLinalgDevice(TestLinalg):
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3951")
     @skipIfTorchDynamo("Runtime error with torch._C._linalg.linalg_lu_factor")
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
