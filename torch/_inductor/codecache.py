@@ -4946,6 +4946,13 @@ class PyCodeCache:
 
     @classmethod
     def write(cls, source_code: str, extra: str = "") -> tuple[str, str]:
+        from torch._inductor.runtime.sqlite_cache import local_cache, sqlite_cache_enabled
+
+        if sqlite_cache_enabled():
+            key = get_hash(source_code.strip(), extra)
+            cache = local_cache()
+            cache.put("python", key, source_code.encode("utf-8"), overwrite=False)
+            return key, cache.materialize_python(key)
         return write(source_code, "py", extra=extra)
 
     @classmethod
@@ -4956,7 +4963,7 @@ class PyCodeCache:
         *,
         set_sys_modules: bool | None = None,
     ) -> ModuleType:
-        key, path = write(source_code, "py", extra=extra)
+        key, path = cls.write(source_code, extra=extra)
         return cls.load_by_key_path(key, path, set_sys_modules=set_sys_modules)
 
     @classmethod
@@ -4969,6 +4976,11 @@ class PyCodeCache:
         *,
         set_sys_modules: bool | None = None,
     ) -> ModuleType:
+        from torch._inductor.runtime.sqlite_cache import local_cache, sqlite_cache_enabled
+
+        if sqlite_cache_enabled():
+            # A worker or deserialized graph may hold a previous process's path.
+            path = local_cache().materialize_python(key)
         if linemap is None:
             linemap = []
 
@@ -5007,7 +5019,14 @@ class PyCodeCache:
         corresponding on-disk source files.
         """
         if purge:
+            from torch._inductor.runtime.sqlite_cache import (
+                local_cache,
+                sqlite_cache_enabled,
+            )
+
             for mod in cls.modules:
+                if sqlite_cache_enabled():
+                    local_cache().delete("python", getattr(mod, "key"))
                 try:
                     if not mod.__file__:
                         raise AssertionError(f"Module {mod} has no __file__ attribute")

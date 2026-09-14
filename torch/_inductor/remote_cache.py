@@ -131,6 +131,30 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
         return data
 
 
+def create_local_cache_backend() -> RemoteCacheBackend[bytes]:
+    from .runtime.sqlite_cache import sqlite_cache_enabled
+
+    if sqlite_cache_enabled():
+        return SQLiteLocalCacheBackend()
+    return LocalCacheBackend()
+
+
+class SQLiteLocalCacheBackend(RemoteCacheBackend[bytes]):
+    @override
+    def _get(self, key: str) -> bytes | None:
+        from .runtime.sqlite_cache import local_cache
+
+        cache = local_cache()
+        return cache.get("autotune", cache.autotune_key(key))
+
+    @override
+    def _put(self, key: str, data: bytes) -> None:
+        from .runtime.sqlite_cache import local_cache
+
+        cache = local_cache()
+        cache.put("autotune", cache.autotune_key(key), data)
+
+
 class LocalCacheBackend(RemoteCacheBackend[bytes]):
     """
     A local filesystem implementation of the cache backend interface.
@@ -359,7 +383,7 @@ class LocalCache(RemoteCache[JsonDataTy]):
         # Local caches use the per-operation key as the filesystem path. Accept
         # cache_id so they can be constructed through create_cache like remote
         # caches.
-        backend = LocalCacheBackend()
+        backend = create_local_cache_backend()
         serde = RemoteCacheJsonSerde()
         super().__init__(backend, serde)
 
