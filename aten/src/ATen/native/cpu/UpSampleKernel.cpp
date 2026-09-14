@@ -1617,7 +1617,7 @@ void upsample_separable_1d(
   unsigned int weights_precision = 0;
 
   if (input_scalar_type == at::kByte) {
-    // This is a special branch to provide uint8 dtype support for bilinear, bicubic and lanczos modes only
+    // This is a special branch to provide uint8 dtype support for bilinear, trilinear, bicubic and lanczos modes only
     TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4 || F::interp_size == 6);
     int unused = 0;
     std::tie(indices_weights, unused, weights_precision) =
@@ -1669,8 +1669,8 @@ void upsample_separable_1d(
 
 // Generic separable upsampling interpolation kernel for N-d case with anti-aliasing.
 // It also supports antialias=False iff
-// (dtype == uint8 and mode in ("bilinear", "bicubic")): this is used as
-// fallback in these settings when AVX isn't supported.
+// (dtype == uint8 and mode in ("bilinear", "trilinear", "bicubic")). This is
+// used as fallback for bilinear and bicubic when AVX isn't supported.
 template <int out_ndims, typename scale_type, class F>
 void upsample_separable_Nd_kernel_impl(
     const Tensor& output,
@@ -1950,6 +1950,11 @@ void upsample_trilinear3d_kernel_impl(
     std::optional<double> scales_d,
     std::optional<double> scales_h,
     std::optional<double> scales_w) {
+  if (input.dtype() == at::kByte) {
+    return upsample_separable_Nd_kernel_impl<3, scale_t, HelperInterpLinear>(
+      output, input, align_corners, {scales_d, scales_h, scales_w},
+      /*antialias=*/false);
+  }
   if ((_use_channels_last_kernel_3d(output, input))) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "upsample_trilinear3d_channels_last", [&] {
       upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
