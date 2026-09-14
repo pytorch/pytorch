@@ -38,6 +38,7 @@ from torch._dynamo.aot_compile import (
     _GuardScope,
     _names_a_missing_global,
     _resolve_guard_scope,
+    _warn_dropped_module_dispatch,
     AOTCompiledFunction,
     AOTCompiledModel,
     ModelInput,
@@ -486,6 +487,49 @@ class SimpleLinearModule(torch.nn.Module):
 
     def forward(self, x):
         return self.linear(x)
+
+
+class ScaleModule(torch.nn.Module):
+    def forward(self, x):
+        return x * 2
+
+
+class CustomCallModule(torch.nn.Module):
+    def __call__(self, x):
+        return super().__call__(x) + 100
+
+    def forward(self, x):
+        return x * 2
+
+
+# Module-level so its guards serialize: a local class fails the capture with
+# PackageError before the artifact shape it is there to pin can be observed.
+class InheritingLinear(torch.nn.Linear):
+    pass
+
+
+# One hook per per-instance dict nn.Module._call_impl dispatches on, keyed by
+# the wording the dropped-dispatch warning uses for it. The _global_* dicts it
+# also tests are deliberately outside the warning. A hook on the
+# module aot_compile_module was handed is dropped; a FORWARD hook on a CHILD
+# module is traced through nn.Module.__call__ and lands in the graph instead,
+# while a CHILD's backward hook makes fullgraph capture refuse the module
+# outright. All four carry an effect, so a capture that keeps them can be told
+# from one that drops them: the forward ones through the RESULT the redirect's
+# artifact produces, the backward ones through the GRADIENT it produces, which
+# is the only thing they change.
+_HOOK_REGISTRARS = {
+    "forward pre-hooks": lambda m: m.register_forward_pre_hook(
+        lambda mod, args: (args[0] + 1,)
+    ),
+    "forward hooks": lambda m: m.register_forward_hook(lambda mod, args, out: out * 3),
+    "backward pre-hooks": lambda m: m.register_full_backward_pre_hook(
+        lambda mod, grad_output: (grad_output[0] * 10,)
+    ),
+    "backward hooks": lambda m: m.register_full_backward_hook(
+        lambda mod, grad_input, grad_output: (grad_input[0] * 10,)
+    ),
+}
 
 
 GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
@@ -1697,51 +1741,542 @@ from user code:
 
         self.addCleanup(restore)
 
-    def test_aot_compile_module_dispatches_on_global_guard(self):
-        # The default guard_filter_fn drops all global guards, so a caller who
-        # needs one honored has to opt in. Keeping it only works because
-        # AOTCompiledModel.deserialize supplies the traced function's globals.
-        # The capture below leaks Dynamo's minted globals into this module's
-        # dict, so hide them; the load seeds nothing here, since no alias is in
-        # the serialized scope and no guard source names the builtins-dict key.
+    def _check_module_global_guard_dispatch(self, make_mod, set_mode):
+        # Shared body of the module global-guard tests: capture one ModelInput
+        # per value of a guarded global, then check that dispatch follows the
+        # live value -- in the capturing process and, after a
+        # torch._dynamo.reset() plus save/load, on the load path, which has to
+        # resolve a guard scope of its own. Both halves run in this process, and
+        # the scope both resolve to is this module's dict, which the capture
+        # leaks Dynamo's minted globals into, so hide them here rather than leave
+        # them for a sibling test to inherit. The load seeds nothing into it: no
+        # alias is in the serialized scope and no guard source names the
+        # builtins-dict key.
         self._hide_leaked_dynamo_globals()
-        mod = GlobalConfigModule()
+        mod = make_mod()
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with set_mode(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
         model = torch.compile(
             mod,
             fullgraph=True,
             backend="inductor",
             options={"guard_filter_fn": keep_global_guards},
         )
-        x = torch.randn(4, 8)
-
-        expected = {}
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                expected[mode] = mod(x)
-        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
-
         model._aot_compile(
             [
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[set_mode(m)])
+                for m in ("sum", "mean")
             ]
         )
         for mode in ("sum", "mean"):
-            with _set_pooling(mode):
+            with set_mode(mode):
                 self.assertEqual(model(x), expected[mode])
 
         data = model._save_aot_compiled_module()
         torch._dynamo.reset()
         reloaded = torch.compile(
-            GlobalConfigModule(),
+            make_mod(),
             fullgraph=True,
             backend="inductor",
             options={"guard_filter_fn": keep_global_guards},
         )
         reloaded._load_aot_compiled_module(data)
         for mode in ("sum", "mean"):
-            with _set_pooling(mode):
+            with set_mode(mode):
                 self.assertEqual(reloaded(x), expected[mode])
+
+    def test_aot_compile_module_dispatches_on_global_guard(self):
+        # The default guard_filter_fn drops all global guards, so a caller who
+        # needs one honored has to opt in. Keeping it only works because
+        # AOTCompiledModel.deserialize supplies the traced function's globals.
+        self._check_module_global_guard_dispatch(GlobalConfigModule, _set_pooling)
+
+    def test_aot_compile_module_scope_resolves_through_forward_hook(self):
+        # A registered forward hook makes get_traced_fn(model) return
+        # Module._wrapped_call_impl, whose globals are torch/nn/modules/module.py.
+        # The guard scope has to come from what was actually traced, model.forward.
+        #
+        # The hook is deliberately the identity: aot_compile_module traces
+        # model.forward directly and never runs hooks, so a hook with an effect
+        # would simply be dropped from the compiled result. This pins the guard
+        # SCOPE resolution on a hooked module, not hook support.
+        def make_mod():
+            mod = GlobalConfigModule()
+            mod.register_forward_hook(lambda m, i, o: o)
+            return mod
+
+        self._check_module_global_guard_dispatch(make_mod, _set_pooling)
+
+    @parametrize(
+        "hooks",
+        sorted(_HOOK_REGISTRARS),
+        name_fn=lambda hooks: hooks.replace(" ", "_").replace("-", "_"),
+    )
+    def test_aot_compile_module_warns_on_dropped_hooks(self, hooks):
+        # Every per-instance dict _call_impl dispatches on, warned on both
+        # paths: the capture traces model.forward and the load calls the
+        # artifact, so neither runs a hook the loading process registered.
+        def make_mod():
+            mod = ScaleModule()
+            _HOOK_REGISTRARS[hooks](mod)
+            return mod
+
+        def naming_the_hooks(logs):
+            return [
+                line
+                for line in logs.output
+                if f"{hooks} registered" in line and "do NOT run" in line
+            ]
+
+        model = torch.compile(make_mod(), fullgraph=True, backend="eager")
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            model._aot_compile(
+                [ModelInput(args=(torch.randn(3),), kwargs={}, contexts=[])]
+            )
+        self.assertEqual(len(naming_the_hooks(logs)), 1, "\n".join(logs.output))
+        # Both kinds have a capture to redirect to, but the backward one is
+        # conditional: it needs compiled autograd enabled around that trace, and
+        # its artifact cannot be reloaded, so its warning has to say both.
+        redirect = "AOT compile torch.compile(model).forward"
+        self.assertIn(redirect, naming_the_hooks(logs)[0])
+        conditional = "compiled autograd enabled around the capture"
+        if hooks.startswith("backward"):
+            self.assertIn(conditional, naming_the_hooks(logs)[0])
+        else:
+            self.assertNotIn(conditional, naming_the_hooks(logs)[0])
+        # Following the redirect means calling a function, not a module, so both
+        # wordings have to say what its first argument is: a module carrying only
+        # a backward hook gets this warning and no other, and without the clause
+        # a caller who did as it says fails the recorded len(L['args']) == 1
+        # guard on the first call.
+        self.assertIn(
+            "with the module as its first argument", naming_the_hooks(logs)[0]
+        )
+
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded = torch.compile(make_mod(), fullgraph=True, backend="eager")
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            reloaded._load_aot_compiled_module(data)
+        self.assertEqual(len(naming_the_hooks(logs)), 1, "\n".join(logs.output))
+
+    def test_aot_compile_module_warns_one_record_per_group(self):
+        # One record per group rather than per dict, and all three wordings at
+        # once: a module carrying both forward kinds, both backward kinds and a
+        # real __call__ override gets three records, each naming every kind in
+        # its group. Nothing else pins either join, and the parametrization above
+        # registers one kind at a time by construction.
+        mod = CustomCallModule()
+        for register in _HOOK_REGISTRARS.values():
+            register(mod)
+        x = torch.ones(3)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            torch.compile(mod, fullgraph=True, backend="eager")._aot_compile(
+                [ModelInput(args=(x,), kwargs={}, contexts=[])]
+            )
+        self.assertEqual(len(logs.output), 3, "\n".join(logs.output))
+        joined = "\n".join(logs.output)
+        self.assertIn("has forward pre-hooks, forward hooks registered", joined)
+        self.assertIn("has backward pre-hooks, backward hooks registered", joined)
+        self.assertIn("overrides __call__", joined)
+
+    def test_aot_compile_module_warns_on_custom_call(self):
+        # The other thing tracing model.forward skips. No hook dict records it,
+        # so it needs a warning of its own: eager dispatches through
+        # type(model).__call__, the compiled forward does not. Warned on both
+        # paths, like a dropped hook, since the load has its own module to check.
+        def overriding(logs):
+            return [line for line in logs.output if "overrides __call__" in line]
+
+        mod = CustomCallModule()
+        x = torch.ones(3)
+        eager = mod(x)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        self.assertEqual(len(overriding(logs)), 1, "\n".join(logs.output))
+        # The redirect's clause, pinned for this third wording too; the two hook
+        # wordings have it asserted in the dropped-hook warning test above.
+        self.assertIn("with the module as its first argument", overriding(logs)[0])
+        self.assertNotEqual(eager.tolist(), model(x).tolist())
+
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded = torch.compile(CustomCallModule(), fullgraph=True, backend="eager")
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            reloaded._load_aot_compiled_module(data)
+        self.assertEqual(len(overriding(logs)), 1, "\n".join(logs.output))
+
+    def test_aot_compile_module_instance_call_is_not_warned_about(self):
+        # An instance attribute named __call__ is not an override: CPython
+        # resolves a special method on the type, so eager ignores it and the
+        # artifact matches. An instance-first probe would warn that the result
+        # may differ from eager -- on every load as well as the capture -- and
+        # send the caller to a redirect that runs the attribute:
+        # OptimizedModule._initialize reads self._orig_mod.__call__ off the
+        # INSTANCE, so torch.compile(model).forward wraps what the instance dict
+        # holds rather than _wrapped_call_impl.
+        mod = ScaleModule()
+        mod.__call__ = lambda *args, **kwargs: torch.zeros(3)
+        x = torch.ones(3)
+        self.assertEqual(mod(x), x * 2)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        self.assertEqual(model(x), x * 2)
+
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        loading = ScaleModule()
+        loading.__call__ = lambda *args, **kwargs: torch.zeros(3)
+        reloaded = torch.compile(loading, fullgraph=True, backend="eager")
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            reloaded._load_aot_compiled_module(data)
+        self.assertEqual(reloaded(x), x * 2)
+
+    def test_aot_compile_module_fx_call_wrapper_is_not_warned_about(self):
+        # fx.GraphModule reinstalls a wrapper as its per-instance class's
+        # __call__ on every recompile, and recompile always runs from __init__,
+        # so a bare type lookup calls every GraphModule an override -- including
+        # ExportedProgram.module(), a plausible input here. That wrapper only
+        # prettifies tracebacks and delegates to nn.Module.__call__, so eager
+        # runs the hooks and the artifact matches; warning would send the caller
+        # after a non-problem. A subclass that really does define __call__ is
+        # still an override, and the delegation is what finds it there.
+        x = torch.ones(3)
+        gm = torch.fx.symbolic_trace(ScaleModule())
+        self.assertIsNot(type(gm).__call__, torch.nn.Module.__call__)
+        model = torch.compile(gm, fullgraph=True, backend="eager")
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        self.assertEqual(model(x), x * 2)
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded = torch.compile(
+            torch.fx.symbolic_trace(ScaleModule()), fullgraph=True, backend="eager"
+        )
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            reloaded._load_aot_compiled_module(data)
+        self.assertEqual(reloaded(x), x * 2)
+
+        class OverridingGraphModule(torch.fx.GraphModule):
+            def __call__(self, arg):
+                return arg * 3
+
+        overriding = OverridingGraphModule(ScaleModule(), gm.graph)
+        self.assertEqual(overriding(x), x * 3)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            torch.compile(overriding, fullgraph=True, backend="eager")._aot_compile(
+                [ModelInput(args=(x,), kwargs={}, contexts=[])]
+            )
+        overriding_records = [ln for ln in logs.output if "overrides __call__" in ln]
+        self.assertEqual(len(overriding_records), 1, "\n".join(logs.output))
+
+        # A traced module whose __class__ was swapped afterwards, the pattern
+        # parametrize, fully_shard and replicate all use: type(model) is then a
+        # fresh subclass of the class FX wrapped, whose vars still hold that
+        # wrapper, so a probe keyed on type(model) alone calls it an override --
+        # for a module whose eager call is nn.Module's and whose artifact
+        # matches, asserted below.
+        swapped = torch.fx.symbolic_trace(torch.nn.Linear(3, 3))
+        torch.nn.utils.parametrize.register_parametrization(
+            swapped, "weight", torch.nn.Identity()
+        )
+        self.assertIsNot(type(swapped), type(swapped)._wrapped_call.cls)
+        self.assertTrue(issubclass(type(swapped), type(swapped)._wrapped_call.cls))
+        self.assertNotIn("_wrapped_call", vars(type(swapped)))
+        wide = torch.ones(2, 3)
+        eager = swapped(wide)
+        compiled = torch.compile(swapped, fullgraph=True, backend="eager")
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            compiled._aot_compile([ModelInput(args=(wide,), kwargs={}, contexts=[])])
+        self.assertEqual(compiled(wide), eager)
+        # That capture itself installed a second wrapper, on the fresh subclass
+        # this time: serializing the guards pickles the GraphModule, whose
+        # __reduce__ recompiles it onto type(self), and recompile reads
+        # vars(cls), which does not see the inherited _wrapped_call, so the
+        # subclass gets a _WrappedCall of its own, keyed on itself with no
+        # cls_call. Two classes on the MRO now carry one, so skipping a single
+        # class identity leaves the other to be called an override. Neither is
+        # one, and the artifact still answers Linear's forward, so every later
+        # probe in this process -- a load, or this second capture -- has to stay
+        # silent too. (FX's own lookup has the same shape and recurses in eager
+        # on this module, so its eager answer is not something to compare the
+        # artifact against.)
+        for c in type(swapped).__mro__[:2]:
+            self.assertIn("__call__", vars(c))
+            self.assertIs(vars(c)["_wrapped_call"].cls, c)
+            self.assertIsNone(vars(c)["_wrapped_call"].cls_call)
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            compiled._aot_compile([ModelInput(args=(wide,), kwargs={}, contexts=[])])
+        self.assertEqual(compiled(wide), eager)
+
+        # The mirror case: a __call__ assigned onto the per-instance class
+        # afterwards sits exactly where the wrapper did, so a probe that skipped
+        # that class would drop a real override. Eager runs it, the artifact does
+        # not, and it warns.
+        assigned = torch.fx.symbolic_trace(ScaleModule())
+        type(assigned).__call__ = lambda self, arg: arg * 3
+        self.assertEqual(assigned(x), x * 3)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            torch.compile(assigned, fullgraph=True, backend="eager")._aot_compile(
+                [ModelInput(args=(x,), kwargs={}, contexts=[])]
+            )
+        overriding_records = [ln for ln in logs.output if "overrides __call__" in ln]
+        self.assertEqual(len(overriding_records), 1, "\n".join(logs.output))
+
+        # And a wrapper whose cls_call was set no longer delegates to
+        # nn.Module.__call__, so it is an override however it is identified:
+        # dynamo_graph_capture_for_export hooks a hooked root's wrapper that way.
+        # Probed directly, since its forward graph-breaks on the bytecode
+        # flattener before a capture could reach the warning.
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        hooked = ScaleModule()
+        hooked.register_forward_hook(lambda m, i, o: o + 1)
+        exported = dynamo_graph_capture_for_export(hooked)(x)
+        self.assertIsNotNone(type(exported)._wrapped_call.cls_call)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            _warn_dropped_module_dispatch(exported)
+        overriding_records = [ln for ln in logs.output if "overrides __call__" in ln]
+        self.assertEqual(len(overriding_records), 1, "\n".join(logs.output))
+        # And still one when that wrapper sits behind a class owning neither
+        # attribute, the __class__ swap again: the walk passes the fresh
+        # subclass and reaches the wrapper, and cls_call keeps it an override.
+        exported.__class__ = type("Swapped", (type(exported),), {})
+        self.assertNotIn("__call__", vars(type(exported)))
+        self.assertNotIn("_wrapped_call", vars(type(exported)))
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            _warn_dropped_module_dispatch(exported)
+        overriding_records = [ln for ln in logs.output if "overrides __call__" in ln]
+        self.assertEqual(len(overriding_records), 1, "\n".join(logs.output))
+
+        # _LazyGraphModule defers the recompile that installs the wrapper to the
+        # first call or code access, so until then no class on its MRO owns a
+        # __call__ and the probe is silent for want of a wrapper; forced, it is
+        # the ordinary skipped shape.
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        lazy = _LazyGraphModule(ScaleModule(), gm.graph)
+        self.assertTrue(lazy._needs_recompile())
+        owning = [c for c in type(lazy).__mro__ if "__call__" in vars(c)]
+        self.assertEqual(owning, [torch.nn.Module])
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            _warn_dropped_module_dispatch(lazy)
+        self.assertEqual(lazy(x), x * 2)
+        self.assertFalse(lazy._needs_recompile())
+        self.assertIn("__call__", vars(type(lazy)))
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            _warn_dropped_module_dispatch(lazy)
+
+    @parametrize(
+        "hooks",
+        sorted(_HOOK_REGISTRARS),
+        name_fn=lambda hooks: hooks.replace(" ", "_").replace("-", "_"),
+    )
+    def test_aot_compile_module_dropped_hook_advice(self, hooks):
+        # The escape hatch the warning prints, exercised rather than only spelled:
+        # AOT compiling torch.compile(model).forward traces _wrapped_call_impl,
+        # so a forward hook survives there and the artifact reproduces eager. The
+        # same capture keeps a module-level backward hook only with compiled
+        # autograd enabled around it, and that artifact cannot be reloaded, which
+        # is the pair of conditions its warning states.
+        mod = ScaleModule()
+        _HOOK_REGISTRARS[hooks](mod)
+        x = torch.ones(3, requires_grad=True)
+        redirected = torch.compile(mod, fullgraph=True, backend="eager").forward
+        if hooks.startswith("backward"):
+
+            def grad_of(fn):
+                t = torch.ones(3, requires_grad=True)
+                fn(t).sum().backward()
+                return t.grad
+
+            with self.assertRaisesRegex(Unsupported, "Module-level backwards hooks"):
+                redirected.aot_compile(((x,), {}))
+            # The config flag the graph break's own hint names does not reach
+            # here: aot_compile never enters the context that reads it, so only
+            # the context manager lifts the refusal.
+            with torch._dynamo.config.patch(compiled_autograd=True):
+                with self.assertRaisesRegex(
+                    Unsupported, "Module-level backwards hooks"
+                ):
+                    redirected.aot_compile(((x,), {}))
+            enable = torch._dynamo.compiled_autograd._enable
+            with enable(torch.compile(backend="eager")):
+                artifact = redirected.aot_compile(((x,), {}))
+            self.assertNotEqual(grad_of(mod).tolist(), grad_of(ScaleModule()).tolist())
+            self.assertEqual(grad_of(lambda t: artifact(mod, t)), grad_of(mod))
+            # What the warning's second half is about: the artifact saves, and
+            # the reload raises rather than dropping the hook silently.
+            artifact.save_compiled_function(self.path())
+            with open(self.path(), "rb") as f:
+                with self.assertRaisesRegex(AttributeError, "_in_graph_bw_hooks"):
+                    torch.compiler.load_compiled_function(f)
+            return
+        eager = mod(x)
+        self.assertNotEqual(eager.tolist(), ScaleModule()(x).tolist())
+        self.assertEqual(redirected.aot_compile(((x,), {}))(mod, x), eager)
+
+    def test_aot_compile_module_lazy_hook_advice_says_to_wrap_again(self):
+        # LazyModuleMixin registers its initializer as a forward pre-hook, so
+        # every uninitialized lazy module trips the dropped-hook warning -- which
+        # is right, a load onto one really would not materialize its parameters.
+        # The redirect it prints is what does not apply: _initialize pins the
+        # wrapper's forward to _call_lazy_check, which carries no aot_compile,
+        # and the pin outlives the initializer, so materializing in place does
+        # not open it and the wording has to send the caller back to torch.compile.
+        from torch._dynamo.eval_frame import OptimizedModule
+
+        lazy = torch.nn.LazyLinear(8)
+        self.assertTrue(lazy._forward_pre_hooks)
+        wrapper = torch.compile(lazy, fullgraph=True, backend="eager")
+        self.assertIs(wrapper.forward.__func__, OptimizedModule._call_lazy_check)
+        self.assertFalse(hasattr(wrapper.forward, "aot_compile"))
+        lazy(torch.ones(4, 4))
+        self.assertFalse(lazy._forward_pre_hooks)
+        self.assertIs(wrapper.forward.__func__, OptimizedModule._call_lazy_check)
+        self.assertFalse(hasattr(wrapper.forward, "aot_compile"))
+        # Wrapping the materialized module again is what opens the redirect.
+        again = torch.compile(lazy, fullgraph=True, backend="eager")
+        self.assertTrue(hasattr(again.forward, "aot_compile"))
+
+        # Reachable with no lazy capture anywhere: the load inspects the LOADING
+        # process's module, so a donor artifact from any module gets the advice.
+        x = torch.ones(3)
+        donor = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        donor._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = donor._save_aot_compiled_module()
+        torch._dynamo.reset()
+        loading = torch.compile(torch.nn.LazyLinear(8), fullgraph=True, backend="eager")
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            loading._load_aot_compiled_module(data)
+        hooked = [ln for ln in logs.output if "forward pre-hooks registered" in ln]
+        self.assertEqual(len(hooked), 1, "\n".join(logs.output))
+        self.assertIn("carries a lazy initializer", hooked[0])
+        self.assertIn("then wrap it again", hooked[0])
+
+    def test_aot_compile_module_redirect_arg_clause_is_conditional(self):
+        # The redirect's artifact takes the module as its first argument only on
+        # the branch _initialize takes for a user module, which wraps __call__ so
+        # get_traced_fn unwraps to _wrapped_call_impl(self, *args, **kwargs).
+        # Under config.wrap_top_frame -- and for a model.forward dynamo skips --
+        # it wraps the module instead, and wrap_inline's inner closes over it, so
+        # that artifact takes only the forward arguments and the flat clause
+        # would be one argument too many.
+        from torch._dynamo.eval_frame import OptimizedModule
+
+        x = torch.ones(3)
+        mod = ScaleModule()
+        with torch._dynamo.config.patch(wrap_top_frame=True):
+            artifact = torch.compile(
+                mod, fullgraph=True, backend="eager"
+            ).forward.aot_compile(((x,), {}))
+        self.assertEqual(artifact(x), x * 2)
+        with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            artifact(mod, x)
+        # Which of the two a caller gets is decided by the FILE forward is
+        # DEFINED in, so the clause names that rather than stock torch.nn
+        # classes: a subclass that inherits forward is skipped just as a Linear
+        # is, and one that overrides it is not.
+        self.assertTrue(OptimizedModule._forward_has_skip_rule(torch.nn.Linear(3, 3)))
+
+        class OverridingLinear(torch.nn.Linear):
+            def forward(self, arg):
+                return super().forward(arg) * 3
+
+        self.assertTrue(OptimizedModule._forward_has_skip_rule(InheritingLinear(3, 3)))
+        self.assertFalse(OptimizedModule._forward_has_skip_rule(OverridingLinear(3, 3)))
+        # Nor does the clause name a list, since none spells the rule: check_file
+        # consults LEGACY_MOD_INLINELIST before MOD_SKIPLIST, so QuantStub's
+        # forward is inlined although it lives under the skipped torch/ao/.
+        from torch.ao.quantization import QuantStub
+
+        self.assertFalse(OptimizedModule._forward_has_skip_rule(QuantStub()))
+        # And the artifact follows the predicate: the inheriting subclass's takes
+        # only the forward arguments and refuses the module-first call.
+        inheriting = InheritingLinear(3, 3)
+        artifact = torch.compile(
+            inheriting, fullgraph=True, backend="eager"
+        ).forward.aot_compile(((x,), {}))
+        self.assertEqual(artifact(x), inheriting(x))
+        with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            artifact(inheriting, x)
+        # So the clause all three warnings print is qualified rather than flat.
+        torch._dynamo.reset()
+        hooked = ScaleModule()
+        hooked.register_forward_hook(lambda m, i, o: o)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            torch.compile(hooked, fullgraph=True, backend="eager")._aot_compile(
+                [ModelInput(args=(x,), kwargs={}, contexts=[])]
+            )
+        naming = [ln for ln in logs.output if "forward hooks registered" in ln]
+        self.assertEqual(len(naming), 1, "\n".join(logs.output))
+        self.assertIn("takes only the forward arguments", naming[0])
+        self.assertIn("OptimizedModule._forward_has_skip_rule(model)", naming[0])
+        self.assertNotIn("MOD_SKIPLIST", naming[0])
+
+    def test_aot_compile_module_global_hooks_are_not_warned_about(self):
+        # The four _global_* dicts are deliberately outside the warning's list:
+        # an artifact served through OptimizedModule runs them on the wrapper's
+        # own _call_impl, so naming them would be a false positive on the only
+        # module load path in tree.
+        fired = []
+        handle = torch.nn.modules.module.register_module_forward_hook(
+            lambda mod, args, out: fired.append(type(mod).__name__)
+        )
+        self.addCleanup(handle.remove)
+        x = torch.ones(3)
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            reloaded._load_aot_compiled_module(data)
+        fired.clear()
+        self.assertEqual(reloaded(x), x * 2)
+        self.assertEqual(fired, ["OptimizedModule"])
+
+    def test_aot_compile_module_capture_warns_about_the_traced_module(self):
+        # aot_compile_module's caller in eval_frame passes _orig_mod, but a direct
+        # caller may pass the wrapper, so the unwrap happens here rather than only
+        # for the warning: tracing an OptimizedModule.forward reaches eval_frame's
+        # compile_wrapper and dies on set_eval_frame, and the wrapper would also be
+        # stored as the self the recorded type-id guard is checked against, so a
+        # call would match nothing. Asserting the artifact answers covers both.
+        # Warning about the wrapper rather than the module it wraps would report a
+        # __call__ override nobody wrote and stay silent about the dropped hooks.
+        from torch._dynamo.eval_frame import innermost_backend
+        from torch._dynamo.hooks import Hooks
+
+        self._hide_leaked_dynamo_globals()
+        mod = ScaleModule()
+        mod.register_forward_hook(lambda m, i, o: o * 100)
+        wrapper = torch.compile(mod, fullgraph=True, backend="eager")
+        x = torch.randn(3)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            compiled = torch._dynamo.aot_compile.aot_compile_module(
+                wrapper,
+                [ModelInput(args=(x,), kwargs={}, contexts=[])],
+                Hooks(),
+                innermost_backend(wrapper.dynamo_ctx.callback),
+            )
+        # Every record, not just a filtered one: warning about the wrapper emits
+        # exactly one too, and this is the only assertion that the capture is
+        # otherwise quiet. assertEqual drops a non-str msg, so join them.
+        self.assertEqual(len(logs.output), 1, "\n".join(logs.output))
+        self.assertIn("ScaleModule has forward hooks registered", logs.output[0])
+        self.assertIs(compiled.model, mod)
+        # What got traced is ScaleModule.forward, so the artifact answers -- and it
+        # answers without the hook, which eager still runs.
+        self.assertEqual(compiled(x), x * 2)
+        self.assertEqual(mod(x), x * 200)
 
     def _two_input_global_guard_artifact(self, x):
         # A module artifact with a kept global guard and one compiled graph per
@@ -1892,6 +2427,25 @@ from user code:
         self.assertIn("missing from the scope rebuilt", str(ctx.exception))
         self.assertIn("a complete live scope", str(ctx.exception))
         self.assertNotIn("get_traced_fn", str(ctx.exception))
+
+    def test_aot_compile_module_fallback_scope_runs_without_global_guards(self):
+        # The fallback warns rather than refuses, and with no global guard to
+        # satisfy it serves the artifact silently: the warning above fires only
+        # because that artifact kept one, and the rebuilt scope satisfies all zero
+        # of these.
+        x = torch.randn(4, 8)
+        model = torch.compile(GlobalConfigModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            compiled = AOTCompiledModel.deserialize(
+                self._unresolvable_forward_module(), data
+            )
+        result = compiled.compiled_results[0]
+        self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
+        self.assertFalse(result._has_global_guards)
+        self.assertEqual(compiled(x), x.sum(1))
 
     def test_aot_compile_module_deserialize_unwraps_optimized_module(self):
         # An OptimizedModule's forward resolves to a function defined in
