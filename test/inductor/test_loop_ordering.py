@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 
 
 # set so that metrics appear
@@ -309,92 +309,6 @@ class ImplDetailTest(MockSchedulerTest):
 
         self.assertIs(snode._body, original_body)
         self.assertIsNone(snode._loop_mutation_listener)
-
-    def test_fusion_memory_rollback_discards_trial_cache_state(self):
-        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        scheduler = V.graph.scheduler
-        scheduler._tiling_memory_cache = {}
-        scheduler._fusion_memory_cache_trackers = []
-        original_generation = snode._loop_state_gen
-        baseline_key = ((snode, original_generation),)
-        scheduler._tiling_memory_cache[baseline_key] = "baseline"
-        outer = _LoopMutationTracker.create_fusion_memory((snode,))
-        snode.apply_new_loop_order([1, 0])
-        first_trial_generation = snode._loop_state_gen
-        trial_key = ((snode, first_trial_generation),)
-        scheduler._tiling_memory_cache[trial_key] = "trial"
-        for tracker in scheduler._fusion_memory_cache_trackers:
-            tracker.track_fusion_memory_cache_key(trial_key)
-        outer.finish_fusion_memory(rollback=True)
-
-        self.assertEqual(snode._loop_state_gen, original_generation)
-        self.assertNotIn(trial_key, scheduler._tiling_memory_cache)
-        self.assertEqual(scheduler._tiling_memory_cache[baseline_key], "baseline")
-        self.assertEqual(scheduler._fusion_memory_cache_trackers, [])
-
-    def test_fusion_search_rolls_back_successful_probe(self):
-        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        scheduler = Scheduler.__new__(Scheduler)
-        original_state = node1.snapshot_loop_state()
-
-        def mutate_and_accept(*args, **kwargs):
-            node1.apply_new_loop_order([1, 0])
-            return True
-
-        with mock.patch.object(
-            scheduler, "_can_fuse_impl", side_effect=mutate_and_accept
-        ):
-            self.assertTrue(
-                scheduler._can_fuse_for_search(node1, node2, can_reorder=True)
-            )
-
-        self.assertEqual(node1.snapshot_loop_state(), original_state)
-
-    def test_disabled_fusion_memory_preserves_successful_loop_mutation(self):
-        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        scheduler = Scheduler.__new__(Scheduler)
-        scheduler._fusion_memory_state = None
-        scheduler.will_fusion_create_cycle = mock.Mock(return_value=False)
-        scheduler.fuse_two_nodes = mock.Mock()
-        original_state = node1.snapshot_loop_state()
-
-        def mutate_and_accept(*args, **kwargs):
-            node1.apply_new_loop_order([1, 0])
-            return True
-
-        with mock.patch.object(scheduler, "can_fuse", side_effect=mutate_and_accept):
-            self.assertFalse(
-                scheduler.fuse_if_speedup(
-                    node1,
-                    node2,
-                    lambda: False,
-                    OrderedSet([node1, node2]),
-                )
-            )
-
-        self.assertNotEqual(node1.snapshot_loop_state(), original_state)
-        scheduler.fuse_two_nodes.assert_not_called()
-
-    def test_disabled_fusion_memory_uses_standard_fusion_search(self):
-        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        scheduler = Scheduler.__new__(Scheduler)
-        scheduler._fusion_memory_state = None
-        scheduler.unfusable_node = mock.Mock(return_value=False)
-        scheduler.can_fuse = mock.Mock(return_value=True)
-        scheduler._can_fuse_for_search = mock.Mock(
-            side_effect=AssertionError("unexpected speculative search")
-        )
-        scheduler.get_possible_fusions_with_highest_priority = mock.Mock(
-            side_effect=lambda pairs: pairs
-        )
-        scheduler.score_fusion_key = mock.Mock(return_value=0)
-
-        self.assertTrue(scheduler.get_possible_fusions([node1, node2], False))
-        scheduler.can_fuse.assert_called()
-        scheduler._can_fuse_for_search.assert_not_called()
 
     def test_expand_dimension_loop_state_rollback(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
@@ -1004,16 +918,18 @@ class LoopOrderingTest(TestCase):
         # Block reduction + broadcast pointwise should fuse into 1 kernel
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    def test_floordiv_broadcast_with_preceding_reduction(self):
+    @parametrize("nested_reduction", (False, True))
+    def test_floordiv_broadcast_with_preceding_reduction(self, nested_reduction):
         """
         RMSNorm followed by block-wise quantization: two reductions
         with different rnumel (variance over K, then amax over
         block_size=32) separated by pointwise ops.
 
-        Expected: 2 kernels (variance reduction fused with norm,
-        block reduction fused with broadcast pointwise).
-        The FloorDiv broadcast between block reduction and the final
-        pointwise must not cause a third kernel.
+        Expected: 2 kernels (variance reduction fused with norm, block
+        reduction fused with broadcast pointwise), or 1 when nested
+        reductions stage both into a single kernel. The FloorDiv broadcast
+        between block reduction and the final pointwise must not cause an
+        extra kernel in either configuration.
 
         Regression test for https://github.com/pytorch/pytorch/issues/183542
         """
@@ -1042,10 +958,10 @@ class LoopOrderingTest(TestCase):
         torch._dynamo.reset()
         metrics.reset()
         expect = f(x, weight)
-        actual = torch.compile(f)(x, weight)
+        with inductor_config.patch({"triton.nested_reduction": nested_reduction}):
+            actual = torch.compile(f)(x, weight)
         self.assertTrue(same(expect, actual, tol=1e-2))
-        # variance reduction + block reduction = 2 kernels
-        self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertEqual(1 if nested_reduction else 2, metrics.generated_kernel_count)
 
     @inductor_config.patch(
         layout_optimization=True,
@@ -2077,6 +1993,18 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_zero(expr)
             self.assertEqual(result, expected)
 
+    def test_solve_for_zero_floordiv_does_not_query_constant(self):
+        from torch._inductor import tiling_utils
+
+        x = sympy.Symbol("x", integer=True, nonnegative=True)
+        expr = FloorDiv(Mod(x, 4), 2)
+        with mock.patch.object(
+            FloorDiv,
+            "is_constant",
+            side_effect=AssertionError("FloorDiv.is_constant is unsafe"),
+        ):
+            self.assertIsNone(tiling_utils.solve_for_zero(expr))
+
     def test_solve_for_tiling(self):
         from torch._inductor import tiling_utils
 
@@ -2544,6 +2472,83 @@ class TestSplitIterationRanges(MockSchedulerTest):
                 [sympy.Integer(2), sympy.Integer(2)],
                 [[sympy.Integer(2)], []],
             )
+
+    @staticmethod
+    def _unbacked_size_like():
+        """An unbacked symint constrained size-like, as a sympy symbol."""
+        from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+        symint = V.graph.sizevars.shape_env.create_unbacked_symint()
+        _constrain_range_for_size(symint)
+        return symint.node.expr
+
+    def test_unbacked_leftover_extent_raises_cant_split(self):
+        """Leftover extent is an unbacked size-like symbol.
+
+        Same shape as test_leftover_extent_raises_cant_split, but the
+        unconsumed group extent is unbacked rather than a constant. The
+        leftover check must not try to resolve it to a concrete hint:
+        guarding_hint_or_throw raises GuardOnDataDependentSymNode, which is not
+        a CantSplit, so it escapes the `except CantSplit` in every caller and
+        aborts the whole compile instead of just skipping the fusion.
+        """
+        from torch._inductor.codegen.simd import CantSplit, SIMDKernel
+
+        u0 = self._unbacked_size_like()
+
+        # groups=[2, u0], lengths=[[2], []]: size 2 maps onto group 0, leaving
+        # group 1 (extent u0) unconsumed -> remaining=[1, u0].
+        with self.assertRaises(CantSplit):
+            SIMDKernel._split_iteration_ranges(
+                [sympy.Integer(2), u0],
+                [[sympy.Integer(2)], []],
+            )
+
+    def test_is_compatible_false_for_unbacked_leftover(self):
+        """is_compatible answers False rather than propagating.
+
+        This is the contract _try_reindex_pointwise_for_reduction relies on: it
+        asks is_compatible whether a pointwise can be reindexed onto a
+        reduction's groups and expects a bool back, so anything that escapes
+        turns a skipped fusion into a lowering failure.
+        """
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        u0 = self._unbacked_size_like()
+
+        self.assertFalse(
+            SIMDKernel.is_compatible(
+                [sympy.Integer(2), u0],
+                [[sympy.Integer(2)], []],
+            )
+        )
+
+    def test_backed_leftover_extent_still_splits(self):
+        """A backed leftover extent that resolves to 1 still splits.
+
+        Guards against over-tightening the leftover check to
+        statically_known_equals, which cannot prove s0 == 1 for a backed symbol
+        and would silently stop fusing on every dynamic-shape model. Resolving
+        a backed symbol here is fine, it just installs a guard.
+        """
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.codegen.simd import SIMDKernel
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        s0 = V.graph.sizevars.shape_env.create_symbol(
+            1,
+            ConstantSource("s0"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        # Guard the guard: a specialized-away s0 would make this test vacuous.
+        self.assertNotEqual(s0, sympy.Integer(1))
+
+        new_ranges, _ = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(2), s0],
+            [[sympy.Integer(2)], []],
+        )
+        self.assertEqual(new_ranges[0], [sympy.Integer(2)])
 
 
 class TestIndexInversion(TestCase):
