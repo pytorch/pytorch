@@ -6,12 +6,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import socket
 import sys
 import unittest
+from unittest import mock
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -58,3 +60,41 @@ class EtcdServerTest(unittest.TestCase):
             self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()
+
+
+class FindFreePortTest(unittest.TestCase):
+    @staticmethod
+    def _addr():
+        return (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))
+
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo"
+    )
+    @mock.patch("torch.distributed.elastic.rendezvous.etcd_server.socket.socket")
+    def test_find_free_port_falls_back_to_next_addr(
+        self, socket_mock, getaddrinfo_mock
+    ) -> None:
+        # Creating a socket for the first address fails; find_free_port must
+        # move on to the next address instead of raising UnboundLocalError from
+        # closing a socket that was never created.
+        getaddrinfo_mock.return_value = [self._addr(), self._addr()]
+        good_socket = mock.MagicMock()
+        socket_mock.side_effect = [OSError("first attempt failed"), good_socket]
+
+        self.assertIs(find_free_port(), good_socket)
+        good_socket.bind.assert_called_once()
+        good_socket.listen.assert_called_once()
+
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo"
+    )
+    @mock.patch("torch.distributed.elastic.rendezvous.etcd_server.socket.socket")
+    def test_find_free_port_raises_with_cause_when_all_fail(
+        self, socket_mock, getaddrinfo_mock
+    ) -> None:
+        getaddrinfo_mock.return_value = [self._addr()]
+        socket_mock.side_effect = OSError("no socket for you")
+
+        with self.assertRaises(RuntimeError) as cm:
+            find_free_port()
+        self.assertIsInstance(cm.exception.__cause__, OSError)
