@@ -11,6 +11,7 @@ import io
 import multiprocessing as mp
 import os
 import pickle
+import re
 import sys
 import tempfile
 import threading
@@ -695,6 +696,13 @@ class RaisingReprModule(HermeticModule):
 
 
 AOT_POOL_MODE = "sum"
+
+# A dynamic dim on a global is what makes a SHAPE_ENV guard name it -- as a
+# literal G['AOT_DYN_ROWS'] inside a Python lambda, since the default filter
+# keeps that guard and cpp symbolic shape guards are off by default.
+AOT_DYN_ROWS = torch.randn(4, 3)
+torch._dynamo.mark_dynamic(AOT_DYN_ROWS, 0)
+AOT_SUMMED = torch.randn(4, 3)
 
 # Two globals bound to the SAME tensor: make_dupe_guard refuses to relate a local
 # source to a global one, so reading both is what gets a DUPLICATE_INPUT guard
@@ -3460,9 +3468,13 @@ from user code:
         # same shapes, same dtypes, different numbers. And the last resort is
         # itself ordered: it serves the FIRST opted-out result, so a call no
         # artifact guards gets the graph the earliest opted-out ModelInput was
-        # traced for. A scan that skipped opted-out results is not pinned here:
-        # the second pass re-checks them and recovers the graph, so only a false
-        # rejection tells the two apart, which
+        # traced for. A scan that skipped opted-out results is not pinned here,
+        # for two different reasons: in the first case the result that must
+        # serve is the CHECKED one, which the skip never applies to, so [1] is
+        # served by the scan itself; in the second both trees fail on "other"
+        # anyway and the right answer IS the first opted-out result, which the
+        # last resort serves either way. Only a false rejection of an opted-out
+        # tree tells a skipping scan from this one, which
         # test_module_dispatch_rechecks_an_opted_out_result_whose_tree_accepts
         # arranges.
         mod = GlobalConfigModule()
@@ -7501,6 +7513,88 @@ from user code:
             default_loaded = AOTCompiledFunction.deserialize(f.read())
         self.assertEqual(default_loaded(x), expected)
 
+    def test_load_resolves_a_python_shape_guard_against_the_guard_scope(self):
+        # A SHAPE_ENV guard roots at a ShapeEnvSource, which is not global, so the
+        # default filter keeps it, and with enable_cpp_symbolic_shape_guards off it
+        # is a Python lambda rather than a node in the C++ globals tree. Its
+        # G['NAME'] has to resolve where that tree does. The serialized
+        # global_scope never binds a name only the lambda reads (shape_env_sources
+        # is filled from the cpp code parts alone), so a lambda closing over it
+        # raised KeyError on every load, the default one included.
+        def fn(x):
+            return x * 2 + AOT_DYN_ROWS.sum(0)
+
+        x = torch.randn(3)
+        expected = fn(x)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        self.assertTrue(guards_state.shape_code_parts.python_fallback)
+        exprs = guards_state.shape_code_parts.python_code_parts.exprs
+        self.assertTrue(any("G['AOT_DYN_ROWS']" in e for e in exprs), exprs)
+        self.assertNotIn("AOT_DYN_ROWS", guards_state.output_graph.global_scope)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            data = f.read()
+
+        torch._dynamo.reset()
+        self.assertEqual(AOTCompiledFunction.deserialize(data)(x), expected)
+
+        torch._dynamo.reset()
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals={})
+        with self.assertRaisesRegex(RuntimeError, r"'AOT_DYN_ROWS'"):
+            loaded(x)
+
+        # One row trips the range guard the dynamic dim minted, and the failure
+        # has to name that guard: the caller's tensor was checked, not a scope
+        # where the name is unbound.
+        torch._dynamo.reset()
+        short = {"AOT_DYN_ROWS": torch.randn(1, 3)}
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=short)
+        range_guard = r"2 <= G\['AOT_DYN_ROWS'\]\.size\(\)\[0\]"
+        with self.assertRaisesRegex(RuntimeError, range_guard):
+            loaded(x)
+
+    def test_load_python_shape_guard_cannot_pass_on_the_serialized_scope(self):
+        # With a kept global guard the tensor IS in the serialized global_scope, as
+        # a FakeTensor carrying the traced sizes, and a lambda reading that scope
+        # agrees with the artifact whatever the caller binds: a live tensor whose
+        # shape violates the guard passed guard_check. assume_static_by_default
+        # rather than mark_dynamic, because a kept TENSOR_MATCH rejects a marked
+        # tensor on load.
+        def fn(x):
+            return x * 2 + AOT_SUMMED.sum(0)
+
+        x = torch.randn(3)
+        with torch._dynamo.config.patch(assume_static_by_default=False):
+            compiled_fn = torch.compile(
+                fn,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
+        self.assertTrue(guards_state.shape_code_parts.python_fallback)
+        exprs = guards_state.shape_code_parts.python_code_parts.exprs
+        equality = "G['AOT_SUMMED'].size()[1] == L['x'].size()[0]"
+        self.assertIn(equality, exprs)
+        self.assertIn("AOT_SUMMED", guards_state.output_graph.global_scope)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            data = f.read()
+
+        torch._dynamo.reset()
+        wide = {"AOT_SUMMED": torch.randn(4, 5)}
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=wide)
+        with self.assertRaisesRegex(RuntimeError, re.escape(equality)):
+            loaded(x)
+
+        torch._dynamo.reset()
+        tall = {"AOT_SUMMED": torch.randn(7, 3)}
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=tall)
+        self.assertTrue(loaded.guard_check(x))
+
     @parametrize("guard_reads_builtins", (True, False))
     def test_load_disowns_only_a_builtins_key_a_guard_reads(self, guard_reads_builtins):
         # The builtins-dict key a load would seed can already be bound in the
@@ -7725,6 +7819,7 @@ from user code:
         # runs ahead of the snapshot check tells "admitted and left alone" from a
         # seeding that never ran, which the other assertions here cannot.
         hook = CleanupHook.create(caller_scope, builtins_key, chosen)
+        self.addCleanup(CleanupHook.disown, caller_scope, builtins_key)
         loaded = AOTCompiledFunction.deserialize(data, guard_globals=caller_scope)
         hook()
         self.assertTrue(
@@ -8073,6 +8168,7 @@ from user code:
         builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
         self.assertTrue(builtins_key)
         shape_env_sources = guards_state.shape_code_parts.shape_env_sources
+        self.assertEqual(len(additional), 1, f"expected one capture: {additional}")
         (dupe_globals,) = additional
         shape_globals = {get_global_source_name(s) for s in shape_env_sources}
         # Both channels really carry a global, or the two assertions below say
