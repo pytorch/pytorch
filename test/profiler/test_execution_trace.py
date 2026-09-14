@@ -58,7 +58,7 @@ except ImportError:
 Json = dict[str, Any]
 
 
-class TestExecutionTraceGeneric(TestCase):
+class TestExecutionTrace(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def get_execution_trace_root(self, output_file_name) -> Json:
@@ -122,7 +122,7 @@ class TestExecutionTraceGeneric(TestCase):
             raise AssertionError("Expected to find cos node")
 
 
-class TestExecutionTrace(TestCase):
+class TestExecutionTraceDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def payload(self, device, use_device=False):
