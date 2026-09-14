@@ -1849,6 +1849,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4911")
     @requires_gpu_and_triton
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -1988,9 +1989,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         cudnn_version = (
             torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         )
-        prefer_cudnn = (
-            cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
-        )
+        prefer_cudnn = cudnn_version > 91500 and dprops.major in (9, 10)
         if prefer_cudnn and torch.version.cuda and TEST_CUDA:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         else:
@@ -2486,6 +2485,79 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         compiled = torch.compile(Model(budget=0.0).cuda(), backend="aot_eager")
         self.assertEqual(get_act_mem(lambda: compiled(x)), 0)
 
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_region_activation_memory_budget_survives_graph_break(self):
+        from unittest.mock import patch
+
+        import torch._functorch.partitioners as partitioners
+
+        budgets = []
+        choose_saved_values_set = partitioners.choose_saved_values_set
+
+        def record_budget(joint_graph, node_info, memory_budget=1):
+            budgets.append(memory_budget)
+            return choose_saved_values_set(
+                joint_graph, node_info, memory_budget=memory_budget
+            )
+
+        def fn(x, budget):
+            with torch.autograd.graph.region_activation_memory_budget(budget):
+                x = x.sin()
+                torch._dynamo.graph_break()
+                return x.cos()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+
+        with (
+            patch.object(partitioners, "choose_saved_values_set", record_budget),
+            torch._functorch.config.patch(activation_memory_budget=0.9),
+        ):
+            compiled = torch.compile(fn, backend=backend)
+            for budget in (0.0, 0.7, 0.0):
+                x = torch.randn(4, requires_grad=True)
+                compiled(x, budget).sum().backward()
+
+        self.assertEqual(budgets, [0.0, 0.0, 0.7, 0.7])
+
+    def test_region_activation_memory_budget_nested_graph_breaks(self):
+        graphs = []
+
+        def backend(gm, _):
+            graphs.append(gm)
+            return gm.forward
+
+        def fn(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.2):
+                x = x.sin()
+                torch._dynamo.graph_break()
+                with torch.autograd.graph.region_activation_memory_budget(0.7):
+                    x = x.cos()
+                    torch._dynamo.graph_break()
+                    x = x.tan()
+                torch._dynamo.graph_break()
+                x = x + 1
+            torch._dynamo.graph_break()
+            return x * 2
+
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), (x.sin().cos().tan() + 1) * 2)
+        self.assertEqual(
+            [
+                [
+                    torch.fx.traceback._get_memory_budget_annotation(node)
+                    for node in gm.graph.nodes
+                    if node.op in ("call_function", "call_method")
+                ]
+                for gm in graphs
+            ],
+            [[0.2], [0.7], [0.7], [0.2], [None]],
+        )
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_region_activation_memory_budget_per_region(self):
         """Different graphs (separated by a graph break) can have different
@@ -2684,6 +2756,62 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         x = torch.randn(8, 8, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
             cfn(x).backward()
+
+
+class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
+    """Checkpointing the same module at two sibling call sites. See
+    https://github.com/pytorch/pytorch/issues/193194."""
+
+    def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
+        # An unspecialized plain-float module attribute (self.eps), read
+        # inside a torch.utils.checkpoint region that's entered from two
+        # sibling call sites under dynamic shapes, used to hard crash with
+        # AssertionError: lift_tracked_freevar_to_input should not be called
+        # on root SubgraphTracer.
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.eps = 1e-6
+
+            def forward(self, x, extra):
+                out = x * self.eps
+                if extra:
+                    out = out + x
+                return out
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+
+            def forward(self, x):
+                out1 = torch.utils.checkpoint.checkpoint(
+                    self.block, x, False, use_reentrant=False
+                )
+                out2 = torch.utils.checkpoint.checkpoint(
+                    self.block, x, True, use_reentrant=False
+                )
+                return out1 + out2
+
+        model = Model()
+        cnt = CompileCounterWithBackend("aot_eager")
+        # dynamic=True is what unspecializes self.eps (via wrap_symfloat)
+        # rather than specializing it to a constant; it also happens to
+        # cover the two different sequence lengths below with one compile.
+        compiled_model = torch.compile(model, backend=cnt, dynamic=True, fullgraph=True)
+
+        for seq_len in (8, 16):
+            x = torch.randn(2, seq_len, requires_grad=True)
+            expected = model(x)
+            result = compiled_model(x)
+            self.assertEqual(result, expected)
+            # Exercise the AC joint-graph/recompute boundary, where this
+            # issue was originally reported.
+            result.sum().backward()
+
+        # Confirms dynamic shapes were actually exercised: one compile
+        # covering both sequence lengths, not a silent recompile.
+        self.assertEqual(cnt.frame_count, 1)
 
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
@@ -3405,7 +3533,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 
 instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu"
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
 
 

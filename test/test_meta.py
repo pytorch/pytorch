@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     parametrize,
+    instantiate_parametrized_tests,
     xfailIfTorchDynamo,
     skipIfXpu,
 )
@@ -46,8 +47,10 @@ from torch.testing._internal.common_dtype import (
     integral_types,
 )
 from torch.testing._internal.common_methods_invocations import (
-    binary_ufuncs, op_db, foreach_unary_op_db, foreach_binary_op_db,
-    foreach_pointwise_op_db, foreach_reduce_op_db, foreach_other_op_db)
+    binary_ufuncs,
+    foreach_op_db,
+    op_db,
+)
 from torch.testing._internal.opinfo.core import S, SampleInput
 from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
@@ -80,15 +83,6 @@ u8 = torch.uint8
 u16 = torch.uint16
 u32 = torch.uint32
 u64 = torch.uint64
-
-foreach_op_db = (
-    foreach_unary_op_db +
-    foreach_binary_op_db +
-    foreach_pointwise_op_db +
-    foreach_reduce_op_db +
-    foreach_other_op_db
-)
-
 
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
@@ -1761,6 +1755,18 @@ class TestMeta(TestCase):
                 self._norm_backwards_test_helper(torch.ops.aten.native_group_norm_backward,
                                                  args, output_mask, expected_shapes)
 
+    def test_group_norm_channels_last(self):
+        input = torch.empty((2, 32, 8, 8), device="meta").contiguous(
+            memory_format=torch.channels_last
+        )
+        output, mean, rstd = torch.native_group_norm(input, None, None, 2, 32, 64, 4, 1e-5)
+        self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
+
+        grad_input, _, _ = torch.ops.aten.native_group_norm_backward(
+            torch.empty_like(output), input, mean, rstd, None, 2, 32, 64, 4, (True, False, False)
+        )
+        self.assertTrue(grad_input.is_contiguous(memory_format=torch.channels_last))
+
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))
     def test_batch_norm_backward(self, output_mask):
@@ -2202,6 +2208,32 @@ class TestMeta(TestCase):
         self.assertEqual(cpu_output_dtype, meta_output_dtype)
         self.assertEqual(cpu_logsumexp_dtype, meta_logsumexp_dtype)
 
+    def test_flash_attention_mixed_head_dim_metadata(self):
+        q_bshd = torch.empty(1, 128, 2, 192, device="meta", dtype=torch.float16)
+        k_bshd = torch.empty_like(q_bshd)
+        v_bshd = torch.empty(1, 128, 2, 128, device="meta", dtype=torch.float16)
+        q, k, v = (tensor.transpose(1, 2) for tensor in (q_bshd, k_bshd, v_bshd))
+
+        output = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[0]
+        self.assertEqual(output.shape, v.shape)
+        self.assertEqual(output.stride(), v.stride())
+
+        expanded_q = q[:1, :1].expand(2, 4, -1, -1)
+        expanded_k = k[:1, :1].expand(2, 4, -1, -1)
+        expanded_v = v[:1, :1].expand(2, 4, -1, -1)
+        output = torch.ops.aten._scaled_dot_product_flash_attention(
+            expanded_q, expanded_k, expanded_v
+        )[0]
+        self.assertEqual(output.shape, expanded_v.shape)
+        self.assertEqual(output.stride(), (16384, 32768, 128, 1))
+
+        output = torch.ops.aten._flash_attention_forward(
+            q_bshd, k_bshd, v_bshd, None, None, 128, 128, 0.0, False, False
+        )[0]
+        self.assertEqual(output.shape, v_bshd.shape)
+        self.assertEqual(output.stride(), v_bshd.stride())
+
+
 class TestMetaKernelConv(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_convolution_backward_meta_kernel_channels_last(self):
@@ -2255,7 +2287,45 @@ class TestMetaKernelConv(TestCase):
 
 
 
+@instantiate_parametrized_tests
 class TestMetaKernelRegistrations(TestCase):
+    @parametrize("shift", ["lshift", "rshift"])
+    @parametrize("other_kind", ["Scalar", "Tensor"])
+    def test_shift_out_symbolic_fake_tensor(self, shift, other_kind):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        op_packet = getattr(torch.ops.aten, f"__{shift}__")
+        functional = getattr(op_packet, other_kind)
+        out_op = getattr(op_packet, f"{other_kind}_out")
+        with FakeTensorMode(shape_env=shape_env):
+            size = shape_env.create_unbacked_symint()
+            inp = torch.empty(size, dtype=torch.int32)
+            out = torch.empty(size, dtype=torch.int32)
+            other = 16 if other_kind == "Scalar" else torch.empty(size, dtype=torch.int32)
+            functional_result = functional(inp, other)
+            result = out_op(inp, other, out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(result.shape, functional_result.shape)
+        self.assertEqual(result.stride(), functional_result.stride())
+        self.assertEqual(result.dtype, functional_result.dtype)
+        self.assertEqual(result.layout, functional_result.layout)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shift", ["lshift", "rshift"])
+    @parametrize("other_kind", ["Scalar", "Tensor"])
+    def test_shift_out_dtype_mismatch(self, shift, other_kind):
+        op_packet = getattr(torch.ops.aten, f"__{shift}__")
+        op = getattr(op_packet, f"{other_kind}_out")
+        inp = torch.empty(3, dtype=torch.int32, device="meta")
+        out = torch.empty(0, dtype=torch.float32, device="meta")
+        other = 1 if other_kind == "Scalar" else torch.empty(3, dtype=torch.int32, device="meta")
+
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            op(inp, other, out=out)
+
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_aminmax_out_dtype_mismatch(self):
         inp = torch.rand(10, 10, device="meta")

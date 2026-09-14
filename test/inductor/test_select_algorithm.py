@@ -36,13 +36,13 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
+    MI300_ARCH,
     skipIfRocmArch,
-    skipIfXpu,
-    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import (
@@ -322,7 +322,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184490")
     @patches
     def test_mm_plus_mm(self):
         @torch.compile
@@ -339,8 +338,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    # TODO: fix accuracy failure of the triton template on XPU.
-    # and enable this test case.
     @patches
     def test_mm_plus_mm2(self):
         @torch.compile
@@ -372,6 +369,43 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
+    @patches
+    @inductor_config.patch(max_autotune_gemm_backends="TRITON")
+    def test_mm_plus_mm_xpu_ascending_k_loop(self):
+        # Regression: triton-xpu miscompiles descending-K loops
+        # (range(K1, 0, -BLOCK_K)) when the K loop runs more than one iteration,
+        # so XPU must render both mm_plus_mm K loops ascending.
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        a = torch.randn(512, 512, device=GPU_TYPE)
+        b = torch.randn(512, 512, device=GPU_TYPE)
+        c = torch.randn(512, 512, device=GPU_TYPE)
+        d = torch.randn(512, 512, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(foo), a, b, c, d)
+        code = code[0]
+        # K1 is the mm_plus_mm template's K variable (plain mm uses K), so its
+        # presence proves the fused template was selected and that it ascended.
+        self.assertIn("tl.cdiv(K1, BLOCK_K)", code)
+        FileCheck().check_not("range(K1, 0, -").run(code)
+
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
+    @patches
+    @inductor_config.patch(max_autotune_gemm_backends="TRITON")
+    def test_bmm_xpu_ascending_k_loop(self):
+        # Same regression guard for bmm (also used by baddbmm). K=512 keeps the
+        # K loop multi-iteration for every admissible BLOCK_K (< 128).
+        def foo(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.randn(2, 128, 512, device=GPU_TYPE)
+        b = torch.randn(2, 512, 128, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(foo), a, b)
+        code = code[0]
+        self.assertIn("triton_tem_fused_bmm", code)
+        FileCheck().check_not("range(K, 0, -").run(code)
 
     @patches
     def test_mm_dup_args(self):
@@ -854,6 +888,12 @@ class TestExternKernelCaller(TestCase):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @skipIfRocmArch(MI200_ARCH)
+    # gfx942: the 128x128x64 / 8-warp Triton candidate is miscompiled by the AMD
+    # block-pingpong schedule (LDS race, stale-by-one-BLOCK_K A operands), so the
+    # autotune correctness check fails intermittently; the compile-worker pool
+    # does not forward TRITON_HIP_USE_BLOCK_PINGPONG, so it cannot be disabled
+    # per test. https://github.com/triton-lang/triton/issues/11696
+    @skipIfRocmArch(MI300_ARCH)
     @patches
     def test_extern_kernel_benchmark_valid_timing(self):
         def fn(a, b):
@@ -872,17 +912,7 @@ class TestExternKernelCaller(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @requires_gpu()
-    def test_extern_kernel_benchmark_request_variations(self):
-        """
-        Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
-        different configurations:
-        - With has_out_variant=True
-        - When out is None (tensors created from metadata)
-        - With profile_bandwidth_with_do_bench_using_profiling enabled
-        - When len(args) is 0
-        """
-
+    def _mm_tensor_metas(self):
         input_meta = [
             TensorMeta(
                 device=torch.device(GPU_TYPE),
@@ -906,6 +936,21 @@ class TestExternKernelCaller(TestCase):
             strides=(64, 1),
             offset=0,
         )
+        return input_meta, output_meta
+
+    @requires_gpu()
+    def test_extern_kernel_benchmark_request_variations(self):
+        """
+        Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
+        different configurations:
+        - With has_out_variant=True
+        - When out is None (tensors created from metadata)
+        - When len(args) is 0
+
+        The profile_bandwidth_with_do_bench_using_profiling variation lives in
+        test_extern_kernel_benchmark_request_with_profiling, which needs Kineto.
+        """
+        input_meta, output_meta = self._mm_tensor_metas()
 
         # Test 1: has_out_variant=True with out=None and len(args)==0
         # This should call super().benchmark() which creates tensors from metadata
@@ -956,8 +1001,20 @@ class TestExternKernelCaller(TestCase):
         expected = torch.mm(a, b)
         torch.testing.assert_close(out, expected, atol=1e-4, rtol=1e-4)
 
-        # Test 4: profile_bandwidth_with_do_bench_using_profiling enabled
-        # with has_out_variant=False and len(args) > 0
+    @requires_gpu()
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_extern_kernel_benchmark_request_with_profiling(self):
+        """
+        ExternKernelBenchmarkRequest.benchmark with
+        profile_bandwidth_with_do_bench_using_profiling enabled, has_out_variant=False
+        and len(args) > 0.
+
+        do_bench_using_profiling times the kernel by capturing device events through
+        the profiler, so a build without Kineto falls back to the legacy profiler and
+        cannot run this path.
+        """
+        input_meta, output_meta = self._mm_tensor_metas()
+
         with config.patch(profile_bandwidth_with_do_bench_using_profiling=True):
             a = torch.randn(64, 64, device=GPU_TYPE)
             b = torch.randn(64, 64, device=GPU_TYPE)
@@ -1233,6 +1290,44 @@ class TestTemplateRender(TestCase):
             for kernel in template_kernels
         )
 
+    @requires_triton()
+    def test_jit_lines_preserves_hip_options(self):
+        kernel = unittest.mock.MagicMock()
+        kernel.use_jit = False
+        kernel.args.python_argdefs.return_value = ([], [], [], [])
+        kernel.index_dtype = "tl.int32"
+        kernel.output_node.get_device.return_value = torch.device("cuda")
+        kernel.meta = {
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 0,
+            "kpack": 1,
+        }
+        kernel.triton_meta = None
+        kernel.inductor_meta_common.return_value = {}
+        kernel.num_stages = 1
+        kernel.num_warps = 4
+        kernel.num_consumer_groups = 0
+        kernel.num_buffers_warp_spec = 0
+
+        with patch.object(
+            select_algorithm.DeviceProperties,
+            "create",
+            return_value=unittest.mock.MagicMock(),
+        ):
+            TritonTemplateKernel.jit_lines(kernel)
+
+        self.assertEqual(
+            {
+                key: kernel.triton_meta[key]
+                for key in ("matrix_instr_nonkdim", "waves_per_eu", "kpack")
+            },
+            {
+                "matrix_instr_nonkdim": 16,
+                "waves_per_eu": 0,
+                "kpack": 1,
+            },
+        )
+
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
@@ -1365,12 +1460,10 @@ class TestTemplateRender(TestCase):
                 (large_capture,),
             )
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
-    )
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
     def test_external_template_prologue_epilogue_fusion(self):
         """
         Tests prologue fusion, epilogue fusion, and extra inputs through the
