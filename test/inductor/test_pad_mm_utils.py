@@ -3,6 +3,7 @@ import operator
 from unittest import mock
 
 import torch
+from torch._inductor import config as inductor_config
 from torch._inductor.fx_passes.pad_mm import (
     _padding_bench_fn,
     _padding_plan_result_decoder_factory,
@@ -12,16 +13,16 @@ from torch._inductor.fx_passes.pad_mm import (
     addmm_replace,
     bmm_replace,
     FORCE_PADDING,
-    get_normal_padding_plans,
     get_non_view_def,
+    get_normal_padding_plans,
     get_padding_lengths,
     K_N_PADDING,
     K_PADDING,
     M_N_PADDING,
     M_PADDING,
     mm_replace,
-    NO_PADDING,
     N_PADDING,
+    NO_PADDING,
     pad_addmm,
     pad_bmm,
     pad_mm,
@@ -29,7 +30,6 @@ from torch._inductor.fx_passes.pad_mm import (
     should_pad_addmm,
     should_pad_bench_key,
 )
-from torch._inductor import config as inductor_config
 from torch._inductor.runtime.caching import encoders
 from torch._inductor.test_case import run_tests, TestCase
 
@@ -83,9 +83,7 @@ class PadMMUtilsTest(TestCase):
         # leading stride is not 16-byte aligned.
         transposed = torch.empty(4096, 1157, dtype=dtype).t()
         self.assertEqual(
-            get_normal_padding_plans(
-                transposed, mat2_n_tail, torch.ops.aten.mm
-            ),
+            get_normal_padding_plans(transposed, mat2_n_tail, torch.ops.aten.mm),
             (NO_PADDING, N_PADDING, M_N_PADDING),
         )
 
@@ -171,9 +169,7 @@ class PadMMUtilsTest(TestCase):
             FORCE_PADDING,
         ):
             lengths = get_padding_lengths(mat1, mat2, torch.ops.aten.addmm, plan)
-            torch.testing.assert_close(
-                pad_addmm(bias, mat1, mat2, *lengths), expected
-            )
+            torch.testing.assert_close(pad_addmm(bias, mat1, mat2, *lengths), expected)
 
     def test_selected_plan_is_carried_into_replacement(self):
         mat1 = torch.randn(17, 33)
@@ -258,9 +254,7 @@ class PadMMUtilsTest(TestCase):
                 return_value=("cuda:0", "B200", "sm_100"),
             ),
         ):
-            first_key = should_pad_bench_key(
-                match, mat1, mat2, torch.ops.aten.mm
-            )
+            first_key = should_pad_bench_key(match, mat1, mat2, torch.ops.aten.mm)
             first_encoded = encoders.should_pad_params_encoder(
                 match, mat1, mat2, torch.ops.aten.mm
             )
@@ -274,9 +268,7 @@ class PadMMUtilsTest(TestCase):
                 return_value=("cuda:0", "H100", "sm_90"),
             ),
         ):
-            second_key = should_pad_bench_key(
-                match, mat1, mat2, torch.ops.aten.mm
-            )
+            second_key = should_pad_bench_key(match, mat1, mat2, torch.ops.aten.mm)
             second_encoded = encoders.should_pad_params_encoder(
                 match, mat1, mat2, torch.ops.aten.mm
             )
@@ -296,9 +288,7 @@ class PadMMUtilsTest(TestCase):
                 mock.patch(
                     "torch._inductor.fx_passes.pad_mm.can_pad", return_value=True
                 ),
-                mock.patch(
-                    "torch._inductor.fx_passes.pad_mm._should_pad"
-                ) as select,
+                mock.patch("torch._inductor.fx_passes.pad_mm._should_pad") as select,
             ):
                 self.assertTrue(
                     should_pad(
@@ -342,17 +332,13 @@ class PadMMUtilsTest(TestCase):
                 mock.patch(
                     "torch._inductor.fx_passes.pad_mm.set_cached_base_mm_benchmark_time"
                 ),
-                mock.patch(
-                    "torch._inductor.fx_passes.pad_mm.set_cached_padding_plan"
-                ),
+                mock.patch("torch._inductor.fx_passes.pad_mm.set_cached_padding_plan"),
                 mock.patch(
                     "torch._inductor.fx_passes.pad_mm._should_run_pad_autoheuristic",
                     return_value=False,
                 ),
             ):
-                return _select_padding_plan_uncached(
-                    match, mat1, mat2, op, input
-                )
+                return _select_padding_plan_uncached(match, mat1, mat2, op, input)
 
         self.assertEqual(
             select(
@@ -505,9 +491,7 @@ class PadMMUtilsTest(TestCase):
             mock.patch(
                 "torch._inductor.fx_passes.pad_mm.set_cached_base_mm_benchmark_time"
             ),
-            mock.patch(
-                "torch._inductor.fx_passes.pad_mm.set_cached_padding_plan"
-            ),
+            mock.patch("torch._inductor.fx_passes.pad_mm.set_cached_padding_plan"),
             mock.patch(
                 "torch._inductor.fx_passes.pad_mm._should_run_pad_autoheuristic",
                 return_value=True,
@@ -544,9 +528,7 @@ class PadMMUtilsTest(TestCase):
                 "torch._inductor.fx_passes.pad_mm.get_cached_padding_plan",
                 return_value=None,
             ),
-            mock.patch(
-                "torch._inductor.fx_passes.pad_mm.set_cached_padding_plan"
-            ),
+            mock.patch("torch._inductor.fx_passes.pad_mm.set_cached_padding_plan"),
             mock.patch(
                 "torch._inductor.fx_passes.pad_mm._should_run_pad_autoheuristic",
                 return_value=True,
@@ -575,9 +557,7 @@ class PadMMUtilsTest(TestCase):
         bias = torch.randn(65)
 
         with (
-            mock.patch(
-                "torch._inductor.fx_passes.pad_mm.can_pad", return_value=True
-            ),
+            mock.patch("torch._inductor.fx_passes.pad_mm.can_pad", return_value=True),
             mock.patch(
                 "torch._inductor.kernel.mm_common._use_small_mm_pointwise",
                 return_value=False,
@@ -628,9 +608,7 @@ class PadMMUtilsTest(TestCase):
         match.output_node.return_value.meta = {}
         _selected_padding_plan.set(FORCE_PADDING)
         with (
-            mock.patch(
-                "torch._inductor.fx_passes.pad_mm.can_pad", return_value=True
-            ),
+            mock.patch("torch._inductor.fx_passes.pad_mm.can_pad", return_value=True),
             mock.patch(
                 "torch._inductor.kernel.mm_common._use_small_mm_pointwise",
                 return_value=False,
@@ -663,9 +641,7 @@ class PadMMUtilsTest(TestCase):
                 "torch._inductor.fx_passes.pad_mm.should_exclude_padding_time",
                 return_value=False,
             ),
-            mock.patch(
-                "torch._inductor.fx_passes.pad_mm.get_do_bench"
-            ) as get_do_bench,
+            mock.patch("torch._inductor.fx_passes.pad_mm.get_do_bench") as get_do_bench,
         ):
             plan = _select_padding_plan_uncached(
                 mock.MagicMock(),

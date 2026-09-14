@@ -2,9 +2,9 @@ import functools
 import itertools
 import operator
 import typing
+from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
-from collections.abc import Callable, Sequence
 from typing import Any
 
 import torch
@@ -336,10 +336,7 @@ def _m_padding_repairs_mat1_stride(
         return False
 
     element_size = mat1.element_size()
-    return (
-        leading_stride * element_size % 16 != 0
-        and k * element_size % 16 == 0
-    )
+    return leading_stride * element_size % 16 != 0 and k * element_size % 16 == 0
 
 
 def get_normal_padding_plans(
@@ -348,9 +345,7 @@ def get_normal_padding_plans(
     op: torch._ops.OpOverloadPacket,
 ) -> tuple[PaddingPlan, ...]:
     """Return bounded non-M subsets plus one guarded M layout-repair plan."""
-    m_pad, k_pad, n_pad = get_padding_lengths(
-        mat1, mat2, op, LEGACY_ALL_PADDING
-    )
+    m_pad, k_pad, n_pad = get_padding_lengths(mat1, mat2, op, LEGACY_ALL_PADDING)
     plans: list[PaddingPlan] = [NO_PADDING]
     if k_pad:
         plans.append(K_PADDING)
@@ -363,7 +358,6 @@ def get_normal_padding_plans(
         # an otherwise unaligned leading stride and K padding is not already
         # performing the same materialization.
         plans.append(M_N_PADDING if n_pad else M_PADDING)
-    assert len(plans) <= 4
     return tuple(plans)
 
 
@@ -954,9 +948,7 @@ def _select_padding_plan_uncached(
                 key,
             )
             if ah_should_pad is not None:
-                selected_plan = (
-                    autoheuristic_plan if ah_should_pad else NO_PADDING
-                )
+                selected_plan = autoheuristic_plan if ah_should_pad else NO_PADDING
                 set_cached_padding_plan(key, selected_plan)
                 return selected_plan
 

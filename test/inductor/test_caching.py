@@ -2437,8 +2437,8 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
             K_PADDING,
             M_N_PADDING,
             M_PADDING,
-            NO_PADDING,
             N_PADDING,
+            NO_PADDING,
             PaddingPlan,
         )
         from torch._inductor.runtime.caching import encoders
