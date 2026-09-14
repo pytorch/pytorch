@@ -56,7 +56,10 @@ class ReplicateTest(MultiProcContinuousTest):
 
         Returns the default backend for the current device type.
         """
-        return dist.get_default_backend_for_device(cls.device_type())
+        device_type = cls.device_type
+        if callable(device_type):
+            device_type = device_type()
+        return dist.get_default_backend_for_device(device_type)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -302,8 +305,11 @@ class ReplicateTest(MultiProcContinuousTest):
         global_mesh: DeviceMesh,
         use_activation_checkpointing: bool,
         mlp_dim: int,
-        device=None,
+        *,
+        device: str,
     ):
+        device_type = torch.device(device).type
+        device = torch.device(f"{device_type}:{self.rank}")
         replicate_shard_mesh, tp_mesh = (
             global_mesh["replicate", "shard"],
             global_mesh["tp"],
@@ -324,7 +330,6 @@ class ReplicateTest(MultiProcContinuousTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
         torch.manual_seed(42 + replicate_pg.rank() + 1)
-        device = torch.device(device)
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
             losses: list[torch.Tensor] = []
