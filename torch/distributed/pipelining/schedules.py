@@ -2524,10 +2524,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
         self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
         self.unsharded_stages = set()
-        # Stages kept unsharded until the next UNSHARD consumes the marker.
-        self._retained_stages: set[int] = set()
-        # Stages resharded by REDUCE_GRAD until RESHARD or the next step.
-        self._resharded_by_reduce: set[int] = set()
+        # A deferred FSDP stage keeps its unsharded parameters and accumulated
+        # gradients across schedule calls. The next UNSHARD consumes the
+        # deferred marker. The RESHARD after finalization consumes the finalized
+        # marker.
+        self._deferred_stages: set[int] = set()
+        self._finalized_stages: set[int] = set()
 
     def register_custom_function(
         self,
@@ -2780,8 +2782,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
             elif comp_type == UNSHARD:
                 if stage_uses_fsdp:
-                    if stage_idx in self._retained_stages:
-                        self._retained_stages.remove(stage_idx)
+                    if stage_idx in self._deferred_stages:
+                        self._deferred_stages.remove(stage_idx)
                         return
                     if stage_idx in self.unsharded_stages:
                         raise AssertionError(f"Already unsharded {stage_idx=}")
@@ -2796,14 +2798,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         self.unshard_ops[stage_idx].append(handle)
             elif comp_type == RESHARD:
                 if stage_uses_fsdp:
-                    if stage_idx in self._resharded_by_reduce:
-                        self._resharded_by_reduce.remove(stage_idx)
+                    if stage_idx in self._finalized_stages:
+                        self._finalized_stages.remove(stage_idx)
                         return
                     if (
                         not self._finalize_gradients
                         and self.backward_counter[stage_idx] == self._n_microbatches
                     ):
-                        self._retained_stages.add(stage_idx)
+                        self._deferred_stages.add(stage_idx)
                         return
                     if stage_idx not in self.unsharded_stages:
                         raise AssertionError(
@@ -2909,20 +2911,20 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
             elif comp_type == REDUCE_GRAD:
                 if not self._finalize_gradients and stage_uses_fsdp:
-                    self._retained_stages.add(stage_idx)
+                    self._deferred_stages.add(stage_idx)
                     return
                 grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                 stage.perform_reduce_grad(grad_scale_factor)
                 if stage_uses_fsdp:
                     self.unsharded_stages.discard(stage_idx)
-                    self._retained_stages.discard(stage_idx)
-                    self._resharded_by_reduce.add(stage_idx)
+                    self._deferred_stages.discard(stage_idx)
+                    self._finalized_stages.add(stage_idx)
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
         # count either full_backward or backward_weight together, to determine when to sync DP grads
         self.backward_counter.clear()
-        self._resharded_by_reduce.clear()
+        self._finalized_stages.clear()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
             logger.debug(
                 "_PipelineScheduleRuntime running time_step %d, action %s",
