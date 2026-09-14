@@ -242,11 +242,11 @@ struct C10_API FakeTensorMode {
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)) {}
 
-  // record the real constant a fake tensor was created from, or clear it when
-  // constant is nullptr; the constant is stored on the fake's ExtraMeta so it
-  // dies with the tensor
+  // record the real constant a fake tensor was created from; the constant is
+  // stored on the fake's ExtraMeta so it dies with the tensor
+  // setting to nullptr to clear it
   void set_constant(
-      const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
+      c10::TensorImpl* fake_impl,
       c10::intrusive_ptr<c10::TensorImpl> constant);
 
   // return the real constant a fake tensor was created from, or nullptr
