@@ -90,7 +90,7 @@ def compile(
     ]
     + (
         [
-            # FIXME.: AOTInductor compiled library does not exist at
+            # FIXME: AssertionError: AOTInductor compiled library does not exist at
             {
                 "device": "cpu",
                 "package_cpp_only": True,
@@ -121,7 +121,6 @@ def compile(
     params: f"{cls.__name__}{'Cpp' if params['package_cpp_only'] else ''}_{params['device']}",
 )
 class TestAOTInductorPackage(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
 
     def check_model(
         self: TestCase,
