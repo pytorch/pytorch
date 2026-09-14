@@ -281,7 +281,7 @@ void reciprocal_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
+        [=](scalar_t a) -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
         [=](Vectorized<scalar_t> a) { return a.reciprocal(); });
   });
 }
@@ -535,7 +535,7 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+        [=](scalar_t a) -> scalar_t {
           return (static_cast<scalar_t>(1)) / std::sqrt(a);
         },
         [=](Vectorized<scalar_t> a) { return a.rsqrt(); });
