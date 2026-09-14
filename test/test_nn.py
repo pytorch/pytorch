@@ -17038,7 +17038,7 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_backward_cond
 
         dtype = torch.float16
-        shape = (8, 128)
+        shape = (8 if output_mask[0] else 8192, 128)
         normalized_shape = [128]
         x = torch.randn(*shape, dtype=dtype, device="cuda")
         w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
@@ -17266,7 +17266,7 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
     )
     def test_backward_output_mask_variants(self, output_mask):
         dtype = torch.float16
-        shape = (8, 128)
+        shape = (8 if output_mask[0] else 8192, 128)
         normalized_shape = [128]
         x = torch.randn(*shape, dtype=dtype, device="cuda")
         w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")

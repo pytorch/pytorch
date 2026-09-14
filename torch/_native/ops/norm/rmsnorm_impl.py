@@ -13,6 +13,7 @@ import torch
 
 from ... import cutedsl_utils as cu
 from .norms import _const_data_ptr, _device_properties, _required_align_bytes
+from .rmsnorm_launch import NORMALIZED_SIZES, weight_grad_min_rows
 
 
 def _is_supported(input: torch.Tensor) -> bool:
@@ -207,6 +208,17 @@ def _fused_rms_norm_backward_cond(
     if input.numel() == 0:
         return False
     n = math.prod(normalized_shape)
+    props = _device_properties(input.device)
+    if (
+        not output_mask[0]
+        and weight is not None
+        and output_mask[1]
+        and n in NORMALIZED_SIZES
+        and (props.major, props.minor) in ((9, 0), (10, 0))
+    ):
+        min_rows = weight_grad_min_rows(n, input.element_size())
+        if min_rows is None or input.numel() // n < min_rows:
+            return False
     if not _n_yields_valid_cp_size(n, input.dtype):
         return False
     if not _bwd_fits_smem(input, grad_out, n):
