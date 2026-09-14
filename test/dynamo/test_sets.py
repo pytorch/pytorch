@@ -90,6 +90,21 @@ class CustomNewSetTests(_BaseSetTests):
     class GrandchildSetWithNew(CustomSetWithNew):
         pass
 
+    # No class between the leaf and set/frozenset overrides __new__ at all
+    # -- tp_new must resolve the owner by walking the MRO, not by checking
+    # self.value.__new__ identity for a fixed list of known base types.
+    class PlainSet(set):
+        pass
+
+    class GrandchildPlainSet(PlainSet):
+        pass
+
+    class PlainFrozenset(frozenset):
+        pass
+
+    class GrandchildPlainFrozenset(PlainFrozenset):
+        pass
+
     @make_dynamo_test
     def test_set_subclass_new_via_super(self):
         s = self.CustomSetWithNew([1, 2])
@@ -135,6 +150,35 @@ class CustomNewSetTests(_BaseSetTests):
         self.assertTrue(type(s) is self.GrandchildSetWithNew)
         self.assertTrue(set(s) == {1, 2})
         self.assertTrue(s.newarg is None)
+
+    @make_dynamo_test
+    def test_set_new_multilevel_no_override_ignores_extra_args(self):
+        s = self.GrandchildPlainSet.__new__(
+            self.GrandchildPlainSet, [1, 2], extra="ignored"
+        )
+        self.assertTrue(type(s) is self.GrandchildPlainSet)
+        self.assertTrue(s == set())
+
+    @make_dynamo_test
+    def test_set_new_multilevel_no_override_via_construction(self):
+        s = self.GrandchildPlainSet([1, 2])
+        self.assertTrue(type(s) is self.GrandchildPlainSet)
+        self.assertTrue(set(s) == {1, 2})
+
+    @make_dynamo_test
+    def test_frozenset_new_multilevel_no_override_via_construction(self):
+        s = self.GrandchildPlainFrozenset([1, 2])
+        self.assertTrue(type(s) is self.GrandchildPlainFrozenset)
+        self.assertTrue(set(s) == {1, 2})
+
+    @make_dynamo_test
+    def test_frozenset_new_multilevel_no_override_rejects_kwargs(self):
+        self.assertRaises(
+            TypeError,
+            lambda: self.GrandchildPlainFrozenset.__new__(
+                self.GrandchildPlainFrozenset, [1, 2], extra=1
+            ),
+        )
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):

@@ -2207,6 +2207,16 @@
       "Hints": []
     }
   ],
+  "GB4188": [
+    {
+      "Gb_type": "unsupported __new__ method",
+      "Context": "tp_new_impl for {self.value}",
+      "Explanation": "Dynamo does not know how to construct `{self.value}` via `{self.value.__new__}`, which is not a supported constructor (not a plain Python __new__, and not one of the recognized C-level __new__ methods).",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0142": [
     {
       "Gb_type": "Unsupported context manager",

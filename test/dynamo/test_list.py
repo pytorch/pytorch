@@ -6,9 +6,11 @@
 import collections
 import enum
 import sys
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.exc
+import torch._dynamo.side_effects
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
@@ -232,6 +234,17 @@ class CustomNewTupleTests(torch._dynamo.test_case.TestCase):
     class GrandchildTupleWithNew(CustomTupleWithNew):
         pass
 
+    # No class between GrandchildPlainTuple and tuple overrides __new__ at
+    # all (not even in Python) -- tp_new must resolve by walking the MRO to
+    # find the owner (tuple), not by checking self.value.__new__ identity,
+    # which happens to be depth-independent only for types where it was
+    # explicitly special-cased.
+    class PlainTuple(tuple):  # noqa: SLOT001
+        pass
+
+    class GrandchildPlainTuple(PlainTuple):
+        pass
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -265,6 +278,18 @@ class CustomNewTupleTests(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_tuple_new_rejects_kwargs(self):
         self.assertRaises(TypeError, lambda: tuple.__new__(tuple, [1, 2], extra=1))
+
+    @make_dynamo_test
+    def test_tuple_new_multilevel_no_override(self):
+        t = self.GrandchildPlainTuple.__new__(self.GrandchildPlainTuple, [1, 2, 3])
+        self.assertTrue(type(t) is self.GrandchildPlainTuple)
+        self.assertTrue(tuple(t) == (1, 2, 3))
+
+    @make_dynamo_test
+    def test_tuple_new_multilevel_no_override_via_construction(self):
+        t = self.GrandchildPlainTuple([1, 2, 3])
+        self.assertTrue(type(t) is self.GrandchildPlainTuple)
+        self.assertTrue(tuple(t) == (1, 2, 3))
 
 
 class ListTests(TupleTests):
@@ -634,6 +659,15 @@ class CustomNewListTests(torch._dynamo.test_case.TestCase):
     class GrandchildListWithNew(CustomListWithNew):
         pass
 
+    # No class between GrandchildPlainList and list overrides __new__ at
+    # all -- tp_new must resolve by walking the MRO to find the owner
+    # (list), not by checking self.value.__new__ identity.
+    class PlainList(list):
+        pass
+
+    class GrandchildPlainList(PlainList):
+        pass
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -660,6 +694,17 @@ class CustomNewListTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(list(lst) == [1, 2, 3])
 
     @make_dynamo_test
+    def test_list_new_multilevel_no_override_ignores_extra_args(self):
+        # list.__new__ (PyType_GenericNew) ignores extra args/kwargs even
+        # when reached through a multi-level MRO chain with no override in
+        # between.
+        lst = self.GrandchildPlainList.__new__(
+            self.GrandchildPlainList, [1, 2], extra="ignored"
+        )
+        self.assertTrue(type(lst) is self.GrandchildPlainList)
+        self.assertTrue(lst == [])
+
+    @make_dynamo_test
     def test_list_new_exact_type(self):
         lst = list.__new__(list)
         lst.append(1)
@@ -671,6 +716,42 @@ class CustomNewListTests(torch._dynamo.test_case.TestCase):
         # -- only list.__init__ (called separately) actually populates it.
         lst = list.__new__(list, [1, 2], extra="ignored")
         self.assertTrue(lst == [])
+
+    def test_list_subclass_new_stores_no_init_args(self):
+        # Regression test: list.__new__ ignores its extra (iterable) arg, so
+        # UserDefinedClassVariable.tp_new_impl must not thread it through to
+        # track_new_user_defined_object as init_args (which would otherwise
+        # get replayed, unused, by reconstruction codegen). This used to only
+        # work for the exact self.value.__new__ identities hardcoded there
+        # (dict/set/deque/SimpleNamespace); list was missing from that list.
+        class PlainList(list):
+            pass
+
+        class GrandchildPlainList(PlainList):
+            pass
+
+        def fn(x):
+            return GrandchildPlainList([1, 2, 3]), x + 1
+
+        seen_init_args = []
+        orig = torch._dynamo.side_effects.SideEffects.track_new_user_defined_object
+
+        def spy(self, base_cls_vt, cls_vt, init_args, **kwargs):
+            seen_init_args.append(list(init_args))
+            return orig(self, base_cls_vt, cls_vt, init_args, **kwargs)
+
+        with patch.object(
+            torch._dynamo.side_effects.SideEffects,
+            "track_new_user_defined_object",
+            spy,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            lst, _ = opt_fn(torch.ones(2))
+
+        self.assertEqual(list(lst), [1, 2, 3])
+        self.assertTrue(len(seen_init_args) >= 1)
+        for init_args in seen_init_args:
+            self.assertEqual(init_args, [])
 
 
 class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
