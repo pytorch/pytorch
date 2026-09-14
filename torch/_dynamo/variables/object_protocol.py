@@ -327,6 +327,12 @@ def pysequence_check(obj_type: type) -> bool:
     return type_implements_sq_item(obj_type)
 
 
+def pylong_check(obj_type: type) -> bool:
+    """Implements PyLong_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/longobject.h#L12-L13
+    return issubclass(obj_type, int)
+
+
 def pyindex_check(obj_type: type) -> bool:
     """Implements _PyIndex_Check semantics for VariableTracker objects."""
     # ref: https://github.com/python/cpython/blob/3.13/Include/internal/pycore_abstract.h#L11-L17
@@ -824,7 +830,7 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     """
     # Starting on Python 3.16, this will explicitly require an integer instance
     # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
-    if not issubclass(obj.python_type(), int):
+    if not pylong_check(obj.python_type()):
         raise_type_error(tx, "an integer is required")
     # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
     val = specialize_symnode(obj).as_python_constant()
@@ -885,7 +891,7 @@ def pynumber_index(
     # exact int. A SymInt is not constant: nb_index is where it specializes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
-    if obj.is_python_constant() and issubclass(obj.python_type(), int):
+    if obj.is_python_constant() and pylong_check(obj.python_type()):
         return ConstantVariable.create(operator.index(obj.as_python_constant()))
 
     if obj.tp_as_number.nb_index is None:
@@ -896,7 +902,7 @@ def pynumber_index(
 
     result = obj.nb_index_impl(tx)
 
-    if not issubclass(result.python_type(), int):
+    if not pylong_check(result.python_type()):
         raise_type_error(
             tx,
             f"__index__ returned non-int (type {result.python_type_name()})",
