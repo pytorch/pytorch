@@ -176,6 +176,36 @@ static std::string format_tensor_type_mismatch(
   return fail_reason.str();
 }
 
+namespace {
+thread_local std::optional<c10::DeviceIndex>* current_device_index_cache =
+    nullptr;
+
+class CurrentDeviceIndexCacheScope {
+ public:
+  CurrentDeviceIndexCacheScope() : previous_cache_(current_device_index_cache) {
+    current_device_index_cache = &cache_;
+  }
+
+  ~CurrentDeviceIndexCacheScope() {
+    current_device_index_cache = previous_cache_;
+  }
+
+ private:
+  std::optional<c10::DeviceIndex> cache_;
+  std::optional<c10::DeviceIndex>* previous_cache_;
+};
+} // namespace
+
+at::DeviceIndex LocalState::currentDeviceIndex() const {
+  if (current_device_index_cache == nullptr) {
+    return at::accelerator::getDeviceIndex();
+  }
+  if (!current_device_index_cache->has_value()) {
+    *current_device_index_cache = at::accelerator::getDeviceIndex();
+  }
+  return **current_device_index_cache;
+}
+
 TensorCheck::TensorCheck(
     const LocalState& state,
     PyTypeObject* pt,
@@ -216,7 +246,9 @@ TensorCheck::TensorCheck(
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
 
-bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
+bool TensorCheck::deviceIndexMatches(
+    const LocalState& state,
+    const c10::Device& device) const {
   if (!device_index_is_current_) {
     return device_index_ == device.index();
   }
@@ -224,7 +256,7 @@ bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
   // of whichever rank happened to compile, so comparing against it would reject
   // every other rank. CooR guarantees the tensor is on the current accelerator,
   // so check that instead -- still a real check, just not a rank-specific one.
-  return device.index() == at::accelerator::getDeviceIndex();
+  return device.index() == state.currentDeviceIndex();
 }
 
 // See note in guards.py [Note - On Export Tensor Guards]
@@ -258,7 +290,7 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
   if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || !deviceIndexMatches(device) ||
+      dtype_ != dtype || !deviceIndexMatches(state, device) ||
       requires_grad_ != requires_grad) {
     return false;
   }
@@ -306,7 +338,7 @@ std::string TensorCheck::check_verbose(
     fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
                 << v.dtype().toScalarType();
     return std::move(fail_reason).str();
-  } else if (!deviceIndexMatches(v.device())) {
+  } else if (!deviceIndexMatches(state, v.device())) {
     fail_reason << "Tensor device index mismatch. Expected device index to be "
                 << (device_index_is_current_
                         ? std::string("the current device")
@@ -4399,6 +4431,7 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
+    CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
       _reset_relational_guard_state();
@@ -4457,6 +4490,7 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
+    CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     int num_guards_executed = 0;
 
