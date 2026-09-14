@@ -69,6 +69,28 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf,amd-dpx
 
+  # Build-only Hopper coverage: nothing in CI compiles for sm90 on CUDA 12.x
+  # otherwise, so this catches 12.6-specific compile breaks against '9.0'.
+  linux-jammy-cuda12_6-py3_11-gcc11-sm90-build-only:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.6-py3.11-gcc11-sm90-build-only ') }}
+    name: linux-jammy-cuda12.6-py3.11-gcc11-sm90-build-only
+    uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - get-label-type
+      - job-filter
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.r7i.4xlarge
+      build-environment: linux-jammy-cuda12.6-py3.11-gcc11-sm90-build-only
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3.11-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '9.0'
+      build-generates-artifacts: false
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "12.6"
+    secrets: inherit
+
   libtorch-linux-jammy-cuda13_0-py3_10-gcc11-debug-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda13.0-py3.10-gcc11-debug ') }}
     name: libtorch-linux-jammy-cuda13.0-py3.10-gcc11-debug
@@ -499,16 +521,16 @@ jobs:
       runner: windows.4xlarge.nonephemeral
     secrets: inherit
 
-  linux-jammy-rocm-py3_10-build:
-    name: linux-jammy-rocm-py3.10-mi350
+  linux-noble-rocm-py3_11-build:
+    name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: "mt-"
-      build-environment: linux-jammy-rocm-py3.10-mi350
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      build-environment: linux-noble-rocm-py3.11-mi350
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
@@ -529,20 +551,20 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.2" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.2" },
         ]}
-      python-version: "3.10"
+      python-version: "3.11"
     secrets: inherit
 
-  linux-jammy-rocm-py3_10-test:
-    name: linux-jammy-rocm-py3.10-mi350
+  linux-noble-rocm-py3_11-test:
+    name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-jammy-rocm-py3_10-build
+      - linux-noble-rocm-py3_11-build
       - target-determination
       - job-filter
     with:
-      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
