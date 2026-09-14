@@ -3250,6 +3250,39 @@ class ReducerTest(TestCase):
         for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
             self.assertEqual(p_ref.grad, p_bat.grad)
 
+    @requires_gloo()
+    def test_batched_grad_copy_batches_copy_out(self):
+        """batched_grad_copy also batches the bucket-to-grad copy-out."""
+        model = self._create_mixed_precision_model()
+
+        # Without batching: one copy_bucket_to_grad record per parameter.
+        reducer_ref = self._create_reducer(model)
+        reducer_ref.prepare_for_forward()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+        ) as prof_ref:
+            self._run_forward_backward(model, reducer_ref)
+        ref_events = [e.key for e in prof_ref.key_averages()]
+        self.assertIn("torch.distributed.ddp.reducer::copy_bucket_to_grad", ref_events)
+
+        # With batching: the per-parameter copy-out is replaced by a single
+        # batched _foreach_copy_ per bucket.
+        model_bat = copy.deepcopy(model)
+        reducer_bat = self._create_reducer(model_bat, batched_grad_copy=True)
+        reducer_bat.prepare_for_forward()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+        ) as prof_bat:
+            self._run_forward_backward(model_bat, reducer_bat)
+        bat_events = [e.key for e in prof_bat.key_averages()]
+        self.assertNotIn(
+            "torch.distributed.ddp.reducer::copy_bucket_to_grad", bat_events
+        )
+        self.assertIn(
+            "torch.distributed.ddp.reducer::copy_bucket_to_grad_batched",
+            bat_events,
+        )
+
 
 @skip_if_win32()
 class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
