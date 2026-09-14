@@ -93,15 +93,25 @@ class TestKernelRowTile(TestCase):
                 widened += 1
                 with self.subTest(n=n, bits=bits):
                     self.assertEqual(
-                        cfg.tpr & (cfg.tpr - 1), 0, "tpr must be a power of two"
+                        cfg.threads_per_row & (cfg.threads_per_row - 1),
+                        0,
+                        "threads_per_row must be a power of two",
                     )
                     self.assertEqual(
-                        cfg.tpr % rt.WARP, 0, "tpr must be a warp multiple"
+                        cfg.threads_per_row % rt.WARP,
+                        0,
+                        "threads_per_row must be a warp multiple",
                     )
-                    self.assertIn(cfg.tpr, rt._TPR_RUNGS)
-                    self.assertLessEqual(cfg.tpr, cfg.nt)
-                    self.assertEqual(cfg.nt % cfg.tpr, 0, "nt must hold whole rows")
-                    self.assertGreater(cfg.tpr, rt.row_config(n, bits).tpr)
+                    self.assertIn(cfg.threads_per_row, rt._THREADS_PER_ROW_RUNGS)
+                    self.assertLessEqual(cfg.threads_per_row, cfg.threads_per_block)
+                    self.assertEqual(
+                        cfg.threads_per_block % cfg.threads_per_row,
+                        0,
+                        "threads_per_block must hold whole rows",
+                    )
+                    self.assertGreater(
+                        cfg.threads_per_row, rt.row_config(n, bits).threads_per_row
+                    )
         self.assertGreater(
             widened, 0, "nothing was widened -- the sweep has gone stale"
         )
@@ -246,9 +256,18 @@ class TestKernelRowTile(TestCase):
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.ones(8, 384, device="cuda")
         with self.assertRaisesRegex(ValueError, "power-of-two"):
-            rt.reduce_row_tile(trait, "nw3", x, [torch.float32], tpr=96, nt=96)
+            rt.reduce_row_tile(
+                trait,
+                "nw3",
+                x,
+                [torch.float32],
+                threads_per_row=96,
+                threads_per_block=96,
+            )
         # The neighbouring power-of-two width is served, and correctly.
-        (got,) = rt.reduce_row_tile(trait, "nw2", x, [torch.float32], tpr=64, nt=64)
+        (got,) = rt.reduce_row_tile(
+            trait, "nw2", x, [torch.float32], threads_per_row=64, threads_per_block=64
+        )
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
 
 
