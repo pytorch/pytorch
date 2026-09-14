@@ -370,6 +370,13 @@ class C10_API DistNetworkError : public DistError {
   DistNetworkError(SourceLocation source_location, std::string msg);
 };
 
+// Used to distinguish EINTR-caused errors from transient network
+// failures.
+class C10_API DistInterruptedError : public DistNetworkError {
+ public:
+  using DistNetworkError::DistNetworkError;
+};
+
 // Raised when a queue is empty and a non-blocking pop is called.
 // Translated to torch.distributed.QueueEmptyError in Python
 class C10_API DistQueueEmptyError : public DistStoreError {
