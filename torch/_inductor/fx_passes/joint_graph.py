@@ -554,8 +554,51 @@ def _has_self_referential_shape(
     return False
 
 
+# TODO: Investigate generalizing this to cuDNN, CPU Flash, and overrideable fused attention.
+def _remove_zero_bias_from_efficient_attention(
+    gm: torch.fx.GraphModule,
+    uniform_values: dict[torch.fx.Node, Any],
+) -> None:
+    if config.numerics == "strict":
+        return
+
+    targets = (
+        (aten._scaled_dot_product_efficient_attention.default, 3),
+        (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+    )
+    for target, bias_index in targets:
+        for node in gm.graph.find_nodes(op="call_function", target=target):
+            bias = node.args[bias_index]
+            if not isinstance(bias, torch.fx.Node):
+                continue
+            if target is aten._scaled_dot_product_efficient_attention_backward.default:
+                # Backward positional argument 10 is a four-element bool sequence:
+                # [..., compute_grad_bias]. Thus grad_input_mask[3] says whether backward
+                # must produce grad_bias, which requires retaining the bias. This is
+                # rare for a proven-zero bias, but can occur for a differentiable
+                # expression such as parameter * 0.
+                grad_input_mask = node.args[10]
+                compute_bias_gradient = grad_input_mask[3]
+                if compute_bias_gradient:
+                    continue
+            value = uniform_values.get(bias)
+            fake_bias = bias.meta.get("val")
+            if (
+                not isinstance(fake_bias, torch.Tensor)
+                or not fake_bias.dtype.is_floating_point
+                or value != 0.0
+            ):
+                continue
+            args = list(node.args)
+            args[bias_index] = None
+            node.args = tuple(args)
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
-    """Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."""
+    """Fold uniform constants and algebraic no-ops.
+
+    This includes replacing an all-zero additive efficient-attention bias with no bias.
+    """
     with torch.utils._python_dispatch._disable_current_modes():
         aten = torch.ops.aten
 
@@ -565,6 +608,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         cf.run()
 
         node_replacements = cf.node_replacements
+        _remove_zero_bias_from_efficient_attention(gm, node_replacements)
 
         # note: [constant folding refining of symints]
         # constant folding will partially evaluate a graph such that values which have dependencies which

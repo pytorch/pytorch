@@ -210,9 +210,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         device_major = triton_meta["device"].major
         warp_size = triton_meta["device"].warp_size_or_default
-        # Kernels with per-row online-softmax state have room for larger
-        # reduction blocks than the contiguous default.
-        scalar_online_softmax = AutotuneHint.SCALAR_ONLINE_SOFTMAX in inductor_meta.get(
+        # Kernels with per-row accumulators have room for larger reduction
+        # blocks than the contiguous default.
+        scalar_accumulators = AutotuneHint.SCALAR_ACCUMULATORS in inductor_meta.get(
             "autotune_hints", ()
         )
         MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
@@ -271,7 +271,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 )
 
         contiguous_rblock = (
-            4096 if scalar_online_softmax and "y" in size_hints else MAX_R0_BLOCK
+            4096 if scalar_accumulators and "y" in size_hints else MAX_R0_BLOCK
         )
         contiguous_config = make_config(
             # Default XBLOCK=2 launches too few programs to fill
@@ -322,7 +322,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         )
 
         scalar_acc_configs: list[Config] = []
-        if scalar_online_softmax and "y" not in size_hints:
+        if scalar_accumulators and "y" not in size_hints:
             scalar_acc_configs = [
                 make_config(1, min(rnumel, 4096)),
                 make_config(1, min(rnumel, 8192), num_warps=4),
