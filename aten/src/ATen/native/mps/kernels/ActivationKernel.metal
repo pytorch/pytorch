@@ -354,6 +354,49 @@ REGISTER_BINARY_OP(sigmoid_backward, bfloat, bfloat);
 REGISTER_BINARY_OP(sigmoid_backward, float2, float2);
 REGISTER_BINARY_OP(sigmoid_backward, half2, half2);
 
+struct tanh_backward_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T grad_output, const T output) {
+    const float o = float(output);
+    return static_cast<T>(float(grad_output) * (1.0f - o * o));
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T grad_output, const T output) {
+    return c10::metal::mul(
+        grad_output,
+        c10::metal::conj(T(1, 0) - c10::metal::mul(output, output)));
+  }
+};
+
+REGISTER_BINARY_OP(tanh_backward, float, float);
+REGISTER_BINARY_OP(tanh_backward, half, half);
+REGISTER_BINARY_OP(tanh_backward, bfloat, bfloat);
+REGISTER_BINARY_OP(tanh_backward, float2, float2);
+REGISTER_BINARY_OP(tanh_backward, half2, half2);
+
+// grad wrt logit input: dy / (x * (1 - x)), zeroed (eps set) or NaN'd (no eps)
+// outside the valid interval. Matches logit_backward_kernel in
+// native/cpu/BinaryOpsKernel.cpp; eps < 0 signals the no-clamp variant.
+struct logit_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T x, const T eps) {
+    const float xf = float(x);
+    const float e = float(eps);
+    if (e < 0.0f) {
+      if (xf < 0.0f || xf > 1.0f) {
+        return static_cast<T>(NAN);
+      }
+    } else if (xf < e || xf > 1.0f - e) {
+      return static_cast<T>(0);
+    }
+    return static_cast<T>(float(grad_output) / (xf * (1.0f - xf)));
+  }
+};
+
+REGISTER_BINARY_ALPHA_OP(logit_backward, float, float, float);
+REGISTER_BINARY_ALPHA_OP(logit_backward, half, half, half);
+REGISTER_BINARY_ALPHA_OP(logit_backward, bfloat, bfloat, bfloat);
+
 struct glu_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
