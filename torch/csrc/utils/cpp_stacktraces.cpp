@@ -3,10 +3,29 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 
+#include <algorithm>
+#include <cctype>
+
 namespace torch {
 namespace {
 bool compute_cpp_stack_traces_enabled() {
-  return c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES") == true;
+  const auto show_cpp_stacktraces =
+      c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES");
+  if (show_cpp_stacktraces.has_value()) {
+    return show_cpp_stacktraces.value();
+  }
+
+  auto distributed_debug = c10::utils::get_env("TORCH_DISTRIBUTED_DEBUG");
+  if (!distributed_debug.has_value()) {
+    return false;
+  }
+
+  std::transform(
+      distributed_debug->begin(),
+      distributed_debug->end(),
+      distributed_debug->begin(),
+      [](unsigned char c) { return toupper(c); });
+  return distributed_debug.value() == "DETAIL";
 }
 
 bool compute_disable_addr2line() {
