@@ -1878,6 +1878,7 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 
 
 def pointwise_cat(inputs, dim=0):
+    """Lower concatenation as a pointwise operation."""
     # (inclusive, exclusive)
     inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
