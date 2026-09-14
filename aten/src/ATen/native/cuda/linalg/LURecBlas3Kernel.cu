@@ -865,7 +865,7 @@ std::tuple<real_t, int> block_max(
   __syncthreads();
 
   constexpr auto NWARPS = BS / 32;
-  if (tid < 32) {
+  if (warp_id == 0) {
     auto v = (tid < NWARPS) ? sdata[tid] : static_cast<real_t>(-1);
     auto i = (tid < NWARPS) ? sidx[tid] : -1;
     warp_argmax(v, i);
