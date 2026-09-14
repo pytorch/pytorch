@@ -72,7 +72,10 @@ operators:
         def gen():
             return SelectiveBuilder.from_yaml_str(yaml_config_invalid)
 
-        self.assertRaises(Exception, gen)
+        with self.assertRaisesRegex(
+            ValueError, "Got unexpected top level keys: invalid"
+        ):
+            gen()
 
         selector_all = SelectiveBuilder.from_yaml_str(yaml_config_all)
 
@@ -178,7 +181,11 @@ operators:
         def gen_new_op():
             return combine_operators(op1, op3)
 
-        self.assertRaises(Exception, gen_new_op)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Expected both arguments to have the same name",
+        ):
+            gen_new_op()
 
     def test_training_op_fetch(self) -> None:
         yaml_config = """
