@@ -212,6 +212,7 @@ jobs:
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          TEST_STEP_TIMEOUT: ${{ steps.test-timeout.outputs.timeout }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
@@ -221,6 +222,16 @@ jobs:
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
           set -x
+
+          # Soft per-shard deadline: exit run_test.py cleanly a margin before the
+          # step-timeout wall (preserving test reports) instead of being SIGKILLed.
+          # Skipped for rerun-disabled shards, which run long by design and don't
+          # fail on the recorded failure. See run_test.py.
+          if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" != "1" ]]; then
+            margin_min=25
+            PYTORCH_SHARD_DEADLINE_EPOCH=$(( $(date +%s) + (TEST_STEP_TIMEOUT - margin_min) * 60 ))
+            export PYTORCH_SHARD_DEADLINE_EPOCH
+          fi
 
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
@@ -264,6 +275,7 @@ jobs:
             -e TEST_SHOWLOCALS \
             -e NO_TEST_TIMEOUT \
             -e NO_TD \
+            -e PYTORCH_SHARD_DEADLINE_EPOCH \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
