@@ -19,8 +19,9 @@ from torch.distributed.checkpoint.planner import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
 from torch.distributed.tensor._shards_wrapper import LocalShardsWrapper
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
 )
@@ -63,11 +64,12 @@ for p1 in TWO_D_PLACEMENTS:
             TWO_D_TO_TWO_D_PLACEMENTS.append((p1, p2))
 
 
-@instantiate_parametrized_tests
 class TestDTensorReshardPlacementChange(DTensorTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -178,6 +180,8 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     """
     Test DCP reshard for DTensor with placements changes and mesh_tensor change.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
     @with_temp_dir
@@ -438,6 +442,8 @@ class TestCheckpointableReshard(DTensorTestBase):
     Test DCP reshard loads when shard sizes are uneven across the ranks.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(4)
@@ -597,6 +603,11 @@ class TestCheckpointableReshard(DTensorTestBase):
                 "Expected loading_local_tensor to equal expected_loaded_local_val_tensor"
             )
         dist.barrier()
+
+
+instantiate_device_type_tests(TestDTensorReshardPlacementChange, globals())
+instantiate_device_type_tests(TestDTensorReshardMeshChange, globals())
+instantiate_device_type_tests(TestCheckpointableReshard, globals())
 
 
 # TODO: Add dtensor resharding test when world size changes.
