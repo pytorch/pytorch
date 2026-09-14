@@ -3624,15 +3624,15 @@ class SIMDScheduling(BaseScheduling):
             kernel_features.reduction_numel,
             kernel_features.coalesce_analysis,
         )
-        kernels = self.create_kernel_choices(
-            kernel_features,
-            [tiling],
-            {
-                "features": kernel_features,
-                "tiling_scores": tiling_score,
-                "disable_multi_kernel": True,
-            },
-        )
+        with config.patch("triton.multi_kernel", 0):
+            kernels = self.create_kernel_choices(
+                kernel_features,
+                [tiling],
+                {
+                    "features": kernel_features,
+                    "tiling_scores": tiling_score,
+                },
+            )
         if len(kernels) != 1:
             raise AssertionError(
                 f"expected one bounded kernel choice, got {len(kernels)}"
@@ -3735,7 +3735,10 @@ class SIMDScheduling(BaseScheduling):
             list(node.get_nodes()),
             free_buffers=False,
         )
-        self._codegen_intermediate_hooks(one_pass_kernel, finals)
+        # The selected plan writes the final buffers, but those buffers retain
+        # the operation names of the structural final-reduction nodes.  Match
+        # hooks against physical output names from the one-pass kernel.
+        self._codegen_intermediate_hooks(one_pass_kernel, finals, use_buffer_names=True)
         self.free_buffers_in_scheduler()
 
     def _codegen_nested_reduction(self, node, plan):
@@ -4484,7 +4487,9 @@ class SIMDScheduling(BaseScheduling):
         self.free_buffers_in_scheduler()
 
     @staticmethod
-    def _codegen_intermediate_hooks(kernel, nodes) -> None:
+    def _codegen_intermediate_hooks(
+        kernel, nodes, *, use_buffer_names: bool = False
+    ) -> None:
         if not (
             V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
             and config.generate_intermediate_hooks
@@ -4495,13 +4500,13 @@ class SIMDScheduling(BaseScheduling):
         # we can't check dead buffers.
         live_outs = kernel.args.live_output_buffers()
         for node in nodes:
-            name = node.get_name()
-            if name not in live_outs:
-                continue
             if node.node is None:
                 raise AssertionError("expected node.node to not be None")
             origin_node = node.node.get_origin_node()
-            if origin_node is not None:
+            names = node.get_buffer_names() if use_buffer_names else [node.get_name()]
+            for name in names:
+                if name not in live_outs or origin_node is None:
+                    continue
                 counters["inductor"]["intermediate_hooks"] += 1
                 V.graph.wrapper_code.writeline(
                     f"run_intermediate_hooks({origin_node.name!r}, {name})"

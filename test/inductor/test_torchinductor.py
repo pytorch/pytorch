@@ -19483,6 +19483,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "max_autotune": True,
             "compile_threads": 1,
             "force_disable_caches": True,
+            "generate_intermediate_hooks": True,
             "triton.autotune_experimental_large_output_outer_reductions": True,
         }
     )
