@@ -86,7 +86,7 @@ jobs:
     container:
       # image: "ghcr.io/pytorch/ci-image:pytorch-linux-jammy-rocm-n-py3-ba143c9007fe66ad6f1cad2ffe99ff25a5563e72"  # zizmor: ignore[unpinned-images]
       # image:  ${{ inputs.docker-image }}
-      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
+      image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-rocm-n-py3${{ inputs.docker-image && format('-{0}', inputs.docker-image) || '' }}
 
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
