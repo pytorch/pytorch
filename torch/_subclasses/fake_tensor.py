@@ -416,7 +416,7 @@ def maybe_clear_fake_constant(x: object) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.constant = None
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        torch._C._clear_fake_constant(x)
+        torch._C._set_fake_constant(x, None)
 
 
 @functools.cache
