@@ -1,4 +1,5 @@
 import functools
+import inspect
 import os
 from functools import cached_property
 from typing import Any
@@ -12,13 +13,22 @@ from .triton_helpers import get_constexprs
 @functools.lru_cache(None)
 def _tma_arg_helpers():
     """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
-    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]; the nvidia
-    backend's make_tensordesc_arg ignores its third arg, so we pass None."""
+    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]."""
     from triton.backends.nvidia.driver import make_tensordesc_arg
     from triton.tools.tensor_descriptor import TensorDescriptor
 
-    def make_arg(arg, metadata):
-        return make_tensordesc_arg(arg, metadata, None)
+    # triton 3.5.0 and earlier take (arg, metadata); 3.8.0 added a third
+    # argument the nvidia backend ignores. Resolve the arity once, not per
+    # launch.
+    if len(inspect.signature(make_tensordesc_arg).parameters) >= 3:
+
+        def make_arg(arg, metadata):
+            return make_tensordesc_arg(arg, metadata, None)
+
+    else:
+
+        def make_arg(arg, metadata):
+            return make_tensordesc_arg(arg, metadata)
 
     return make_arg, TensorDescriptor
 
