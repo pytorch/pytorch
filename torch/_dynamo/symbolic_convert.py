@@ -269,6 +269,11 @@ def _import_module(name: str) -> types.ModuleType:
     return importlib.import_module(name)
 
 
+# What import_source last bound under each name: a name gone from sys.modules
+# since is served from here rather than re-imported inside a trace.
+_import_source_cache: dict[str, types.ModuleType] = {}
+
+
 def _registered_module_for_globals(
     module_name: object, f_globals: dict[str, Any]
 ) -> tuple[str, types.ModuleType] | None:
@@ -2437,7 +2442,12 @@ class InstructionTranslatorBase(
             # rebind can have replaced that since _import_module cached its
             # answer. importlib.import_module returns the live entry and, like
             # __import__, waits out a module another thread is still executing.
-            value = importlib.import_module(module_name)
+            # A name removed from sys.modules since keeps the object it last
+            # resolved to: the program's objects came from that one, and
+            # re-importing here would run the module body inside the trace.
+            if module_name in sys.modules or module_name not in _import_source_cache:
+                _import_source_cache[module_name] = importlib.import_module(module_name)
+            value = _import_source_cache[module_name]
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope

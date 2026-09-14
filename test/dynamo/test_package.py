@@ -4,10 +4,12 @@ import functools
 import gc
 import importlib
 import os
+import re
 import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo.testing
@@ -1163,7 +1165,7 @@ def add(x, y):
             torch._dynamo.reset()
             fn.__globals__[alias] = types.ModuleType("some.other.name")
             with self.assertRaisesRegex(
-                Unsupported, f"alias {alias} for {key}.*named some.other.name"
+                Unsupported, rf"alias {alias} for {key}.*named some\.other\.name"
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(*args)
         finally:
@@ -1207,7 +1209,7 @@ def add(x, y):
                     torch._dynamo.reset()
                     fn.__globals__[alias] = bound
                     with self.assertRaisesRegex(
-                        Unsupported, f"alias {alias} for {name}.*{expected}"
+                        Unsupported, f"alias {alias} for {name}.*{re.escape(expected)}"
                     ):
                         torch.compile(fn, backend="eager", fullgraph=True)(*args)
                     torch._dynamo.reset()
@@ -1230,12 +1232,14 @@ def add(x, y):
             torch._dynamo.reset()
 
     def test_import_alias_the_trace_refused_is_not_recorded_for_install(self):
-        # The graph break abandons the trace, but the CompilePackage entry made
-        # for the frame outlives it and is what gets saved. A record written
-        # before the check would ship in that entry, and install() binds every
-        # recorded alias unconditionally -- record_only_if_new gates only the
-        # uninstall bookkeeping -- over the very global the check refused to
-        # touch. Nothing is recorded for an alias the trace did not bind.
+        # Two ops precede the import, so the graph break has a checkpoint: the
+        # trace restarts and the frame is compiled up to it, and the
+        # CompilePackage entry made for the frame outlives the abandoned trace
+        # and is what gets saved. A record written before the check would ship
+        # in that entry, and install() binds every recorded alias
+        # unconditionally -- record_only_if_new gates only the uninstall
+        # bookkeeping -- over the very global the check refused to touch.
+        # Nothing is recorded for an alias the trace did not bind.
         ctx = DiskDynamoStore()
         name = "torch_test_package_import_alias_refused"
         alias = f"__import_{name}"
@@ -1245,6 +1249,7 @@ def add(x, y):
 
         def fn(x):
             y = x + 1
+            y = y * 2
             import torch_test_package_import_alias_refused as taken
 
             return y + taken.VALUE
@@ -1257,6 +1262,7 @@ def add(x, y):
             compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
             self.assertEqual(fn(*args), compiled_fn(*args))
             self.assertIs(fn.__globals__[alias], foreign)
+            self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
             for entry in package._codes.values():
                 self.assertNotIn(alias, entry.import_sources)
             for backend_id, backend in package.cached_backends.items():
@@ -1324,6 +1330,33 @@ def add(x, y):
                 self.assertNotIn(alias, fn.__globals__)
         finally:
             sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_of_a_name_removed_from_sys_modules_keeps_its_module(self):
+        # Codegen resolves names the traced bytecode never imported -- here
+        # functools, for the partial built in the frame -- so nothing has put a
+        # removed entry back by the time import_source runs. The alias keeps
+        # the object the process last resolved instead of re-running the import
+        # machinery inside the trace, which would execute the module body again
+        # and bind a second copy of a module the program still holds.
+        alias = "__import_functools"
+
+        def fn(x):
+            return x + 1, functools.partial(torch.add, x)
+
+        args = (torch.randn(3, 2),)
+        try:
+            compiled_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(fn(*args)[0], compiled_fn(*args)[0])
+            self.assertIs(fn.__globals__[alias], functools)
+            torch._dynamo.reset()
+            with mock.patch.dict(sys.modules):
+                del sys.modules["functools"]
+                self.assertEqual(fn(*args)[0], compiled_fn(*args)[0])
+                self.assertNotIn("functools", sys.modules)
+            self.assertIs(fn.__globals__[alias], functools)
+        finally:
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 

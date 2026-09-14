@@ -32,7 +32,7 @@ from .hooks import Hooks
 
 
 if TYPE_CHECKING:
-    from .guards import GuardManagerWrapper
+    from .guards import GuardManagerWrapper, GuardsState
     from .output_graph import OutputGraphGuardsState
     from .package import SourceInfo
 
@@ -50,7 +50,9 @@ _EXTERNAL_DATA_HINT = (
 # resolved and only a key inside it is absent, so the advice to define the
 # global would be wrong.
 _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
-_SHAPE_GUARD_GLOBAL_RE = re.compile(r"G\['([^']*)'\]")
+# The G['NAME'] operands of a symbolic-shape guard installed as a Python lambda.
+# Anchored: shape exprs are source names, so L['self'].myG['k'] carries no global.
+_SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
 _UNBOUND = object()
 
 # Names Dynamo mints into the scope the guards resolve against, rather than
@@ -579,6 +581,23 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     }
 
 
+def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
+    """Every global name the kept guards read at check time."""
+    # Wider than their originating_sources: the serialized global_scope is the
+    # serializer's own record of the names the kept guards resolve, so it also
+    # carries a DUPLICATE_INPUT's source_b and a cpp-form SHAPE_ENV guard's
+    # shape_env_sources. A SHAPE_ENV guard installed as a Python lambda reads
+    # its G['NAME'] operands from the same scope, and none of them reaches
+    # global_scope -- shape_env_sources is filled from the cpp code parts alone
+    # -- so they are recovered from the lambda's own text.
+    names = set(guards_state.output_graph.global_scope)
+    shape_code_parts = guards_state.shape_code_parts
+    if shape_code_parts is not None and shape_code_parts.python_fallback:
+        for expr in shape_code_parts.python_code_parts.exprs:
+            names.update(_SHAPE_GUARD_GLOBAL_RE.findall(expr))
+    return names
+
+
 @dataclass
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
@@ -670,20 +689,12 @@ class AOTCompiledFunction:
         if self._artifacts.guard_manager is None:
             guards_state = load_guards_state(self._artifacts.guards_state)
             output_graph = guards_state.output_graph
-            # The wide set: the serializer's own record of every name the kept
-            # guards read. Enough to arm the pick below, but not to decide what
-            # it takes -- see _guard_source_globals. The builtins dict key rides
+            # The wide set: every name the kept guards read, which also gates the
+            # seeding below. Enough to arm the pick, but not to decide what it
+            # takes -- see _guard_source_globals. The builtins dict key rides
             # along whether or not a guard reads it, so it is not evidence.
             builtins_key = output_graph.name_of_builtins_dict_key_in_fglobals or ""
-            recorded_globals = set(output_graph.global_scope) - {builtins_key}
-            # A symbolic-shape guard installed as a Python lambda reads its
-            # G['NAME'] operands from this same scope, and none of them reaches
-            # global_scope -- shape_env_sources is filled from the cpp code parts
-            # alone -- so they are recovered from the lambda's own text.
-            shape_code_parts = guards_state.shape_code_parts
-            if shape_code_parts is not None and shape_code_parts.python_fallback:
-                for expr in shape_code_parts.python_code_parts.exprs:
-                    recorded_globals.update(_SHAPE_GUARD_GLOBAL_RE.findall(expr))
+            recorded_globals = _recorded_guard_globals(guards_state) - {builtins_key}
             # Dynamo's own __import_* aliases are not user globals: a rebuilt
             # scope carries every recorded one freshly imported, so a guard
             # rooted at one resolves there and neither half of the warning the
@@ -729,7 +740,7 @@ class AOTCompiledFunction:
             # IS fn.__globals__, and PyFunction_New caches __builtins__ at creation,
             # so the __builtins__ written below cannot rewire the bytecode's lookups.
             # The builtins-dict key below is an ordinary global and does; see there.
-            self._seed_guard_scope(guard_scope, guards_state.output_graph)
+            self._seed_guard_scope(guard_scope, guards_state)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
@@ -737,15 +748,15 @@ class AOTCompiledFunction:
             )
 
     def _seed_guard_scope(
-        self, guard_scope: dict[str, Any], output_graph: "OutputGraphGuardsState"
+        self, guard_scope: dict[str, Any], guards_state: "GuardsState"
     ) -> None:
         # Dynamo mints __import_* aliases, a __builtins_dict___N key and the
         # ___unnamed_scope_<id>_c<n> key of an inlined frame's globals into the
         # TRACING process's globals and roots guards at them; a process that only
         # loads never traced. Each name is gated on the artifact showing a kept
-        # guard reads it -- the aliases and the unnamed-scope key on the pruned
-        # global_scope, the builtins key on the deserialized guards' own roots --
-        # because this writes into a scope that may be a user module's live
+        # guard reads it -- the aliases and the unnamed-scope key on every name
+        # the kept guards read, the builtins key on the deserialized guards' own
+        # roots -- because this writes into a scope that may be a user module's live
         # namespace and installs no CleanupHook. A binding this process already
         # had is left alone: a wrong binding fails the guard rather than passing
         # it. The one value replaced is one this load itself put there, in the
@@ -754,18 +765,18 @@ class AOTCompiledFunction:
         from .source import get_global_source_name
         from .utils import CleanupHook
 
-        # The serialized global_scope is pruned to the names the kept guards
-        # resolve at check time, which is wider than their originating_sources:
-        # a DUPLICATE_INPUT reads its source_b and a SHAPE_ENV guard reads the
-        # shape-env sources, and a scope lacking one of those fails with a
-        # KeyError on G[...] too. That is exactly the set the aliases need, so it
-        # gates them. Only a caller-supplied scope can be missing one --
-        # forward_callable imports every recorded one.
-        guarded_globals = output_graph.global_scope
-        # That pruned scope cannot gate the builtins key -- the serializer writes
-        # it in whether or not a guard reads it -- so match the deserialized
-        # guards' own roots instead. The two wider channels above never root at
-        # this key: load_builtin_from_argval is the only site that mints a
+        output_graph = guards_state.output_graph
+        # A scope lacking any name the kept guards read fails with a KeyError on
+        # G[...], whichever channel reads it, so that whole set gates the aliases
+        # and the unnamed-scope key: the same set the arming in __post_init__
+        # starts from, before it subtracts the aliases, which a seeding must
+        # not. Only a caller-supplied scope can be missing one --
+        # forward_callable imports every recorded alias and spreads used_globals.
+        guarded_globals = _recorded_guard_globals(guards_state)
+        # That set cannot gate the builtins key -- the serializer writes it into
+        # global_scope whether or not a guard reads it -- so match the
+        # deserialized guards' own roots instead. The wider channels never root
+        # at this key: load_builtin_from_argval is the only site that mints a
         # source under it, and only for a callable builtin.
         builtins_key = output_graph.name_of_builtins_dict_key_in_fglobals
         sources = [guard.originating_source for guard in output_graph.guards]
@@ -2020,8 +2031,8 @@ class AOTCompiledModel:
         strong as the guard's type: a kept ``TENSOR_MATCH`` accepts a same-metadata
         swap, checking metadata and not values, and a root ``TYPE_MATCH`` on a
         container checks its type, not the members the graph reads through it.
-        Loading also MUTATES that dict: a recorded ``__import_*`` alias the serialized
-        scope still carries, that builtins key when a guard source names it, and the
+        Loading also MUTATES that dict: a recorded ``__import_*`` alias a kept guard
+        still reads, that builtins key when a guard source names it, and the
         ``___unnamed_scope_*`` key of an inlined frame's globals when the graph
         lifted a value through it -- bound to the dict serialized with the artifact,
         since the key embeds an ``id()`` from the tracing process that no live
