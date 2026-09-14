@@ -45,7 +45,6 @@ FLEX_GEMM_OP_ALIASES = {
     torch.addmm: torch.ops.aten.addmm.default,
     torch.bmm: torch.ops.aten.bmm.default,
     torch.baddbmm: torch.ops.aten.baddbmm.default,
-    torch.nn.functional.scaled_mm: torch.ops.aten._scaled_mm_v2.default,
     torch.nn.functional.grouped_mm: torch.ops.aten._grouped_mm.default,
     torch._grouped_mm: torch.ops.aten._grouped_mm.default,
 }
@@ -610,8 +609,7 @@ def flex_gemm(
         gemm_kwargs = {}
     if kernel_options is None:
         kernel_options = {}
-    public_gemm_op = gemm_op
-    if public_gemm_op in (
+    if gemm_op in (
         torch.ops.aten._scaled_mm_v2,
         torch.ops.aten._scaled_mm_v2.default,
     ):
@@ -619,7 +617,7 @@ def flex_gemm(
             "FlexGEMM direct aten._scaled_mm_v2 calls are unsupported; "
             "use torch.nn.functional.scaled_mm"
         )
-    if public_gemm_op in (
+    if gemm_op in (
         torch._scaled_grouped_mm,
         torch.ops.aten._scaled_grouped_mm,
         torch.ops.aten._scaled_grouped_mm.default,
@@ -628,15 +626,14 @@ def flex_gemm(
             "FlexGEMM scaled grouped GEMMs are not supported yet; "
             "only bf16 torch.nn.functional.grouped_mm with offs is supported"
         )
-    gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
+    if gemm_op is torch.nn.functional.scaled_mm:
+        return flex_gemm_scaled_mm(gemm_args, epilogue_fn, gemm_kwargs, kernel_options)
 
+    gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
     if gemm_op is torch.ops.aten._grouped_mm.default:
         return flex_gemm_grouped_mm(
             gemm_op, gemm_args, epilogue_fn, gemm_kwargs, kernel_options
         )
-
-    if public_gemm_op is torch.nn.functional.scaled_mm:
-        return flex_gemm_scaled_mm(gemm_args, epilogue_fn, gemm_kwargs, kernel_options)
 
     def body_fn(*args: Any) -> Any:
         # Keep the traced body positional-only; the HOP carries gemm_kwargs for lowering.
