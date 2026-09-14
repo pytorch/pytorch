@@ -60,3 +60,12 @@ struct MaxUnpoolingParams {
   ::c10::metal::array<idx_type_t, N> output_strides;
   ::c10::metal::array<idx_type_t, N> indices_strides;
 };
+
+struct AdaptiveAvgPool3dParams {
+  int32_t inputT;
+  int32_t inputH;
+  int32_t inputW;
+  int32_t outputT;
+  int32_t outputH;
+  int32_t outputW;
+};
