@@ -53,16 +53,19 @@ _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
 # Names Dynamo mints into the scope the guards resolve against, rather than
 # names the caller wrote: the __import_* module aliases, the __builtins_dict___N
 # key, and the ___unnamed_scope_<id>_c<n> key an inlined frame whose globals
-# belong to no module is guarded through. A load seeds each of the first two a
-# kept guard is rooted at, so a KeyError on one reports a gap in that seeding;
-# the last embeds id() of a dict in the tracing process, so no module's vars()
-# in a loading process holds it. None of the three is a name the advice below
-# can send a caller to define. The list is complete because a report here needs
+# belong to no module is guarded through. A load seeds each of the three a kept
+# guard is rooted at, so a KeyError on one reports a gap in that seeding -- for
+# the last, a namespace the graph only specialized on: the key embeds id() of a
+# dict in the tracing process, so no module's vars() in a loading process holds
+# it, and the artifact carries the dict only where the graph lifted a value read
+# through it. None of the three is a name the advice below can send a caller to
+# define. The list is complete because a report here needs
 # a serializable guard rooted at a GlobalSource on the name: every other minted
 # family builds no Source (the codegen-only installs) or a guard type in
 # UNSUPPORTED_SERIALIZATION_GUARD_TYPES, which ___unnamed_scope's was not -- so
 # moving a type off that list means re-checking this one.
-_MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", "___unnamed_scope")
+_UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
+_MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", _UNNAMED_SCOPE_PREFIX)
 
 
 def _names_a_missing_global(text: str) -> bool:
@@ -667,11 +670,13 @@ class AOTCompiledFunction:
     def _seed_guard_scope(
         self, guard_scope: dict[str, Any], output_graph: "OutputGraphGuardsState"
     ) -> None:
-        # Dynamo mints __import_* aliases and a __builtins_dict___N key into the
+        # Dynamo mints __import_* aliases, a __builtins_dict___N key and the
+        # ___unnamed_scope_<id>_c<n> key of an inlined frame's globals into the
         # TRACING process's globals and roots guards at them; a process that only
         # loads never traced. Each name is gated on the artifact showing a kept
-        # guard reads it -- the aliases on the pruned global_scope, the builtins
-        # key on the deserialized guards' own roots -- because this writes into a
+        # guard reads it -- the aliases and the unnamed-scope key on the pruned
+        # global_scope, the builtins key on the deserialized guards' own roots --
+        # because this writes into a
         # scope that may be a user module's live namespace and installs no
         # CleanupHook. A binding this process already had is left alone: a wrong
         # binding fails the guard rather than passing it. The one value replaced
@@ -730,6 +735,21 @@ class AOTCompiledFunction:
         for alias, module_name in self._artifacts.runtime_env.import_sources.items():
             if alias in guarded_globals and alias not in guard_scope:
                 guard_scope[alias] = importlib.import_module(module_name)
+        # The unnamed-scope key embeds id() of a dict in the tracing process, so
+        # no live scope carries it. Where the graph lifted a value read through
+        # that dict, used_globals recorded the dict under the key, and that
+        # recording is what the rebuilt scope hands the guard, so a supplied
+        # scope is handed the same object; a key used_globals lacks names a
+        # namespace the graph only specialized on, and there is nothing to bind.
+        # install_global_by_id binds through install_global_unsafe, so a capture
+        # in this process may still own a leftover it left here; disowned as the
+        # builtins key is below, so the hook cannot delete it once collected.
+        used_globals = self._artifacts.runtime_env.used_globals
+        for name in guarded_globals:
+            if name.startswith(_UNNAMED_SCOPE_PREFIX) and name in used_globals:
+                CleanupHook.disown(guard_scope, name)
+                if name not in guard_scope:
+                    guard_scope[name] = used_globals[name]
         if not seeds_builtins or builtins_key is None:
             return
         # A pre-reset compile's CleanupHook may still own this name even when we
@@ -914,11 +934,11 @@ class AOTCompiledFunction:
         bytecode, so a name it omits still resolves to the baked-in value.
         ``guard_globals`` REPLACES the guard scope with no such fallback -- a name
         it lacks fails the guard, and an EMPTY dict is an empty scope rather than
-        "no scope" -- and the load WRITES into it, seeding the recorded aliases and
-        builtins-dict key a kept guard is rooted at without replacing a name it
-        already binds, so pass the dict those should land in. Passing neither
-        resolves global guards against the scope rebuilt from the artifact, where
-        a rebinding in this process is invisible.
+        "no scope" -- and the load WRITES into it, seeding the recorded aliases,
+        builtins-dict key and unnamed-scope key a kept guard is rooted at without
+        replacing a name it already binds, so pass the dict those should land in.
+        Passing neither resolves global guards against the scope rebuilt from the
+        artifact, where a rebinding in this process is invisible.
 
         ``bytecode_reads_guard_scope`` picks the guarded names out of
         ``guard_globals`` into the bytecode's globals snapshot as well -- the live
@@ -1416,10 +1436,13 @@ class AOTCompiledModel:
         as the guard's type: a kept ``TENSOR_MATCH`` checks metadata, not values,
         and a root ``TYPE_MATCH`` on a container checks its type, not the members
         the graph reads through it. Loading also MUTATES that dict: a recorded
-        ``__import_*`` alias the serialized scope still carries, and that builtins
-        key when a guard source names it, are inserted (never overwriting an
-        existing key) so guards rooted at them resolve in a process that never
-        traced.
+        ``__import_*`` alias the serialized scope still carries, that builtins key
+        when a guard source names it, and the ``___unnamed_scope_*`` key of an
+        inlined frame's globals when the graph lifted a value through it -- bound
+        to the dict serialized with the artifact, since the key embeds an ``id()``
+        from the tracing process that no live namespace holds -- are inserted
+        (never overwriting an existing key) so guards rooted at them resolve in a
+        process that never traced.
 
         There is no live scope only when ``model.forward`` does not resolve to a
         Python function of its own: ``get_traced_fn`` cannot resolve it, or it is
@@ -1428,6 +1451,17 @@ class AOTCompiledModel:
         scope rebuilt from the artifact, where they check nothing useful, and a
         guard rooted at any global but those aliases and that key warns to say
         so, naming the cause.
+
+        The function ``model.forward`` resolves to is the outermost one bound as
+        ``forward``: a ``functools.wraps``'d decorator over it, in the class body
+        or rebound on the instance, resolves to the decorator's own function, so
+        the scope is the decorator's module. That is the scope a capture of the
+        decorated forward records as well -- Dynamo traces the decorator as the
+        root frame -- so an artifact captured through the same decorator loads
+        and reads that module's guarded globals live, and one captured from the
+        undecorated forward fails its global guards there, with ``KeyError on
+        G['NAME']`` and a hint naming that module; load an artifact onto the
+        forward it was captured from.
 
         ``guard_globals``, when supplied, is that scope instead of anything
         resolved from ``model.forward``, so a caller who wants neither the live
