@@ -1555,6 +1555,7 @@ class AOTCompiledModel:
     # artifact aot_compile_module produces, and the list contents it was decided
     # over: compiled_results is public, so a call that finds them changed decides
     # again. The comparison costs about what a bind does, so not once per call.
+    # The defaults are the verdict over no results, so the first call decides.
     _shared_binding: bool = dataclasses.field(
         default=False, init=False, compare=False, repr=False
     )
@@ -1562,21 +1563,24 @@ class AOTCompiledModel:
         default=(), init=False, compare=False, repr=False
     )
 
-    def __post_init__(self) -> None:
-        self._binds_alike()
-
     def _binds_alike(self) -> bool:
         # By identity, not ==: the dataclass __eq__ would reach the Signature
         # compare _binding_key exists to avoid. Measured at 0.27us for four
         # results, call included, against 0.81us for one check().
         results, prior = self.compiled_results, self._decided_over
-        if len(results) != len(prior) or not all(map(operator.is_, results, prior)):
-            self._decided_over = results = tuple(results)
-            key = _binding_key(results[0]._artifacts) if results else None
-            self._shared_binding = key is not None and all(
-                _binding_key(result._artifacts) == key for result in results[1:]
-            )
-        return self._shared_binding
+        if len(results) == len(prior) and all(map(operator.is_, results, prior)):
+            return self._shared_binding
+        results = tuple(results)
+        key = _binding_key(results[0]._artifacts) if results else None
+        shared = key is not None and all(
+            _binding_key(result._artifacts) == key for result in results[1:]
+        )
+        # Verdict first, contents last. A concurrent caller reads the contents
+        # first, so one that matches them reads the verdict reached over them and
+        # one that does not decides for itself: never new contents, old verdict.
+        self._shared_binding = shared
+        self._decided_over = results
+        return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         # Guard evaluation ignores _guard_check_enabled, which only the last
