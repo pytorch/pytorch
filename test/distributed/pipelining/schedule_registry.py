@@ -13,6 +13,8 @@ from torch.distributed.pipelining.schedules import (
     RECV_F,
     SEND_B,
     SEND_F,
+    WAIT_SEND_B,
+    WAIT_SEND_F,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 
@@ -212,6 +214,8 @@ class ScheduleWithReorderedB(_PipelineScheduleRuntime):
                 _Action(0, F, 1),
                 _Action(0, SEND_F, 0),
                 _Action(0, SEND_F, 1),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 1),
                 _Action(0, RECV_B, 0),
                 _Action(0, RECV_B, 1),
                 _Action(0, B, 0),
@@ -226,5 +230,7 @@ class ScheduleWithReorderedB(_PipelineScheduleRuntime):
                 _Action(1, B, 1),
                 _Action(1, SEND_B, 0),
                 _Action(1, SEND_B, 1),
+                _Action(1, WAIT_SEND_B, 0),
+                _Action(1, WAIT_SEND_B, 1),
             ],
         }

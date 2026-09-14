@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Any, cast, Literal, NamedTuple, Protocol
 
 import torch
@@ -63,6 +63,8 @@ class _ComputationType(str, Enum):
     RECV_F = "RECV_F"
     SEND_B = "SEND_B"
     RECV_B = "RECV_B"
+    WAIT_SEND_F = "WAIT_SEND_F"
+    WAIT_SEND_B = "WAIT_SEND_B"
     FULL_BACKWARD = "B"
     OVERLAP_F_B = "OVERLAP_F_B"
     REDUCE_GRAD = "REDUCE_GRAD"
@@ -85,6 +87,8 @@ SEND_F = _ComputationType.SEND_F
 RECV_F = _ComputationType.RECV_F
 SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
+WAIT_SEND_F = _ComputationType.WAIT_SEND_F
+WAIT_SEND_B = _ComputationType.WAIT_SEND_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
@@ -105,7 +109,7 @@ B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(WAIT_REDUCE_GRAD|REDUCE_GRAD|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B|F|I|B|W)(\d*)"
+    r"(\d+)(WAIT_REDUCE_GRAD|WAIT_SEND_F|WAIT_SEND_B|REDUCE_GRAD|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B|F|I|B|W)(\d*)"
 )
 
 
@@ -852,6 +856,50 @@ def _wait_batch_p2p(work: list[dist.Work]):
     """
     for w in work:
         w.wait()
+
+
+_SendKey = tuple[_ComputationType, int, int]
+
+
+@dataclass
+class _PendingSend:
+    """Own one send batch until its matching wait."""
+
+    ops: list[dist.P2POp]
+    works: list[dist.Work]
+    retire: Callable[[], None] | None = None
+
+
+class _PendingSendTracker:
+    """Own pending send buffers and retire them through explicit waits."""
+
+    def __init__(self) -> None:
+        self._pending: dict[_SendKey, _PendingSend] = {}
+
+    def register(
+        self,
+        key: _SendKey,
+        ops: list[dist.P2POp],
+        works: list[dist.Work],
+        retire: Callable[[], None] | None = None,
+    ) -> None:
+        if key in self._pending:
+            raise AssertionError(f"Duplicate pipeline send {key}")
+        self._pending[key] = _PendingSend(ops, works, retire)
+
+    def wait(self, key: _SendKey) -> None:
+        if key not in self._pending:
+            raise AssertionError(f"No pending pipeline send for {key}")
+        pending = self._pending[key]
+        _wait_batch_p2p(pending.works)
+        del self._pending[key]
+        if pending.retire is not None:
+            pending.retire()
+
+    def drain(self) -> None:
+        """Wait for sends without an explicit wait action."""
+        for key in list(self._pending):
+            self.wait(key)
 
 
 class PipelineScheduleSingle(_PipelineSchedule):
@@ -2778,8 +2826,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
             )
 
-        # send ops should be waited on before step() exists, mainly for hygiene
-        send_ops: list[list[dist.Work]] = []
+        pending_sends = _PendingSendTracker()
 
         def _perform_action(action: _Action) -> None:
             comp_type = action.computation_type
@@ -2810,9 +2857,22 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # However, I was wondering if I should avoid calling batched operators at all in the case that there is
             # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
             if comp_type == SEND_F:
-                send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+                key = (SEND_F, stage_idx, mb_index)
+                ops = stage.get_fwd_send_ops(mb_index)
+                pending_sends.register(
+                    key,
+                    ops,
+                    _batch_p2p(ops),
+                    partial(stage.release_fwd_output_leases, mb_index),
+                )
             elif comp_type == SEND_B:
-                send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
+                key = (SEND_B, stage_idx, mb_index)
+                ops = stage.get_bwd_send_ops(mb_index)
+                pending_sends.register(key, ops, _batch_p2p(ops))
+            elif comp_type in (WAIT_SEND_F, WAIT_SEND_B):
+                send_type = SEND_F if comp_type == WAIT_SEND_F else SEND_B
+                key = (send_type, stage_idx, mb_index)
+                pending_sends.wait(key)
             elif comp_type == RECV_F:
                 if (stage_idx, mb_index) in self.fwd_recv_ops:
                     raise AssertionError(
@@ -3030,9 +3090,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
                 raise e
 
-        # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
-        while send_ops:
-            _wait_batch_p2p(send_ops.pop())
+        pending_sends.drain()
 
         if len(self.unshard_ops) != 0:
             raise AssertionError("Unused unshard operations")
@@ -4126,6 +4184,16 @@ def _simulate_comms_compute(
             peer_stage_idx = stage_idx + 1
             expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index)
             return expected_send in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
+        elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+            # Require the peer recv to keep the simulation conservative.
+            forward = action.computation_type == WAIT_SEND_F
+            send_type = SEND_F if forward else SEND_B
+            if _Action(stage_idx, send_type, action.microbatch_index) not in prev_ops:
+                return False
+            peer_stage_idx = stage_idx + 1 if forward else stage_idx - 1
+            recv_type = RECV_F if forward else RECV_B
+            expected_recv = _Action(peer_stage_idx, recv_type, action.microbatch_index)
+            return expected_recv in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
         else:
             raise ValueError(f"Unsupported action type {action}")
 
