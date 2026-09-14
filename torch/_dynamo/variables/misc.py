@@ -181,10 +181,12 @@ class SuperVariable(VariableTracker):
         except ValueError:
             # Corner case where the typevar is not in the mro of the objvar
             # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
-            # Use the original objvar value (not type_to_use, which is always
-            # a type) so the raised TypeError's message matches CPython's
-            # "instance of X" vs "type X" wording.
-            obj_for_check = getattr(self.objvar, "value", type_to_use)
+            # supercheck picks "instance of X" vs "type X" off PyType_Check(obj),
+            # so hand it the real object rather than type_to_use, which is always
+            # a type and would report an instance as "type X".
+            obj_for_check = self.objvar.get_real_python_backed_value()
+            if obj_for_check is NO_SUCH_SUBOBJ:
+                obj_for_check = type_to_use
             try:
                 resolved = getattr(super(search_type, obj_for_check), name)
             except TypeError as e:
@@ -394,15 +396,10 @@ class SuperVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         elif (
             isinstance(self.objvar, variables.UserDefinedObjectVariable)
-            and self.objvar._base_vt is not None
             and self.objvar._base_methods is not None
             and inner_fn in self.objvar._base_methods
         ):
-            if name == "__init__" and isinstance(
-                self.objvar, variables.lists.DequeVariable
-            ):
-                return self.objvar.call_method(tx, name, args, kwargs)
-            return self.objvar._base_vt.call_method(tx, name, args, kwargs)
+            return self.objvar.call_base_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             attr_name = args[0].value  # type: ignore[attr-defined]
             # object.__getattribute__ IS PyObject_GenericGetAttr.  Delegate
