@@ -568,6 +568,27 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         if device_of is not None:
                             device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
 
+                aot_consultation = ""
+                aot_manifest = self.native_aot_manifests.get(str(f.func.name))
+                if aot_manifest is not None and not aot_manifest.structured:
+                    stub = f"at::native::{aot_manifest.stub_name()}"
+                    device_type = f"c10::DeviceType::{aot_manifest.dispatch_key}"
+                    gate = (
+                        "!at::globalContext().maskUnconditionalNativeAot()"
+                        if aot_manifest.unconditional
+                        else "at::globalContext().allowNativeAot()"
+                    )
+                    aot_args = ", ".join(
+                        [*(a.name for a in sig.arguments()), "aot_result"]
+                    )
+                    aot_consultation = f"""
+  if ({gate} && {stub}.is_device_supported({device_type})) {{
+    {returns_type} aot_result;
+    if ({stub}({device_type}, {aot_args})) {{
+      return aot_result;
+    }}
+  }}
+"""
                 return f"""\
 namespace {{
 
@@ -575,6 +596,7 @@ namespace {{
   {device_check}
 
   {device_guard}
+  {aot_consultation}
   return {impl_name}({args_exprs_str});
 }}
 
