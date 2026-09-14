@@ -17203,6 +17203,7 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
         dtypes=float8_types(),
+        dtypesIfMPS=empty_types(),
         # Deliberately e4m3fn even on gfx942 (native fnuz); see _scaled_mm_v2.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
@@ -19443,6 +19444,7 @@ op_db: list[OpInfo] = [
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.float8_e4m3fn),
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
@@ -26535,7 +26537,7 @@ python_ref_db = [
             # TypeError: Trying to convert Float8_* to the MPS backend but it does not have support for that dtype.
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
+                dtypes=(torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
@@ -26543,7 +26545,7 @@ python_ref_db = [
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
+                dtypes=(torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
             ),
         ),
     ),

@@ -1,9 +1,13 @@
+import builtins
 import dataclasses
+import enum
+import importlib
 import inspect
 import io
 import logging
 import os
 import pickle
+import re
 import tempfile
 import types
 from collections.abc import Callable, Sequence
@@ -32,6 +36,7 @@ from .hooks import Hooks
 
 if TYPE_CHECKING:
     from .guards import GuardManagerWrapper
+    from .output_graph import OutputGraphGuardsState
     from .package import SourceInfo
 
 
@@ -40,6 +45,52 @@ log = logging.getLogger(__name__)
 _EXTERNAL_DATA_HINT = (
     "Mark the value(s) as external data by using `external_data={'key': ...}`."
 )
+
+
+# A guard failure that is exactly a missing top-level global: the verbose code
+# part a guard tree reports for one ("KeyError on G['CONFIG']"). A trailing
+# subscript ("KeyError on G['CONFIG']['scale']") means the global itself
+# resolved and only a key inside it is absent, so the advice to define the
+# global would be wrong.
+_MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
+
+# Names Dynamo mints into the scope the guards resolve against, rather than
+# names the caller wrote: the __import_* module aliases, the __builtins_dict___N
+# key, and the ___unnamed_scope_<id>_c<n> key an inlined frame whose globals
+# belong to no module is guarded through. A load seeds each of the first two a
+# kept guard is rooted at, so a KeyError on one reports a gap in that seeding;
+# the last embeds id() of a dict in the tracing process, so no module's vars()
+# in a loading process holds it. None of the three is a name the advice below
+# can send a caller to define. The list is complete because a report here needs
+# a serializable guard rooted at a GlobalSource on the name: every other minted
+# family builds no Source (the codegen-only installs) or a guard type in
+# UNSUPPORTED_SERIALIZATION_GUARD_TYPES, which ___unnamed_scope's was not -- so
+# moving a type off that list means re-checking this one.
+_MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", "___unnamed_scope")
+
+
+def _names_a_missing_global(text: str) -> bool:
+    # Matched whole, against one verbose code part: matching a substring of the
+    # GuardDebugInfo string would also fire for the nested-key failure above.
+    match = _MISSING_GLOBAL_RE.fullmatch(text)
+    if match is None:
+        return False
+    return not match["name"].strip("\"'").startswith(_MINTED_GLOBAL_PREFIXES)
+
+
+class _GuardScope(enum.Enum):
+    """Which dict the artifact's global guards resolve names against."""
+
+    # Never serialized: the guards still hold the tracing process's globals.
+    CAPTURED = "captured"
+    # A live scope the load path re-rooted the guards at, e.g. a function
+    # load's f_globals.
+    SUPPLIED = "supplied"
+    # Rebuilt for this load: the globals the graph lifted, the graph's freshly
+    # imported module aliases, the backend id, and whatever an f_globals= was
+    # merged over them. That merge copies, so a name bound in the f_globals
+    # after the load is invisible to these guards.
+    RECONSTRUCTED = "reconstructed"
 
 
 def bind_locals(
@@ -465,6 +516,27 @@ class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
     _extra_globals: dict[str, object] | None = None
+    # Guard-only scope, held by reference: never merged into fn.__globals__, so a
+    # caller-supplied one cannot rewire what the compiled bytecode reads. Left
+    # None, the guards resolve against fn.__globals__ itself and are seeded into it.
+    _guard_globals: dict[str, object] | None = None
+    # Which of the three scopes the artifact's guards resolve against, so a
+    # guard failure can say something actionable about the dict the name was
+    # looked up in. Not init-settable: it stays CAPTURED unless __post_init__
+    # itself resolves a scope, which it does only for a load that has guards
+    # left to re-root.
+    _guard_scope: _GuardScope = dataclasses.field(
+        init=False, default=_GuardScope.CAPTURED
+    )
+    # The rebuilt callable, set by __post_init__ (never absent on a live
+    # artifact); a declared field rather than an attribute setattr'd onto the
+    # instance. Out of repr and eq because the field has no default: leaving it
+    # in either makes both raise AttributeError on an instance __post_init__
+    # abandoned -- check_compatibility and forward_callable both raise there --
+    # which is what a traceback rendering frame locals would report instead of
+    # the real failure. It is a per-instance FunctionType, so it is not
+    # equality state either.
+    fn: Callable[..., Any] = dataclasses.field(init=False, repr=False, compare=False)
 
     def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
         f_locals: dict[str, object] = {}
@@ -500,19 +572,160 @@ class AOTCompiledFunction:
 
         if self._artifacts.guard_manager is None:
             guards_state = load_guards_state(self._artifacts.guards_state)
+            guard_scope = self._guard_globals
+            if guard_scope is None:
+                self._guard_scope = _GuardScope.RECONSTRUCTED
+                guard_scope = self.fn.__globals__
+            else:
+                # A live scope: a name it lacks must fail the guard rather than
+                # fall back to the value serialized with the artifact.
+                self._guard_scope = _GuardScope.SUPPLIED
+            # Seeded AFTER forward_callable, never before: on the default path this
+            # IS fn.__globals__, and PyFunction_New caches __builtins__ at creation,
+            # so the __builtins__ written below cannot rewire the bytecode's lookups.
+            # The builtins-dict key below is an ordinary global and does; see there.
+            self._seed_guard_scope(guard_scope, guards_state.output_graph)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
-                self.fn.__globals__,
+                guard_scope,
             )
+
+    def _seed_guard_scope(
+        self, guard_scope: dict[str, Any], output_graph: "OutputGraphGuardsState"
+    ) -> None:
+        # Dynamo mints __import_* aliases and a __builtins_dict___N key into the
+        # TRACING process's globals and roots guards at them; a process that only
+        # loads never traced. Each name is gated on the artifact showing a kept
+        # guard reads it -- the aliases on the pruned global_scope, the builtins
+        # key on the deserialized guards' own roots -- because this writes into a
+        # scope that may be a user module's live namespace and installs no
+        # CleanupHook. A binding this process already had is left alone: a wrong
+        # binding fails the guard rather than passing it. The one value replaced
+        # is one this load itself put there, in the builtins branch below.
+        from .output_graph import get_builtins_dict
+        from .source import get_global_source_name
+        from .utils import CleanupHook
+
+        # The serialized global_scope is pruned to the names the kept guards
+        # resolve at check time, which is wider than their originating_sources:
+        # a DUPLICATE_INPUT reads its source_b and a SHAPE_ENV guard reads the
+        # shape-env sources, and a scope lacking one of those fails with a
+        # KeyError on G[...] too. That is exactly the set the aliases need, so it
+        # gates them. Only a caller-supplied scope can be missing one --
+        # forward_callable imports every recorded one.
+        guarded_globals = output_graph.global_scope
+        # That pruned scope cannot gate the builtins key -- the serializer writes
+        # it in whether or not a guard reads it -- so match the deserialized
+        # guards' own roots instead. The two wider channels above never root at
+        # this key: load_builtin_from_argval is the only site that mints a
+        # source under it, and only for a callable builtin.
+        builtins_key = output_graph.name_of_builtins_dict_key_in_fglobals
+        sources = [guard.originating_source for guard in output_graph.guards]
+        roots = {get_global_source_name(source) for source in sources}
+        seeds_builtins = bool(builtins_key) and builtins_key in roots
+        # Refused before anything below writes or disowns, so a refused load
+        # leaves the caller's scope exactly as it found it; the check reads only
+        # __builtins__ and has to run whenever the key is seeded, not only when
+        # it is derived, or a pre-bound key would let a bad binding load.
+        if seeds_builtins:
+            bound = guard_scope.get("__builtins__", builtins.__dict__)
+            if not isinstance(bound, (dict, types.ModuleType)):
+                # Name the parameter this dict arrived by: get_builtins_dict would
+                # otherwise raise a bare AttributeError out of Dynamo internals.
+                # load_compiled_function forwards one dict as both, so a dict that
+                # arrived by both routes is named by the public one -- guard_globals
+                # is not in that signature. The TYPE and not the value -- a repr on a
+                # load failure path runs user code.
+                arrived_as_f_globals = (
+                    self._guard_globals is None
+                    or self._guard_globals is self._extra_globals
+                )
+                param = "f_globals" if arrived_as_f_globals else "guard_globals"
+                raise TypeError(
+                    f"{param}['__builtins__'] must be a dict or a module, got "
+                    f"{type(bound).__name__}"
+                )
+        # No disown for an alias: import_source and CompilePackage._install_global
+        # bind one by plain dict assignment, and only install_global_unsafe
+        # creates a CleanupHook, never for an alias.
+        for alias, module_name in self._artifacts.runtime_env.import_sources.items():
+            if alias in guarded_globals and alias not in guard_scope:
+                guard_scope[alias] = importlib.import_module(module_name)
+        if not seeds_builtins or builtins_key is None:
+            return
+        # A pre-reset compile's CleanupHook may still own this name even when we
+        # leave its value alone; drop it so it can't delete the binding once
+        # collected.
+        CleanupHook.disown(guard_scope, builtins_key)
+        # The dict this key resolves to has to be the LIVE builtins: the guard
+        # rooted here is an ID_MATCH on a builtin, so a snapshot goes on passing
+        # after that builtin is rebound. That is what this load binds when the
+        # scope has no __builtins__; a caller who pre-binds one chooses the dict
+        # the guard watches. Two bindings reach a snapshot, and the
+        # second is this load's own -- when the generated bytecode reads this key,
+        # get_runtime_env records a pickle-filtered COPY of the tracing builtins
+        # under it and forward_callable spreads that copy into fn.__globals__,
+        # which IS the default guard scope. Re-derive over that one; a binding from
+        # anywhere else is a value this process chose and stays.
+        # Re-deriving it also decides what the bytecode subscripts, since that
+        # recording exists only because the bytecode reads this key, and it is
+        # filtered for picklability alone: a builtin the tracing process had and
+        # this one lacks stops being readable -- a kept guard on that name reports
+        # it, and without one the bytecode raises KeyError.
+        snapshot = self._artifacts.runtime_env.used_globals.get(builtins_key)
+        if builtins_key in guard_scope and (
+            snapshot is None or guard_scope[builtins_key] is not snapshot
+        ):
+            return
+        # forward_callable builds fn.__globals__ as a plain dict, so unlike an
+        # exec'd module namespace it carries no __builtins__ to derive from.
+        guard_scope.setdefault("__builtins__", builtins.__dict__)
+        guard_scope[builtins_key] = get_builtins_dict(guard_scope)
+
+    def _missing_global_hint(self) -> str:
+        """Advice for a guard that failed on a global its scope does not define,
+        worded for the scope the guards were actually resolved against."""
+        if self._guard_scope is _GuardScope.RECONSTRUCTED:
+            return (
+                " -- a guarded global is missing from the scope rebuilt from the "
+                "artifact; load with an f_globals= that is a complete live scope "
+                "carrying the name -- normally vars(mod) for the module mod that "
+                "defined the function, which is usually not the module doing the "
+                "loading -- so the guard can resolve it."
+            )
+        if self._guard_scope is _GuardScope.SUPPLIED:
+            return (
+                " -- a guarded global is missing from the live scope this "
+                "artifact was loaded against; define it there so the guard can "
+                "resolve it."
+            )
+        # CAPTURED: the guards hold the globals they were traced against BY
+        # REFERENCE, so a name deleted after capture can be defined there again
+        # to make the guard resolve -- the same advice as SUPPLIED, worded for
+        # the dict this path actually used.
+        return (
+            " -- a guarded global is missing from the globals of the module the "
+            "compiled function was traced in, which its guards still resolve "
+            "against; define it there so the guard can resolve it."
+        )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self._artifacts.guard_manager is None:
             raise AssertionError("guard_manager must not be None")
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
-            reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
-            raise RuntimeError(f"GuardManager check failed, reason: {reason}")
+            debug_info = self._artifacts.guard_manager.check_verbose(f_locals)
+            msg = f"GuardManager check failed, reason: {debug_info}"
+            if any(
+                _names_a_missing_global(part) for part in debug_info.verbose_code_parts
+            ):
+                # What the f-string interpolated is str(GuardDebugInfo), which
+                # ends in a newline, so the hint has to be appended to the
+                # stripped message: otherwise its inline continuation lands on a
+                # line of its own, starting with a stray space.
+                msg = msg.rstrip() + self._missing_global_hint()
+            raise RuntimeError(msg)
         return self.fn(*args, **kwargs)
 
     def source_info(self) -> "SourceInfo":
@@ -599,7 +812,21 @@ class AOTCompiledFunction:
         data: bytes,
         f_globals: dict[str, object] | None = None,
         external_closure_data: dict[str, Any] | None = None,
+        *,
+        guard_globals: dict[str, object] | None = None,
     ) -> "AOTCompiledFunction":
+        """Rebuild a compiled function from ``serialize()`` output.
+
+        ``f_globals`` is MERGED over the scope reconstructed from the serialized
+        bytecode, so a name it omits still resolves to the baked-in value.
+        ``guard_globals`` REPLACES the guard scope with no such fallback -- a name
+        it lacks fails the guard, and an EMPTY dict is an empty scope rather than
+        "no scope" -- and the load WRITES into it, seeding the recorded aliases and
+        builtins-dict key a kept guard is rooted at without replacing a name it
+        already binds, so pass the dict those should land in. Passing neither
+        resolves global guards against the scope rebuilt from the artifact, where
+        a rebinding in this process is invisible.
+        """
         f = io.BytesIO(data)
         f.seek(0)
         unpickler = AOTCompileUnpickler(external_closure_data or {}, f)
@@ -615,7 +842,7 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
-        return cls(artifacts, _extra_globals=f_globals)
+        return cls(artifacts, _extra_globals=f_globals, _guard_globals=guard_globals)
 
     def disable_guard_check(self) -> None:
         self._guard_check_enabled = False
@@ -662,6 +889,10 @@ def aot_compile_fullgraph(
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
+                # NB: the is_global clause dropping every global guard is
+                # deliberate, not a gap: narrowing it would need every load to
+                # supply a scope binding every global a kept guard reads.
+                # Callers who need one guarded pass their own guard_filter_fn.
                 return [
                     (
                         not (

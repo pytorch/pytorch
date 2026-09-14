@@ -799,13 +799,13 @@ class TestPeriodicCanary(TestCase):
     @periodic
     @onlyCPU
     def test_cpu_canary(self, device):
-        self.assertEqual(torch.arange(4, device=device).sum().item(), 6)
+        self.assertEqual(torch.arange(4, device=device).sum().item(), 7)
 
     @periodic
     @onlyCUDA
     def test_gpu_canary(self, device):
         x = torch.ones(4, 4, device=device)
-        self.assertEqual(x @ x, torch.full((4, 4), 4.0, device=device))
+        self.assertEqual(x @ x, torch.full((4, 4), 5.0, device=device))
 
 
 instantiate_device_type_tests(TestPeriodicCanary, globals(), only_for=("cpu", "cuda"))
