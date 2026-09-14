@@ -2439,14 +2439,20 @@ from user code:
         torch._dynamo.reset()
         self.assertEqual(AOTCompiledFunction.deserialize(data)(x), expected)
 
+        # Specification, not regression: the name is absent from the serialized
+        # scope too (asserted above), so a lambda over either dict raises
+        # KeyError here. The default load above and the one-row arm below are
+        # what separate the fix from the parent.
         torch._dynamo.reset()
         loaded = AOTCompiledFunction.deserialize(data, guard_globals={})
         with self.assertRaisesRegex(RuntimeError, r"'AOT_DYN_ROWS'"):
             loaded(x)
 
-        # One row trips the range guard the dynamic dim minted, and the failure
-        # has to name that guard: the caller's tensor was checked, not a scope
-        # where the name is unbound.
+        # One row trips the range guard the dynamic dim minted. A failing lambda
+        # reports its whole code-part list, so the regex does not single out the
+        # tripped expression; it tells a lambda that resolved the name and failed
+        # on the caller's tensor from one whose only part is the KeyError name,
+        # which is what a lambda over the serialized scope produced.
         torch._dynamo.reset()
         short = {"AOT_DYN_ROWS": torch.randn(1, 3)}
         loaded = AOTCompiledFunction.deserialize(data, guard_globals=short)
