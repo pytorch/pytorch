@@ -4166,6 +4166,19 @@ class _Missing:
         return _Missing()
 
 
+class _LiveBuiltins:
+    """Stands in a snapshot for builtins.__dict__: resolves to the loading
+    process's own, by reference, rather than a copy of the saving one's."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return vars, (builtins,)
+
+
+# One instance, so a scope binding the dict twice (__builtins__ and Dynamo's
+# __builtins_dict___N alias) carries the reduce once and a memo get for the rest.
+_live_builtins = _LiveBuiltins()
+
+
 @functools.cache
 def _get_unsupported_types() -> tuple[type, ...]:
     # We only do ID_MATCH on C objects which is already banned from guards serialization.
@@ -4195,8 +4208,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
-        # above _keep. Required, because omitting it silently prunes every
-        # container per value.
+        # above _keep. Required, because omitting it would carry no plain
+        # tuple verbatim.
         self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
@@ -4373,31 +4386,57 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Whether a function container (__defaults__/__dict__/...) is carried whole
         rather than pruned per value; the rule and its reasons are in the Note
         [Reconstructing a function a guard is rooted at] above."""
-        if not self._keep(container):
-            return False
-        if type(container) is dict:
-            return False
+        # The tuple case is decided on the recording alone. A recorded tuple is
+        # also in guard_tree_values today (EQUALS_MATCH registers the value it
+        # reads), but the failure mode of that second invariant breaking would
+        # be the silent forever-miss this rule exists to prevent.
         if type(container) is tuple:
             return id(container) in self.value_guarded_containers
-        return True
+        if type(container) is dict:
+            return False
+        return self._keep(container)
 
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
         """Built once per module dict, so every function rebuilt against that
         dict is built over ONE shared scope after load (pickle memoizes it)."""
-        snapshot = self._globals_snapshots.get(id(f_globals))
+        snapshot: dict[str, Any] | None = self._globals_snapshots.get(id(f_globals))
         if snapshot is None:
-            snapshot = {
-                name: self._prune(value, "unguarded function global")
-                for name, value in f_globals.items()
-            }
+            snapshot = {}
+            # Iterate a COPY: a CleanupHook can pop a name Dynamo installed out
+            # of this dict from a weakref callback, and iterating it live while
+            # pruning raises RuntimeError when that lands mid-loop.
+            for name, value in dict(f_globals).items():
+                # The live builtins.__dict__ is exempt from the keep contract
+                # wherever it is bound, not just under __builtins__: a traced
+                # module's own dict also holds it under Dynamo's
+                # __builtins_dict___N alias, the SAME object, and that is the
+                # dict a saved BUILTIN_MATCH guard registers. Keeping it "as
+                # read" would carry all of builtins (~6 KB) per snapshot, so
+                # every such slot travels as a reference resolved in the
+                # loading process. It stays a dict, since a guard may have
+                # walked through the slot and rebakes against whatever is in
+                # it; where no guard registered it at all (caching_precompile
+                # drops the BUILTIN_MATCH guard, and aot_compile's default
+                # filter drops every global one) this hands back the live dict
+                # rather than a sentinel, which the same rebake argument
+                # covers. The cost: a guard that walked the slot rebakes
+                # against the loading process's builtins rather than the
+                # binding the compile saw, which is the rule
+                # test_snapshot_keeps_the_save_time_value_of_a_guarded_global
+                # pins for a guarded global.
+                if value is builtins.__dict__:
+                    snapshot[name] = _live_builtins
+                else:
+                    snapshot[name] = self._prune(value, "unguarded function global")
             # FunctionType binds builtins from the scope's __builtins__ at
             # creation, so that entry can never be a sentinel: a pruned one
-            # becomes the real module (pickled by reference), a kept one (the
-            # builtins dict some guard read through) stays verbatim as the
-            # keep contract says. The key set is the module dict's at save time,
-            # names Dynamo installed into it included; a guard on the dict's
-            # shape compares against the live dict at run time and is only as
-            # portable as those names (see the commit message).
+            # becomes the real module. A dict without the key stays without it,
+            # since FunctionType falls back to the loading frame's builtins and
+            # a guard on the dict's shape must see the same keys. The key set is
+            # the module dict's at save time, names Dynamo installed into it
+            # included; a guard on the dict's shape compares against the live
+            # dict at run time and is only as portable as those names (see the
+            # commit message).
             if isinstance(snapshot.get("__builtins__"), _Missing):
                 snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
@@ -4458,9 +4497,37 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in obj.__dict__.items()
             }
         # An unguarded annotation/type param may be an unpicklable local class;
-        # prune it. (On 3.14 _read_raw_annotations returns a copy, so the dict is
-        # never kept and is always pruned per value.)
-        raw_annotations = self._read_raw_annotations(obj)
+        # prune it. An exact dict is never carried whole, so the keep below only
+        # fires for a dict SUBCLASS assigned onto __annotations__ that a guard
+        # registered, and not even for that on 3.14, where the read copies. The
+        # 3.14 FORWARDREF read reruns the annotate function with only NAME
+        # lookups proxied, so it absorbs a missing name, a raising attribute or a
+        # raising call, but the rest of the expression still runs for real:
+        # formatting a proxy in an f-string (_Stringifier refuses __format__) or
+        # a sub-expression that never touches a name (`()[0]`) raises out of it;
+        # that would fail the dump for a slot the prune exists to make optional,
+        # so drop the whole set instead.
+        # Safe for those: FORWARDREF hands back the cached __annotations__ when
+        # the function has one, so reaching the handler means the whole
+        # __annotate__ call was unreadable, and a guard rooted at
+        # fn.__annotations__ read them at trace time.
+        try:
+            raw_annotations = self._read_raw_annotations(obj)
+        except RecursionError:
+            # Not expression-shaped: an overflow drops a set that reads fine at
+            # any other depth, cached and guarded ones included. It is the dump's
+            # own limit, which pickle_guards_state reports as a bypass.
+            raise
+        except Exception as e:
+            code = obj.__code__
+            log.debug(
+                "dropping the annotations of %s (%s:%d): %s",
+                getattr(code, "co_qualname", code.co_name),
+                code.co_filename,
+                code.co_firstlineno,
+                e,
+            )
+            raw_annotations: dict[str, Any] = {}
         if self._keep_container_verbatim(raw_annotations):
             annotations = raw_annotations
         else:
