@@ -3332,16 +3332,6 @@ class NumpyNdarrayVariable(TensorVariable):
             return VariableTracker.build(tx, int(r))
         return self._insert_attr_into_graph(tx, "size")
 
-    def _unsupported_attr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        unimplemented(
-            gb_type="Unsupported ndarray attribute access",
-            context=f"tp_getattro_impl {self} {name}",
-            explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
-            hints=[],
-        )
-
     tp_getset = {
         "ndim": GetSet(_get_ndim, None),
         "itemsize": GetSet(_get_itemsize, None),
@@ -3352,9 +3342,6 @@ class NumpyNdarrayVariable(TensorVariable):
         "shape": GetSet(lambda s, tx: s._get_shape_or_strides(tx, "shape"), None),
         "strides": GetSet(lambda s, tx: s._get_shape_or_strides(tx, "strides"), None),
         "size": GetSet(_get_size, None),
-        "base": GetSet(lambda s, tx: s._unsupported_attr(tx, "base"), None),
-        "flags": GetSet(lambda s, tx: s._unsupported_attr(tx, "flags"), None),
-        "dtype": GetSet(lambda s, tx: s._unsupported_attr(tx, "dtype"), None),
     }
 
     def tp_getattro_impl(
