@@ -74,6 +74,8 @@ from ..utils import (
     get_fake_value,
     is_tensor_getset_descriptor,
     istype,
+    no_keywords,
+    no_positional,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -86,6 +88,8 @@ from .base import (
     GetSet,
     Member,
     Method,
+    readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -184,6 +188,7 @@ _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     float: frozenset({"fromhex", "hex"}),
 }
 if sys.version_info >= (3, 14):
+    _BUILTIN_CONSTANT_FOLDABLE_METHODS[float] |= frozenset({"from_number"})
     _BUILTIN_CONSTANT_FOLDABLE_METHODS[complex] = frozenset({"from_number"})
 
 
@@ -430,10 +435,10 @@ class BaseBuiltinVariable(VariableTracker):
         source = self.source and AttrSource(self.source, "__flags__")
         return VariableTracker.build(tx, fn.__flags__, source)
 
-    tp_getset = {"__bases__": GetSet(_type_get_bases, None)}
+    tp_getset = {"__bases__": GetSet(_type_get_bases, unmodeled_setter)}
     tp_members = {
-        "__base__": Member(_type_get_base, None),
-        "__flags__": Member(_type_get_flags, None),
+        "__base__": Member(_type_get_base, readonly_setter),
+        "__flags__": Member(_type_get_flags, readonly_setter),
     }
 
     @classmethod
@@ -605,7 +610,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return VariableTracker.build(tx, self.fn.__name__, source)
 
     tp_getset = {
-        "__name__": GetSet(_builtin_type_get_name, None),
+        "__name__": GetSet(_builtin_type_get_name, readonly_setter),
     }
 
     @classmethod
@@ -1334,11 +1339,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                                 self_handler,
                                 e,
                             )
-                            unimplemented(
-                                gb_type="invalid call to builtin op handler",
-                                context=f"invalid args to {self_handler}: {args} {kwargs}",
-                                explanation=f"Encountered TypeError when trying to handle op {fn.__name__}",
-                                hints=[*graph_break_hints.DIFFICULT],
+                            raise_args_mismatch(
+                                tx,
+                                fn.__name__,
+                                expect=str(inspect.signature(self_handler)),
+                                actual=f"{args} {kwargs}",
                             )
                     else:
                         raise
@@ -2028,6 +2033,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return generic_str(tx, arg)
 
+    def call_bytes(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        no_positional(tx, "bytes", list(args))
+        no_keywords(tx, "bytes", kwargs)
+        return variables.ConstantVariable.create(b"")
+
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
             unimplemented(
@@ -2049,10 +2064,13 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
-            r = builtins.__build_class__(
-                fn,  # type: ignore[possibly-undefined]
-                *[a.as_python_constant() for a in args[1:]],
-            )
+            try:
+                r = builtins.__build_class__(
+                    fn,  # type: ignore[possibly-undefined]
+                    *[a.as_python_constant() for a in args[1:]],
+                )
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
             return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)
@@ -2440,6 +2458,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             (
                 variables.SetVariable,
                 variables.FrozensetVariable,
+                variables.DictKeySetVariable,
                 variables.ConstDictVariable,
             ),
         ):
@@ -3205,7 +3224,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
         if isinstance(
-            a, (ListVariable, ConstDictVariable, SetVariable, FrozensetVariable)
+            a,
+            (
+                ListVariable,
+                ConstDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                variables.DictKeySetVariable,
+            ),
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
         if isinstance(a, UserDefinedObjectVariable):
@@ -3387,7 +3413,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
         # an existing set/frozenset/dict.
         if isinstance(
-            arg, (variables.SetVariable, variables.FrozensetVariable, ConstDictVariable)
+            arg,
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.DictKeySetVariable,
+                ConstDictVariable,
+            ),
         ):
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
             return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
@@ -3549,7 +3581,12 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
         obj, attr = args
         if not attr.is_python_constant():
             raise_observed_exception(TypeError, tx)
-        result = obj.call_obj_hasattr(tx, attr.as_python_constant())
+        attr_name = attr.as_python_constant()
+        if not isinstance(attr_name, str):
+            raise_type_error(
+                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
+            )
+        result = obj.call_obj_hasattr(tx, attr_name)
         if result is None:
             unimplemented(
                 gb_type="hasattr() on unsupported type",
@@ -3590,6 +3627,11 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         if len(args) != 3 or kwargs:
             raise_observed_exception(TypeError, tx)
         obj, name_var, val = args
+        if not issubclass(name_var.python_type(), str):
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{name_var.python_type_name()}'",
+            )
         result = self._call_setattr(tx, obj, name_var, val)
         if result is not None:
             return result
