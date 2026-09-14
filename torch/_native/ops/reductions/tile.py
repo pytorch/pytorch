@@ -1,6 +1,6 @@
 # Shared reduction kernel/datapath; drivers own launch and cache policy. Reuse avoids
 # prior 3.7x unwidened and 3x undeclared-alignment regressions. Tiles map vec
-# elements/load across tpr threads/row; rolled folds share vector-class kernels.
+# elements/load across threads_per_row threads/row; rolled folds share vector-class kernels.
 
 import math
 
@@ -26,32 +26,32 @@ def align_bytes(N: int, itemsize: int) -> int:
 
 
 class TileMap:
-    """Map row elements to threads and loads; tpr=1 needs no lane merge."""
+    """Map row elements to threads and loads; threads_per_row=1 needs no lane merge."""
 
-    def __init__(self, N: int, itemsize: int, tpr: int, loads: int):
+    def __init__(self, N: int, itemsize: int, threads_per_row: int, loads: int):
         # Cross-warp butterflies require a power-of-two warp count.
-        nw = tpr // WARP
-        if tpr != 1 and (tpr % WARP or nw & (nw - 1)):
+        nw = threads_per_row // WARP
+        if threads_per_row != 1 and (threads_per_row % WARP or nw & (nw - 1)):
             raise ValueError(
-                f"tpr must be 1 or a power-of-two multiple of {WARP}, got {tpr}"
+                f"threads_per_row must be 1 or a power-of-two multiple of {WARP}, got {threads_per_row}"
             )
         unroll = vec_size(N, itemsize) * loads
         if unroll > MAX_UNROLL:
             raise ValueError(
                 f"per-thread unroll {unroll} (vec*loads) exceeds MAX_UNROLL={MAX_UNROLL}; "
                 f"compile time scales with it (~1 ms/op, superlinear past ~1300). "
-                f"Got N={N} tpr={tpr} loads={loads}."
+                f"Got N={N} threads_per_row={threads_per_row} loads={loads}."
             )
         self.N = N
         self.vec = vec_size(N, itemsize)
-        self.tpr = tpr
+        self.threads_per_row = threads_per_row
         self.loads = loads
         # Wide loads require vec to divide N; otherwise use per-element reads.
         self.wide_ok = N % self.vec == 0
 
     @property
     def sig(self):
-        return (self.N, self.vec, self.tpr, self.loads, self.wide_ok)
+        return (self.N, self.vec, self.threads_per_row, self.loads, self.wide_ok)
 
     def align_bytes(self, itemsize: int) -> int:
         """Alignment to declare for THIS tile (element width when the wide load is off)."""
@@ -60,12 +60,12 @@ class TileMap:
 
 @cute.jit
 def merge_lanes(trait, acc, tm: cutlass.Constexpr, asc: cutlass.Constexpr = False):
-    """Merge row lanes; `asc` controls numeric association and index ties. No-op at tpr=1."""
-    if const_expr(tm.tpr == 1):
+    """Merge row lanes; `asc` controls numeric association and index ties. No-op at threads_per_row=1."""
+    if const_expr(tm.threads_per_row == 1):
         return acc
     from .traits import warp_reduce
 
-    return warp_reduce(trait, acc, tm.tpr, ascending=asc)
+    return warp_reduce(trait, acc, tm.threads_per_row, ascending=asc)
 
 
 _ROLL_UNROLL = 4
@@ -86,11 +86,11 @@ def fold_row_rolled(
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
     vec = const_expr(tm.vec)
-    tpr = const_expr(tm.tpr)
+    threads_per_row = const_expr(tm.threads_per_row)
     gv = cute.flat_divide(mX[Int64(r), None], (vec,))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for c in cutlass.range(nwaves, unroll=unroll):
-        k = c * Int32(tpr) + lane
+        k = c * Int32(threads_per_row) + lane
         ok = k < nchunks
         ks = k if ok else Int32(0)  # clamp so the load is always in range
         cute.autovec_copy(gv[None, ks], frag)
@@ -127,7 +127,7 @@ def fold_cols_rolled(
 class TileReduce:
     """Reduction kernel parameterized by reduced axis.
 
-    Row uses tpr threads per contiguous row and merges lanes. Column gives each thread
+    Row uses threads_per_row threads per contiguous row and merges lanes. Column gives each thread
     vec adjacent outputs and splits strided rows on grid y. Only folding is axis-specific;
     dead-thread handling, projection, and nslots-by-nouts stores are shared.
     """
@@ -138,8 +138,8 @@ class TileReduce:
         dtype,
         axis,
         N,
-        tpr=1,
-        nt=128,
+        threads_per_row=1,
+        threads_per_block=128,
         nouts=1,
         final=True,
         unroll=_ROLL_UNROLL,
@@ -149,16 +149,20 @@ class TileReduce:
     ):
         if axis not in ("row", "col"):
             raise ValueError(f"axis must be 'row' or 'col', got {axis!r}")
-        if axis == "row" and (tpr % WARP or tpr > nt or nt % tpr):
+        if axis == "row" and (
+            threads_per_row % WARP
+            or threads_per_row > threads_per_block
+            or threads_per_block % threads_per_row
+        ):
             raise ValueError(
-                f"tpr must be a multiple of {WARP} dividing nt: {tpr=} {nt=}"
+                f"threads_per_row must be a multiple of {WARP} dividing threads_per_block: {threads_per_row=} {threads_per_block=}"
             )
         self.trait = trait
         self.dtype = dtype
         self.axis = axis
         self.N = N
-        self.tpr = tpr
-        self.nt = nt
+        self.threads_per_row = threads_per_row
+        self.threads_per_block = threads_per_block
         self.nouts = nouts
         self.final = final
         self.unroll = unroll
@@ -167,7 +171,7 @@ class TileReduce:
         itemsize = dtype.width // 8
         # Rolled row folds use TileMap only for mapping and vec. Column vec is a driver
         # choice for accumulators per thread, so columns need no tile.
-        self.tm = TileMap(N, itemsize, tpr, 1) if axis == "row" else None
+        self.tm = TileMap(N, itemsize, threads_per_row, 1) if axis == "row" else None
         if axis == "row":
             self.vec = self.tilemap.vec
         elif vec is None:
@@ -177,8 +181,8 @@ class TileReduce:
             self.vec = vec
         # Rows merge to one slot; columns keep vec independent slots.
         self.nslots = 1 if axis == "row" else self.vec
-        self.rows_per_block = nt // tpr
-        self.warps_per_row = tpr // WARP
+        self.rows_per_block = threads_per_block // threads_per_row
+        self.warps_per_row = threads_per_row // WARP
 
     @property
     def tilemap(self):
@@ -193,8 +197,8 @@ class TileReduce:
         return (
             self.axis,
             self.vec,
-            self.tpr,
-            self.nt,
+            self.threads_per_row,
+            self.threads_per_block,
             self.nouts,
             self.final,
             self.unroll,
@@ -225,11 +229,13 @@ class TileReduce:
             gx = cute.ceil_div(mIns[0].shape[0], const_expr(self.rows_per_block))
             gy = Int32(1)
         else:
-            gx = cute.ceil_div(nchunks, const_expr(self.nt))
+            gx = cute.ceil_div(nchunks, const_expr(self.threads_per_block))
             # Grid y splits stage 1's reduced axis; combine has consumed it.
             gy = Int32(1) if const_expr(self.combine) else npar
         self.kernel(mIns, mOuts, nchunks, nwaves, project_n, q, npar).launch(
-            grid=[gx, gy, 1], block=[const_expr(self.nt), 1, 1], stream=stream
+            grid=[gx, gy, 1],
+            block=[const_expr(self.threads_per_block), 1, 1],
+            stream=stream,
         )
 
     @cute.kernel
@@ -241,12 +247,12 @@ class TileReduce:
         trait = self.trait
         if const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
-                tx // const_expr(self.tpr)
+                tx // const_expr(self.threads_per_row)
             )
-            lane = Int32(tx % const_expr(self.tpr))
+            lane = Int32(tx % const_expr(self.threads_per_row))
             alive = raw < Int32(mIns[0].shape[0])
         else:
-            raw = Int32(bx) * const_expr(self.nt) + Int32(tx)
+            raw = Int32(bx) * const_expr(self.threads_per_block) + Int32(tx)
             lane = Int32(0)  # the col mapping gives every output group its own thread
             alive = raw < nchunks
         # Clamp dead threads to unit 0 and discard them at store, avoiding predicated loads.
