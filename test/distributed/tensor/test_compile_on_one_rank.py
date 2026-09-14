@@ -518,11 +518,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     def test_inductor_template_no_baked_device(self):
         # A Triton template must not bake the rank-specific device index either.
         #
-        # The device-index drop is applied where TritonKernel builds triton_meta
-        # (codegen/triton.py), but a template's triton_meta is built separately in
-        # select_algorithm.py and calls DeviceProperties.create() on the concrete
-        # device, so it still emits DeviceProperties(..., index=N). The same gap
-        # exists in triton_combo_kernel.py.
+        # Templates build triton_meta separately from TritonKernel, so this guards
+        # the select_algorithm.py construction path.
         #
         # test_inductor_compiles_under_coor does not catch this: _coor_inductor_fn
         # is a factory plus a reduction, which only produces inductor-generated
@@ -533,10 +530,40 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         compiled = torch.compile(
             self._coor_template_fn, backend="inductor", fullgraph=True
         )
-        a = torch.randn(256, 256, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(256, 256, device="cuda", dtype=torch.bfloat16)
+        # The metadata path is dtype-independent; float32 keeps it covered on pre-SM80.
+        a = torch.randn(256, 256, device="cuda")
+        b = torch.randn(256, 256, device="cuda")
         _, codes = run_and_get_code(compiled, a, b)
-        self._assert_no_baked_device("\n".join(codes))
+        code = "\n".join(codes)
+        self.assertIn("triton_tem_fused", code)
+        self._assert_no_baked_device(code)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch(
+        combo_kernels=True,
+        benchmark_combo_kernel=False,
+        combo_kernel_peak_memory_increase_gb=None,
+        combo_kernel_peak_memory_pct_threshold=None,
+    )
+    def test_inductor_combo_kernel_no_baked_device(self):
+        # Combo kernels build triton_meta separately from ordinary pointwise kernels.
+        # Disable benchmarking and memory gating to isolate that codegen path.
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b):
+            return a.sin(), b.cos()
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        args = (
+            torch.randn(8192, device="cuda"),
+            torch.randn(4096, device="cuda"),
+        )
+        _, codes = run_and_get_code(compiled, *args)
+        code = "\n".join(codes)
+        self.assertIn("combo_grid_meta", code)
+        self._assert_no_baked_device(code)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
