@@ -58,9 +58,8 @@ guesses about vectorization.
   two factors — ``{"sqsum": (x, x)}`` — so the fold is one fused
   ``fma(val, scale, acc)``: the product is never rounded on its own (bitwise
   parity with folding the product directly, one FFMA instead of FMUL+FADD).
-  ``outs={name: sink_op}`` is the general form for any sink op. A sink declares
-  ``sink_arity``; arity greater than one means the fn returns a tuple of
-  independently collected value planes for the sink to combine.
+  ``outs={name: sink_op}`` is the general form for any sink op
+  (e.g. OnlineLSEReduce's coupled (max, sum) accumulator).
 * PREPASS: ``prepass=fn2, prepass_outs=(names,)`` runs fn2 over the RAW
   accumulator before any store (driver flag epi_needs_acc_prepass; needs a
   re-readable accumulator — SM90 registers, SM100 tmem with no_release;
@@ -357,8 +356,10 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
     @cute.jit
     def _fragment_sink_flush(self, op, state, epi_loop_tensors, value):
         """Flush one sink's returned plane(s) with the operands it declared."""
+        # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
+        planes = value if isinstance(value, tuple) else (value,)
         fragments = []
-        for plane in self._value_planes(op.name, op.sink_arity, value):
+        for plane in planes:
             fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
             fragment.store(plane)
             fragments.append(fragment)
@@ -496,20 +497,10 @@ class EpiMod:
                 raise ValueError(
                     f"sink op for {name!r} must have fn_port == 'sink' and be named {name!r}"
                 )
-            if not isinstance(op.sink_arity, int) or op.sink_arity < 1:
-                raise ValueError(f"sink {name!r}: sink_arity must be a positive integer")
-            if op.sink_arity > 1 and self.mode == "acc_pair":
+            if getattr(op, "scaled", False) and self.mode == "acc_pair":
                 raise ValueError(
-                    f"sink {name!r}: multi-plane sinks are not supported in acc_pair mode "
+                    f"sink {name!r}: scaled reduces are not supported in acc_pair mode yet "
                     "(a tuple return already carries the two lanes there)"
-                )
-        for name in self.prepass_outs:
-            op = self.ops.get(name)
-            if op is None:
-                op = self.sinks.get(name)
-            if op is not None and op.sink_arity > 1:
-                raise ValueError(
-                    f"sink {name!r}: multi-plane sinks are not supported in prepass_outs"
                 )
         sig = inspect.signature(fn)
         params = list(sig.parameters)
@@ -839,7 +830,7 @@ class EpiMod:
             if varlen_m or gather_A or blockscaled or concat_key:
                 raise ValueError("swap_ab: dense non-blockscaled only")
             if not self.supports_swap_ab():
-                raise ValueError("swap_ab requires element-mode and orientation-aware epilogue ops")
+                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
             if ag_args is not None:
                 # With swapped slots kernel-A is the caller's B: the AG gate
                 # would gate the wrong operand (and the wrong M geometry).
@@ -1372,9 +1363,7 @@ class EpiMod:
                 config.tile_n,
                 num_seqs=num_seqs if getattr(op, "dim", 0) == 1 else None,
             )
-            bufs[name] = epi_args[name] = torch.empty(
-                shape, dtype=op.sink_alloc_dtype(), device=device
-            )
+            bufs[name] = epi_args[name] = torch.empty(shape, dtype=torch.float32, device=device)
         return bufs
 
     def _finalize_sink(self, name, buf, cu_seqlens_m, plan):
@@ -1637,9 +1626,9 @@ class EpiMod:
                 for name in self.outputs:
                     epi_values[name] = outs[name]
                 sink_bufs = {}
-                for name, shape, dtype in sink_shapes:
+                for name, shape in sink_shapes:
                     if epi_values.get(name) is None:
-                        buf = _t.empty(shape, dtype=dtype, device=A.device)
+                        buf = _t.empty(shape, dtype=_t.float32, device=A.device)
                         sink_bufs[name] = epi_values[name] = buf
                 B_w = B if b_kn_c else B.mT
                 sem = _t.zeros(1, dtype=_t.int32, device=A.device) if sem_dyn else None
@@ -1708,11 +1697,7 @@ class EpiMod:
                     cache[shape_key] = shapes
                 for name, shape in shapes.items():
                     if epi_args.get(name) is None:
-                        epi_args[name] = torch.empty(
-                            shape,
-                            dtype=self.sinks[name].sink_alloc_dtype(),
-                            device=A.device,
-                        )
+                        epi_args[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
                         owned_sinks[name] = True
             res = tuned_mod_gemm(
                 self,
@@ -1817,9 +1802,7 @@ class EpiMod:
                 if name not in provided_out
             )
             # tuned sink_bufs are already the winning config's exact slices
-            sink_shapes = tuple(
-                (name, tuple(buf.shape), buf.dtype) for name, buf in sink_bufs.items()
-            )
+            sink_shapes = tuple((name, tuple(b.shape)) for name, b in sink_bufs.items())
             self._call_cache[ck] = (
                 plan_used,
                 recipes,
