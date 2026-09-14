@@ -697,9 +697,8 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
   void* data_ptr = std::malloc(num_bytes);
-  if (!data_ptr) {
-    throw std::bad_alloc();
-  }
+  AOTI_RUNTIME_CHECK(
+      data_ptr, "Failed to allocate " + std::to_string(num_bytes) + " bytes");
   auto deleter = [](void* ptr) { std::free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
@@ -1411,8 +1410,8 @@ class AOTInductorModelBase {
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
     return weights_size;
 #else
-    throw std::runtime_error{
-        "constant blob size is only available for mmap'd weights"};
+    AOTI_RUNTIME_CHECK(
+        false, "constant blob size is only available for mmap'd weights");
 #endif
   }
 
@@ -1421,10 +1420,9 @@ class AOTInductorModelBase {
   }
 
   void update_constants_array_from_map() {
-    if (!constants_map_) {
-      throw std::runtime_error{
-          "constants_map_ was not ready when constants_ is trying to be constructed from it!"};
-    }
+    AOTI_RUNTIME_CHECK(
+        constants_map_,
+        "constants_map_ was not ready when constants_ is trying to be constructed from it!");
     if (!constants_) {
       constants_ =
           std::make_shared<std::vector<ConstantHandle>>(constants_info_.size());
@@ -1460,9 +1458,7 @@ class AOTInductorModelBase {
   /// Returns true if the model is complete.
   bool is_finished() {
 #ifdef USE_CUDA
-    if (!run_finished_) {
-      throw std::runtime_error{"Model CUDA event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model CUDA event was not initialized");
 
     auto event_status = cudaEventQuery(*run_finished_);
     if (event_status == cudaSuccess) {
@@ -1471,13 +1467,12 @@ class AOTInductorModelBase {
       return false;
     }
 
-    throw std::runtime_error(
+    AOTI_RUNTIME_CHECK(
+        false,
         std::string("The model did not finish successfully. Error: ") +
-        cudaGetErrorString(cudaGetLastError()));
+            cudaGetErrorString(cudaGetLastError()));
 #elif defined(USE_XPU)
-    if (!run_finished_) {
-      throw std::runtime_error{"Model XPU event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model XPU event was not initialized");
     using namespace sycl::info;
     return (*run_finished_)->get_info<event::command_execution_status>() ==
         event_command_status::complete;
@@ -1490,16 +1485,12 @@ class AOTInductorModelBase {
   /// Synchronizes completion event.
   void wait_for_completion() {
 #ifdef USE_CUDA
-    if (!run_finished_) {
-      throw std::runtime_error{"Model event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model event was not initialized");
 
     AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
 #endif // USE_CUDA
 #ifdef USE_XPU
-    if (!run_finished_) {
-      throw std::runtime_error{"Model event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model event was not initialized");
     (*run_finished_)->wait_and_throw();
 #endif
   }
@@ -1507,10 +1498,9 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #if defined(USE_MMAP_EXTERNAL)
-    if (!user_managed_mmap) {
-      throw std::runtime_error{
-          "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first."};
-    }
+    AOTI_RUNTIME_CHECK(
+        user_managed_mmap,
+        "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first.");
     // Mapped memory for weights
     return user_managed_mmap;
 #endif
