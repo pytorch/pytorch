@@ -1928,7 +1928,7 @@ from user code:
         dtypes = (torch.float32, torch.float64, torch.int64, torch.bfloat16)
         xs = [torch.ones(3, 3, dtype=dtype) for dtype in dtypes]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._shared_binding)
+        self.assertTrue(model.forward._binds_alike())
         binds = []
         bind = AOTCompiledFunction.prepare_f_locals
 
@@ -1957,7 +1957,7 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         model._aot_compile([ModelInput(args=(x.double(),), kwargs={}, contexts=[])])
         combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
-        self.assertFalse(combined._shared_binding)
+        self.assertFalse(combined._binds_alike())
         self.assertEqual(combined(x.double()), x.double() * 3)
         self.assertEqual(combined(x), x * 2)
 
@@ -1968,11 +1968,11 @@ from user code:
         mod, x = ScaleModule(), torch.randn(3, 3)
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
-        self.assertTrue(combined._shared_binding)
+        self.assertTrue(combined._binds_alike())
         combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
         # Bound from [0], mode reads 1 and [1]'s `mode == 0` guard rejects it.
         self.assertEqual(combined(x.double()), x.double() * 2)
-        self.assertFalse(combined._shared_binding)
+        self.assertFalse(combined._binds_alike())
 
     def test_module_dispatch_judges_a_replaced_result_on_its_own_binding(self):
         # [1] is compiled for mode=1 but defaults mode to 0, so a call leaving
@@ -1982,12 +1982,44 @@ from user code:
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         results = [aot_compile_forward(mod, triples, t) for t in (x, x.double())]
         combined = AOTCompiledModel(mod, results)
-        self.assertTrue(combined._shared_binding)
+        self.assertTrue(combined._binds_alike())
         combined.compiled_results[1] = aot_compile_forward(mod, doubles, x.double(), 1)
         self.assertEqual(combined(x.double(), 1), x.double() * 3)
         with self.assertRaises(RuntimeError):
             combined(x.double())
-        self.assertFalse(combined._shared_binding)
+        self.assertFalse(combined._binds_alike())
+
+    def test_module_dispatch_never_pairs_new_contents_with_a_stale_verdict(self):
+        # A call entering while another thread is still deciding over the
+        # appended list must not find the new contents already published beside
+        # the old True: the decider is held inside its first _binding_key, where
+        # the contents had been stored ahead of the verdict, and the call made in
+        # that window has to bind [1] from its own default.
+        mod, x = ScaleModule(), torch.randn(3, 3)
+        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
+        combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
+        self.assertTrue(combined._binds_alike())
+        combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
+        entered, release = threading.Event(), threading.Event()
+        binding_key = torch._dynamo.aot_compile._binding_key
+
+        def held(artifacts):
+            if threading.current_thread() is decider:
+                entered.set()
+                release.wait()
+            return binding_key(artifacts)
+
+        decider = threading.Thread(target=combined._binds_alike)
+        self.addCleanup(decider.join)
+        self.addCleanup(release.set)
+        with patch("torch._dynamo.aot_compile._binding_key", held):
+            decider.start()
+            self.assertTrue(entered.wait(timeout=60))
+            # Bound from [0], mode reads 1 and [1]'s `mode == 0` guard rejects it.
+            self.assertEqual(combined(x.double()), x.double() * 2)
+            release.set()
+            decider.join()
+        self.assertFalse(combined._binds_alike())
 
     def test_module_dispatch_serves_a_call_the_guard_tree_accepts(self):
         # A first check() can reject a call the same tree accepts on its next
@@ -2108,15 +2140,18 @@ from user code:
         # Every result's signature carries the same default object, so the
         # results share a binding; deciding that through Signature equality
         # raised `Boolean value of Tensor with more than one value is ambiguous`
-        # from the constructor, for _aot_compile and deserialize alike.
+        # on the first call, for _aot_compile and deserialize alike.
         mod = TensorDefaultModule()
         model = torch.compile(mod, fullgraph=True, backend="eager")
         xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._shared_binding)
+        self.assertTrue(model.forward._binds_alike())
         for x in xs:
             self.assertEqual(model(x), x * 2)
+        # Each result unpickles on its own, so the loaded results hold distinct
+        # default objects and bind per result: a false negative, not a false share.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
+        self.assertFalse(loaded._binds_alike())
         for x in xs:
             self.assertEqual(loaded(x), x * 2)
 
@@ -2130,7 +2165,7 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._shared_binding)
+        self.assertTrue(model.forward._binds_alike())
         for x in xs:
             self.assertEqual(model(x), x * 3)
         other = torch.nn.Module()
@@ -2139,9 +2174,15 @@ from user code:
         model2._aot_compile([ModelInput(args=(xs[1],), kwargs={}, contexts=[])])
         results = model.forward.compiled_results[:1] + model2.forward.compiled_results
         combined = AOTCompiledModel(mod, results)
-        self.assertFalse(combined._shared_binding)
+        self.assertFalse(combined._binds_alike())
         self.assertEqual(combined(xs[0]), xs[0] * 3)
         self.assertEqual(combined(xs[1]), xs[1] * 5)
+        # Loading gives each result a cell of its own, so a round trip binds per
+        # result too.
+        loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
+        self.assertFalse(loaded._binds_alike())
+        for x in xs:
+            self.assertEqual(loaded(x), x * 3)
 
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
