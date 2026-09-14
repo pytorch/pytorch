@@ -2923,11 +2923,9 @@ class TestSDPACPU(NNTestCase):
             return masked_out, grads
 
         if backend == SDPBackend.FLASH_ATTENTION and "cuda" in str(device):
-            unittest.skip("FlashAttention does not support masks on cuda")
-            return
+            self.skipTest("FlashAttention does not support masks on cuda")
         if backend == SDPBackend.EFFICIENT_ATTENTION and "cpu" in str(device):
-            unittest.skip("EfficientAttention does not support masks on cpu")
-            return
+            self.skipTest("EfficientAttention does not support masks on cpu")
         query, key, value, mask = attention_inputs(seq_len, head_dim, device, dtype)
 
         # Compute results for the tested backend
@@ -4622,8 +4620,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
         if torch.accelerator.get_memory_info()[1] < 80 * 2**30:
-            unittest.skip("This test requires substatnial GPU memory.")
-            return
+            self.skipTest("This test requires substatnial GPU memory.")
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 1, 32, 64
         seq_len_q, seq_len_kv = 8192, 8192
