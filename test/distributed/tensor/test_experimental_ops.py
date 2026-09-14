@@ -5,7 +5,8 @@
 import torch
 import torch.distributed as dist
 from torch.distributed.tensor import distribute_tensor, Replicate
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -18,6 +19,8 @@ LR = 0.001
 
 
 class DistOtherOpsTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         # hard code world size to 2
@@ -194,6 +197,8 @@ DistOtherOpsTestWithLocalTensor = create_local_tensor_test_class(
     # Send / recv ops are not supported
     skipped_tests=["test_bernoulli"],
 )
+
+instantiate_device_type_tests(DistOtherOpsTest, globals())
 
 if __name__ == "__main__":
     run_tests()
