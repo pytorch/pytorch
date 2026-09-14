@@ -328,6 +328,7 @@ struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   virtual bool memoryProfilingEnabled() const = 0;
 };
 
+C10_API void setGlobalMemoryReportingInfo(MemoryReportingInfoBase* reporter);
 C10_API bool memoryProfilingEnabled();
 C10_API void reportMemoryUsageToProfiler(
     void* ptr,
