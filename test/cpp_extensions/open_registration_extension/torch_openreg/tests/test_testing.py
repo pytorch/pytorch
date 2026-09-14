@@ -307,7 +307,7 @@ with _temp_test_configs(
 class TestCapabilityGating(TestCase):
     """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
 
-    executed_count = 0
+    _executed: dict = defaultdict(int)
 
     @classmethod
     def setUpClass(cls):
@@ -318,44 +318,55 @@ class TestCapabilityGating(TestCase):
             lambda cls: {
                 Capability.dtype.fp8: lambda: True,
                 Capability.dtype.bf16: lambda: False,
+                Capability.attention.flash_attention: lambda: True,
             }
         )
 
     @classmethod
     def tearDownClass(cls):
         PrivateUse1TestBase._capabilities = cls._saved_capabilities
-        expected_runs = 3
-        if cls.executed_count != expected_runs:
-            raise AssertionError(
-                f"Capability gating failed! "
-                f"Expected {expected_runs} tests to run, "
-                f"but {cls.executed_count} tests executed."
-            )
+        expected = {
+            "test_capability_supported": 1,
+            "test_capability_unsupported": 0,
+            "test_capability_missing": 1,
+            "test_capability_combined": 1,
+            "test_any_supported": 1,
+            "test_any_unsupported": 0,
+            "test_any_missing": 1,
+            "test_any_partially_missing": 1,
+        }
+        for name, count in expected.items():
+            if cls._executed[name] != count:
+                raise AssertionError(
+                    f"{name} ran {cls._executed[name]} times, expected {count}"
+                )
         super().tearDownClass()
+
+    # AND semantics (default).
 
     @requires_capabilities(Capability.dtype.fp8)
     def test_capability_supported(self, device):
-        type(self).executed_count += 1
+        type(self)._executed["test_capability_supported"] += 1
         self.assertEqual(torch.device(device).type, "openreg")
 
     @requires_capabilities(Capability.dtype.bf16)
     def test_capability_unsupported(self, device):
-        type(self).executed_count += 1
+        type(self)._executed["test_capability_unsupported"] += 1
         self.fail("Expected skip: dtype.bf16 is unsupported on this device")
 
     def test_capability_missing(self, device):
         """@requires_capabilities raises AssertionError for undeclared capabilities."""
 
-        @requires_capabilities(Capability.attention.flash_attention)
+        @requires_capabilities(Capability.attention.cudnn_attention)
         def dummy(self):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
             AssertionError,
-            r"has not declared capabilities: attention\.flash_attention",
+            r"has not declared capabilities: attention\.cudnn_attention",
         ):
             dummy(self)
-        type(self).executed_count += 1
+        type(self)._executed["test_capability_missing"] += 1
 
     def test_capability_combined(self, device):
         """@requires_capabilities raises AssertionError when a combined set
@@ -363,18 +374,73 @@ class TestCapabilityGating(TestCase):
 
         @requires_capabilities(
             Capability.dtype.fp8,
-            Capability.dtype.bf16,
-            Capability.attention.flash_attention,
+            Capability.attention.cudnn_attention,
         )
         def dummy(self):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
             AssertionError,
-            r"has not declared capabilities: attention\.flash_attention",
+            r"has not declared capabilities: attention\.cudnn_attention",
         ):
             dummy(self)
-        type(self).executed_count += 1
+        type(self)._executed["test_capability_combined"] += 1
+
+    # OR semantics (any=True).
+
+    @requires_capabilities(
+        Capability.attention.flash_attention,
+        Capability.attention.mem_efficient_attention,
+        any=True,
+    )
+    def test_any_supported(self, device):
+        type(self)._executed["test_any_supported"] += 1
+        self.assertEqual(torch.device(device).type, "openreg")
+
+    @requires_capabilities(Capability.dtype.bf16, any=True)
+    def test_any_unsupported(self, device):
+        type(self)._executed["test_any_unsupported"] += 1
+        self.fail("Expected skip: dtype.bf16 is unsupported under any=True")
+
+    def test_any_missing(self, device):
+        """any=True asserts when none of the capabilities are declared."""
+
+        @requires_capabilities(
+            Capability.attention.cudnn_attention,
+            Capability.attention.mem_efficient_attention,
+            any=True,
+        )
+        def dummy(self):
+            self.fail("should not execute")
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"has not declared any of the required capabilities: "
+            r"attention\.cudnn_attention, attention\.mem_efficient_attention",
+        ):
+            dummy(self)
+        type(self)._executed["test_any_missing"] += 1
+
+    def test_any_partially_missing(self, device):
+        """any=True skips (not asserts) when some capabilities are declared but
+        none are supported, even if others are undeclared."""
+
+        @requires_capabilities(
+            Capability.dtype.bf16,
+            Capability.attention.cudnn_attention,
+            any=True,
+        )
+        def dummy(self):
+            self.fail("should not execute")
+
+        with self.assertRaisesRegex(
+            unittest.SkipTest,
+            r"does not satisfy any of the required capabilities: "
+            r"unsupported capabilities: dtype\.bf16; "
+            r"missing capabilities: attention\.cudnn_attention",
+        ):
+            dummy(self)
+        type(self)._executed["test_any_partially_missing"] += 1
 
 
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
