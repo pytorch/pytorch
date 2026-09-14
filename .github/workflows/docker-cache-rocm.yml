@@ -33,10 +33,9 @@ jobs:
     name: download-docker-builds-artifacts
     runs-on: ubuntu-24.04
     outputs:
-      pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
-      # Bracket syntax: the artifact key has a dot, which expression property access would split.
+      # Hyphenated ids: artifact keys have a dot, which expression property access would split.
       pytorch-linux-noble-rocm-n-py3-11: ${{ steps.process-artifacts.outputs['pytorch-linux-noble-rocm-n-py3.11'] }}
-      pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
+      pytorch-linux-noble-rocm-n-py3-11-benchmarks: ${{ steps.process-artifacts.outputs['pytorch-linux-noble-rocm-n-py3.11-benchmarks'] }}
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e #4.1.7
@@ -61,9 +60,8 @@ jobs:
       matrix:
         runner: [linux.rocm.mi210.docker-cache]
         docker-image: [
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3-11 }}"
-          #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
+          #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3-11-benchmarks }}"
         ]
     runs-on: "${{ matrix.runner }}"
     steps:

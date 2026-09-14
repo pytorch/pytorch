@@ -197,12 +197,8 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.14
     CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3.11)
-    if [[ $tag =~ "jammy" ]]; then
-      ANACONDA_PYTHON_VERSION=3.10
-    else
-      ANACONDA_PYTHON_VERSION=3.11
-    fi
+  pytorch-linux-noble-rocm-n-py3.11 | pytorch-linux-noble-rocm-n-py3.11-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
     ROCM_VERSION=10.0
     THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
