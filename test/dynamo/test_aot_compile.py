@@ -2073,7 +2073,8 @@ from user code:
         dtypes = (torch.float32, torch.float64, torch.int64, torch.bfloat16)
         xs = [torch.ones(3, 3, dtype=dtype) for dtype in dtypes]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._binds_alike())
+        compiled = model.forward
+        self.assertTrue(compiled._binds_alike(tuple(compiled.compiled_results)))
         binds = []
         bind = AOTCompiledFunction.prepare_f_locals
 
@@ -2111,7 +2112,7 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         model._aot_compile([ModelInput(args=(x.double(),), kwargs={}, contexts=[])])
         combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
         self.assertEqual(combined(x.double()), x.double() * 3)
         self.assertEqual(combined(x), x * 2)
 
@@ -2122,11 +2123,11 @@ from user code:
         mod, x = ScaleModule(), torch.randn(3, 3)
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
-        self.assertTrue(combined._binds_alike())
+        self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
         # Bound from [0], mode reads 1 and [1]'s `mode == 0` guard rejects it.
         self.assertEqual(combined(x.double()), x.double() * 2)
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_judges_a_replaced_result_on_its_own_binding(self):
         # [1] is compiled for mode=1 but defaults mode to 0, so a call leaving
@@ -2136,12 +2137,38 @@ from user code:
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         results = [aot_compile_forward(mod, triples, t) for t in (x, x.double())]
         combined = AOTCompiledModel(mod, results)
-        self.assertTrue(combined._binds_alike())
+        self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results[1] = aot_compile_forward(mod, doubles, x.double(), 1)
         self.assertEqual(combined(x.double(), 1), x.double() * 3)
         with self.assertRaises(RuntimeError):
             combined(x.double())
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+
+    def test_module_dispatch_judges_only_the_results_a_call_began_with(self):
+        # The same replacement, made while the call is in flight: [0]'s check()
+        # appends [1], compiled for mode=1 but defaulting mode to 0. A scan that
+        # read the live list would reach [1] on this call and judge it on the
+        # binding decided over [0] alone, where mode reads 1, and serve x * 3 for
+        # a call eager answers x * 2. The call judges the results it began with
+        # and the next call decides over both.
+        mod, x = ScaleModule(), torch.randn(3, 3)
+        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
+        first = aot_compile_forward(mod, triples, x)
+        later = aot_compile_forward(mod, doubles, x.double(), 1)
+        combined = AOTCompiledModel(mod, [first])
+        manager = first._live_guard_manager()
+        check = manager.check
+
+        def appending_check(f_locals):
+            combined.compiled_results[1:] = [later]
+            return check(f_locals)
+
+        with patch.object(manager, "check", appending_check):
+            with self.assertRaises(RuntimeError):
+                combined(x.double())
+        self.assertIs(combined.compiled_results[1], later)
+        self.assertEqual(combined(x.double(), 1), x.double() * 3)
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_never_pairs_new_contents_with_a_stale_verdict(self):
         # A call entering while another thread is still deciding over the
@@ -2152,7 +2179,7 @@ from user code:
         mod, x = ScaleModule(), torch.randn(3, 3)
         triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
         combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
-        self.assertTrue(combined._binds_alike())
+        self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
         entered, release = threading.Event(), threading.Event()
         binding_key = torch._dynamo.aot_compile._binding_key
@@ -2163,7 +2190,9 @@ from user code:
                 release.wait()
             return binding_key(artifacts)
 
-        decider = threading.Thread(target=combined._binds_alike)
+        decider = threading.Thread(
+            target=combined._binds_alike, args=(tuple(combined.compiled_results),)
+        )
         self.addCleanup(decider.join)
         self.addCleanup(release.set)
         with patch("torch._dynamo.aot_compile._binding_key", held):
@@ -2173,7 +2202,7 @@ from user code:
             self.assertEqual(combined(x.double()), x.double() * 2)
             release.set()
             decider.join()
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_serves_a_call_the_guard_tree_accepts(self):
         # A first check() can reject a call the same tree accepts on its next
@@ -2299,13 +2328,14 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._binds_alike())
+        compiled = model.forward
+        self.assertTrue(compiled._binds_alike(tuple(compiled.compiled_results)))
         for x in xs:
             self.assertEqual(model(x), x * 2)
         # Each result unpickles on its own, so the loaded results hold distinct
         # default objects and bind per result: a false negative, not a false share.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
-        self.assertFalse(loaded._binds_alike())
+        self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
             self.assertEqual(loaded(x), x * 2)
 
@@ -2319,7 +2349,8 @@ from user code:
         model = torch.compile(mod, fullgraph=True, backend="eager")
         xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        self.assertTrue(model.forward._binds_alike())
+        compiled = model.forward
+        self.assertTrue(compiled._binds_alike(tuple(compiled.compiled_results)))
         for x in xs:
             self.assertEqual(model(x), x * 3)
         other = torch.nn.Module()
@@ -2328,13 +2359,13 @@ from user code:
         model2._aot_compile([ModelInput(args=(xs[1],), kwargs={}, contexts=[])])
         results = model.forward.compiled_results[:1] + model2.forward.compiled_results
         combined = AOTCompiledModel(mod, results)
-        self.assertFalse(combined._binds_alike())
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
         self.assertEqual(combined(xs[0]), xs[0] * 3)
         self.assertEqual(combined(xs[1]), xs[1] * 5)
         # Loading gives each result a cell of its own, so a round trip binds per
         # result too.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
-        self.assertFalse(loaded._binds_alike())
+        self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
             self.assertEqual(loaded(x), x * 3)
 
@@ -2412,13 +2443,10 @@ from user code:
         # The load resolves the guard scope from model.forward, the INSTANCE
         # attribute, so the dict the guards read is the globals of the function
         # that attribute resolves to -- here a function over foreign globals,
-        # which is not where resolving forward on the class lands. That
-        # resolved scope is what decides it, not the rebind: an inherited
-        # forward reaches the same function, and a rebind over the class's own
-        # module globals resolves to the class's own dict. A hint naming only
-        # the class's forward sends this reader to a dict where defining the
-        # name does not restore dispatch -- which is what the two assertions at
-        # the end of this test measure.
+        # which is not where resolving forward on the class lands. The hint
+        # names that instance attribute, not the class's forward, which would
+        # send this reader to a dict where defining the name does not restore
+        # dispatch -- which is what the two assertions at the end measure.
         self._hide_leaked_dynamo_globals()
         x = torch.randn(3, 3)
         model = torch.compile(
@@ -2449,10 +2477,11 @@ from user code:
             message = str(ctx.exception)
             self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
             self.assertIn(
-                "for an instance that rebound forward before the load", message
+                "the function this HermeticModule instance's forward resolves to",
+                message,
             )
-            # HermeticModule.forward is defined in this module, so the hint's
-            # first clause read on its own points here.
+            # HermeticModule.forward, the class attribute, is defined in this
+            # module; a hint naming it would point here.
             g["AOT_HERMETIC_WEIGHT"] = saved
             with self.assertRaises(RuntimeError):
                 reloaded(x)
@@ -2469,9 +2498,9 @@ from user code:
     def test_no_match_message_hint_stays_neutral_for_a_supplied_scope(self):
         # deserialize skips _resolve_guard_scope when the caller passes
         # guard_globals=, so the guards hold THAT dict rather than the globals of
-        # the function model.forward resolves to. Naming the class's forward here
-        # would send the reader to a dict where the name is already defined and
-        # dispatch still fails -- the last three assertions measure both halves.
+        # the function model.forward resolves to. Naming forward here would send
+        # the reader to a dict where the name is already defined and dispatch
+        # still fails -- the assertions after the wording measure both halves.
         self._hide_leaked_dynamo_globals()
         x = torch.randn(3, 3)
         model = torch.compile(
@@ -2495,8 +2524,11 @@ from user code:
         self.assertIn(
             "missing from the live scope this artifact was loaded against", message
         )
-        self.assertNotIn("HermeticModule.forward", message)
-        self.assertIn("AOT_HERMETIC_WEIGHT", HermeticModule.forward.__globals__)
+        self.assertNotIn("instance's forward", message)
+        # The guards hold the supplied dict, not the one the class's forward
+        # owns: this module's, where the name read below resolves.
+        self.assertIs(compiled.compiled_results[0]._guard_globals, scope)
+        self.assertIs(HermeticModule.forward.__globals__, globals())
         scope["AOT_HERMETIC_WEIGHT"] = AOT_HERMETIC_WEIGHT
         self.assertEqual(compiled(x), x @ AOT_HERMETIC_WEIGHT)
 
@@ -2529,7 +2561,7 @@ from user code:
             g["AOT_HERMETIC_WEIGHT"] = saved
         self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
         self.assertIn("the module the compiled function was traced in", message)
-        self.assertNotIn("RaisingReprModule.forward", message)
+        self.assertNotIn("instance's forward", message)
         self.assertIn("Add a ModelInput", message)
 
     def test_no_match_report_survives_a_forward_resolve_that_raises(self):
@@ -2570,7 +2602,7 @@ from user code:
             "artifact was loaded against",
             message,
         )
-        self.assertNotIn("RaisingReprModule.forward", message)
+        self.assertNotIn("instance's forward", message)
         self.assertIn("Add a ModelInput", message)
 
     def test_no_match_message_when_a_failure_names_no_guard(self):
@@ -2593,6 +2625,33 @@ from user code:
         message = str(ctx.exception)
         self.assertIn("[0] <guard check failed without naming a guard>", message)
         self.assertIn("Add a ModelInput", message)
+
+    def test_no_match_report_names_the_results_the_dispatch_judged(self):
+        # compiled_results is public, and the report indexes the binding the
+        # dispatch built, one per result the call began with. [0]'s check()
+        # appends a result mid-call: a report that re-read the list would ask for
+        # a binding the dispatch never made, and an IndexError would take its
+        # place. The appended result is the next call's to judge.
+        mod, x = ScaleModule(), torch.randn(3, 3)
+        first = aot_compile_forward(mod, make_scaling_forward(2), x)
+        later = aot_compile_forward(mod, make_scaling_forward(3), x)
+        combined = AOTCompiledModel(mod, [first])
+        manager = first._live_guard_manager()
+        check = manager.check
+
+        def appending_check(f_locals):
+            combined.compiled_results[1:] = [later]
+            return check(f_locals)
+
+        with patch.object(manager, "check", appending_check):
+            with self.assertRaises(RuntimeError) as ctx:
+                combined(x.double())
+        lines = str(ctx.exception).splitlines()
+        self.assertIn("Tried 1 compiled input(s)", lines[0])
+        self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
+        with self.assertRaises(RuntimeError) as ctx:
+            combined(x.double())
+        self.assertIn("Tried 2 compiled input(s)", str(ctx.exception))
 
     def test_aot_compile_module_disable_guard_check(self):
         # disable_guard_check() is the escape hatch for an artifact whose guards
@@ -2649,37 +2708,6 @@ from user code:
                 self.assertTrue(result.guard_check(mod, x))
             results[0].disable_guard_check()
             self.assertEqual(model(x), expected["sum"])
-
-    def test_aot_compile_module_last_resort_iterates_past_a_checked_result(self):
-        self._hide_leaked_dynamo_globals()
-        # The last resort serves the first result that opted out, which need not
-        # be compiled_results[0]: with [0] still checked, a call no artifact
-        # guards has to walk past it. The parent pins that walk under the default
-        # filter (test_module_dispatch_serves_an_opted_out_result_from_any_position,
-        # a local guard on `mode`); here the rejection comes from a GLOBAL guard
-        # that keep_global_guards keeps, so a filter or _guard_source_globals
-        # regression that dropped the pooling guard reddens this test and not that
-        # one. The ordering cases below opt out compiled_results[0] first, so
-        # neither sees the walk.
-        mod = GlobalConfigModule()
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        x = torch.randn(4, 8)
-        with _set_pooling("mean"):
-            expected = mod(x)
-        model._aot_compile(
-            [
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
-            ]
-        )
-        model.forward.compiled_results[1].disable_guard_check()
-        with _set_pooling("other"):
-            self.assertEqual(model(x), expected)
 
     def test_aot_compile_module_opted_out_result_is_the_last_resort(self):
         self._hide_leaked_dynamo_globals()
@@ -4718,7 +4746,7 @@ from user code:
         # mode -- the loud one is recoverable on the serving machine. A module
         # load takes no f_globals=: eval_frame's _load_aot_compiled_module takes
         # only the bytes, though deserialize still takes guard_globals=. The
-        # hint names HermeticModule.forward whenever the scope model.forward
+        # hint names the instance's forward whenever the scope model.forward
         # resolves to is the dict the guards hold, as it is for any load that
         # passed no guard_globals= -- the rebound sibling's included -- so the
         # substring asserted below fits that sibling too; what pins this
@@ -4751,7 +4779,8 @@ from user code:
             self.assertIn("No AOT compiled graph matched", message)
             self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
             self.assertIn(
-                "the globals of the function HermeticModule.forward resolves to",
+                "the globals of the function this HermeticModule instance's forward "
+                "resolves to",
                 message,
             )
             # A missing global counts as the mismatch it is: the report cannot

@@ -769,9 +769,9 @@ class AOTCompiledFunction:
         """Advice for a guard that failed on a global its scope does not define,
         worded for the scope the guards were actually resolved against. Returns a
         bare sentence; a caller that continues a line of its own adds the
-        separator. ``forward`` is the model class's ``forward``, passed only when
-        the guards hold the dict it resolves to, and honoured only in the
-        SUPPLIED branch."""
+        separator. ``forward`` names the instance attribute a module load resolved
+        the scope from, passed only when the guards hold the dict it resolves to,
+        and honoured only in the SUPPLIED branch."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
             rebuilt = (
                 "a guarded global is missing from the scope rebuilt from the artifact"
@@ -798,17 +798,8 @@ class AOTCompiledFunction:
             namespace = _module_namespace_name(self._guard_globals or {})
             named = "" if namespace is None else f", here vars({namespace})"
             where = (
-                # A module load resolves the scope from the INSTANCE attribute,
-                # so the dict is the globals of the function that attribute
-                # resolves to. Resolving forward on the class lands in that
-                # same dict whenever it reaches that same function, inheritance
-                # from another module included, and can land elsewhere once an
-                # instance rebinds forward; naming the class's forward alone
-                # would send that reader to a dict these guards never read.
-                f"the globals of the function {forward} resolves to -- or, for "
-                "an instance that rebound forward before the load, of the "
-                "function it was rebound to, since that is the one the load "
-                f"resolved{named}"
+                f"the globals of the function {forward} resolves to, since that "
+                f"is the one the load resolved{named}"
                 if forward is not None
                 else f"the live scope this artifact was loaded against{named}"
             )
@@ -1420,14 +1411,13 @@ class AOTCompiledModel:
         default=(), init=False, compare=False, repr=False
     )
 
-    def _binds_alike(self) -> bool:
+    def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
         # By identity, not ==: the dataclass __eq__ would reach the Signature
         # compare _binding_key exists to avoid. Measured at 0.27us for four
         # results, call included, against 0.81us for one check().
-        results, prior = self.compiled_results, self._decided_over
+        prior = self._decided_over
         if len(results) == len(prior) and all(map(operator.is_, results, prior)):
             return self._shared_binding
-        results = tuple(results)
         key = _binding_key(results[0]._artifacts) if results else None
         shared = key is not None and all(
             _binding_key(result._artifacts) == key for result in results[1:]
@@ -1440,17 +1430,20 @@ class AOTCompiledModel:
         return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # compiled_results is public, so read it once: every stage below judges
+        # the results this call began with, on the binding decided over them.
+        results = tuple(self.compiled_results)
         # Bound ahead of every guard, so a call the signature cannot bind still
         # surfaces as bind_locals' TypeError, as the plain module call would; a
         # bind costs more than a check(), so results that share one bind once.
         shared = (
-            self.compiled_results[0].prepare_f_locals(self.model, *args, **kwargs)
-            if self._binds_alike()
+            results[0].prepare_f_locals(self.model, *args, **kwargs)
+            if self._binds_alike(results)
             else None
         )
         bound: list[dict[str, object]] = []
         # Guard evaluation ignores _guard_check_enabled, so scan every result.
-        for result in self.compiled_results:
+        for result in results:
             f_locals = shared
             if f_locals is None:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
@@ -1461,27 +1454,30 @@ class AOTCompiledModel:
                 return result.fn(self.model, *args, **kwargs)
         # A check() can reject from the dict-tag fast path without running the
         # tree; a second check() then evaluates it in full, opted-out results too.
-        for i, result in enumerate(self.compiled_results):
+        for i, result in enumerate(results):
             if result._live_guard_manager().check(bound[i]):
                 return result.fn(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
         # only after both passes above have failed to find a real match.
-        for result in self.compiled_results:
+        for result in results:
             if not result._guard_check_enabled:
                 return result.fn(self.model, *args, **kwargs)
-        raise RuntimeError(self._no_match_report(bound))
+        raise RuntimeError(self._no_match_report(results, bound))
 
-    def _no_match_report(self, bound: list[dict[str, object]]) -> str:
+    def _no_match_report(
+        self, results: tuple[AOTCompiledFunction, ...], bound: list[dict[str, object]]
+    ) -> str:
         """A report naming every compiled input and what its guards said.
 
-        ``bound`` is the f_locals the dispatch above judged, one per result, so
-        the report explains the same binding rather than a fresh one."""
+        ``results`` and ``bound`` are the results the dispatch above judged and
+        the f_locals it judged them on, one per result, so the report explains
+        the same call rather than a fresh one."""
         lines = [
             "No AOT compiled graph matched this call. Tried "
-            f"{len(self.compiled_results)} compiled input(s):"
+            f"{len(results)} compiled input(s):"
         ]
         missing_at: int | None = None
-        for i, result in enumerate(self.compiled_results):
+        for i, result in enumerate(results):
             reason = result._live_guard_manager().check_verbose(bound[i])
             if reason.result:
                 lines.append(
@@ -1491,21 +1487,20 @@ class AOTCompiledModel:
                 )
                 continue
             if not reason.verbose_code_parts:
-                # A failing accessor can report no parts at all (a set index past
-                # the end of a shorter set answers GuardDebugInfo(false, 0)), so
-                # an empty list is not the passing signal reason.result is.
+                # A failing accessor can answer false with no parts to quote.
                 lines.append(f"  [{i}] <guard check failed without naming a guard>")
                 continue
             parts = reason.verbose_code_parts
             if missing_at is None and any(map(_names_a_missing_global, parts)):
                 missing_at = i
-            # A part embeds the guard's raw source line, which linecache ends
-            # only at \n: collapse every separator splitlines() reads it back on.
+            # Collapse every separator splitlines() reads the report back on.
             joined = " ".join("; ".join(parts).splitlines())
             lines.append(f"  [{i}] {joined}")
         if missing_at is not None:
-            missing_global = self.compiled_results[missing_at]
-            forward: str | None = f"{type(self.model).__name__}.forward"
+            missing_global = results[missing_at]
+            # Named as the instance attribute: the load resolved the scope from
+            # model.forward, and a rebound instance reads another function's dict.
+            forward: str | None = f"this {type(self.model).__name__} instance's forward"
             resolved: dict[str, Any] | None = None
             if missing_global._guard_scope is _GuardScope.SUPPLIED:
                 # Resolving forward runs user code: get_traced_fn formats a
