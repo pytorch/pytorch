@@ -25,7 +25,6 @@ from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
 from typing import Any, NamedTuple
-from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -979,31 +978,26 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc) -> None:
-        # Choose the rendezvous port once, in the parent, before spawning any
-        # rank; the ranks inherit it via os.environ. A fixed port collides when
-        # distributed tests run concurrently (sharded CI, or containers sharing
-        # a network namespace) and rank 0 dies with EADDRINUSE at init.
         self.processes = []
-        with patch.dict(os.environ, {"MASTER_PORT": str(find_free_port())}):
-            for rank in range(int(self.world_size)):
-                parent_conn, child_conn = torch.multiprocessing.Pipe()
-                process = proc(
-                    target=self.__class__._run,
-                    name="process " + str(rank),
-                    args=(
-                        rank,
-                        self._current_test_name(),
-                        self.file_name,
-                        child_conn,
-                    ),
-                    kwargs={
-                        "fake_pg": getattr(self, "fake_pg", False),
-                    },
-                )
-                process.start()
-                logger.info("Started process %s with pid %s", rank, process.pid)
-                self.pid_to_pipe[process.pid] = parent_conn
-                self.processes.append(process)
+        for rank in range(int(self.world_size)):
+            parent_conn, child_conn = torch.multiprocessing.Pipe()
+            process = proc(
+                target=self.__class__._run,
+                name="process " + str(rank),
+                args=(
+                    rank,
+                    self._current_test_name(),
+                    self.file_name,
+                    child_conn,
+                ),
+                kwargs={
+                    "fake_pg": getattr(self, "fake_pg", False),
+                },
+            )
+            process.start()
+            logger.info("Started process %s with pid %s", rank, process.pid)
+            self.pid_to_pipe[process.pid] = parent_conn
+            self.processes.append(process)
 
     def _spawn_processes(self) -> None:
         try:
@@ -1736,7 +1730,7 @@ class SaveForwardInputsModel(nn.Module):
 
 @contextmanager
 def _dynamo_dist_per_rank_init(
-    rank, world_size, backend=None, init_pg=True, fake_pg=False
+    rank, world_size, backend=None, init_pg=True, fake_pg=False, *, rdvz_file=None
 ):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
@@ -1749,8 +1743,6 @@ def _dynamo_dist_per_rank_init(
     if backend is None:
         backend = c10d.get_default_backend_for_device(device_type)
 
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ.setdefault("MASTER_PORT", "6789")
     if init_pg:
         if fake_pg:
             store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1761,7 +1753,21 @@ def _dynamo_dist_per_rank_init(
                 store=store,
             )
         else:
-            c10d.init_process_group(backend=backend, rank=rank, world_size=world_size)
+            if rdvz_file is None:
+                # Legacy env:// rendezvous. Every rank must derive the same
+                # port here, so it cannot be allocated dynamically; pass
+                # rdvz_file instead to avoid colliding with concurrent runs.
+                os.environ["MASTER_ADDR"] = "localhost"
+                os.environ["MASTER_PORT"] = "6789"
+                store = None
+            else:
+                store = c10d.FileStore(rdvz_file, world_size)
+            c10d.init_process_group(
+                backend=backend,
+                store=store,
+                rank=rank,
+                world_size=world_size,
+            )
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1784,27 +1790,26 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # _exit_stack is set up in TestCase
-        cls._exit_stack.enter_context(
-            patch.dict(
-                os.environ,
-                {
-                    "MASTER_ADDR": "localhost",
-                    "MASTER_PORT": str(find_free_port()),
-                },
-            )
-        )
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            cls.rdvz_file = f.name
         cls.rank = 0
         device = torch.accelerator.current_accelerator().type
         cls.device = f"{device}:{cls.rank}"
         cls.device_ids = None if device in cls.device else [cls.rank]
         c10d.init_process_group(
-            c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1
+            c10d.get_default_backend_for_device(device),
+            store=c10d.FileStore(cls.rdvz_file, 1),
+            rank=cls.rank,
+            world_size=1,
         )
 
     @classmethod
     def tearDownClass(cls):
         c10d.destroy_process_group()
+        try:
+            os.remove(cls.rdvz_file)
+        except OSError:
+            pass
         super().tearDownClass()
 
 
