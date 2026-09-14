@@ -7,11 +7,11 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-
+import os
 
 _log_handlers: dict[str, logging.Handler] = {
     "console": logging.StreamHandler(),
-    "dynamic_rendezvous": logging.NullHandler(),
+    "dynamic_rendezvous": logging.StreamHandler() if os.environ.get("RECORD_RDZV_EVENT") else logging.NullHandler(),
     "null": logging.NullHandler(),
 }
 
