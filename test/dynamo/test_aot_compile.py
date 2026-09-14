@@ -407,7 +407,11 @@ _UNNAMED_SCOPE_NS = {
     # A tensor, so a graph reading it LIFTS it and records the minted key in
     # used_globals, where the str above is only specialized on.
     "AOT_NS_SCALE": torch.full((8,), 2.0),
+    # A dynamic dim names the minted key in a shape guard's G[...] operands,
+    # the one place the default filter, which drops the TENSOR_MATCH, leaves it.
+    "AOT_NS_ROWS": torch.randn(8, 4),
 }
+torch._dynamo.mark_dynamic(_UNNAMED_SCOPE_NS["AOT_NS_ROWS"], 0)
 exec(
     "AOT_NS_POOL_MODE = 'sum'\n"
     "def ns_pool_fn(x):\n"
@@ -415,13 +419,26 @@ exec(
     "        return x.sum(1)\n"
     "    return x.mean(1)\n"
     "def ns_scale_fn(x):\n"
-    "    return x * AOT_NS_SCALE\n",
+    "    return x * AOT_NS_SCALE\n"
+    "def ns_rows_fn(x):\n"
+    "    return x + AOT_NS_ROWS.sum(0)\n",
     _UNNAMED_SCOPE_NS,
 )
 
 
 ns_pool_fn = _UNNAMED_SCOPE_NS["ns_pool_fn"]
 ns_scale_fn = _UNNAMED_SCOPE_NS["ns_scale_fn"]
+ns_rows_fn = _UNNAMED_SCOPE_NS["ns_rows_fn"]
+
+# The same read from a REGISTERED module of its own: an inlined frame there roots
+# its globals at Dynamo's __import_<module> alias, so the dynamic dim names that
+# alias in the shape guard's operands instead.
+_HELPER_MOD = types.ModuleType("aot_compile_helper_mod")
+_HELPER_MOD.HELPER_ROWS = torch.randn(8, 4)
+torch._dynamo.mark_dynamic(_HELPER_MOD.HELPER_ROWS, 0)
+exec("def helper_rows_fn(x):\n    return x + HELPER_ROWS.sum(0)\n", vars(_HELPER_MOD))
+sys.modules[_HELPER_MOD.__name__] = _HELPER_MOD
+helper_rows_fn = _HELPER_MOD.helper_rows_fn
 
 
 def calls_into_an_unnamed_scope(x):
@@ -434,6 +451,28 @@ class UnnamedScopeModule(torch.nn.Module):
     # the second live.
     def forward(self, x):
         return ns_scale_fn(x) + EPS
+
+
+class UnnamedScopeRowsModule(torch.nn.Module):
+    def forward(self, x):
+        return ns_rows_fn(x)
+
+
+class ImportedRowsModule(torch.nn.Module):
+    def forward(self, x):
+        return helper_rows_fn(x)
+
+
+class AttrDictModule(torch.nn.Module):
+    # An attribute name ending in G, whose dynamic dim renders in a shape expr
+    # as L['self'].myG['k'] -- a G['k'] substring that names no global.
+    def __init__(self):
+        super().__init__()
+        self.myG = {"k": torch.randn(8, 4)}
+        torch._dynamo.mark_dynamic(self.myG["k"], 0)
+
+    def forward(self, x):
+        return x + self.myG["k"].sum(0)
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -3937,6 +3976,78 @@ from user code:
         # is invisible to a guard reading the rebuilt scope.
         AOT_DYNAMIC_GLOBAL = torch.randn(1, 4)
         self.assertEqual(compiled(x).shape, x.shape)
+
+    def test_aot_compile_module_shape_guard_alias_is_seeded_from_the_artifact(self):
+        # The default filter drops every guard rooted at an __import_* alias, so
+        # an alias only a Python-form shape guard reads is absent from the
+        # serialized global_scope, and a seeding gated on that scope alone left
+        # it unbound: the load succeeded and every call failed with KeyError on
+        # G['__import_...'], where the rebuilt scope, which imports every
+        # recorded alias, answered. The seeding gates on the same widened set
+        # the arming reads.
+        alias = "__import_" + _HELPER_MOD.__name__
+        x = torch.randn(4)
+        model = torch.compile(ImportedRowsModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        guards_state = load_guards_state(captured._artifacts.guards_state)
+        self.assertTrue(guards_state.shape_code_parts.python_fallback)
+        exprs = guards_state.shape_code_parts.python_code_parts.exprs
+        self.assertTrue(any(f"G['{alias}']" in e for e in exprs), exprs)
+        self.assertNotIn(alias, guards_state.output_graph.global_scope)
+        self.assertIn(alias, captured._artifacts.runtime_env.import_sources)
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        self._hide_leaked_dynamo_globals()
+        self.assertNotIn(alias, globals())
+        reloaded = AOTCompiledModel.deserialize(ImportedRowsModule(), data)
+        (result,) = reloaded.compiled_results
+        self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
+        # An alias is not a user global, so the artifact holds no global guard.
+        self.assertFalse(result._has_global_guards)
+        self.assertEqual(reloaded(x), x + _HELPER_MOD.HELPER_ROWS.sum(0))
+        self.assertIs(globals()[alias], _HELPER_MOD)
+
+    def test_aot_compile_module_shape_guard_unnamed_scope_key_is_seeded(self):
+        # ..._unnamed_scope_key_is_seeded_from_the_artifact reached through the
+        # shape channel on the default filter: the tensor's own TENSOR_MATCH is
+        # global and dropped, so the key is in no kept guard's source and not in
+        # global_scope, while used_globals carries the dict the lambda reads.
+        x = torch.randn(4)
+        model = torch.compile(UnnamedScopeRowsModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        guards_state = load_guards_state(captured._artifacts.guards_state)
+        exprs = guards_state.shape_code_parts.python_code_parts.exprs
+        (key,) = captured._artifacts.runtime_env.used_globals
+        self.assertTrue(key.startswith("___unnamed_scope"), key)
+        self.assertTrue(any(f"G['{key}']" in e for e in exprs), exprs)
+        self.assertNotIn(key, guards_state.output_graph.global_scope)
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        self._hide_leaked_dynamo_globals()
+        self.assertNotIn(key, globals())
+        reloaded = AOTCompiledModel.deserialize(UnnamedScopeRowsModule(), data)
+        self.assertEqual(reloaded(x), x + _UNNAMED_SCOPE_NS["AOT_NS_ROWS"].sum(0))
+        (result,) = reloaded.compiled_results
+        self.assertIs(globals()[key], result._artifacts.runtime_env.used_globals[key])
+
+    def test_aot_compile_module_attribute_dict_shape_guard_holds_no_global(self):
+        # Shape exprs are source names, so a dict read off an attribute renders
+        # as L['self'].myG['k']; an unanchored operand scan took k for a global
+        # and armed the fallback warning on an artifact holding no global guard.
+        x = torch.randn(4)
+        model = torch.compile(AttrDictModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        guards_state = load_guards_state(captured._artifacts.guards_state)
+        exprs = guards_state.shape_code_parts.python_code_parts.exprs
+        self.assertTrue(any("L['self'].myG['k']" in e for e in exprs), exprs)
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        compiled = AOTCompiledModel.deserialize(AttrDictModule(), data)
+        (result,) = compiled.compiled_results
+        self.assertFalse(result._has_global_guards)
 
     def test_aot_compile_module_key_order_only_global_is_not_read_live(self):
         # A global certified by nothing but a guard_on_key_order entry. Iterating
