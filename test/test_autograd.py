@@ -1400,6 +1400,15 @@ class TestAutograd(TestCase):
                 tmp_edge, inputs=(x,), grad_tensors=torch.tensor([1.0, 2.0, 3.0, 4.0])
             )
 
+    def test_gradient_edge_none_grad_error_message(self):
+        x = torch.rand(2, requires_grad=True).clone()
+        edge = GradientEdge(x.grad_fn, x.output_nr)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "GradientEdge\\. This is not supported\\.",
+        ):
+            torch.autograd.backward((edge,), grad_tensors=(None,))
+
     def test_gradient_edge_graph_ownership(self):
         # Ensure we own the graph properly
         class Clone(torch.autograd.Function):
