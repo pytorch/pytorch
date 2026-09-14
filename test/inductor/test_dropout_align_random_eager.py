@@ -9,7 +9,10 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_TRITON
 
@@ -137,7 +140,7 @@ def dropout_parity(device, shape, p=0.3, dtype=torch.float32, seed=1234):
     "Inductor dropout alignment tests require Linux and Triton",
 )
 class TestDropoutAlignRandomEager(InductorTestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -167,6 +170,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             f"Mismatch fraction {fraction:.6f} ({bad}/{total}) exceeds {max_fraction}",
         )
 
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
     def test_linear_block_compile_parity_forward(self, device):
         for training in (False, True):
             eager, compiled = build_models(DROPOUT_P)
@@ -193,6 +197,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
 
             self.assertSmallMismatchFraction(y_eager, y_comp)
 
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
     def test_linear_block_compile_parity_backward(self, device):
         eager, compiled = build_models(DROPOUT_P)
         eager.to(device)
@@ -222,6 +227,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertIsNotNone(p_new.grad)
             self.assertSmallMismatchFraction(p_ref.grad, p_new.grad)
 
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
     def test_dropout_mask_parity_and_rng_offset(self, device):
         H, W = BATCH * SEQ_LEN, FFN_DIM
 
@@ -272,6 +278,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # multiple dropouts + multiple iterations
     # ───────────────────────────────────────────────────────────
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
     def test_multi_dropout_multi_iterations_parity(self, device):
         eager = MultiDropoutBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = MultiDropoutBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
@@ -298,6 +305,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # dynamic shapes test (a)
     # ───────────────────────────────────────────────────────────
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
     def test_dropout_parity_dynamic_shapes(self, device):
         eager = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
@@ -326,6 +334,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # cudagraphs test via mode='reduce-overhead' (b)
     # ───────────────────────────────────────────────────────────
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
     def test_dropout_parity_cudagraphs_reduce_overhead(self, device):
         eager = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
@@ -443,6 +452,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # nn.Dropout as primitive RNG consumer (should PASS)
     # ───────────────────────────────────────────────────────────
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
     def test_primitive_nn_dropout_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
 
@@ -466,6 +476,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # Seed and base are packed into int64 as (seed << 32) | base.
     # Seeds > 2^32 overflow.
     # ───────────────────────────────────────────────────────────
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
     def test_large_seed(self, device):
         for seed in [2**33 + 1, 2**40 + 12345]:
             with self.subTest(seed=seed):
@@ -478,7 +489,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
 instantiate_device_type_tests(
     TestDropoutAlignRandomEager,
     globals(),
-    only_for="cuda",
+    only_for=["cuda", "xpu"],
+    allow_xpu=True,
 )
 
 
