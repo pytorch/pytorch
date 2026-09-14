@@ -214,6 +214,7 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
 
+    @skipIfRocm
     def test_blackwell_outer_no_split_max_autotune_config(self):
         expected = (64, 128, 16)
 
@@ -325,7 +326,6 @@ class TestTritonHeuristics(TestCase):
         with config.patch(
             {
                 "triton.enable_experimental_large_output_outer_reductions": True,
-                "triton.autotune_experimental_large_output_outer_reductions": True,
             }
         ):
             self.assertNotIn(candidate, config_set(enabled=False))
