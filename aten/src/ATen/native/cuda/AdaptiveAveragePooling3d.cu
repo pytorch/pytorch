@@ -434,6 +434,11 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
   TORCH_CHECK(input.dim() == gradOutput_.dim(),
     __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
+  for (int64_t i = 0; i < input.dim() - 3; ++i) {
+    TORCH_CHECK(input.size(i) == gradOutput_.size(i),
+      __func__, ": input and gradOutput_ must have the same size at dim ", i,
+      ", but got ", input.size(i), " and ", gradOutput_.size(i));
+  }
 
   checkAllSameGPU(
       "adaptive_avg_pool3d_out_cuda",
