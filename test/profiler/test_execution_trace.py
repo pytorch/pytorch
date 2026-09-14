@@ -846,7 +846,7 @@ class TestExecutionTraceDevice(TestCase):
                 raise AssertionError("Expected t2 contents to match [0, 0, 1, 0]")
 
 
-instantiate_device_type_tests(TestExecutionTrace, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestExecutionTraceDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
