@@ -45,7 +45,7 @@ from torch.utils._triton import (
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-from .. import config, ir, metrics, utils
+from .. import config, dependencies, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
@@ -92,6 +92,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     TMA_ALIGNMENT,
+    TRITON_FLOAT8_DTYPES,
     triton_type,
     triton_version_uses_attrs_dict,
     upcast_compute_type,
@@ -135,6 +136,7 @@ from .triton_utils import (
     select_tile_hint,
     should_unwrap_unspec_arg,
     signature_to_meta,
+    use_block_ptr_enabled,
     use_uint8_triton_storage_for_cuda_float8_e4m3fn,
 )
 from .wrapper import SymbolicCallArg
@@ -378,6 +380,7 @@ class IndexingOptions:
     _has_rindex: bool
     index: sympy.Expr
     expand_shape: Sequence[int | str] | None
+    reduction_axes_omitted: bool = False
 
     def has_mask(self) -> bool:
         return bool(self.mask_vars)
@@ -542,7 +545,7 @@ class BlockDescriptorOptions:
 
         try:
             # Get permutation to sort strides in ascending order.
-            # This is used as the order argument in tl.make_block_ptr
+            # This is used as the order argument for the block descriptor.
             order = utils.argsort_sym(V.graph._shape_env, params.strides)
         except AssertionError:
             # Symbolic shapes, failed to evaluate comparison expression
@@ -1792,10 +1795,15 @@ class TritonOverrides(OpOverrides):
             shape=(RBLOCK, XBLOCK),
         )
 
-        if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            input_precision = "tf32"
-        else:
-            input_precision = "ieee"
+        precision = torch.backends.cuda.matmul.fp32_precision
+        if precision == "bfx9" and orig_a.dtype == torch.float32:
+            # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+            torch._logging.warning_once(
+                log,
+                "Triton does not support bfx9 precision; using IEEE precision instead.",
+            )
+            precision = "ieee"
+        input_precision = "tf32" if precision == "tf32" else "ieee"
 
         return f'tl.dot({a}, {b}, input_precision="{input_precision}")'
 
@@ -1808,12 +1816,22 @@ class TritonOverrides(OpOverrides):
         is_pure=True,
         pack=1,
         input_dtypes=None,
+        output_dtypes=None,
+        output_index=0,
     ):
+        """Emit inline asm and share multiple outputs through kernel CSE."""
         # Use the actual dtype, not the compute type — the asm operates on
         # specific register types and Triton needs to know the real output type.
-        asm_triton_type = triton_type(dtype)
+        all_output_dtypes = output_dtypes or (dtype,)
+        asm_triton_type = (
+            f"({', '.join(triton_type(dt) for dt in all_output_dtypes)})"
+            if output_dtypes is not None
+            else triton_type(dtype)
+        )
         if constraints is None:
-            constraints = ", ".join(["=r"] + ["r" for _ in inputs])
+            constraints = ", ".join(
+                ["=r" for _ in all_output_dtypes] + ["r" for _ in inputs]
+            )
 
         # Inductor computes bf16/fp16 in fp32. For "h" (16-bit register)
         # constraints, cast back to the original dtype so the asm sees the
@@ -1832,20 +1850,16 @@ class TritonOverrides(OpOverrides):
             else:
                 cast_inputs.append(str(inp))
 
-        if torch.version.hip:
-            # AMDGCN asm strings may contain real newlines (instructions are
-            # newline-separated, unlike PTX which uses semicolons).  The
-            # generated code is nested inside two Python string layers:
-            #   Layer 1 : the cached wrapper .py file
-            #   Layer 2 : the Triton kernel source (a triple-quoted string
-            #             inside that wrapper, exec'd / JIT-compiled)
-            # repr() escapes \n -> \\n, then we double the backslashes so
-            # they survive both layers: \\\\n -> (L1 parse) \\n -> (L2 parse) \n.
-            asm_literal = repr(asm).replace("\\", "\\\\")
-            constraints_literal = repr(constraints).replace("\\", "\\\\")
-        else:
-            asm_literal = f"'{asm}'"
-            constraints_literal = f"'{constraints}'"
+        # Asm strings may contain real newlines (AMDGCN instructions are
+        # newline-separated; multi-line PTX blocks with .reg declarations
+        # too).  The generated code is nested inside two Python string layers:
+        #   Layer 1 : the cached wrapper .py file
+        #   Layer 2 : the Triton kernel source (a triple-quoted string
+        #             inside that wrapper, exec'd / JIT-compiled)
+        # repr() escapes \n -> \\n, then we double the backslashes so
+        # they survive both layers: \\\\n -> (L1 parse) \\n -> (L2 parse) \n.
+        asm_literal = repr(asm).replace("\\", "\\\\")
+        constraints_literal = repr(constraints).replace("\\", "\\\\")
 
         def asm_call(args):
             return (
@@ -1853,21 +1867,40 @@ class TritonOverrides(OpOverrides):
                 f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
             )
 
-        if pack <= 1:
-            return asm_call(", ".join(cast_inputs))
+        args = ", ".join(cast_inputs)
+        if pack <= 1 and output_dtypes is None:
+            return asm_call(args)
 
         first_input = inputs[0]
         compute = V.kernel.compute
         cse = V.kernel.cse
-        result = cse.newvar(dtype=dtype, shape=first_input.shape)
-        packed_args = ", ".join(
-            f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
+        if pack > 1:
+            args = ", ".join(
+                f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
+            )
+        call = asm_call(args)
+        cache_key = f"inline_asm_elementwise({call})"
+        output_key = f"{cache_key}[{output_index}]"
+        if result := cse.try_get(output_key):
+            return result
+
+        result = tuple(
+            cse.newvar(dtype=dt, shape=first_input.shape) for dt in all_output_dtypes
         )
-        compute.writeline(f"{result} = {asm_call(packed_args)}")
-        compute.writeline(
-            f"{result} = triton_helpers.inline_asm_unpack({result}, {first_input}, {pack})"
-        )
-        return result
+        compute.writeline(f"{', '.join(map(str, result))} = {call}")
+        if pack > 1:
+            unpacked = tuple(
+                cse.newvar(dtype=dt, shape=first_input.shape)
+                for dt in all_output_dtypes
+            )
+            for out, packed in zip(unpacked, result):
+                compute.writeline(
+                    f"{out} = triton_helpers.inline_asm_unpack({packed}, {first_input}, {pack})"
+                )
+            result = unpacked
+        for index, output in enumerate(result):
+            cse.put(f"{cache_key}[{index}]", output)
+        return result[output_index]
 
     @staticmethod
     @maybe_upcast_float32()
@@ -3270,6 +3303,19 @@ class TMACompatibilityChecker:
         return self.force
 
 
+# Reductions that may share a scalar kernel with an online softmax. Alone they
+# keep the vector path until their shapes are swept like softmax was.
+ARG_REDUCTION_TYPES = (
+    "argmax",
+    "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
+)
+PLAIN_REDUCTION_TYPES = ("sum", "prod", "max", "min", "xor_sum")
+
+
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
     """A class to represent a triton kernel and helpers to generate
     triton kernel programmatically
@@ -3308,6 +3354,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
+        # Derived families share constants emitted in the function prologue.
+        self._named_constants: dict[str, str] = {}
+        self._named_constant_defs: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
@@ -3317,7 +3366,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
-        self.host_tma_descriptor_args: dict[str, TensorDescriptorOptions] = {}
+        # TensorDescriptorOptions for pointwise/reduction kernels; template
+        # kernels set a resolved {block_shape, shape, strides} dict directly
+        # (see TritonTemplateKernel.tma_descriptor).
+        self.host_tma_descriptor_args: dict[
+            str, TensorDescriptorOptions | dict[str, Any]
+        ] = {}
         self._host_tma_non_materializable: OrderedSet[str] = OrderedSet()
         self._host_tma_non_materializable_buffers: OrderedSet[str] | None = None
         self._emitted_device_tma = False
@@ -3543,6 +3597,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return any(stride == 1 for stride in stride_vars)
 
+    def _reject_if_template_host_tma(self, var: str) -> None:
+        """Bail out if `var` can no longer be host-side TMA but the template
+        already committed to a host descriptor for it.
+
+        A buffer used as both a template operand and an epilogue operand is one
+        kernel arg, and the two uses need different descriptors. The template has
+        already emitted its descriptor access, so the kernel cannot compile; raise
+        so this choice is dropped and a non-host-side one is used instead.
+        """
+        # Template registrations are plain dicts; epilogue ones are
+        # TensorDescriptorOptions and are free to fall back.
+        if isinstance(self.host_tma_descriptor_args.get(var), dict):
+            log.warning(
+                "host-side TMA disabled for this kernel: %s is both a template "
+                "operand and an epilogue operand, which need different descriptors",
+                var,
+            )
+            raise NotImplementedError(
+                f"host-side TMA cannot share arg {var} between a template operand "
+                "and an epilogue operand"
+            )
+
     @staticmethod
     def _is_host_tma_materializable(
         indexing: TensorDescriptorOptions,
@@ -3581,7 +3657,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer_read_indices: dict[
             str, list[tuple[sympy.Expr, tuple[sympy.Symbol, ...]]]
         ] = collections.defaultdict(list)
-        for node in NodeScheduleMarker.only_nodes(self.features.node_schedule):
+        for node in NodeScheduleMarker.only_nodes(self.features.indexing_node_schedule):
             for dep in node.read_writes.reads:
                 if not hasattr(dep, "var_names"):
                     if hasattr(dep, "name"):
@@ -3798,9 +3874,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        allow_reduction_invariant_indexing=False,
     ):
         """
-        Compute the index and mask to pass to tl.load() or tl.store()
+        Compute the index and mask to pass to tl.load() or tl.store().
+
+        ``allow_reduction_invariant_indexing`` lets a caller request narrower
+        indexing when it can consume a shape with omitted reduction axes. The
+        returned ``IndexingOptions.reduction_axes_omitted`` records whether the
+        narrowing was actually applied.
         """
         index = self.prepare_indexing(index)
         index_vars = index.free_symbols
@@ -3856,7 +3938,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if (
             (
-                (block_ptr and self.allow_block_ptr and config.triton.use_block_ptr)
+                (block_ptr and self.allow_block_ptr and use_block_ptr_enabled())
                 or (
                     tma_compatibility_checker
                     and tma_compatibility_checker.can_use_tma()
@@ -4074,12 +4156,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
                 options_class = (
                     self.block_ptr_options_cls
-                    if config.triton.use_block_ptr
+                    if use_block_ptr_enabled()
                     else self.tensor_descriptor_options_cls
                 )
                 nonlocal tma_compatibility_checker
                 stride_sorter_cls: type[BlockParameters.StrideSorter]
-                if config.triton.use_block_ptr:
+                if use_block_ptr_enabled():
                     can_lift = False
                     stride_sorter_cls = BlockParameters.IdentityStrideSorter
                 else:
@@ -4188,6 +4270,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape=expand_shape,
             )
 
+        reduction_axes_omitted = False
         if need_dense and not have_dense:
             if self.inside_reduction and self.is_native_matmul:
                 # This avoids full broadcasting (need_dense) when performing native matmul.
@@ -4246,6 +4329,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_str = "[" + ",".join(map(str, expand_list)) + "]"
                 expand_shape = tuple(expand_list)
                 index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+            elif (
+                allow_reduction_invariant_indexing
+                and copy_shape is None
+                and override_mask is None
+                and not config.triton.dense_indexing
+                and not dense_indexing
+                and (
+                    minimal_shape := self._reduction_invariant_indexing_shape(
+                        index,
+                        mask_vars,
+                    )
+                )
+                is not None
+            ):
+                expand_str = "[" + ", ".join(map(str, minimal_shape)) + "]"
+                expand_shape = minimal_shape
+                index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+                reduction_axes_omitted = True
             else:
                 expand_str, expand_shape = _get_expand_str()
                 index_str = f"tl.broadcast_to({index_str}, {expand_str})"
@@ -4276,6 +4377,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             has_rindex,
             index,
             expand_shape=expand_shape,
+            reduction_axes_omitted=reduction_axes_omitted,
         )
 
     def codegen_block_ptr(
@@ -4340,6 +4442,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             # Device-side TMA: reached for every case except the host-TMA branch
             # above (which returned) -- emit an in-kernel tl.make_tensor_descriptor.
+            self._reject_if_template_host_tma(var)
             self._emitted_device_tma = True
 
         else:
@@ -4512,9 +4615,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.inside_reduction
             and self.range_trees[-1].is_loop
             and not indexing.has_rindex()
+            and not indexing.has_rmask()
         ):
-            # can lift a common load outside of reduction loop
-            # One exception is when this is an indirect_load.
+            # Lift loads whose address and mask are available outside the loop.
             return self.body
         else:
             return self.loads
@@ -4546,6 +4649,85 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             result_shape = get_broadcasted_shape(result_shape, tuple(mask_shape))
 
         return result_shape
+
+    def _reduction_invariant_indexing_shape(
+        self,
+        index: sympy.Expr,
+        mask_vars: Iterable[str | TritonCSEVariable],
+    ) -> BlockShapeType:
+        """Return a minimal shape for reduction-invariant masked indexing.
+
+        For a row index used by a rowwise reduction, dense indexing emits an
+        address such as ``tl.broadcast_to(x, [XBLOCK, R0_BLOCK])`` and loads the
+        same ``index[x]`` value in every reduction lane. If the address and all
+        non-range predicates are independent of the reduction coordinate, this
+        returns ``[XBLOCK, 1]`` instead. The reduction consumer broadcasts that
+        one loaded value across its reduction lanes.
+
+        An axis remains singleton only when both the address and every non-range
+        predicate are broadcast on it. Omitting a fixed-tile reduction axis also
+        requires a positive logical extent, which permits removing its synthetic
+        range mask. Looped reductions need no extent proof because an empty range
+        executes no loop body. Temporary values participate through their
+        propagated block shapes, so this also covers provably invariant indirect
+        addresses.
+        """
+        load_mask = self._load_mask
+        if not self.inside_reduction or load_mask is None:
+            return None
+
+        # Lane-shape changes are currently qualified only on CUDA and ROCm.
+        # Other Triton backends retain dense indexing until they are covered.
+        device = V.graph.current_device
+        if device is None or device.type != "cuda":
+            return None
+
+        # These schedules introduce coordinate scopes outside the block shape
+        # tracked by this proof.
+        if self.cooperative_reduction or self.mix_order_reduction:
+            return None
+
+        active_range_trees = self.active_range_trees()
+        load_masks = OrderedSet[str | TritonCSEVariable](mask_vars)
+        load_masks.add(load_mask)
+        shape = self._broadcast_shape_with_masks(
+            TritonSymbols.get_block_shape(index), load_masks
+        )
+        if shape is None:
+            return None
+        if not shape:
+            shape = ("1",) * self.triton_tensor_ndim()
+
+        dense_shape = tuple(self.dense_size_list())
+        if len(shape) != len(dense_shape):
+            return None
+        omitted_reduction = False
+        for tree in active_range_trees:
+            dim = tree.tensor_dim
+            if dim is None or str(shape[dim]) == str(dense_shape[dim]):
+                continue
+            if not tree.is_reduction:
+                if str(shape[dim]) != "1":
+                    return None
+                continue
+            if (
+                str(shape[dim]) != "1"
+                # Fixed-tile reductions execute even at zero logical extent, while
+                # looped reductions execute no body and therefore no narrowed load.
+                or (
+                    not tree.is_loop
+                    and not V.graph.sizevars.statically_known_gt(
+                        tree.numel, sympy.S.Zero
+                    )
+                )
+            ):
+                return None
+            omitted_reduction = True
+
+        if not omitted_reduction:
+            return None
+
+        return tuple(shape)
 
     GDC_WAIT = "tl.extra.cuda.gdc_wait()"
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
@@ -4807,12 +4989,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             index,
             block_ptr=True,
             tma_compatibility_checker=tma_checker,
+            allow_reduction_invariant_indexing=True,
         )
 
-        if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
-            indexing.index
-        ):
-            self.has_load_with_contiguous_rdim = True
+        if isinstance(indexing, IndexingOptions):
+            if self._has_stride1_on_rdim(indexing.index):
+                self.has_load_with_contiguous_rdim = True
 
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
@@ -4916,12 +5098,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     for_store=False,
                 )
             elif is_sympy_integer_like(original_index):
+                self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
                 self.host_tma_descriptor_args.pop(var, None)
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
             else:
+                self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
                 self.host_tma_descriptor_args.pop(var, None)
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
@@ -4999,7 +5183,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     ),
                 )
 
-        if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):
+        # Only CSE values emitted outside the loop remain valid after it closes.
+        if not self.inside_reduction or load_buffer is self.body:
             self.outside_loop_vars.add(result_var)
 
         return result_var
@@ -5075,6 +5260,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 ):
                     value_shape = ", ".join(map(str, value.shape))
                     indexing_str += f".broadcast_to({value_shape})"
+            self._reject_if_template_host_tma(var)
             self._host_tma_non_materializable.add(var)
             self.host_tma_descriptor_args.pop(var, None)
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
@@ -5088,7 +5274,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 value_shape = ", ".join(map(str, value.shape))
                 indexing_str += f".broadcast_to({value_shape})"
-            line = f"tl.atomic_add({var} + ({indexing_str}), {value}, {indexing.mask_str}, sem='relaxed')"
+            # PyTorch bool accumulation has OR semantics.
+            atomic_op = "atomic_or" if dtype == torch.bool else "atomic_add"
+            line = f"tl.{atomic_op}({var} + ({indexing_str}), {value}, {indexing.mask_str}, sem='relaxed')"
         else:
             raise NotImplementedError(f"store mode={mode}")
 
@@ -5228,6 +5416,81 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=tuple(target_shape),
         )
 
+    @functools.cached_property
+    def use_scalar_accumulators(self) -> bool:
+        """
+        Per-row accumulators for every reduction of a large inner reduction
+        loop: each block is reduced along the reduction dim before it is folded
+        into the running state, so only the per-row state stays live. The path
+        is taken around an online softmax, whose shapes were swept; the arg and
+        plain reductions fused with it (Domino cross entropy) are scalarized
+        alongside. The size, load and full-size output limits come from that
+        sweep.
+        """
+        features = self.features
+        if (
+            not config.triton.scalar_accumulators
+            # Which signed zero wins a strict max depends on the reduction
+            # block, so strict mode keeps the single-config vector path.
+            or config.strict_signed_zero
+            or self.is_combo_kernel
+            or self.cooperative_reduction
+            # Nested and sub-parent reductions emit extra nodes into the grid.
+            or features.indexing_node_schedule is not features.node_schedule
+            or self.num_reduction_dims != 1
+            or torch.version.hip is not None
+            or V.graph.get_current_device_or_throw().type != "cuda"
+            or V.graph.sizevars.optimization_hint(features.reduction_numel) <= 4096
+            or features.get_reduction_hint(self.tiling_scores) != ReductionHint.INNER
+        ):
+            return False
+        online_softmax_nodes = 0
+        for node in features.reduction_nodes():
+            buf = node.node
+            # tl.reduce cannot take int1; bool-typed reductions keep the vector
+            # path, which casts after the loop.
+            if not isinstance(buf, ir.ComputedBuffer) or buf.get_dtype() == torch.bool:
+                return False
+            reduction_type = buf.get_reduction_type()
+            if reduction_type == "online_softmax_reduce":
+                online_softmax_nodes += 1
+            elif reduction_type not in ARG_REDUCTION_TYPES + PLAIN_REDUCTION_TYPES:
+                return False
+        # The sweep covered kernels with one or two online softmaxes.
+        if online_softmax_nodes not in (1, 2):
+            return False
+        nodes = OrderedSet(features.scheduler_nodes())
+        produced = OrderedSet(
+            buf.get_name() for node in nodes for buf in node.get_outputs()
+        )
+        loads = OrderedSet(
+            dep
+            for node in nodes
+            for dep in node.read_writes.reads
+            if isinstance(dep, dependencies.MemoryDep) and dep.name not in produced
+        )
+        if len(loads) > 3:
+            return False
+        sizevars = V.graph.sizevars
+        full_numel = sizevars.optimization_hint(
+            features.numel * features.reduction_numel
+        )
+        full_size_outputs = sum(
+            any(user.node not in nodes for user in buf.users)
+            and sizevars.optimization_hint(buf.node.get_numel()) >= full_numel
+            for node in nodes
+            for buf in node.get_outputs()
+        )
+        return full_size_outputs <= 1
+
+    def use_scalar_online_softmax(
+        self, value: CSEVariable | tuple[CSEVariable, ...]
+    ) -> bool:
+        # Split-reduction combines pass partial (max, sum) tuples. Checked out
+        # of line so the type checker does not narrow `value` to a tuple in
+        # the reduction() branches that follow.
+        return not isinstance(value, tuple) and self.use_scalar_accumulators
+
     def reduction(
         self,
         dtype: torch.dtype,
@@ -5277,8 +5540,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and reduction_type in ("sum", "prod")
         )
         strict_reduction_loop = strict_reduction and not self.persistent_reduction
-        # Inner-tree combiner used to linear-accumulate the per-tile trees:
-        # "+" for sum, "*" for prod (identity 0.0 / 1.0 comes from `default`).
+        # Combiner for the persistent strict path: "+" for sum, "*" for prod
+        # (identity 0.0 / 1.0 comes from `default`); the loop uses combine_fn.
         strict_op = "*" if reduction_type == "prod" else "+"
 
         # When we do native matmtul codegen,
@@ -5321,11 +5584,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         arg_index_reduction_types = ("argmax", "argmin")
         arg_value_reduction_types = ("argmax_value", "argmin_value")
         arg_with_value_reduction_types = ("argmax_with_value", "argmin_with_value")
-        arg_reduction_types = (
-            arg_index_reduction_types
-            + arg_value_reduction_types
-            + arg_with_value_reduction_types
-        )
+        arg_reduction_types = ARG_REDUCTION_TYPES
         arg_root_ops = {
             "argmax": "max",
             "argmin": "min",
@@ -5401,7 +5660,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             value, _, _ = final_reduction(buffer, value, result_type)
             buffer.splice(f"{result_var} = {value}")
 
-        def final_argreduce(buffer, result_var, value, index, result_kind="index"):
+        def final_argreduce(
+            buffer, result_var, value, index, result_kind="index", whole_tile=False
+        ):
+            helper = argreduce_helper(whole_tile)
             value = self.reduction_collapse_dims(buffer, value, value.dtype)
             index = self.reduction_collapse_dims(
                 buffer,
@@ -5414,7 +5676,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_value, result_index = result_var
                 buffer.splice(
                     f"""\
-                    {result_value}, {result_index} = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
+                    {result_value}, {result_index} = triton_helpers.{helper}({value}, {index}, {dim})
                     {result_value} = {self.reduction_resize(f"{result_value}")}
                     {result_index} = {self.reduction_resize(f"{result_index}")}
                     """
@@ -5422,14 +5684,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif result_kind == "value":
                 buffer.splice(
                     f"""\
-                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
+                    {result_var}_val, {result_var}_idx = triton_helpers.{helper}({value}, {index}, {dim})
                     {result_var} = {self.reduction_resize(f"{result_var}_val")}
                     """
                 )
             else:
                 buffer.splice(
                     f"""\
-                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
+                    {result_var}_val, {result_var}_idx = triton_helpers.{helper}({value}, {index}, {dim})
                     {result_var} = {self.reduction_resize(f"{result_var}_idx")}
                     """
                 )
@@ -5441,7 +5703,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return "value"
             return "index"
 
-        cache_key = (src_dtype, reduction_type, value)
+        def argreduce_helper(whole_tile: bool) -> str:
+            # The two-pass helper pays off over a whole row tile, not on the
+            # tail of a loop, and only where the index alone is consumed. It is
+            # CUDA-only and behind the scalar flag: the Triton CPU backend
+            # returns a different index from it (test_2d_reductions_mixed_indexing).
+            two_pass = (
+                whole_tile
+                and argreduce_result_kind() == "index"
+                and config.triton.scalar_accumulators
+                and torch.version.hip is None
+                and V.graph.get_current_device_or_throw().type == "cuda"
+            )
+            suffix = "_with_first_index" if two_pass else "_with_index"
+            return f"{root_op}{suffix}"
+
+        cache_key = (
+            src_dtype,
+            reduction_type,
+            value if logical_index is None else (value, logical_index),
+        )
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
 
@@ -5562,6 +5843,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     masked_value,
                     accumulator_index,
                     argreduce_result_kind(),
+                    whole_tile=True,
                 )
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
@@ -5637,6 +5919,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             default = self._map_tuple_or_scalar(constant_repr, default)
+            scalar_loop = (
+                reduction_type in PLAIN_REDUCTION_TYPES and self.use_scalar_accumulators
+            )
+            scalar_argreduce = (
+                reduction_type in arg_reduction_types and self.use_scalar_accumulators
+            )
+            scalar_online_softmax = (
+                reduction_type == "online_softmax_reduce"
+                and self.use_scalar_online_softmax(value)
+            )
+            if scalar_loop or scalar_argreduce or scalar_online_softmax:
+                self.autotune_hints.add(AutotuneHint.SCALAR_ACCUMULATORS)
+            scalar_size_str = f"[{', '.join(self.dense_size_list()[:dim])}]"
             if not isinstance(default, tuple):
                 if reduction_type == "dot":
                     dense_sizes = self.dense_size_list()
@@ -5652,11 +5947,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.body.writeline(
                         f"{accumulator} = tl.full({dense_size_str}, {default}, {acc_type})"
                     )
-                elif strict_reduction_loop:
+                elif strict_reduction_loop or scalar_loop:
                     accumulator.shape = tuple(result_shape)
                     result_size_str = f"[{', '.join(result_shape)}]"
                     self.body.writeline(
                         f"{accumulator} = tl.full({result_size_str}, {default}, {acc_type})"
+                    )
+                elif scalar_argreduce:
+                    accumulator.shape = tuple(self.dense_size_list()[:dim])
+                    self.body.writeline(
+                        f"{accumulator} = tl.full({scalar_size_str}, {default}, {acc_type})"
                     )
                 else:
                     self.body.writeline(
@@ -5667,37 +5967,99 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 accumulator_index = f"_{result_prefix}_index"
                 if index_dtype is None:
                     raise AssertionError("index_dtype must be set for arg reductions")
+                index_max = torch.iinfo(index_dtype).max
+                index_type = self.dtype_to_str(index_dtype)
+                acc_size_str = (
+                    scalar_size_str if scalar_argreduce else self.dense_size_str()
+                )
                 self.body.writeline(
-                    f"{accumulator_index} = tl.full({self.dense_size_str()}, "
-                    f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"
+                    f"{accumulator_index} = tl.full({acc_size_str}, {index_max}, {index_type})"
                 )
                 root_op = arg_root_ops[reduction_type]
                 # Use logical_index if it was unpacked, otherwise fall back to physical index
                 index_var = (
-                    f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
+                    f"({str(logical_index)}).to({index_type})"
                     if logical_index is not None
                     else f"{reduction_range_prefix}index"
                 )
-                self.compute.splice(
-                    f"""\
-                {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
-                    {accumulator}, {accumulator_index}, {value}, {index_var}
-                )
-                {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
-                {accumulator_index} = {where_cond(f"{accumulator_index}_next", accumulator_index)}
-                """
-                )
-                final_argreduce(
-                    self.post_loop_combine,
-                    result_var,
-                    accumulator,
-                    accumulator_index,
-                    argreduce_result_kind(),
-                )
+                if scalar_argreduce:
+                    helper = argreduce_helper(True)
+                    block_index = f"tl.broadcast_to({where_cond(index_var, index_max)}, {self.dense_size_str()})"
+                    self.compute.splice(
+                        f"""\
+                    {accumulator}_block, {accumulator_index}_block = triton_helpers.{helper}(
+                        {where_cond(value, default)}, {block_index}, {dim}
+                    )
+                    {accumulator}, {accumulator_index} = triton_helpers.{root_op}imum_with_index(
+                        {accumulator}, {accumulator_index}, {accumulator}_block, {accumulator_index}_block
+                    )
+                    """
+                    )
+                    result_kind = argreduce_result_kind()
+                    if result_kind == "value_and_index":
+                        result_value, result_index = cast(tuple[Any, Any], result_var)
+                        self.post_loop_combine.writeline(
+                            f"{result_value} = {self.reduction_resize(accumulator)}"
+                        )
+                        self.post_loop_combine.writeline(
+                            f"{result_index} = {self.reduction_resize(accumulator_index)}"
+                        )
+                    else:
+                        source = (
+                            accumulator if result_kind == "value" else accumulator_index
+                        )
+                        self.post_loop_combine.writeline(
+                            f"{result_var} = {self.reduction_resize(source)}"
+                        )
+                else:
+                    self.compute.splice(
+                        f"""\
+                    {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
+                        {accumulator}, {accumulator_index}, {value}, {index_var}
+                    )
+                    {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
+                    {accumulator_index} = {where_cond(f"{accumulator_index}_next", accumulator_index)}
+                    """
+                    )
+                    final_argreduce(
+                        self.post_loop_combine,
+                        result_var,
+                        accumulator,
+                        accumulator_index,
+                        argreduce_result_kind(),
+                    )
             elif is_welford_reduction(reduction_type):
                 result_var = self.welford_reduce(
                     result_var, reduction_type, value, where_cond, acc_type, dtype
                 )
+            elif scalar_online_softmax:
+                # Per-row accumulators: each block is reduced along the
+                # reduction dim before it is folded into the running state.
+                accumulator_max = f"_{result_var}_max"
+                accumulator_sum = f"_{result_var}_sum"
+                self.body.writeline(
+                    f"{accumulator_max} = tl.full({scalar_size_str}, float('-inf'), {acc_type})"
+                )
+                self.body.writeline(
+                    f"{accumulator_sum} = tl.full({scalar_size_str}, 0.0, {acc_type})"
+                )
+                self.compute.splice(
+                    f"""
+                    {accumulator_max}, {accumulator_sum} = triton_helpers.online_softmax_reduce_scalar_combine(
+                        {accumulator_max}, {accumulator_sum}, {value}, {cond or True}, {dim},
+                        {config.use_fast_math}, {config.strict_signed_zero}
+                    )
+                    """
+                )
+                result_max = cast(CSEVariable, result_var)
+                result_sum = self.cse.newvar(dtype=dtype, shape=result_max.shape)
+                self.post_loop_combine.splice(
+                    f"""
+                    {result_max} = {self.reduction_resize(accumulator_max)}
+                    {result_sum} = {self.reduction_resize(accumulator_sum)}
+                    """
+                )
+                result_var = result_max, result_sum
             elif reduction_type == "online_softmax_reduce":
                 accumulator_max = f"_{result_var}_max"
                 accumulator_sum = f"_{result_var}_sum"
@@ -5757,25 +6119,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dim,
                     dtype,
                 )
-            elif strict_reduction_loop:
-                zero = cast(str, default)
+            elif strict_reduction_loop or scalar_loop:
+                combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 masked = self.cse.generate(
                     self.compute,
-                    where_cond(value, zero),
+                    where_cond(value, cast(str, default)),
                     dtype=value.dtype,
                     shape=value.shape,
                 )
                 chunk_expr, chunk_dtype, chunk_shape = final_reduction(
                     self.compute, masked, None
                 )
+                # tl.sum widens sub-32-bit ints; keep the loop-carried type.
                 chunk = self.cse.generate(
                     self.compute,
-                    chunk_expr,
+                    f"({chunk_expr}).to({acc_type})",
                     dtype=chunk_dtype,
                     shape=chunk_shape,
                 )
                 self.compute.writeline(
-                    f"{accumulator} = {accumulator} {strict_op} {chunk}"
+                    f"{accumulator} = {combine_fn(accumulator, chunk)}"
                 )
                 self.post_loop_combine.writeline(f"{result_var} = {accumulator}")
             else:
@@ -6235,6 +6598,70 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=shape,
         )
 
+    def _bitcast_reshape_expr(
+        self,
+        value: CSEVariable,
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> str:
+        value_expr = str(value)
+        if dtype in TRITON_FLOAT8_DTYPES:
+            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
+        return self._reshape_expr(value, shape, value_expr=value_expr)
+
+    def _emit_recursive_split(
+        self,
+        expr: str,
+        names: Sequence[str],
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> None:
+        """Split a trailing axis into a power-of-two number of lanes."""
+        factor = len(names)
+        if factor <= 1 or factor & (factor - 1) != 0:
+            raise AssertionError(f"split factor must be a power of two: {factor}")
+        is_float8 = dtype in TRITON_FLOAT8_DTYPES
+        if factor == 2:
+            if not is_float8:
+                self.compute.writeline(f"{', '.join(names)} = tl.split({expr})")
+                return
+            raw_parts = tuple(
+                self.cse.newvar(dtype=torch.uint8, shape=shape[:-1]) for _ in names
+            )
+            self.compute.writeline(
+                f"{', '.join(map(str, raw_parts))} = tl.split({expr})"
+            )
+            for raw_part, name in zip(raw_parts, names):
+                self.compute.writeline(
+                    f"{name} = {raw_part}.to({triton_type(dtype)}, bitcast=True)"
+                )
+            return
+        half = factor // 2
+        split_shape = (*shape[:-1], half, 2)
+        part_shape = (*shape[:-1], half)
+        split_dtype = torch.uint8 if is_float8 else dtype
+        even = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        odd = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        self.compute.writeline(
+            f"{even}, {odd} = tl.split("
+            f"tl.reshape({expr}, {triton_shape_str(split_shape)}))"
+        )
+        self._emit_recursive_split(str(even), names[0::2], part_shape, dtype)
+        self._emit_recursive_split(str(odd), names[1::2], part_shape, dtype)
+
+    def emit_split_via_reshape(
+        self,
+        value: CSEVariable,
+        reshape_shape: Sequence[sympy.Expr | int | str],
+        part_names: Sequence[str],
+    ) -> None:
+        """Reshape ``value`` to expose the trailing lane axis, then split it."""
+        dtype = value.dtype
+        if dtype is None:
+            raise AssertionError("split value must have a known dtype")
+        expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        self._emit_recursive_split(expr, part_names, reshape_shape, dtype)
+
     def emit_broadcast_via_reshape(
         self,
         value: CSEVariable,
@@ -6249,11 +6676,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Used for nested-reduction broadcasts that lift a reduced-resolution
         value (one element per group) to full or half resolution.
         """
-        reshaped = self._reshape_expr(value, pre_broadcast_shape)
+        reshaped = self._bitcast_reshape_expr(value, pre_broadcast_shape, dtype)
         broadcasted = (
             f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
         )
         line = triton_reshape(broadcasted, list(broadcast_shape), list(final_shape))
+        if dtype in TRITON_FLOAT8_DTYPES:
+            line = f"{line}.to({triton_type(dtype)}, bitcast=True)"
         return self.cse.generate(
             self.compute,
             line,
@@ -6265,11 +6694,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _reshape_expr(
         value: CSEVariable,
         shape: Sequence[sympy.Expr | int | str],
+        *,
+        value_expr: str | None = None,
     ) -> str:
+        if value_expr is None:
+            value_expr = str(value)
         old_shape = getattr(value, "shape", None)
         if old_shape is None:
-            return f"tl.reshape({value}, {triton_shape_str(shape)})"
-        return triton_reshape(str(value), list(old_shape), list(shape))
+            return f"tl.reshape({value_expr}, {triton_shape_str(shape)})"
+        return triton_reshape(value_expr, list(old_shape), list(shape))
 
     def _lift_helper(
         self, fn, values: tuple[CSEVariable, ...], dtypes: tuple[torch.dtype, ...]
@@ -7038,8 +7471,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_load": self.num_load,
             "num_store": self.num_store,
             "num_reduction": self.num_reduction,
-            # Triton will not accept an OrderedSet for autotune_hints
-            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
+            # Sorted so the generated source does not depend on set ordering.
+            "autotune_hints": tuple(
+                sorted(self.autotune_hints, key=lambda hint: hint.value)
+            ),
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
@@ -7118,6 +7553,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             resolved = {}
             for inner, opts in self.host_tma_descriptor_args.items():
+                if isinstance(opts, dict):
+                    resolved[inner] = opts
+                    continue
                 dims = [_resolve_block_dim(s) for s in opts.block_shape]
                 resolved[inner] = {
                     "block_shape": dims,
@@ -7177,6 +7615,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 return True
         return False
+
+    def pointer_range_override(self) -> tuple[int, ...] | None:
+        """Suppress ``tt.pointer_range=32`` when this kernel uses atomics.
+
+        On HIP the annotation lets the backend use buffer ops, and buffer atomics are
+        far slower than global ones under contention. ``()`` suppresses; ``None`` lets
+        ``config_of`` decide, which is also where the config flag is applied. Only
+        valid once the kernel body exists, since it reads ``atomic_add_found``.
+        """
+        if torch.version.hip is not None and self.atomic_add_found:
+            return ()
+        return None
 
     def codegen_kernel(self, name=None) -> str:
         """
@@ -7375,24 +7825,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
-        # Compute configs after codegen_body() so we know if the kernel
-        # uses atomic ops. On HIP, buffer ops don't support atomics, so
-        # we must not tag any args with pointer_range_32 in that case.
-        # Also disable pointer_range_32 when the config flag is off.
-        if torch.version.hip is not None and (
-            self.atomic_add_found or not config.triton.emit_pointer_range_32
-        ):
-            triton_meta["configs"] = [
-                config_of(
-                    signature,
-                    pointer_range_override=(),
-                    skip_cpp_wrapper_input_tensor_alignment=True,
-                )
-            ]
-        else:
-            triton_meta["configs"] = [
-                config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
-            ]
+        # Computed after codegen_body() so self.atomic_add_found is accurate.
+        triton_meta["configs"] = [
+            config_of(
+                signature,
+                skip_cpp_wrapper_input_tensor_alignment=True,
+                pointer_range_override=self.pointer_range_override(),
+            )
+        ]
 
         for helper in self.helper_functions:
             code.writeline("")
@@ -7444,6 +7884,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
+            code.splice(self._named_constant_defs)
             code.splice(self.body)
             if config.triton.proton_profiling:
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
@@ -7678,7 +8119,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return f"tl.arange(0, {self.kexpr(entry.block_size())}){size}{suffix}"
 
     def iteration_ranges_scalar_code(
-        self, entry: IterationRangesRoot, value: Any
+        self, entry: IterationRangesRoot, value: str
     ) -> str:
         index_dtype = self.index_dtype
         ndim = self.triton_tensor_ndim()
@@ -7869,6 +8310,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         rindex = self._flatten_reduction_indices(rn_inds)
         buffer.splice(f"rindex = {self.index_to_str(rindex)}")
 
+    def _codegen_named_constant(
+        self, sym: sympy.Symbol, expr: sympy.Expr, constexpr: bool
+    ) -> None:
+        """Emit a loop-invariant named constant at kernel-function scope."""
+        name = str(sym)
+        annotation = ": tl.constexpr" if constexpr else ""
+        line = f"{name}{annotation} = {self.index_to_str(expr)}"
+        existing = self._named_constants.get(name)
+        if existing is not None:
+            if existing != line:
+                raise AssertionError(
+                    f"conflicting definitions for named constant {sym}"
+                )
+            return
+        self._named_constants[name] = line
+        self._named_constant_defs.writeline(line)
+
     def iteration_ranges_codegen_header(
         self,
         entry: IterationRangesRoot,
@@ -7883,9 +8341,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 raise AssertionError(
                     "derived reduction roots do not support cooperative reductions"
                 )
+            # Derived indices may be loop-local, but their shape constants are not.
             for sym, expr, constexpr in entry.named_constants():
-                annotation = ": tl.constexpr" if constexpr else ""
-                code.writeline(f"{sym}{annotation} = {self.index_to_str(expr)}")
+                self._codegen_named_constant(sym, expr, constexpr)
             code.writeline(
                 f"{entry.name} = {self.index_to_str(entry.block_offset())} + "
                 f"{self.iteration_ranges_ranges_code(entry)}"
@@ -8086,6 +8544,7 @@ class FusedUserDefinedTritonKernel(TritonKernel):
 class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
+    supports_sub_parent_epilogue = True
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [

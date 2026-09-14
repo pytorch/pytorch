@@ -24,11 +24,18 @@ from torch._inductor.comms import (
     ReorderInfo,
     sink_waits_iterative,
 )
-from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.compile_fx import (
+    compile_fx as inductor_compile_fx,
+    compile_fx_inner,
+)
 from torch._inductor.dependencies import WeakDep
 from torch._inductor.fx_passes.bucketing import (
+    _ALL_DTYPES,
+    _compute_foreach_groups,
     _insert_fn_trace_before_node,
+    _pre_bucket_all_gather,
     _trace as bucketing_trace,
+    _unpack_bucketed_all_gather_output,
     all_gather_merge_fn_to_trace_custom_ops,
     is_all_gather_into_tensor,
     is_all_reduce_tensor,
@@ -141,25 +148,245 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         ]
         self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
         self.assertTrue(any("16*((u0//2))" in shape for shape in symbolic_shapes))
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.split_with_sizes_copy.out
+                for node in gm.graph.nodes
+            )
+        )
 
-    def test_all_gather_bucket_trace_requires_unbacked_chunk_hint(self):
+    def test_all_gather_bucket_trace_uses_fused_unpack_for_static_shapes(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+            y = torch.empty(5, 2)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(
+            targets.count(torch.ops.aten.split_with_sizes_copy.out),
+            1,
+        )
+        self.assertNotIn(torch.ops.aten.split_with_sizes.default, targets)
+
+    def test_all_gather_singleton_bucket_does_not_copy_unpack(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+
+        gm = bucketing_trace(
+            lambda value: all_gather_merge_fn_to_trace_custom_ops(
+                [value],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32],
+                0,
+            ),
+            (x,),
+        )
+
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.split_with_sizes_copy.out
+                for node in gm.graph.nodes
+            )
+        )
+
+    def test_all_gather_group_size_one_does_not_copy_unpack(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+            y = torch.empty(5, 2)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                1,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.split_with_sizes_copy.out
+                for node in gm.graph.nodes
+            )
+        )
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_fused_all_gather_unpack_handles_mixed_dtypes(self):
+        group_size = 2
+        expected_bfloat16 = torch.arange(
+            6,
+            device="cuda",
+            dtype=torch.bfloat16,
+        ).reshape(group_size, 3)
+        expected_float32 = torch.arange(
+            8,
+            device="cuda",
+            dtype=torch.float32,
+        ).reshape(group_size, 4)
+        expected_empty = torch.empty(
+            group_size,
+            0,
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        rank_major_bytes = torch.cat(
+            [
+                torch.cat(
+                    [
+                        expected_bfloat16[rank].view(torch.uint8),
+                        expected_float32[rank].view(torch.uint8),
+                        expected_empty[rank].view(torch.uint8),
+                    ]
+                )
+                for rank in range(group_size)
+            ]
+        )
+
+        unpack = functools.partial(
+            _unpack_bucketed_all_gather_output,
+            ins_sizes=[torch.Size((3,)), torch.Size((2, 2)), torch.Size((0,))],
+            ins_split_sizes=[6, 16, 0],
+            out_dtypes=[torch.bfloat16, torch.float32, torch.bfloat16],
+            group_size=group_size,
+            bucket_dtype=torch.uint8,
+        )
+        gm = make_fx(unpack)(rank_major_bytes)
+        compiled = compile_fx_inner(gm, [rank_major_bytes])
+
+        FileCheck().check_count(
+            "torch.ops.aten.split_with_sizes_copy.out(", count=1, exactly=True
+        ).run(compiled.source_code)
+        actual = compiled([rank_major_bytes])
+
+        self.assertEqual(actual[0], expected_bfloat16.flatten())
+        self.assertEqual(actual[1], expected_float32.reshape(4, 2))
+        self.assertEqual(actual[2].numel(), 0)
+        self.assertTrue(all(output.is_contiguous() for output in actual))
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_all_gather_unpack_handles_all_empty_outputs(self):
+        actual = _unpack_bucketed_all_gather_output(
+            torch.empty(2, 0, device="cuda", dtype=torch.uint8),
+            [torch.Size((0,)), torch.Size((0, 3))],
+            [0, 0],
+            [torch.float32, torch.bfloat16],
+            2,
+            torch.uint8,
+        )
+
+        self.assertEqual(actual[0].shape, (0,))
+        self.assertEqual(actual[1].shape, (0, 3))
+        self.assertTrue(all(output.is_contiguous() for output in actual))
+
+    def test_all_gather_bucket_trace_accepts_unhinted_unbacked_chunk_numel(self):
         x, y = self._make_hinted_unbacked_chunked_fake_inputs()
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Collective bucketing requires hinted symbolic sizes",
-        ):
-            bucketing_trace(
-                lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
-                    [a, b],
-                    "0",
-                    2,
-                    torch.float32,
-                    [torch.float32, torch.float32],
-                    0,
-                ),
-                (x, y),
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_all_gather").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.split_with_sizes_copy.out
+                for node in gm.graph.nodes
             )
+        )
+
+    def test_all_gather_foreach_groups_ignore_tensor_shape(self):
+        inputs = [torch.empty(3), torch.empty(2, 4), torch.empty(0)]
+
+        self.assertIsNone(
+            _compute_foreach_groups(inputs, [torch.float32] * len(inputs))
+        )
+
+    def test_all_gather_foreach_groups_preserve_dtype_pairs(self):
+        inputs = [
+            torch.empty(3, dtype=torch.bfloat16),
+            torch.empty(4, dtype=torch.bfloat16),
+            torch.empty(5, dtype=torch.float32),
+            torch.empty(6, dtype=torch.bfloat16),
+        ]
+
+        self.assertEqual(
+            _compute_foreach_groups(
+                inputs,
+                [
+                    torch.bfloat16,
+                    torch.float32,
+                    torch.float32,
+                    torch.bfloat16,
+                ],
+            ),
+            [0, 3, -1, 1, -1, 2],
+        )
+
+    def test_all_gather_foreach_groups_isolate_noncontiguous_inputs(self):
+        inputs = [
+            torch.empty(3),
+            torch.empty(8)[::2],
+            torch.empty(5),
+        ]
+
+        self.assertEqual(
+            _compute_foreach_groups(inputs, [torch.float32] * len(inputs)),
+            [0, 2, -1, 1],
+        )
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_pre_bucket_all_gather_foreach_handles_different_lengths(self):
+        inputs = [
+            torch.arange(3, device="cuda", dtype=torch.bfloat16),
+            torch.arange(8, device="cuda", dtype=torch.bfloat16).reshape(2, 4).T,
+            torch.empty(0, device="cuda", dtype=torch.bfloat16),
+            torch.arange(5, device="cuda", dtype=torch.bfloat16),
+        ]
+        out_dtypes = [torch.bfloat16] * len(inputs)
+
+        actual = _pre_bucket_all_gather(
+            inputs,
+            1,
+            torch.bfloat16,
+            [_ALL_DTYPES.index(dtype) for dtype in out_dtypes],
+            0,
+            _compute_foreach_groups(inputs, out_dtypes),
+        )
+
+        expected = torch.cat([value.reshape(-1) for value in inputs])
+        self.assertEqual(actual, expected)
 
     def test_reduce_scatter_bucket_trace_preserves_hinted_unbacked_chunk_shapes(self):
         x, y = self._make_hinted_unbacked_chunked_fake_inputs(hint=8)
@@ -3916,6 +4143,153 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         for n in (7, 11):
             x = torch.randn(n, HIDDEN, device=self.device)
             compiled(x, w, group_size, group_name)
+
+
+class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
+    """
+    The compile time sync runs on a gloo process group over CPU, so unlike the rest of
+    TestSyncDecisionCrossRanks these need no accelerator.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _init_process_group(self, timeout: datetime.timedelta | None = None) -> None:
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timeout,
+        )
+
+    def test_sync_cache_decision_cross_ranks(self):
+        # A cache hit on one rank and a miss on another leaves only the missing rank
+        # inside _sync_decision_cross_ranks, which desyncs the process group. The hit
+        # must be discarded unless every rank hit.
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        self._init_process_group()
+
+        with torch._functorch.config.patch(_sync_cache_decision_cross_ranks=True):
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+            counters.clear()
+            # Rank 0 hits, rank 1 misses.
+            self.assertFalse(sync_cache_decision_cross_ranks(self.rank == 0))
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"],
+                1 if self.rank == 0 else 0,
+            )
+
+        # Disabled by default, so a lone hit survives and no collective is issued.
+        self.assertEqual(
+            sync_cache_decision_cross_ranks(self.rank == 0), self.rank == 0
+        )
+
+    @torch._functorch.config.patch(
+        enable_autograd_cache=True, _sync_cache_decision_cross_ranks=True
+    )
+    @torch._inductor.config.patch(fx_graph_cache=True, compile_threads=1)
+    def test_cross_rank_miss_recompiles_and_saves(self):
+        # End to end through aot_module_simplified, rank 0 warm and rank 1 cold: rank 1
+        # reaches the partitioner's collective alone while rank 0 sails past on its hit.
+        # Rejecting that hit is only half of it, the rejected rank also has to populate
+        # aot_config.cache_info or its recompile is never saved and the next compile
+        # diverges all over again.
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+
+        self._init_process_group()
+        torch._C._distributed_c10d._register_process_group(
+            "default", torch.distributed.group.WORLD
+        )
+        expected = torch.full((4, 4), self.world_size + 1.0)
+
+        def fn(x):
+            return _functional_collectives.all_reduce(x, "sum", "default") + 1
+
+        def compile_and_run():
+            counters.clear()
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn)(torch.ones(4, 4)), expected)
+
+        # Each rank gets its own cache dir, so the clear below only cools rank 1.
+        with fresh_inductor_cache():
+            compile_and_run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            if self.rank == 1:
+                AOTAutogradCache.clear()
+
+            compile_and_run()
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"],
+                1 if self.rank == 0 else 0,
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            # Both ranks are warm again, so the hit survives the sync and is usable.
+            compile_and_run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"], 0
+            )
+
+    def test_compile_sync_pg_built_for_partitioner_sync_alone(self):
+        # _sync_decision_cross_ranks builds the pg lazily on the partitioner path, which
+        # a partial cache hit leaves to the ranks that missed. Building a group on a
+        # subset of ranks hangs and desyncs _world.group_count, so it has to happen here,
+        # where every rank is, even though the decision itself passes straight through.
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        self._init_process_group()
+        self.assertIsNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+        with torch._functorch.config.patch(_sync_decision_cross_ranks=True):
+            # A build without gloo has nothing to prime, and priming must not be what
+            # surfaces that: the partitioner still raises, and only for the graphs it
+            # syncs, rather than every compile that gets here.
+            with mock.patch.object(c10d, "is_gloo_available", return_value=False):
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertIsNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+        self.assertIsNotNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+    def test_compile_sync_pg_without_gloo(self):
+        from torch._dynamo.distributed import get_compile_sync_pg
+
+        self._init_process_group()
+
+        with mock.patch.object(c10d, "is_gloo_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "requires the gloo backend"):
+                get_compile_sync_pg()
+
+    def test_compile_sync_pg_inherits_default_timeout(self):
+        from torch._dynamo.distributed import get_compile_sync_pg
+
+        timeout = datetime.timedelta(seconds=120)
+        self._init_process_group(timeout=timeout)
+
+        pg = get_compile_sync_pg()
+        device = torch.device(c10d.distributed_c10d._get_object_coll_device(pg))
+        self.assertEqual(pg._get_backend(device).options._timeout, timeout)
 
 
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):

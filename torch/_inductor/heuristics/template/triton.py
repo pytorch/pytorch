@@ -21,11 +21,12 @@ from ... import config
 from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
-    blackwell_ws_persistent_device_tma_mm_template,
+    blackwell_ws_persistent_tma_mm_template,
     get_scaling_options,
     get_tile_size,
     mm_template,
     persistent_mm_template,
+    persistent_tdm_mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
@@ -34,11 +35,18 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
+    _rocm_version_tuple,
+    _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
+    _TDM_MIN_INNERMOST_REQUEST_BYTES,
+    commit_tdm_operand_layout,
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    rocm_gfx_arch,
+    tdm_descriptor_row_major,
     TMA_DESCRIPTOR_SIZE,
+    tma_inner_dim,
     triton_type,
     using_b200,
     using_rocm_rdna3,
@@ -49,18 +57,16 @@ from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Sequence
 
     from triton import Config as TritonConfig
+
+    from ...ir import IRNode
+    from ...utils import _IntLike
 
 else:
     from torch._inductor.runtime.triton_compat import Config as TritonConfig
 log = logging.getLogger(__name__)
-
-
-def _origami_enabled() -> bool:
-    """Check if origami GEMM optimization is enabled."""
-    return config.rocm.origami
 
 
 USE_META_WS = meta_ws_enabled()
@@ -75,12 +81,106 @@ def _use_template_autows() -> bool:
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
+_rocm_version = _rocm_version_tuple()
+# First ROCm version where origami is not supported.
+ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
+
+
+def _origami_enabled() -> bool:
+    """Check if origami GEMM optimization is enabled."""
+    return config.rocm.origami and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
+
+
+def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
+    """Read the operand orientations a TDM heuristic must have injected.
+
+    Fails closed rather than defaulting to row-major: which tile extent is
+    contiguous depends on the orientation, so a wrong default would silently
+    filter against the wrong axis and admit misaligned blocks.
+    """
+    missing = [
+        key for key in ("tdm_a_row_major", "tdm_b_row_major") if key not in kwargs
+    ]
+    if missing:
+        raise AssertionError(
+            f"TDM config filtering requires {', '.join(missing)}; they are "
+            "injected by the TDM template heuristics and must not be defaulted"
+        )
+    return kwargs["tdm_a_row_major"], kwargs["tdm_b_row_major"]
+
+
+def _tdm_block_legal(block: int, dtype_size: int) -> bool:
+    """Rule 1: the innermost request must hold >= 16 bytes.
+
+    Kept independent of rule 3, which currently implies it but is provisional.
+    """
+    return int(block) * dtype_size >= _TDM_MIN_INNERMOST_REQUEST_BYTES
+
+
+def _tdm_block_direct_path(block: int, dtype_size: int) -> bool:
+    """Rule 3: relative 128-byte contiguous block width."""
+    return (int(block) * dtype_size) % _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES == 0
+
+
+def _tdm_block_aligned(block: int, dtype_size: int) -> bool:
+    """Whether a tile's contiguous extent is both legal and selected."""
+    if dtype_size <= 0:
+        raise AssertionError(
+            f"TDM config filtering requires a positive dtype_size, got {dtype_size}"
+        )
+    return _tdm_block_legal(block, dtype_size) and _tdm_block_direct_path(
+        block, dtype_size
+    )
+
+
+def _tdm_descriptor_blocks_aligned(
+    block_m: int,
+    block_n: int,
+    block_k: int,
+    dtype_size: int,
+    *,
+    a_row_major: bool,
+    b_row_major: bool,
+) -> bool:
+    a_contiguous_block = block_k if a_row_major else block_m
+    b_contiguous_block = block_n if b_row_major else block_k
+    return _tdm_block_aligned(a_contiguous_block, dtype_size) and _tdm_block_aligned(
+        b_contiguous_block, dtype_size
+    )
+
+
+def _filter_tdm_descriptor_block_configs(
+    configs: list[BaseConfig],
+    dtype_size: int,
+    *,
+    a_row_major: bool,
+    b_row_major: bool,
+) -> list[BaseConfig]:
+    return [
+        config
+        for config in configs
+        if _tdm_descriptor_blocks_aligned(
+            config.block_m,
+            config.block_n,
+            config.block_k,
+            dtype_size,
+            a_row_major=a_row_major,
+            b_row_major=b_row_major,
+        )
+    ]
+
 
 # rocm-origami pip pkg is only available on ROCm builds and is only used when
 # both max_autotune and config.rocm.origami are enabled (env-var driven, set once
 # at config import). Cache the import here so the hot path never pays an exception
 # and CUDA/CPU/origami-disabled processes never attempt the import.
-if IS_ROCM and config.max_autotune and config.rocm.origami:
+# origami is not supported on ROCm 10.0+.
+if (
+    IS_ROCM
+    and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
+    and config.max_autotune
+    and config.rocm.origami
+):
     try:
         import origami  # type: ignore[import-not-found]
     except ImportError:
@@ -91,6 +191,17 @@ if IS_ROCM and config.max_autotune and config.rocm.origami:
         )
 else:
     origami = None
+    if (
+        IS_ROCM
+        and config.rocm.origami
+        and _rocm_version >= ORIGAMI_UNSUPPORTED_ROCM_VERSION
+    ):
+        log.warning(
+            "ROCm origami GEMM selection is not supported on ROCm %d.%d+ "
+            "(detected %d.%d); origami disabled.",
+            *ORIGAMI_UNSUPPORTED_ROCM_VERSION,
+            *_rocm_version,
+        )
 
 
 # TODO(rocm-origami): replace these wrappers with public accessors when the
@@ -315,6 +426,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # Whether the heuristic is used for int8. Use this when the heuristic is int8 exclusive
         # but prefer the preprocess_mm_configs argument when it's used for both
         self.has_int8_tensor: bool = False
+        # Whether descriptor-specific TDM config filtering is active.
+        self.uses_tdm_configs: bool = False
         # Whether to scale configs at all
         # TODO(coconutruben): remove this once mm_plus_mm and tests support scaling
         self.should_scale_configs: bool = True
@@ -389,11 +502,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 64, 64, 3, 8),
             GemmConfig(128, 256, 128, 3, 8),
             GemmConfig(256, 128, 128, 3, 8),
-        ]
-
-        self.mixed_mm_configs: list[BaseConfig] = [
-            GemmConfig(16, 128, 256, 3, 4),
-            GemmConfig(16, 128, 256, 5, 8),
         ]
 
         self.persistent_mm_configs: list[BaseConfig] = [
@@ -1631,13 +1739,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
 
-        # Exhaustive search for mm configs
+        # Exhaustive search for mm configs. num_stages is deliberately not an axis
+        # here: _filter_configs forces every config to self.default_num_stages, so
+        # enumerating it would only produce duplicates that get deduped later.
         self.exhaustive_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 BLOCK_M,
                 BLOCK_N,
                 BLOCK_K,
-                num_stages,
+                self.default_num_stages,
                 num_warps,
                 group_m=group_m,
                 matrix_instr_nonkdim=matrix_instr_nonkdim,
@@ -1647,7 +1757,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
-            for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
@@ -1682,6 +1791,25 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): ROCmFlexConfig(32, 32, 1, 8, kpack=default_kpack),
         }
 
+        # Backward defaults measured on gfx950. Only the head dims covered here were
+        # measured; anything else keeps the shared ROCm values below. The block shape
+        # and num_stages=2 have to move together: on gfx950 either one alone is a
+        # regression at head_dim 128, while the pair is a gain at both head dims.
+        self.gfx950_default_flex_bwd_config = {
+            (torch.bfloat16, 64): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.bfloat16, 128): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.float16, 64): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.float16, 128): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+        }
+
         # RDNA3 (gfx11xx) optimal configs profiled on gfx1151 (head_dim=256).
         # Three seq_len tiers to match CU occupancy on 16-CU RDNA3:
         #   short  (seq < 128): BLOCK_M=16, tiny tiles keep all CUs busy
@@ -1702,6 +1830,19 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         self.rdna3_default_flex_config = {
             (torch.bfloat16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
             (torch.float16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+        }
+
+        # Selection is an exact match on the gfx target, so a target only gets
+        # values that were measured on it. gfx numbers neither order by
+        # capability nor identify the product line -- gfx1250 is MI450, a CDNA5
+        # part -- so there is no direction along which tuning can be inherited.
+        # Targets absent here fall back to the shared ROCm defaults below.
+        self.flex_fwd_config_by_arch = {
+            "gfx942": self.gfx942_default_flex_config,
+            "gfx950": self.gfx950_default_flex_config,
+        }
+        self.flex_bwd_config_by_arch = {
+            "gfx950": self.gfx950_default_flex_bwd_config,
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1781,6 +1922,106 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for kpack in [1, 2]
         ]
 
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        tdm_report: tuple[int, int, bool, bool] | None = None
+        if self.uses_tdm_configs:
+            # Validate before filtering: an already-empty pool would skip a
+            # per-config check entirely and report success for bad metadata.
+            a_row_major, b_row_major = _tdm_descriptor_orientation(kwargs)
+            if dtype_size <= 0:
+                raise AssertionError(
+                    "TDM config filtering requires a positive dtype_size, "
+                    f"got {dtype_size}"
+                )
+            candidate_count = len(configs)
+            configs = _filter_tdm_descriptor_block_configs(
+                configs,
+                dtype_size,
+                a_row_major=a_row_major,
+                b_row_major=b_row_major,
+            )
+            tdm_report = (candidate_count, dtype_size, a_row_major, b_row_major)
+            caller_exclude = exclude
+
+            def tdm_exclude(
+                block_m: sympy.Integer,
+                block_n: sympy.Integer,
+                block_k: sympy.Integer,
+            ) -> bool:
+                return not _tdm_descriptor_blocks_aligned(
+                    block_m,
+                    block_n,
+                    block_k,
+                    dtype_size,
+                    a_row_major=a_row_major,
+                    b_row_major=b_row_major,
+                ) or caller_exclude(block_m, block_n, block_k)
+
+            exclude = tdm_exclude
+
+        scaled = super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs,
+            has_int8_tensor,
+            scale,
+            exclude,
+            dtype_size,
+            op_name,
+            **kwargs,
+        )
+        if tdm_report is None:
+            return scaled
+        return self._report_empty_tdm_pool(scaled, *tdm_report)
+
+    @staticmethod
+    def _report_empty_tdm_pool(
+        configs: Generator[TritonConfig, None, None],
+        candidate_count: int,
+        dtype_size: int,
+        a_row_major: bool,
+        b_row_major: bool,
+    ) -> Generator[TritonConfig, None, None]:
+        """Report when preprocessing leaves a TDM template with no configs.
+
+        Counted after scaling, not right after the block filter: scaling clamps
+        block sizes to the shape hints and re-applies ``tdm_exclude``, so a
+        config that passed at full size can still be dropped by a small K.
+        """
+        surviving = 0
+        for triton_config in configs:
+            surviving += 1
+            yield triton_config
+        if not surviving:
+            # debug, not warning: an empty pool is expected for any shape whose
+            # clamped block width misses the 128-byte policy, and the cause is
+            # not necessarily alignment -- caller exclusions and the other
+            # preprocessing stages can empty it too.
+            log.debug(
+                "TDM: preprocessing left no usable configs out of %d candidates "
+                "(dtype_size=%d, a_row_major=%s, b_row_major=%s); this template "
+                "contributes no autotuning choices",
+                candidate_count,
+                dtype_size,
+                a_row_major,
+                b_row_major,
+            )
+
     def _prune_exhaustive_configs(
         self,
         configs: list[BaseConfig],
@@ -1815,7 +2056,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[int, ...]] = OrderedSet()
+        used: OrderedSet[tuple[int | None, ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -1838,7 +2079,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 continue
 
             # Construct key for finding duplicate configs
-            key: tuple[int, ...] = (
+            key: tuple[int | None, ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -1847,6 +2088,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 waves_per_eu,
                 matrix_instr_nonkdim,
                 kpack,
+                conf.hint_override,
             )
 
             # Check if gemm specific arg exists - add to key if does
@@ -1873,6 +2115,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     "matrix_instr_nonkdim": matrix_instr_nonkdim,
                     "waves_per_eu": waves_per_eu,
                     "kpack": kpack,
+                    "hint_override": conf.hint_override,
                 }
                 if group_m is not None:
                     kwargs["GROUP_M"] = group_m
@@ -1888,7 +2131,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
-        capability = torch.cuda.get_device_capability()
         default_kpack = get_default_kpack()
 
         if head_dim <= 256:
@@ -1910,14 +2152,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     default_config = self.rdna3_default_flex_config.get(
                         (dtype, head_dim), default_config
                     )
-            elif capability >= (9, 5):  # gfx950 (MI350X/MI355X)
-                default_config = self.gfx950_default_flex_config.get(
-                    (dtype, head_dim), default_config
-                )
-            elif capability >= (9, 4):  # gfx942 (MI300X/MI325X)
-                default_config = self.gfx942_default_flex_config.get(
-                    (dtype, head_dim), default_config
-                )
+            else:
+                default_config = self.flex_fwd_config_by_arch.get(
+                    rocm_gfx_arch(), {}
+                ).get((dtype, head_dim), default_config)
         else:
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4, kpack=default_kpack)
@@ -1940,10 +2178,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_kpack = get_default_kpack()
+        arch_bwd_config = self.flex_bwd_config_by_arch.get(rocm_gfx_arch(), {}).get(
+            (dtype, head_dim)
+        )
         if dtype == torch.float32:
             default_config = ROCmFlexBwDConfig(
                 16, 16, 16, 16, 1, 4, kpack=default_kpack
             )
+        elif arch_bwd_config is not None:
+            default_config = arch_bwd_config
         elif head_dim <= 256:
             if head_dim == 64:
                 default_config = ROCmFlexBwDConfig(
@@ -2149,6 +2392,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # attributes used by the origami branch in _get_template_configs_impl.
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
+    uses_tdm_configs: bool
     _get_exceeding_shared_memory_checker: Callable[
         [bool, int], Callable[[BaseConfig, int], bool] | None
     ]
@@ -2265,7 +2509,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             # have to drop its best picks at compile time (Triton OutOfResources
             # is not always caught on the HIP backend). Check against
             # self.default_num_stages because ROCmConfigHeuristic._filter_configs
-            # (triton.py:1728) clobbers num_stages to that value downstream.
+            # normalizes num_stages to that value downstream.
             lds_check = self._get_exceeding_shared_memory_checker(False, 0)
             exhaustive = self.exhaustive_configs
             if lds_check is not None:
@@ -2293,6 +2537,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 configs=exhaustive,
                 dtype_size=dtype.itemsize,
                 op_name=op_name,
+                **kwargs,
             )
             selector = origami.OrigamiMatmulSelector(
                 allcfgs,
@@ -2369,10 +2614,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     max_warps,
                     max(1, tile_area // (mfma_dim * warp_size)),
                 )
-                # num_stages: ROCmConfigHeuristic._filter_configs (triton.py:1728)
-                # overwrites this to self.default_num_stages, so seed with that
-                # value to keep the in-flight GemmConfig consistent with the
-                # post-filter state.
+                # ROCmConfigHeuristic._filter_configs normalizes num_stages to
+                # self.default_num_stages, so seed with that value to keep the
+                # in-flight GemmConfig consistent with the post-filter state.
                 base_config = GemmConfig(
                     block_m=cfg.mt.m,
                     block_n=cfg.mt.n,
@@ -2388,6 +2632,26 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     cfg.occupancy,
                     wgm_result.wgm,
                 )
+
+            # Revalidate the reconstructed Origami tiles. The candidate pool was
+            # filtered above, but selected results are rebuilt as GemmConfig objects.
+            if self.uses_tdm_configs:
+                a_row_major, b_row_major = _tdm_descriptor_orientation(kwargs)
+                origami_config_count = len(origami_configs)
+                origami_configs = _filter_tdm_descriptor_block_configs(
+                    origami_configs,
+                    dtype.itemsize,
+                    a_row_major=a_row_major,
+                    b_row_major=b_row_major,
+                )
+                pruned = origami_config_count - len(origami_configs)
+                if pruned:
+                    log.info(
+                        "Origami: pruned %d/%d selected configs failing "
+                        "TDM descriptor alignment",
+                        pruned,
+                        origami_config_count,
+                    )
 
             # Apply backend filters (max block size, memory constraints, etc.).
             # LDS-overflow prune already happened upstream against
@@ -2430,9 +2694,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     )
                     yield template_kwargs
             else:
-                # No origami configs returned (e.g., topk=0), fall back to regular generator
+                # No valid Origami configs remain; fall back to the regular generator.
                 log.warning(
-                    "Origami returned no configs, falling back to regular config generator"
+                    "No valid Origami configs remain, falling back to regular config generator"
                 )
                 for c in configs(
                     m,
@@ -2650,6 +2914,10 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     """
     TMA-specific mixin that uses persistent configs and adds TMA options.
     This inherits from MMTemplateConfigMixin and overrides config generation.
+
+    ``ROCmPersistentTDMTemplateConfigHeuristic`` feeds the same Jinja template
+    with deliberately different probes (unit-stride row-majorness, stable
+    descriptor API, no workspace). Keep both in sync when adding a variable.
     """
 
     def _get_template_configs_impl(
@@ -2664,9 +2932,22 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError("TMATemplateConfigMixin requires MMKernelInputs")
         mat1, mat2 = kernel_inputs.mat1mat2()
+
+        def _row_major(node) -> bool:
+            # TMA needs the contiguous dim last. Use the same inner-dim rule as
+            # can_use_tma, which already accepted these operands -- deriving it
+            # separately here is how a [1, K] operand ended up transposed.
+            stride = node.layout.stride
+            inner = tma_inner_dim(stride)
+            if inner is None:
+                raise AssertionError(
+                    f"host-side TMA: expected exactly one stride-1 dim, got {stride}"
+                )
+            return inner == len(stride) - 1
+
         tma_opts = {
-            "A_ROW_MAJOR": not mat1.layout.is_transposed(),
-            "B_ROW_MAJOR": not mat2.layout.is_transposed(),
+            "A_ROW_MAJOR": _row_major(mat1),
+            "B_ROW_MAJOR": _row_major(mat2),
             "NUM_SMS": get_num_sms(),
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
@@ -2735,6 +3016,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "NUM_SMS": get_num_sms(),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
+                "HOST_SIDE_TMA": config.triton.enable_host_side_tma,
             }
 
     @staticmethod
@@ -2849,13 +3131,15 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        def is_tensorwise_scale(scale: Any) -> bool:
+        def is_tensorwise_scale(scale: IRNode) -> bool:
             size = scale.get_size()
             return len(size) == 0 or all(
                 V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
             )
 
-        def normalize_tensorwise_scale(scale: Any, *, allow_high_rank: bool) -> Any:
+        def normalize_tensorwise_scale(
+            scale: IRNode, *, allow_high_rank: bool
+        ) -> IRNode:
             if not is_tensorwise_scale(scale):
                 return scale
             if not allow_high_rank and len(scale.get_size()) > 2:
@@ -2904,7 +3188,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         scale_b = input_nodes[3]
 
         # Scale compatibility assertion from mm_common.scaled_mm_options
-        def are_compatible_scales(size_a: Any, size_b: Any) -> bool:
+        def are_compatible_scales(
+            size_a: Sequence[_IntLike], size_b: Sequence[_IntLike]
+        ) -> bool:
             # Same sized scales are compatible
             if len(size_a) == len(size_b):
                 return True
@@ -3148,7 +3434,93 @@ class PersistentMMTemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    persistent_tdm_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+)
+class ROCmPersistentTDMTemplateConfigHeuristic(
+    MMTemplateConfigMixin,
+    ROCmConfigHeuristic,  # type: ignore[misc]
+):
+    """Persistent descriptor MM heuristic for gfx1250 TDM.
+
+    No `TMAWorkspaceMixin`: stable descriptors need no explicit TMA descriptor
+    workspace. Its `num_warps != 2` filter is NVIDIA-TMA policy.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Persistent pool; ROCm finalization backfills the AMD kernargs.
+        self.mm_configs = self.persistent_mm_configs
+        self.uses_tdm_configs = True
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(
+                "ROCmPersistentTDMTemplateConfigHeuristic requires MMKernelInputs"
+            )
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        # Orientation is read from hints here; admission installed int32 bounds
+        # only. Exact size/stride/offset guards are deferred to the commit below.
+        a_row_major = tdm_descriptor_row_major(mat1)
+        b_row_major = tdm_descriptor_row_major(mat2)
+        if a_row_major is None or b_row_major is None:
+            return
+
+        kwargs = {
+            **kwargs,
+            "tdm_a_row_major": a_row_major,
+            "tdm_b_row_major": b_row_major,
+        }
+        # Materialize before committing: alignment filtering, shape-hint
+        # scaling, Origami selection and backend filters all run below and any
+        # can empty the pool. Specializing for a template that then contributes
+        # nothing is the defect this ordering avoids.
+        generated = super()._get_template_configs_impl(kernel_inputs, op_name, **kwargs)
+        # Same Jinja template as TMATemplateConfigMixin, deliberately different
+        # probes; see that class for why the two option blocks stay separate.
+        configs = [
+            {
+                **template_kwargs,
+                "A_ROW_MAJOR": a_row_major,
+                "B_ROW_MAJOR": b_row_major,
+                "NUM_SMS": get_num_sms(),
+                # The TDM capability gate requires make_tensor_descriptor.
+                "TMA_EXPERIMENTAL_API": False,
+            }
+            for template_kwargs in generated
+        ]
+        if not configs:
+            log.debug(
+                "TDM: no configs survived filtering; leaving operands unspecialized"
+            )
+            return
+
+        # The one production commit point; addmm inherits this method.
+        commit_tdm_operand_layout(mat1, mat2)
+        log.debug("TDM: committed operand layout for %d configs", len(configs))
+        yield from configs
+
+
+@register_template_heuristic(
+    persistent_tdm_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+    op_name="addmm",
+)
+class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
+    AddMMConfigMixin, ROCmPersistentTDMTemplateConfigHeuristic
+):
+    """Addmm extension for the gfx1250 TDM persistent template."""
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
@@ -3176,7 +3548,7 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="addmm",
@@ -3299,7 +3671,7 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
 
 @register_template_heuristic(
     # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",

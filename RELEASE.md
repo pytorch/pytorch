@@ -51,6 +51,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
+| 2.14 | >=3.10, <=(3.15, 3.15t experimental) | C++20 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.29.3), CUDA 13.0 (CUDNN 9.24.0.43) (NCCL 2.30.7), CUDA 13.2 (CUDNN 9.24.0.43) (NCCL 2.30.7) | -- | ROCm 7.14 |
 | 2.13 | >=3.10, <=(3.15, 3.15t experimental) | C++20 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.29.3), CUDA 13.0 (CUDNN 9.20.0.48) (NCCL 2.29.7) | CUDA 13.2 (CUDNN 9.20.0.48) (NCCL 2.29.7) | ROCm 7.2 |
 | 2.12 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.29.3), CUDA 13.0 (CUDNN 9.20.0.48) (NCCL 2.29.7) | CUDA 13.2 (CUDNN 9.20.0.48) (NCCL 2.29.7) | ROCm 7.2 |
 | 2.11 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.28.9), CUDA 12.8 (CUDNN 9.17.1.4) (NCCL 2.28.9), CUDA 13.0 (CUDNN 9.17.1.4) (NCCL 2.28.9) | -- | ROCm 7.2 |
@@ -70,18 +71,18 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ### PyTorch CUDA Support Matrix
 
-For Release 2.12 and 2.13 PyTorch Supports following CUDA Architectures:
+For Release 2.12, 2.13 and 2.14 PyTorch Supports following CUDA Architectures:
 
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |
 | 12.6.3 | Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0) | |
-| 13.0.2 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
+| 13.0.3 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
 | 13.2.1 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
 
 | CUDA | architectures supported for Linux aarch64 builds |
 | --- | --- |
 | 12.6.3 | Ampere(8.0), Hopper(9.0) |
-| 13.0.2 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
+| 13.0.3 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
 | 13.2.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
 
 ## Release Cadence
@@ -104,8 +105,8 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.12 | 13 Apr 2026 | 13 May 2026 | Jun 2026 | Not planned |
 | 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | Not planned |
 | 2.14 | 10 Aug 2026 | 2 Sept 2026 | (Oct 2026) | Not planned |
-| 2.15 | 28 Sept 2026 | 28 Oct 2026 | (Nov 2026) | Not planned |
-| 2.16 | 23 Nov 2026 | 22 Dec 2026 | (Jan 2027) | Not planned |
+| 2.15 | 5 Oct 2026 | 28 Oct 2026 | (Nov 2026) | Not planned |
+| 2.16 | 30 Nov 2026 | 22 Dec 2026 | (Jan 2027) | Not planned |
 
 ## General Overview
 
