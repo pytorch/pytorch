@@ -2,10 +2,16 @@
 
 import os
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestDeviceBackendAutoload(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_autoload(self):
         switch = os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
 
