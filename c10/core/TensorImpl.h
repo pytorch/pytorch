@@ -47,7 +47,7 @@
 // is shrunk to a smaller size. As a result, a Tensor is always going to
 // keep the memory allocated for its maximum capacity reshaped to so far.
 //
-// This parameter is respected "upper-case" methods which call Resize()
+// This parameter is respected by "upper-case" methods which call Resize()
 // (e.g., CopyFrom, ResizeLike); it is NOT respected by Tensor::resize_
 // or ShrinkTo, both of which guarantee to never to free memory.
 C10_DECLARE_bool(caffe2_keep_on_shrink);
