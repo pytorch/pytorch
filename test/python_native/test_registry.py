@@ -137,6 +137,7 @@ class TestRegistry(TestCase):
         self.assertEqual(node.dispatch_key, "CPU")
         self.assertEqual(node.cond_fn, cond_fn)
         self.assertEqual(node.impl_fn, impl_fn)
+        self.assertIsNone(node.eager_availability_fn)
         self.assertFalse(node.unconditional_override)
         self.assertTrue(node.active)
 
@@ -449,6 +450,25 @@ class TestRegistryRuntime(TestCase):
         out = torch.ops.aten.mul.Tensor(a, b)
         self.assertTrue(torch.equal(out, torch.tensor([8.0, 15.0])))
         self.assertFalse(sentinel_called[0])
+
+    def test_eager_unavailable_falls_through(self):
+        impl = MagicMock(side_effect=AssertionError("implementation was called"))
+        self.registry._register_op_override_with_eager_availability(
+            "test_dsl",
+            "aten",
+            "mul.Tensor",
+            "CPU",
+            lambda a, b: True,
+            impl,
+            eager_availability_fn=lambda: False,
+        )
+        self._install("mul.Tensor", "CPU")
+
+        self.assertEqual(
+            torch.ops.aten.mul.Tensor(torch.tensor([2.0]), torch.tensor([4.0])).item(),
+            8.0,
+        )
+        impl.assert_not_called()
 
     def test_compile_session_flag_falls_through_without_recursion(self):
         """The eager router must not redispatch to its own aten override when
@@ -846,18 +866,22 @@ class TestRegistryRuntime(TestCase):
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([8.0, 15.0])))
 
     def test_fake_tensor_shape_inference(self):
-        """FakeTensorMode must shape-infer through `_native::<id>` via the
-        registered fake kernel (which redispatches to the aten meta).
-        """
+        """FakeTensor skips the eager implementation and availability check."""
 
         def cond(*a, **k):
             return True
 
-        def impl(a, b):
-            return torch.full_like(a, 1.0)
+        impl = MagicMock(side_effect=AssertionError("implementation ran"))
+        eager_availability = MagicMock(side_effect=AssertionError("guard ran"))
 
-        self.registry.register_op_override(
-            "test_dsl", "aten", "mul.Tensor", "CPU", cond, impl
+        self.registry._register_op_override_with_eager_availability(
+            "test_dsl",
+            "aten",
+            "mul.Tensor",
+            "CPU",
+            cond,
+            impl,
+            eager_availability_fn=eager_availability,
         )
         self._install("mul.Tensor", "CPU")
 

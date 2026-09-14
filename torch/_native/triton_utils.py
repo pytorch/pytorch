@@ -16,8 +16,8 @@ from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
     _OpCondFn,
     _OpImplFn,
+    _register_op_override_with_eager_availability as _register_op_override_impl,
     deregister_op_overrides as _deregister_op_overrides_impl,
-    register_op_override as _register_op_override_impl,
 )
 
 
@@ -65,6 +65,23 @@ def runtime_available() -> bool:
 def runtime_version() -> None | Version:
     _, version = _check_runtime_available()
     return version
+
+
+@functools.cache
+def _eager_driver_available() -> bool:
+    """Initialize and cache Triton's driver for eager overrides."""
+    try:
+        from triton.runtime import driver
+
+        _ = driver.active
+    except Exception:
+        log.info(
+            "Triton driver initialization failed; "
+            "skipping conditional Triton overrides",
+            exc_info=True,
+        )
+        return False
+    return True
 
 
 @functools.cache
@@ -127,6 +144,9 @@ def register_op_override(
         dispatch_key,
         cond,
         impl,
+        eager_availability_fn=(
+            None if unconditional_override else _eager_driver_available
+        ),
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,
     )
