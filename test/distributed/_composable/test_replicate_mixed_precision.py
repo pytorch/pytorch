@@ -47,10 +47,12 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
         self,
         param_dtype: torch.dtype | None,
         reduce_dtype: torch.dtype | None,
+        *,
+        device: str,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
-        ref_model = copy.deepcopy(model).to(self.device_type)
+        ref_model = copy.deepcopy(model).to(device)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         mp_policy = MixedPrecisionPolicy(
@@ -70,6 +72,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_compute_dtype(self, device):
+        device = torch.device(device).type
         self.run_subtests(
             {
                 "param_dtype": [torch.bfloat16, torch.float16],
@@ -81,11 +84,13 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
     def _test_compute_dtype(
         self,
         param_dtype: torch.dtype,
-        device,
+        *,
+        device: str,
     ):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             param_dtype=param_dtype,
             reduce_dtype=None,
+            device=device,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_single
@@ -141,6 +146,8 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(2)
     def test_input_jvp(self, device):
+        device = torch.device(device).type
+
         class ThreeInputMLP(nn.Module):
             def __init__(self, dim: int) -> None:
                 super().__init__()
@@ -168,7 +175,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             cast_forward_inputs=True,
         )
         mesh = init_device_mesh(
-            device,
+            torch.device(device).type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("replicate",),
         )
@@ -300,14 +307,16 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self, device):
-        self._test_reduce_dtype_fp32_reduce(device)
-        self._test_reduce_dtype_bf16_reduce(device)
+        device = torch.device(device).type
+        self._test_reduce_dtype_fp32_reduce(device=device)
+        self._test_reduce_dtype_bf16_reduce(device=device)
 
-    def _test_reduce_dtype_fp32_reduce(self, device):
+    def _test_reduce_dtype_fp32_reduce(self, *, device: str):
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             param_dtype=param_dtype,
             reduce_dtype=reduce_dtype,
+            device=device,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_single
@@ -348,11 +357,12 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
 
-    def _test_reduce_dtype_bf16_reduce(self, device):
+    def _test_reduce_dtype_bf16_reduce(self, *, device: str):
         param_dtype, reduce_dtype = torch.float32, torch.bfloat16
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             param_dtype=param_dtype,
             reduce_dtype=reduce_dtype,
+            device=device,
         )
         group = dist.distributed_c10d._get_default_group()
         orig_reduce_scatter = dist.reduce_scatter_single
@@ -398,13 +408,16 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
         bf16 compute and fp32 reduction accumulates the unsharded gradients in
         fp32.
         """
+        device = torch.device(device).type
         self.run_subtests(
             {"reshard_after_forward": [True, False]},
             self._test_grad_acc_with_reduce_dtype,
             device=device,
         )
 
-    def _test_grad_acc_with_reduce_dtype(self, reshard_after_forward: bool, device):
+    def _test_grad_acc_with_reduce_dtype(
+        self, reshard_after_forward: bool, *, device: str
+    ):
         torch.manual_seed(42)
         param_dtype, reduce_dtype = (torch.bfloat16, torch.float32)
         mp_policy = MixedPrecisionPolicy(
@@ -491,6 +504,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_float16_on_one_submodule(self, device):
+        device = torch.device(device).type
         x = torch.zeros(2, 100, device=device)
 
         # Subtest 1: use fp16 on the second child submodule -- does not require
@@ -545,6 +559,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_submodules_with_external_inputs(self, device):
+        device = torch.device(device).type
         self.run_subtests(
             {"enable_submodule_cast": [False, True]},
             self._test_submodules_with_external_inputs,
@@ -552,7 +567,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         )
 
     def _test_submodules_with_external_inputs(
-        self, enable_submodule_cast: bool, device
+        self, enable_submodule_cast: bool, *, device: str
     ):
         class ToyModule(nn.Module):
             def __init__(self, forward_inputs: dict[str, torch.Tensor]) -> None:
@@ -603,16 +618,18 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_norm_modules_bf16(self, device):
+        device = torch.device(device).type
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
-        self._test_norm_modules(mp_policy, device)
+        self._test_norm_modules(mp_policy, device=device)
 
     @skip_if_lt_x_gpu(1)
     @skipIfRocmArch(MI300_ARCH)  # https://github.com/pytorch/pytorch/issues/182988
     def test_norm_modules_fp16(self, device):
+        device = torch.device(device).type
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16)
-        self._test_norm_modules(mp_policy, device)
+        self._test_norm_modules(mp_policy, device=device)
 
-    def _test_norm_modules(self, mp_policy: MixedPrecisionPolicy, device):
+    def _test_norm_modules(self, mp_policy: MixedPrecisionPolicy, *, device: str):
         def inner(model: nn.Module, x: torch.Tensor):
             # Run forward and backward to check for no type mismatch errors
             z = model(x)
@@ -664,6 +681,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_clamp_reduce_dtype(self, device):
+        device = torch.device(device).type
         # Initialize the model directly in bf16
         init_dtype = torch.bfloat16
         model = nn.Sequential(
@@ -697,6 +715,8 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_dataclass_input(self, device):
+        device = torch.device(device).type
+
         @dataclasses.dataclass
         class Input:
             x: torch.Tensor
