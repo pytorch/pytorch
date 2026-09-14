@@ -1324,6 +1324,10 @@ default](args = (%x, %b_state), kwargs = {})
     return (b_state, getitem_3, getitem_4)""",
             )
 
+
+@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+class TestMoveToDevicePassDevice(TestCase):
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_device_to(self):
         class M(torch.nn.Module):
