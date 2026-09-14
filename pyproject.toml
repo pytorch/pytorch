@@ -338,6 +338,7 @@ dev = [
     "psutil",
     "spin",
     "sympy>=1.13.3",
+    "tzdata ; platform_system == \"Windows\"",
     "wheel"
 ]
 
