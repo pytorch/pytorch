@@ -1,10 +1,9 @@
 # Copyright (C) 2025, Tri Dao.
 import itertools
-from collections.abc import Mapping
-from dataclasses import dataclass, fields
 from enum import IntEnum
+from typing import Optional, List
 from functools import lru_cache, partial
-from typing import List, Optional, get_args
+from dataclasses import dataclass
 
 
 class SplitKMode(IntEnum):
@@ -94,44 +93,6 @@ def blockscaled_config_ok(c: GemmConfig) -> bool:
         and c.cluster_m <= 4
         and c.cluster_n <= 4
     )
-
-
-def canonicalize_config_constraints(config_constraints) -> tuple[tuple[str, object], ...]:
-    """Validate partial GemmConfig fields and return a stable tuple key."""
-    if config_constraints is None:
-        return ()
-    if isinstance(config_constraints, Mapping):
-        items = config_constraints.items()
-    elif isinstance(config_constraints, tuple):
-        items = config_constraints
-    else:
-        raise TypeError("config_constraints must be a mapping or tuple of (field, value) pairs")
-
-    field_types = {field.name: field.type for field in fields(GemmConfig)}
-    constraints = {}
-    for item in items:
-        if not isinstance(item, tuple) or len(item) != 2:
-            raise TypeError("config_constraints entries must be (field, value) tuples")
-        name, value = item
-        if not isinstance(name, str):
-            raise TypeError("config_constraints field names must be strings")
-        if name not in field_types:
-            valid = ", ".join(field_types)
-            raise ValueError(f"unknown GemmConfig constraint {name!r}; choose one of {valid}")
-        if name in constraints:
-            raise ValueError(f"duplicate GemmConfig constraint {name!r}")
-        expected_types = get_args(field_types[name]) or (field_types[name],)
-        if type(value) not in expected_types:
-            expected = " | ".join(
-                "None" if expected_type is type(None) else expected_type.__name__
-                for expected_type in expected_types
-            )
-            raise TypeError(
-                f"GemmConfig constraint {name!r} must have exact type {expected}, "
-                f"got {type(value).__name__}"
-            )
-        constraints[name] = value
-    return tuple(sorted(constraints.items()))
 
 
 def config_supports(config: GemmConfig, *, gather_A: bool = False, varlen_m: bool = False) -> bool:

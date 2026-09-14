@@ -109,7 +109,11 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import (
+    is_reconstructable_decorator_ctx_manager_clone,
+    maybe_reconstruct_decorator_ctx_manager_clone,
+    UserDefinedObjectVariable,
+)
 
 
 try:
@@ -1919,6 +1923,31 @@ class UserMethodVariable(UserFunctionVariable):
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
+        if (
+            self.source is None
+            and isinstance(self.obj, variables.UserDefinedObjectVariable)
+            and isinstance(
+                self.obj.value, torch.utils._contextlib._DecoratorContextManager
+            )
+            and is_reconstructable_decorator_ctx_manager_clone(
+                self.fn, type(self.obj.value)
+            )
+        ):
+            # A bound `clone` method reached with no source -- e.g. via a
+            # closure cell wrapping a context manager created outside the
+            # traced region (see gh-194763) -- can't be inlined the normal
+            # way: constructing a fresh instance requires a `source` on the
+            # class reference (see UserDefinedClassVariable.call_function's
+            # generic-construction gate). maybe_reconstruct_decorator_ctx_manager_clone
+            # handles this the same way UserDefinedObjectVariable.call_function
+            # already does for a bound `clone` reached as a plain callable
+            # value. The predicate guarantees a supported function/class
+            # pair; only source-dependent reconstruction can still decline.
+            reconstructed = maybe_reconstruct_decorator_ctx_manager_clone(
+                tx, self.fn, self.obj.value, self.obj.source, args, kwargs
+            )
+            if reconstructed is not None:
+                return reconstructed
         return super().call_function(tx, args, kwargs)
 
     def _get_func(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -4426,17 +4455,6 @@ class WrapperDescriptorVariable(DescriptorVariable):
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        # Unlike method_descriptor, wrapper_descriptor defines its own
-        # tp_richcompare (wrapperdescr_richcompare), comparing by the
-        # underlying slot rather than falling back to identity.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L60-L83
-        from .object_protocol import python_constant_richcompare_impl
-
-        return python_constant_richcompare_impl(self, tx, other, op)
-
 
 class MethodWrapperVariable(VariableTracker):
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
@@ -4632,20 +4650,6 @@ class MethodDescriptorVariable(DescriptorVariable):
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        # Unlike wrapper_descriptor, method_descriptor does not define its own
-        # tp_richcompare -- it inherits object's identity-based comparison.
-        # python_constant_richcompare_impl still gets this right: it delegates
-        # to the real descriptor's own __eq__/etc, so it's correct whether that
-        # comparison is inherited or overridden. Two accesses of the same
-        # method (e.g. list.append) return the same cached descriptor object,
-        # so identity -- and thus this comparison -- holds.
-        from .object_protocol import python_constant_richcompare_impl
-
-        return python_constant_richcompare_impl(self, tx, other, op)
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
