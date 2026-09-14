@@ -149,7 +149,7 @@ class TestCollectivesWithWrapper(TestCase):
         self.assertEqual(out.tolist(), list(zip(range(world_size), range(world_size))))
 
 
-class TestCollectivesWithBaseClassGeneric(MultiThreadedTestCase):
+class TestCollectivesWithBaseClass(MultiThreadedTestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @property
@@ -318,7 +318,7 @@ class TestCollectivesWithBaseClassGeneric(MultiThreadedTestCase):
         self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
 
 
-class TestCollectivesWithBaseClassMultiAccelerator(MultiThreadedTestCase):
+class TestCollectivesWithBaseClassDevice(MultiThreadedTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -374,7 +374,7 @@ class TestCollectivesWithBaseClassMultiAccelerator(MultiThreadedTestCase):
         self.assertEqual(reduce_scatter_out, expected_reduce_scatter)
 
     @skip_if_lt_x_gpu(1)
-    def test_bwd_sees_fwd_pg(self):
+    def test_bwd_sees_fwd_pg(self, device):
         fwd_tid = threading.current_thread().ident
 
         class MyFunc(torch.autograd.Function):
@@ -409,7 +409,7 @@ class TestCollectivesWithBaseClassMultiAccelerator(MultiThreadedTestCase):
         x = torch.tensor(
             [dist.get_rank()],
             dtype=torch.float,
-            device=self.device_type,
+            device=device,
             requires_grad=True,
         )
         x = MyFunc.apply(x)
@@ -448,7 +448,7 @@ class TestThreadLocalWorld(TestCase):
 
 
 instantiate_device_type_tests(
-    TestCollectivesWithBaseClassMultiAccelerator,
+    TestCollectivesWithBaseClassDevice,
     globals(),
     except_for="cpu",
 )
