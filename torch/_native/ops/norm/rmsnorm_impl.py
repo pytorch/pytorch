@@ -7,11 +7,12 @@ Uses the vendored quack subset at ``torch._vendor.quack``.
 from __future__ import annotations
 
 import math
+from functools import cache
 
 import torch
 
 from ... import cutedsl_utils as cu
-from .norms import _const_data_ptr, _required_align_bytes
+from .norms import _const_data_ptr, _device_properties, _required_align_bytes
 
 
 def _is_supported(input: torch.Tensor) -> bool:
@@ -21,8 +22,7 @@ def _is_supported(input: torch.Tensor) -> bool:
         return False
     if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         return False
-    major, _ = torch.cuda.get_device_capability(input.device)
-    return major in (9, 10, 12)
+    return _device_properties(input.device).major in (9, 10, 12)
 
 
 # quack splits each row across a CTA cluster (at most 16 on SM90/SM100 and 8
@@ -41,19 +41,21 @@ _TILE_ROUND_ELEMS = 2048
 _BWD_SMEM_STAGES = 2
 
 
+@cache
 def _smem_budget_bytes(device: torch.device) -> int:
-    props = torch.cuda.get_device_properties(device)
-    smem = getattr(
-        props, "shared_memory_per_block_optin", props.shared_memory_per_block
+    props = _device_properties(device)
+    smem = (
+        getattr(props, "shared_memory_per_block_optin", None)
+        or props.shared_memory_per_block
     )
     return smem - _SMEM_RESERVED_BYTES
 
 
 def _max_cluster_n(device: torch.device) -> int:
-    major, _ = torch.cuda.get_device_capability(device)
-    return 8 if major == 12 else 16
+    return 8 if _device_properties(device).major == 12 else 16
 
 
+@cache
 def _row_tile_elems(device: torch.device, n: int) -> int:
     per_cta = -(-n // _max_cluster_n(device))
     return -(-per_cta // _TILE_ROUND_ELEMS) * _TILE_ROUND_ELEMS
@@ -103,6 +105,7 @@ def _misaligned_clone_unprofitable(t: torch.Tensor, n: int) -> bool:
     return t.numel() < _MISALIGNED_MIN_NUMEL
 
 
+@cache
 def _n_yields_valid_cp_size(n: int, dtype: torch.dtype) -> bool:
     # quack picks vecsize = gcd(N, 128 // dtype_bits) and lowers each thread's
     # gmem->smem copy to cp.async, whose PTX cp_size only accepts 32, 64, or
@@ -154,11 +157,12 @@ def _fused_rms_norm_cond(
     # but the fwd path doesn't.
     if input.numel() == 0:
         return False
-    if not _n_yields_valid_cp_size(math.prod(normalized_shape), input.dtype):
+    n = math.prod(normalized_shape)
+    if not _n_yields_valid_cp_size(n, input.dtype):
         return False
-    if not _fwd_fits_smem(input, math.prod(normalized_shape)):
+    if not _fwd_fits_smem(input, n):
         return False
-    if _misaligned_clone_unprofitable(input, math.prod(normalized_shape)):
+    if _misaligned_clone_unprofitable(input, n):
         return False
     # Non-contiguous weight would require a reshape+copy that we haven't
     # measured; fall through to aten until we do.
@@ -202,11 +206,11 @@ def _fused_rms_norm_backward_cond(
         return False
     if input.numel() == 0:
         return False
-    if not _n_yields_valid_cp_size(math.prod(normalized_shape), input.dtype):
-        return False
-    if not _bwd_fits_smem(input, grad_out, math.prod(normalized_shape)):
-        return False
     n = math.prod(normalized_shape)
+    if not _n_yields_valid_cp_size(n, input.dtype):
+        return False
+    if not _bwd_fits_smem(input, grad_out, n):
+        return False
     if _misaligned_clone_unprofitable(input, n) or _misaligned_clone_unprofitable(
         grad_out, n
     ):
@@ -224,6 +228,9 @@ def _fused_rms_norm_backward_impl(
     weight: torch.Tensor | None,
     output_mask: list[bool],
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    if not output_mask[0] and (weight is None or not output_mask[1]):
+        return None, None
+
     from .norms import quack_rmsnorm_bwd
 
     grad_input, grad_weight = quack_rmsnorm_bwd(
