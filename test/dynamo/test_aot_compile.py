@@ -2857,6 +2857,37 @@ from user code:
         self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
         self.assertIs(globals()[key], result._artifacts.runtime_env.used_globals[key])
 
+    def test_aot_compile_module_unnamed_scope_key_is_disowned_when_left_alone(self):
+        # A compile in this process that bound the key still owns it through a
+        # CleanupHook that deletes the binding once its code object is collected.
+        # The guards this load installs read that binding by reference for as
+        # long as the artifact lives, so the load takes the ownership even though
+        # it leaves the value alone, as the builtins branch does; otherwise the
+        # artifact fails with KeyError on G['___unnamed_scope_...'] at its first
+        # call after that collection.
+        x = torch.randn(4, 8)
+        model = torch.compile(
+            UnnamedScopeModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        output_graph = load_guards_state(captured._artifacts.guards_state).output_graph
+        (key,) = [n for n in output_graph.global_scope if "___unnamed_scope" in n]
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        self._hide_leaked_dynamo_globals()
+        # The capture's own hook never reaches CleanupManager on this path, so
+        # stand in for a live compile that installed the key.
+        hook = CleanupHook.create(globals(), key, _UNNAMED_SCOPE_NS)
+        reloaded = AOTCompiledModel.deserialize(UnnamedScopeModule(), data)
+        self.assertIs(globals()[key], _UNNAMED_SCOPE_NS)
+        hook()
+        self.assertIs(globals()[key], _UNNAMED_SCOPE_NS)
+        self.assertEqual(reloaded(x), x * 2.0 + EPS)
+
     def test_aot_compile_module_sub_path_global_is_not_read_live(self):
         # A guard rooted at a SUB-PATH of a global certifies that path, not the
         # object LOAD_GLOBAL produces: keep_tensor_guards_unsafe keeps the
@@ -3000,6 +3031,50 @@ from user code:
         actual = compiled(x)
         self.assertEqual(actual.dtype, torch.float32)
         self.assertEqual(actual, x + saved.sum(0))
+
+    def test_aot_compile_module_python_shape_guard_global_arms_the_guard_scope(self):
+        # The default-config shape of ..._shape_only_global_arms_the_guard_scope.
+        # A SHAPE_ENV guard installed as a Python lambda reads its G['NAME']
+        # operands from the resolved scope too, but the serializer records none
+        # of them in global_scope (shape_env_sources is filled from the cpp code
+        # parts alone), so arming off that scope read this artifact as holding no
+        # global guard and the fallback warning stayed silent about a guard that
+        # cannot fail: the rebuilt scope hands the lambda the tensor serialized
+        # with the graph.
+        global AOT_DYNAMIC_GLOBAL
+
+        self._hide_leaked_dynamo_globals()
+        AOT_DYNAMIC_GLOBAL = torch.randn(8, 4)
+        torch._dynamo.mark_dynamic(AOT_DYNAMIC_GLOBAL, 0)
+
+        class DynamicGlobalModule(torch.nn.Module):
+            def forward(self, x):
+                return x + AOT_DYNAMIC_GLOBAL.sum(0)
+
+        x = torch.randn(4)
+        model = torch.compile(DynamicGlobalModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        guards_state = load_guards_state(captured._artifacts.guards_state)
+        self.assertTrue(guards_state.shape_code_parts.python_fallback)
+        exprs = guards_state.shape_code_parts.python_code_parts.exprs
+        self.assertTrue(any("G['AOT_DYNAMIC_GLOBAL']" in e for e in exprs), exprs)
+        self.assertNotIn("AOT_DYNAMIC_GLOBAL", guards_state.output_graph.global_scope)
+
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        mod = DynamicGlobalModule()
+        mod.forward = functools.partial(DynamicGlobalModule.forward, mod)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            compiled = AOTCompiledModel.deserialize(mod, data)
+        fallback = [r for r in logs.records if "no live guard scope" in r.getMessage()]
+        self.assertEqual(len(fallback), 1)
+        for result in compiled.compiled_results:
+            self.assertTrue(result._has_global_guards)
+        # The vacuous half itself: a rebind to a shape the range guard refuses
+        # is invisible to a guard reading the rebuilt scope.
+        AOT_DYNAMIC_GLOBAL = torch.randn(1, 4)
+        self.assertEqual(compiled(x).shape, x.shape)
 
     def test_aot_compile_module_key_order_only_global_is_not_read_live(self):
         # A global certified by nothing but a guard_on_key_order entry. Iterating
@@ -4202,14 +4277,20 @@ from user code:
         torch._dynamo.reset()
         self.assertEqual(AOTCompiledFunction.deserialize(data)(x), expected)
 
+        # Specification, not regression: the name is absent from the serialized
+        # scope too (asserted above), so a lambda over either dict raises
+        # KeyError here. The default load above and the one-row arm below are
+        # what separate the fix from the parent.
         torch._dynamo.reset()
         loaded = AOTCompiledFunction.deserialize(data, guard_globals={})
         with self.assertRaisesRegex(RuntimeError, r"'AOT_DYN_ROWS'"):
             loaded(x)
 
-        # One row trips the range guard the dynamic dim minted, and the failure
-        # has to name that guard: the caller's tensor was checked, not a scope
-        # where the name is unbound.
+        # One row trips the range guard the dynamic dim minted. A failing lambda
+        # reports its whole code-part list, so the regex does not single out the
+        # tripped expression; it tells a lambda that resolved the name and failed
+        # on the caller's tensor from one whose only part is the KeyError name,
+        # which is what a lambda over the serialized scope produced.
         torch._dynamo.reset()
         short = {"AOT_DYN_ROWS": torch.randn(1, 3)}
         loaded = AOTCompiledFunction.deserialize(data, guard_globals=short)
