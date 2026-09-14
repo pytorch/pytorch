@@ -79,6 +79,7 @@ from ..utils import (
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
+    specialize_symnode,
     str_methods,
     tensortype_to_dtype,
     unpack_iterable,
@@ -123,6 +124,7 @@ from .object_protocol import (
     maybe_get_python_type,
     pycallable_check,
     pyiter_check,
+    pylong_as_ssize_t,
     pylong_from_base,
     pynumber_absolute,
     pynumber_add,
@@ -2537,28 +2539,16 @@ class BuiltinVariable(BaseBuiltinVariable):
             # The C entry point takes the default as Py_ssize_t: __index__ is
             # applied and the result must fit an ssize_t before the body runs,
             # even when the default is never used.
-            default = pynumber_index(tx, args[1])
-            if default.is_python_constant():
-                default_val = default.as_python_constant()
-            else:
-                from .tensor import SymNodeVariable
-
-                if not isinstance(default, SymNodeVariable):
-                    unimplemented(
-                        gb_type="length_hint with a non-constant default",
-                        context=f"length_hint default {args[1]}",
-                        explanation="Dynamo cannot convert a non-constant default "
-                        "to an integer index.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-                default_val = default.evaluate_expr(tx.output)
-            if not (-sys.maxsize - 1 <= default_val <= sys.maxsize):
-                raise_observed_exception(
-                    OverflowError,
-                    tx,
-                    args=["Python int too large to convert to C ssize_t"],
+            default = specialize_symnode(pynumber_index(tx, args[1]))
+            if not default.is_python_constant():
+                unimplemented(
+                    gb_type="length_hint with a non-constant default",
+                    context=f"length_hint default {args[1]}",
+                    explanation="Dynamo cannot convert a non-constant default "
+                    "to an integer index.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
-            default = ConstantVariable.create(int(default_val))
+            default = ConstantVariable.create(int(pylong_as_ssize_t(tx, default)))
         else:
             default = ConstantVariable.create(0)
 
@@ -2593,12 +2583,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx,
                     f"__length_hint__ must be an integer, not {type(val).__name__}",
                 )
-            if val > sys.maxsize or val < -sys.maxsize - 1:
-                raise_observed_exception(
-                    OverflowError,
-                    tx,
-                    args=["Python int too large to convert to C ssize_t"],
-                )
+            val = pylong_as_ssize_t(tx, hint)
             if val < 0:
                 raise_value_error(tx, "__length_hint__() should return >= 0")
             return ConstantVariable.create(int(val))
