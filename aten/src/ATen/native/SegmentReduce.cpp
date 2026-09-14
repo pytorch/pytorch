@@ -11,7 +11,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_assert_async.h>
 #include <ATen/ops/_segment_reduce_backward_native.h>
 #include <ATen/ops/all.h>
 #include <ATen/ops/empty.h>
@@ -439,12 +438,7 @@ Tensor segment_reduce_kernel(
     TORCH_CHECK(axis == lengths_value.dim() - 1,
                 "segment_reduce(): Expected axis to be the last dimension of lengths but got ", axis, ".");
 
-    if (!unsafe && data.is_mps()) {
-      at::_assert_async(at::all(lengths_value >= 0), "lengths contains negative value!");
-      at::_assert_async(at::all(lengths_value.sum({-1}) == data.size(axis)),
-                       "segment_reduce(): Expected all rows of lengths along axis "
-                       "to sum to data.size(lengths.dim()-1) when !unsafe.");
-    } else if (!unsafe) {
+    if (!unsafe) {
       auto min_length = lengths_value.min().item<int64_t>();
       TORCH_CHECK((min_length >= 0), "lengths contains negative value!");
       TORCH_CHECK(all(lengths_value.sum({-1}) == data.size(axis)).item<bool>(),
