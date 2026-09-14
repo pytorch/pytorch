@@ -2159,7 +2159,7 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
-template <class T, IValue::enable_if_symint<T>>
+template <is_symint T>
 inline IValue::IValue(at::ArrayRef<T> v) : IValue() {
   auto vi = c10::asIntArrayRefSlowOpt(v);
   if (vi.has_value()) {
@@ -2176,16 +2176,16 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue() {
     }
   }
 }
-template <class T, IValue::enable_if_symint<T>>
+template <is_symint T>
 inline IValue::IValue(at::OptionalArrayRef<T> mb_v) : IValue() {
   if (!mb_v.has_value()) return;
   *this = IValue(*mb_v);
 }
-template <class T, IValue::enable_if_symint<T>>
+template <is_symint T>
 inline IValue::IValue(const std::vector<T>& v) : IValue() {
   *this = IValue(at::ArrayRef<T>(v));
 }
-template <class T, IValue::enable_if_symint<T>>
+template <is_symint T>
 inline IValue::IValue(std::vector<T>&& v) : IValue() {
   auto vi = c10::asIntArrayRefSlowOpt(v);
   if (vi.has_value()) {
@@ -2242,7 +2242,7 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   }
 }
 
-template <class T, IValue::enable_if_ilist_is_ivalue_constructible<T>>
+template <ilist_is_ivalue_constructible T>
 inline IValue::IValue(c10::IListRef<T> v) : IValue() {
   constexpr bool boxed_type_constructs_ivalue =
       std::is_constructible_v<IValue, typename c10::IListRef<T>::boxed_type>;

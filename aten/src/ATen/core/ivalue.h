@@ -223,6 +223,17 @@ struct Capsule {
 ///   // `my_ivalue` is tagged as an int and cannot be used as another type
 ///   torch::Tensor my_tensor = my_ivalue.toTensor();
 /// \endrst
+
+// Only checked at point of use, so the forward declarations above suffice.
+template <class T>
+concept is_symint = std::is_same_v<T, c10::SymInt>;
+
+template <class T>
+concept ilist_is_ivalue_constructible =
+    std::is_constructible_v<IValue, T> &&
+    std::is_constructible_v<IValue, typename IListRef<T>::boxed_type> &&
+    !is_symint<T>;
+
 struct TORCH_API IValue final {
   IValue(const IValue& rhs) : IValue(rhs.payload, rhs.tag) {
     if (isIntrusivePtr() &&
@@ -809,27 +820,16 @@ struct TORCH_API IValue final {
   // Manual constructors for lists of symints, which decay to int list if
   // possible.  To avoid ambiguous overload situations, we template them
   // to prevent implicit conversions
-  template <class T>
-  using enable_if_symint =
-      std::enable_if_t<std::is_same_v<T, c10::SymInt>, std::nullptr_t>;
-
-  template <class T, enable_if_symint<T> = nullptr>
+  template <is_symint T>
   IValue(at::ArrayRef<T> v);
-  template <class T, enable_if_symint<T> = nullptr>
+  template <is_symint T>
   IValue(at::OptionalArrayRef<T> v);
-  template <class T, enable_if_symint<T> = nullptr>
+  template <is_symint T>
   IValue(const std::vector<T>& v);
-  template <class T, enable_if_symint<T> = nullptr>
+  template <is_symint T>
   IValue(std::vector<T>&& v);
 
-  template <class T>
-  using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
-      std::is_constructible_v<IValue, T> &&
-          std::is_constructible_v<IValue, typename IListRef<T>::boxed_type> &&
-          !std::is_same_v<T, c10::SymInt>,
-      std::nullptr_t>;
-
-  template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
+  template <ilist_is_ivalue_constructible T>
   IValue(c10::IListRef<T> v);
 
   // GenericDict
