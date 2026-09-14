@@ -22,10 +22,16 @@
 #define CAFFE2_LOG_THRESHOLD INT_MIN
 #endif // CAFFE2_LOG_THRESHOLD
 
-// Below are different implementations for glog and non-glog cases.
+#if defined(C10_USE_GLOG) && defined(C10_USE_ABSL_LOG)
+#error "C10_USE_GLOG and C10_USE_ABSL_LOG cannot both be set at the same time."
+#endif
+
+// Below are different implementations for glog, absl, and non-glog cases.
 #ifdef C10_USE_GLOG
 #include <c10/util/logging_is_google_glog.h>
-#else // !C10_USE_GLOG
+#elif defined(C10_USE_ABSL_LOG)
+#include <c10/util/logging_is_absl_log.h>
+#else // !C10_USE_GLOG && !C10_USE_ABSL_LOG
 #include <c10/util/logging_is_not_google_glog.h>
 #endif // C10_USE_GLOG
 
@@ -112,7 +118,7 @@ C10_API void UpdateLoggingLevelsFromFlags();
 }
 
 constexpr bool IsUsingGoogleLogging() {
-#ifdef C10_USE_GLOG
+#if defined(C10_USE_GLOG) || defined(C10_USE_ABSL_LOG)
   return true;
 #else
   return false;
