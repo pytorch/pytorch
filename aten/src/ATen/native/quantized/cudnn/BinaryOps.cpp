@@ -141,17 +141,17 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     std::vector<int64_t> uids;
     data_ptrs.reserve(8);
     uids.reserve(8);
-    data_ptrs = {qb.data_ptr<int8_t>(), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
-                 qa.data_ptr<int8_t>(), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
-                 quantized_output.data_ptr<int8_t>()};
+    data_ptrs = {qb.mutable_data_ptr<int8_t>(), const_cast<void*>(rhs_multiplier_tensor.const_data_ptr()), add_output.mutable_data_ptr(),
+                 qa.mutable_data_ptr<int8_t>(), add_output.mutable_data_ptr(), const_cast<void*>(requantize_multiplier_tensor.const_data_ptr()),
+                 quantized_output.mutable_data_ptr<int8_t>()};
     uids = {'b', 'm', 'c', 'a', 'p', 'r', 'q'};
     if constexpr (kReluFused) {
-        data_ptrs.emplace_back(add_output.data_ptr()),
+        data_ptrs.emplace_back(add_output.mutable_data_ptr()),
         uids.emplace_back('f');
     }
 
     auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.data_ptr())
+      .setWorkspacePointer(workspace.mutable_data_ptr())
       .setDataPointers(static_cast<int64_t>(uids.size()), data_ptrs.data())
       .setUids(static_cast<int64_t>(uids.size()), uids.data())
       .build();
