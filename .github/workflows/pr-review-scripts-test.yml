@@ -10,6 +10,10 @@ on:
       - ".github/workflows/hardened-pr-review.yml"
       - ".github/workflows/hardened-pr-review-run.yml"
       - ".github/workflows/pr-review-scripts-test.yml"
+      # The rubric is under contract here too: the suite asserts it names no
+      # severity the sanitizer would drop. Without this line a rubric-only
+      # change skips the one check that would catch it.
+      - ".claude/skills/pr-review-readiness/**"
   pull_request:
     paths:
       - "scripts/pr_review/**"
@@ -17,6 +21,10 @@ on:
       - ".github/workflows/hardened-pr-review.yml"
       - ".github/workflows/hardened-pr-review-run.yml"
       - ".github/workflows/pr-review-scripts-test.yml"
+      # The rubric is under contract here too: the suite asserts it names no
+      # severity the sanitizer would drop. Without this line a rubric-only
+      # change skips the one check that would catch it.
+      - ".claude/skills/pr-review-readiness/**"
 
 permissions:
   contents: read

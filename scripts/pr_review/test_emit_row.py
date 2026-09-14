@@ -78,5 +78,28 @@ class TestUsageMetricsAppliesIt(unittest.TestCase):
             )
 
 
+class TestSafeModelIsFullyAnchored(unittest.TestCase):
+    """`$` also matches before a final newline, so `.match` let one through."""
+
+    def test_a_trailing_newline_is_rejected(self):
+        self.assertEqual(safe_model("claude\n"), "")
+
+    def test_the_bound_cannot_be_exceeded_by_a_newline(self):
+        self.assertEqual(safe_model("x" * 128 + "\n"), "")
+
+    def test_an_ordinary_identifier_still_passes(self):
+        self.assertEqual(safe_model("claude-sonnet-4"), "claude-sonnet-4")
+
+    def test_the_bound_itself_still_passes(self):
+        self.assertEqual(safe_model("x" * 128), "x" * 128)
+
+    def test_over_the_bound_is_still_rejected(self):
+        self.assertEqual(safe_model("x" * 129), "")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
 if __name__ == "__main__":
     unittest.main()

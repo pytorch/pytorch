@@ -7,10 +7,11 @@ that leaves that job is the JSON this script produces, so this file is the egres
 boundary and every control here exists because that text is attacker-influenced
 and ends up somewhere a human or a dashboard reads.
 
-What a JSON schema already guarantees (the action is invoked with --json-schema):
-shape, types, the verdict enum, required keys. Those guarantees come from an
-attacker-influenced producer, so this script re-checks them rather than assuming
-them, and adds what a schema cannot express:
+The model is given the output shape in the prompt, NOT as an enforced schema -
+the workflow passes no --json-schema - so shape, types, the verdict enum and the
+required keys are all things an attacker-influenced producer merely promised.
+This script checks every one of them, and adds what a schema could not express
+even if one were enforced:
 
   * charset — every published STRING must be printable ASCII plus tab and
     newline. Checked on the decoded values, not on the JSON serialization:
@@ -34,9 +35,11 @@ damage is upstream: a 15-minute, Bedrock-only role with no S3 and no GitHub
 write. This script raises the cost of the naive attempts and makes the
 deliberate ones narrow.
 
-Exit code is always 0, and a well-formed file is always written — a rejected or
-malformed result is reported as a `blocked`/`schema_invalid` status rather than
-as a failed job, so the pipeline records what happened instead of going silent.
+A well-formed file is written on every path where writing is possible, and the
+exit code is 0 — a rejected or malformed result is reported as a
+`sanitizer_rejected`/`schema_invalid` status rather than as a failed job, so the
+pipeline records what happened instead of going silent. The one exception is a
+write failure: there is no channel left to report through, so main() returns 1.
 """
 
 from __future__ import annotations
@@ -59,8 +62,9 @@ MAX_MESSAGE = 600
 MAX_SUMMARY = 1500
 MAX_PATH = 400
 MAX_DROPPED_TRACKED = (
-    200  # bound the diagnostic list; the model can emit unlimited findings
+    25  # bound the diagnostic list; the model can emit unlimited findings
 )
+MAX_LINE = 10_000_000  # no source file has this many lines; bounds a published integer
 MAX_STRUCTURED_BYTES = 1024 * 1024  # whole-document ceiling, applied before parsing
 
 # Printable ASCII plus tab and newline. Everything else — control characters,
@@ -99,8 +103,10 @@ _HEX_ONLY = re.compile(r"^[0-9a-fA-F]+$")
 # `owner/repo#123` is the cross-repository reference — it notifies AND writes a
 # cross-reference event into the target issue. `torch/@pytorch-dev-infra` and
 # `pytorch/pytorch#12345` both survived the old pattern untouched.
-_MENTION = re.compile(r"(?<!\w)@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))")
-_ISSUE_REF = re.compile(r"(?<!\w)#(\d+)")
+# Excludes alphanumerics, not `\w`: an underscore is a word character but a
+# markdown emphasis delimiter, so `_@pytorchbot_` and `_#1234_` passed through.
+_MENTION = re.compile(r"(?<![0-9A-Za-z])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))")
+_ISSUE_REF = re.compile(r"(?<![0-9A-Za-z])#(\d+)")
 # `owner/repo#123` has a word character before the `#`, so _ISSUE_REF cannot see
 # it however the lookbehind is written. It needs its own pattern, run first.
 _XREF = re.compile(r"(?<![\w/])([A-Za-z0-9._-]{1,64}/[A-Za-z0-9._-]{1,64})#(\d+)")
@@ -111,10 +117,13 @@ _XREF = re.compile(r"(?<![\w/])([A-Za-z0-9._-]{1,64}/[A-Za-z0-9._-]{1,64})#(\d+)
 # The host alternative demands a dot BEFORE the first slash, which is what keeps
 # `//caffe2/core:core` (a Buck label, plausible in review prose) and `// TODO`
 # out of it while still matching `//user@evil.example.com/` and `//203.0.113.9/x`.  # @lint-ignore
+# Same underscore reason. The `www.` branch needs no second dot: GFM counts the
+# one in `www.` itself, so `www.com/x` autolinks.
 _URL = re.compile(
-    r"(?:\b(?:https?|ftp|data|javascript|vbscript|file)://\S+"
-    r"|\b(?:mailto|tel):\S+"
-    r"|(?<![:\w/])//(?:[^\s/@]{1,64}@)?[A-Za-z0-9._~-]*\.[A-Za-z0-9._~-]+\S*)",
+    r"(?:(?<![0-9A-Za-z])(?:https?|ftp|data|javascript|vbscript|file)://\S+"
+    r"|(?<![0-9A-Za-z])(?:mailto|tel):\S+"
+    r"|(?<![:\w/])//(?:[^\s/@]{1,64}@)?[A-Za-z0-9._~-]*\.[A-Za-z0-9._~-]+\S*"
+    r"|(?<![0-9A-Za-z./])www\.[A-Za-z0-9._~-]+\S*)",
     re.IGNORECASE,
 )
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -133,6 +142,9 @@ _IMAGE_MARKER = "(image removed)"
 # top-level framing. The 200-character cap was the second hole: any longer
 # attribute list walked through untouched. `[^>]` already spans newlines in
 # Python, so dropping both bounds is the whole fix.
+# Tags are ESCAPED at publication, not stripped: no regex separates a tag from a
+# comparison (`x<limit and y>0` parses as one), and deleting it changed what the
+# reviewer wrote. Retained only to build `analysis_view`.
 _HTML_TAG = re.compile(r"<[^>]*>")
 
 # Applied AFTER tag stripping, to whatever `<`, `>` or `&` is left over — an
@@ -223,8 +235,13 @@ def check_no_encoded_blob(text: str, where: str) -> None:
     careless case cheaply. What bounds the damage is that the review job's
     credential is Bedrock-only and expires in fifteen minutes.
     """
-    for match in _BLOB.finditer(text):
-        if _decodes_to_binary(match.group(0)):
+    # Scanned TWICE: a tag can keep each half under the floor, and stripping
+    # rejoins them. Neither subsumes the other -- stripping eats a bracketed
+    # payload whole.
+    for candidate in (text, analysis_view(text)):
+        for match in _BLOB.finditer(candidate):
+            if not _decodes_to_binary(match.group(0)):
+                continue
             raise Rejected(
                 f"{where}: contains a {len(match.group(0))}-char run that decodes to "
                 f"non-printable bytes, which is indistinguishable from a smuggled payload"
@@ -234,6 +251,56 @@ def check_no_encoded_blob(text: str, where: str) -> None:
 def check_value_blobs(obj, where: str) -> None:
     for text in iter_strings(obj):
         check_no_encoded_blob(text, where)
+
+
+def _drop_dangling_escape(text: str) -> str:
+    """Remove a trailing backslash left by a cut through an escape pair.
+
+    Every backslash emitted here escapes the character after it, so a cut
+    between the two leaves one escaping whatever the renderer emits next.
+    Counting the run matters: `\\\\` is a literal backslash and must survive.
+    """
+    trailing = len(text) - len(text.rstrip("\\"))
+    return text[:-1] if trailing % 2 else text
+
+
+def _strip_tags(text: str) -> str:
+    """Remove `<...>` spans in LINEAR time.
+
+    `re.sub(r"<[^>]*>")` is quadratic on a run of `<` with no `>`, and is
+    reachable from the raw 1MB document: measured 28s at 256KB, 0.02ms here.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "<":
+            close = text.find(">", i + 1)
+            if close == -1:
+                # No `>` after here means none later either, so this scan can
+                # never repeat. That is what keeps it linear.
+                out.append(text[i:])
+                break
+            i = close + 1
+        else:
+            nxt = text.find("<", i)
+            if nxt == -1:
+                out.append(text[i:])
+                break
+            out.append(text[i:nxt])
+            i = nxt
+    return "".join(out)
+
+
+def analysis_view(text: str) -> str:
+    """A synthetic tag-stripped view, used ONLY as a blob heuristic.
+
+    NOT what a renderer shows -- an escaped tag renders as visible text -- so it
+    must never decide whether a message has content. It exists because a tag is
+    a free separator to the 120-character blob floor. Strictly an ADDITION to
+    scanning the original: `<BASE64_PAYLOAD>` strips to nothing.
+    """
+    unescaped = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    return _strip_tags(unescaped)
 
 
 def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
@@ -304,7 +371,7 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     escaping depends on that renderer.
     """
     text = "".join(c for c in text[:cap] if _ALLOWED_CHARS.match(c))
-    text = _HTML_TAG.sub("", text.replace("\\", ""))
+    text = text.replace("\\", "")
     # Peel links down to their text. This loop is READABILITY, not the control
     # — the escape below is the control — so its bound is allowed to be a
     # constant. `.sub()` is a single non-recursive pass and the replacement is
@@ -343,7 +410,7 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
         text = text.replace(char, escaped)
     # Capped on the way out as well as in: escaping GROWS the string, and one
     # place deciding the length beats every caller re-truncating.
-    return text[:cap]
+    return _drop_dangling_escape(text[:cap])
 
 
 def unquote_git_path(path: str) -> str:
@@ -405,7 +472,9 @@ def _is_repo_path(path: str) -> bool:
     # forgery and left the natural one open. `\` is refused because it reads as
     # a UNC path (`\\server\share`) and because backslash escapes are a renderer
     # trick — `neutralize` strips them from prose for the same reason.
-    if any(c in path for c in "|`\\"):
+    # `<`, `>`, `&` too: `neutralize_path` escapes only `[]()@#*_`, so
+    # `</details>.py` reached the published path verbatim.
+    if any(c in path for c in "|`\\<>&"):
         return False
     # Printable ASCII only, and NOT tab — `_ALLOWED_CHARS` permits tab, but a
     # path is rendered as a cell rather than as prose, and a tab is a column
@@ -418,6 +487,10 @@ def _is_repo_path(path: str) -> bool:
     # review rather than the one finding. Dropping it here costs that finding
     # alone and leaves the rest of the review publishable.
     if not _PATH_CHARS.match(path):
+        return False
+    # Bound the ESCAPED length, so a published path is always the exact
+    # validated name rather than a half-name cut mid-escape.
+    if len(neutralize_path(path)) > MAX_PATH:
         return False
     return not any(part in ("", ".", "..") for part in path.split("/"))
 
@@ -528,7 +601,12 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
             # attacker a header position.
             prev_was_old_header = False
             saw_git_header = False
-            target = unquote_git_path(raw[4:].strip())
+            # Cut at the TAB, do not strip: git delimits a trailing-whitespace
+            # path with one, so `victim.py ` recorded as the untouched
+            # `victim.py`.
+            header = raw[4:]
+            header = header.split("\t", 1)[0] if "\t" in header else header.strip()
+            target = unquote_git_path(header)
             if target == "/dev/null":
                 current = None
             else:
@@ -555,13 +633,17 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
     return touched
 
 
-def sanitize_findings(
+def sanitize_findings(  # noqa: C901
     raw_findings, touched: dict[str, set[int]]
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], int]:
     kept: list[dict] = []
     dropped: list[dict] = []
+    # Counted before the tracking bound: `len(dropped)` reported 5000 drops as 25.
+    dropped_total = 0
 
     def drop(record: dict) -> None:
+        nonlocal dropped_total
+        dropped_total += 1
         # Bounded: an unbounded findings array would otherwise let the model
         # grow this list without limit. Every attacker-derived string in a
         # record is neutralized and capped, because `dropped_detail` is
@@ -596,7 +678,10 @@ def sanitize_findings(
         if not isinstance(path, str) or not isinstance(message, str):
             drop({"reason": "path_or_message_not_a_string"})
             continue
-        path, message = path.strip(), message.strip()
+        # Exact first, stripped as a fallback. Both candidates are checked
+        # against `touched`, so neither can forge an anchor.
+        path = path if path in touched else path.strip()
+        message = message.strip()
         if not path or not message:
             drop({"path": path, "reason": "missing_path_or_message"})
             continue
@@ -607,6 +692,11 @@ def sanitize_findings(
         # bool is a subclass of int; True must not silently become line 1.
         if not isinstance(line, int) or isinstance(line, bool):
             drop({"path": path, "reason": "line_not_an_integer"})
+            continue
+        if not 0 < line <= MAX_LINE:
+            # `dropped_detail` publishes `line` as an int and no cap sees
+            # non-strings; a 3000-digit value went in whole.
+            drop({"path": path, "reason": "line_out_of_range"})
             continue
         if line not in touched[path]:
             drop({"path": path, "line": line, "reason": "line_not_in_diff"})
@@ -643,7 +733,7 @@ def sanitize_findings(
                 "message": clean_message,
             }
         )
-    return kept, dropped
+    return kept, dropped, dropped_total
 
 
 def build(obj: dict, touched: dict[str, set[int]]) -> dict:
@@ -681,7 +771,7 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
     if not isinstance(findings_raw, list):
         raise Rejected("findings is not an array")
 
-    kept, dropped = sanitize_findings(findings_raw, touched)
+    kept, dropped, dropped_total = sanitize_findings(findings_raw, touched)
 
     # An objection must arrive with evidence. `changes_requested` and no
     # surviving finding is refused whether the findings were discarded as
@@ -694,13 +784,39 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
             f"({len(dropped)} discarded) — refusing to publish an objection with no evidence"
         )
 
+    # And the other direction, which is the one an attacker wants. A clean
+    # verdict alongside a `major` finding is a contradiction the rubric forbids
+    # ("say ready_for_human_review when no major finding is present"), and the
+    # publish job acts on the VERDICT, not on the findings — so it would move
+    # the PR to the terminal label while the artifact records a major problem
+    # nothing downstream reads.
+    #
+    # Read off the CLAIM, not off `kept`, and that distinction is the whole
+    # control. Anchoring runs first, so a kept-only check is escaped by giving
+    # the major finding a path the diff does not touch: sanitization discards
+    # the objection and the clean verdict sails through with the contradiction
+    # gone from the evidence. The model asserting both at once is the defect,
+    # whether or not its own finding survived.
+    claimed_major = sum(
+        1
+        for f in findings_raw
+        if isinstance(f, dict)
+        and isinstance(f.get("severity"), str)
+        and f["severity"].strip().lower() == "major"
+    )
+    if verdict == "ready_for_human_review" and claimed_major:
+        raise Rejected(
+            f"verdict is ready_for_human_review alongside {claimed_major} major "
+            f"finding(s) — refusing to publish a clean verdict that contradicts itself"
+        )
+
     result = {
         "status": "succeeded",
         "verdict": verdict,
         "summary": summary,
         "findings": kept,
-        "findings_dropped": len(dropped),
-        "dropped_detail": dropped[:MAX_FINDINGS],
+        "findings_dropped": dropped_total,
+        "dropped_detail": dropped,
     }
     # Validate what we are about to WRITE, not just what we read. neutralize()
     # and the caps run between those two points; a cap can also truncate a
@@ -745,11 +861,24 @@ def downgrade(result: dict, outcome: str) -> dict:
     status = "blocked" if outcome in ("cancelled", "skipped") else "model_error"
     detail = neutralize(str(outcome), MAX_SUMMARY)[:MAX_SUMMARY]
     detail = "".join(c for c in detail if _ALLOWED_CHARS.match(c))
+    # APPEND, not replace: a `sanitizer_rejected` reason was being overwritten
+    # by the step outcome. Truncate the PRIOR reason, never the suffix.
+    suffix = f"claude step outcome={detail}"
+    prior = result.get("failure_detail")
+    if prior:
+        room = MAX_SUMMARY - len(suffix) - 2
+        combined = f"{prior[:room]}; {suffix}" if room > 0 else suffix[:MAX_SUMMARY]
+    else:
+        combined = suffix[:MAX_SUMMARY]
+    # Cleared: they described a review now reported as one that did not happen.
+    # `findings_dropped` still counts sanitizer drops, not what is cleared here.
     return {
         **result,
         "status": status,
         "verdict": None,
-        "failure_detail": f"claude step outcome={detail}",
+        "summary": "",
+        "findings": [],
+        "failure_detail": combined,
     }
 
 

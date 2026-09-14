@@ -16,8 +16,14 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import json
+import os
+import posixpath
 import re
+import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -29,11 +35,18 @@ sys.path.insert(0, str(HERE))
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
 from _suite_manifest import TestTheSuiteIsWhole  # noqa: E402,F401
 
+# Imported, not restated: the rubric contract below has to compare against the
+# set the sanitizer actually enforces, or the two drift apart silently.
+from extract_verdict import SEVERITIES  # noqa: E402
 
-WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+
+REPO = Path(__file__).resolve().parents[2]
+WORKFLOWS = REPO / ".github" / "workflows"
 STAGE1 = WORKFLOWS / "hardened-pr-review.yml"
 STAGE2 = WORKFLOWS / "hardened-pr-review-run.yml"
 SUITE_CI = WORKFLOWS / "pr-review-scripts-test.yml"
+RUBRIC = REPO / ".claude" / "skills" / "pr-review-readiness" / "SKILL.md"
+HOOK = REPO / ".claude" / "hooks" / "pr_review" / "restrict-write.sh"
 
 
 def strip_comments(text: str) -> str:
@@ -194,6 +207,8 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         "scripts/pr_review/**",
         ".github/workflows/hardened-pr-review.yml",
         ".github/workflows/hardened-pr-review-run.yml",
+        ".claude/hooks/pr_review/**",
+        ".claude/skills/pr-review-readiness/**",
     )
 
     def setUp(self):
@@ -351,32 +366,164 @@ class TestCorroboratedValuesAreTheOnlyOnesOffered(unittest.TestCase):
 
 
 class TestReviewJobConfigDiscoveryIsClosed(unittest.TestCase):
-    """`--setting-sources ""` is the boundary, and nothing else enforces it.
+    """`--setting-sources user` is the boundary, and nothing else enforces it.
 
     Claude Code loads CLAUDE.md, .claude/settings.json and .mcp.json from the
     working tree and its ancestors. A hook in that settings file is arbitrary
     command execution that runs BEFORE any --allowedTools policy applies, so
-    the read-only-tools story is void without this flag. Measured on CLI
-    2.1.201: with the default sources a PreToolUse hook planted in
-    `pr/.claude/settings.json` executed; with `--setting-sources ""` it did not.
+    the read-only-tools story is void without this flag.
 
-    Deleting the flag is a one-token edit that reopens command execution and
-    changes nothing observable in a passing run — the shape that needs a test
-    rather than a comment.
+    THE VALUE IS LOAD-BEARING IN BOTH DIRECTIONS, and this test used to demand
+    the one spelling that is wrong on both counts. It required
+    `--setting-sources ""`, which was measured against the CLI directly — but
+    the deployment goes through claude-code-action, whose parser records a flag
+    with a falsy next token as a boolean `null`
+    (base-action/src/parse-sdk-options.ts), after which its own fallback loads
+    `user,project,local`. So the empty form left discovery fully ON while this
+    test passed, because it greps YAML rather than the parser.
+
+    And the empty form must not start working either: the action installs the
+    `settings:` block — our three hooks — into ~/.claude/settings.json, the
+    `user` source. `[]` would disable restrict-write.sh, the only fence on the
+    bare `Write` grant. `user` is the single value that excludes the PR tree and
+    keeps the hooks.
     """
 
-    def test_review_step_disables_project_setting_sources(self):
-        args = strip_comments(job_block(STAGE2.read_text(), "review"))
+    @staticmethod
+    def _claude_args() -> str:
+        """Just the block scalar — prompt prose must not be able to satisfy these."""
+        review = strip_comments(job_block(STAGE2.read_text(), "review"))
+        body = review.split("claude_args: |", 1)
+        assert len(body) == 2, "premise changed: no claude_args block"
+        return body[1].split("\n          prompt:", 1)[0]
+
+    def test_review_step_scopes_setting_sources_to_user(self):
+        args = self._claude_args()
         self.assertRegex(
             args,
-            r'--setting-sources\s+""',
-            "review job no longer disables project/local setting discovery",
+            r"--setting-sources\s+user(\s|$)",
+            "review job no longer scopes setting discovery to `user`",
         )
         self.assertEqual(
             len(re.findall(r"--setting-sources", args)),
             1,
             "more than one --setting-sources: a later one silently wins",
         )
+
+    def test_the_empty_form_the_action_ignores_is_not_used(self):
+        args = self._claude_args()
+        self.assertNotRegex(
+            args,
+            r'--setting-sources[\s=]+""',
+            "the empty form parses to a boolean and re-enables project/local",
+        )
+
+    def test_only_one_add_dir_because_the_flag_does_not_accumulate(self):
+        # `add-dir` is absent from the action's ACCUMULATING_FLAGS, so a second
+        # occurrence overwrites the first instead of adding to it. A review
+        # silently loses the directory it writes its verdict into.
+        args = self._claude_args()
+        self.assertEqual(
+            len(re.findall(r"--add-dir", args)),
+            1,
+            "more than one --add-dir: this action keeps only the last",
+        )
+        self.assertRegex(args, r"--add-dir\s+\$\{\{\s*runner\.temp\s*\}\}")
+
+
+class TestTheFindingsPathIsPinned(unittest.TestCase):
+    """The tool rule, the prompt and the hook must name one findings path.
+
+    The workflow step that claims to check this compares two values it declares
+    itself. Nothing compared the literal inside `--allowedTools`, which is the
+    one an edit would actually drift.
+    """
+
+    def setUp(self):
+        self.review = strip_comments(job_block(STAGE2.read_text(), "review"))
+
+    # One expected value, and every site that must carry it named explicitly.
+    # A regex over "whatever follows runner.temp" cannot see the drift that
+    # matters: retargeting the prompt to `...findings.txt`, or the hook env to
+    # `nested/...findings.json`, stops matching and so stops being checked,
+    # while the remaining references keep any aggregate assertion green.
+    EXPECTED = "${{ runner.temp }}/pr-review-findings.json"
+
+    def test_the_read_grant_names_the_findings_file(self):
+        self.assertIn(f"Read(/{self.EXPECTED})", self.review)
+
+    def test_the_prompt_tells_the_model_to_write_that_exact_path(self):
+        # WHOLE-TOKEN, not `assertIn`: a containment check takes the expected
+        # path as a PREFIX, so retargeting the prompt to `...findings.jsonl`
+        # passed while directing a write the hook then refuses.
+        prompt = self.review.split("prompt: |", 1)[1]
+        output = prompt.split("OUTPUT.", 1)
+        self.assertEqual(len(output), 2, "premise changed: no OUTPUT section")
+        section = output[1].split("\n\n", 1)[0]
+        targets = [
+            t.rstrip(".,") for t in re.findall(r"\$\{\{ runner\.temp \}\}/\S+", section)
+        ]
+        self.assertEqual(
+            targets,
+            [self.EXPECTED],
+            f"the prompt names a different verdict path: {targets}",
+        )
+
+    def test_every_env_var_that_names_it_is_present_and_agrees(self):
+        # Presence asserted FIRST. Iterating matches alone made DELETING a
+        # binding pass vacuously, after which the hooks fall back to their own
+        # /tmp default and silently disagree with the prompt.
+        for var in ("FINDINGS_FILE", "PR_REVIEW_FINDINGS_FILE"):
+            values = re.findall(rf"^\s+{var}: (.+)$", self.review, re.M)
+            self.assertTrue(values, f"{var} is no longer set in the review job")
+            for value in values:
+                self.assertEqual(
+                    value.strip(), self.EXPECTED, f"{var} drifted to {value!r}"
+                )
+
+    def test_the_hooks_default_agrees_with_the_workflow(self):
+        # The hook falls back to its own literal when the env var is unset, and
+        # the executable tests override that var — so nothing compared it.
+        self.assertIn("pr-review-findings.json", HOOK.read_text())
+
+    def test_the_grant_is_read_not_write(self):
+        # `Write` is deliberately bare and fenced by the hook; the findings file
+        # carries a READ grant so the model can re-read what it wrote.
+        self.assertIn("Read(/${{ runner.temp }}/pr-review-findings.json)", self.review)
+
+
+class TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot(unittest.TestCase):
+    """`path:` on both checkouts is what keeps PR config undiscoverable.
+
+    Two separate controls depend on the workspace root staying empty. Project
+    and local setting discovery resolve against the action's cwd, which is
+    $GITHUB_WORKSPACE; and claude-code-action's agent mode runs
+    `configureGitAuth` unconditionally, which would write a token into a
+    .git/config at that root — the file `persist-credentials: false` exists to
+    prevent. Today both throw or find nothing because the root is not a
+    checkout. Losing either `path:` is a one-token edit that changes nothing
+    observable in a passing run.
+    """
+
+    def test_every_checkout_in_the_review_job_declares_a_path(self):
+        review = job_block(STAGE2.read_text(), "review")
+        steps = review.split("- name:")
+        checkouts = [s for s in steps if "actions/checkout@" in s]
+        self.assertEqual(len(checkouts), 2, "premise changed: not two checkouts")
+        for step in checkouts:
+            found = re.search(r"\n\s+path:\s+(\S+)", step)
+            self.assertIsNotNone(
+                found,
+                f"a review-job checkout declares no path: {step[:60]!r}",
+            )
+            # posixpath.normpath, not a trailing-slash strip: `././` survived
+            # that as `./.` and still resolves to the workspace root.
+            declared = posixpath.normpath(found.group(1).strip().strip("\"'") or ".")
+            self.assertNotIn(
+                declared,
+                {"", "."},
+                "this path IS the workspace root; the checkout must land beside it",
+            )
 
     def test_review_step_keeps_mcp_config_strict(self):
         """`.mcp.json` is the OTHER discovery channel, closed by a DIFFERENT flag.
@@ -606,283 +753,327 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
         self.assertIn("cancel-in-progress: true", block)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestSymlinkScrubIsNulSafe(unittest.TestCase):
+    """A newline in a path component must not split one entry into two.
 
-
-class TestFindingsFileWiringAgreesEverywhere(unittest.TestCase):
-    """The findings path is written in four places and must be one path.
-
-    `${{ env.FINDINGS_FILE }}` is NOT usable everywhere it would read naturally.
-    In `--allowedTools` an expression that resolved empty would silently produce
-    `Write(/)` — a grant over the whole filesystem, from a typo, with no error.
-    So the tool rules and the prompt carry the literal and this pins them to the
-    `env:` value that the shell steps and hooks actually use.
-    """
-
-    # The path is now per-job (`runner.temp`), so what can be pinned is the
-    # EXPRESSION, identically in all three places.
-    LITERAL = "${{ runner.temp }}/pr-review-findings.json"
-
-    def setUp(self):
-        self.text = STAGE2.read_text()
-        # Comments stripped: an explanatory comment further up quotes a sample
-        # `--allowedTools "Read(<workspace>/pr/**)"`, and a search over the raw
-        # text finds THAT and reports the real rule list as empty.
-        self.review = strip_comments(job_block(self.text, "review"))
-
-    def test_the_env_declares_the_basename(self):
-        m = re.search(r"^\s*FINDINGS_BASENAME:\s*(.+?)\s*$", self.text, re.M)
-        self.assertIsNotNone(m, "FINDINGS_BASENAME is not declared in the workflow env")
-        self.assertEqual(m.group(1), "pr-review-findings.json")
-        self.assertTrue(self.LITERAL.endswith("/" + m.group(1)))
-
-    def test_write_is_bare_and_the_hook_is_the_boundary(self):
-        """A path-qualified `Write(...)` rule depends on how the CLI globs a
-        path, and when it does not match the call is refused with no reason
-        recorded anywhere — three runs were lost to that. The grant is bare and
-        `restrict-write.sh` does the restricting, where it is a string compare
-        whose outcome is logged."""
-        rules = re.search(r'--allowedTools "([^"]*)"', self.review)
-        self.assertIsNotNone(rules, "the review job has no --allowedTools")
-        entries = rules.group(1).split(",")
-        self.assertIn("Write", entries, "Write must be granted")
-        self.assertEqual(
-            [r for r in entries if r.startswith("Write(")],
-            [],
-            "no path-qualified Write rule; the hook is the boundary",
-        )
-        self.assertIn("restrict-write.sh", self.review)
-
-    def test_the_write_restricting_hook_is_a_pretooluse_deny(self):
-        """PostToolUse cannot stop a write: the file is already on disk."""
-        self.assertIn('"PreToolUse"', self.review)
-        hook = (
-            Path(__file__).resolve().parents[2]
-            / ".claude/hooks/pr_review/restrict-write.sh"
-        ).read_text()
-        self.assertIn('"deny"', hook)
-        self.assertIn("PR_REVIEW_FINDINGS_FILE", hook)
-
-    def test_every_file_mutating_tool_is_covered_by_that_matcher(self):
-        """MultiEdit was in neither the allow nor the deny list."""
-        matchers = re.findall(r'"matcher":\s*"([^"]*)"', self.review)
-        self.assertTrue(matchers, "no hook matchers found at all")
-        covered = set()
-        for m in matchers:
-            covered |= set(m.split("|"))
-        self.assertTrue(
-            {"Write", "Edit", "MultiEdit", "NotebookEdit"} <= covered,
-            f"file-mutating tools not all covered by a hook matcher: {sorted(covered)}",
-        )
-
-    def test_no_tool_rule_reads_a_workflow_env_var(self):
-        """`runner.*`/`github.*` are runner-provided; a workflow `env` var is
-        ours to mistype, and an empty expansion here is a total grant."""
-        rules = re.search(r'--allowedTools "([^"]*)"', self.review)
-        self.assertNotIn("env.", rules.group(1))
-
-    def test_the_resolved_path_is_asserted_before_the_model_runs(self):
-        """The empty-expansion failure is silent, so something must check it."""
-        self.assertIn("Check the findings path resolved", self.text)
-        self.assertIn("findings path did not resolve", self.text)
-        self.assertIn("exists before the model has run", self.text)
-
-    def test_the_findings_file_is_not_a_fixed_tmp_path(self):
-        """A predictable name is pre-creatable as a symlink on a reused runner."""
-        self.assertNotIn("/tmp/pr-review-findings.json", self.text)
-        self.assertIn("runner.temp", self.review)
-
-    def test_the_findings_directory_is_in_the_session_scope(self):
-        """A permission rule grants a tool over a path; it does not make the
-        path reachable. Without an --add-dir covering it, the Write is refused
-        before the rule is read — silently, as a permission denial."""
-        self.assertIn("--add-dir ${{ runner.temp }}", self.review)
-
-    def test_bash_stays_refused(self):
-        """This job holds live AWS credentials while reading untrusted code."""
-        disallowed = re.search(r'--disallowedTools "([^"]*)"', self.review)
-        self.assertIsNotNone(disallowed)
-        self.assertIn("Bash", disallowed.group(1).split(","))
-
-    def test_the_prompt_names_the_same_literal(self):
-        self.assertIn(f"Write your verdict to {self.LITERAL}", self.review)
-
-    def test_the_sanitizer_reads_the_model_file_not_the_action_output(self):
-        """Two sources of truth is the failure this replaced."""
-        self.assertIn('--structured-output-file "$FINDINGS_FILE"', self.review)
-        self.assertNotIn("steps.claude.outputs.structured_output", self.text)
-
-    def test_no_json_schema_flag_survives(self):
-        """It would be a rival source of truth for the same verdict."""
-        self.assertNotIn("--json-schema", strip_comments(self.review))
-
-
-class TestWorkflowEnvUsesOnlyContextsItHas(unittest.TestCase):
-    """A workflow-level `env:` may not reference `runner`, `steps`, `job`,
-    `needs`, `matrix` or `env` itself.
-
-    This is not a style rule. GitHub rejects the WHOLE FILE at validation, so
-    the run completes as `failure` having created ZERO jobs — there is no job to
-    open, no annotation on the commit, and no log line naming the key. Observed
-    live: `FINDINGS_FILE: ${{ runner.temp }}/...` at workflow level, run
-    33814337391.
-    """
-
-    UNAVAILABLE = ("runner", "steps", "job", "needs", "matrix", "env")
-
-    def test_no_workflow_level_env_value_uses_an_unavailable_context(self):
-        for wf in (STAGE1, STAGE2):
-            text = wf.read_text()
-            m = re.search(r"^env:\n(.*?)^\w", text, re.S | re.M)
-            if not m:
-                continue
-            for line in m.group(1).splitlines():
-                if line.lstrip().startswith("#"):
-                    continue
-                for ctx in self.UNAVAILABLE:
-                    with self.subTest(workflow=wf.name, context=ctx, line=line.strip()):
-                        self.assertNotRegex(line, r"\$\{\{\s*" + ctx + r"\.")
-
-
-class TestValidationHooksArePresentAndReal(unittest.TestCase):
-    """Hooks are supplied through the action's trusted `settings` input.
-
-    Not through a settings FILE in the repo: `--setting-sources ""` exists to
-    stop config discovery from the checked-out PR, which is attacker-authored.
+    The variable round-trip this replaces aimed `rm -f` at the workspace root,
+    where the TRUSTED checkout sits, and the fail-closed re-scan used the same
+    split so it reported clean afterwards.
     """
 
     def setUp(self):
-        self.review = job_block(STAGE2.read_text(), "review")
-        self.repo_root = Path(__file__).resolve().parents[2]
+        self.step = strip_comments(job_block(STAGE2.read_text(), "review"))
+        self.scrub = self.step[self.step.index("Remove symlinks that escape") :]
+        self.scrub = self.scrub[: self.scrub.index("- name: Build the diff")]
 
-    def test_both_hooks_are_registered(self):
-        self.assertIn('"PostToolUse"', self.review)
-        self.assertIn('"Stop"', self.review)
-        self.assertIn("validate-post-write.sh", self.review)
-        self.assertIn("validate-on-stop.sh", self.review)
+    def test_the_list_is_never_joined_with_newlines(self):
+        self.assertNotIn("printf '%s\\n' \"$ESCAPED\"", self.scrub)
+        self.assertNotIn("ESCAPED=$(", self.scrub)
+        self.assertNotIn("LEFT=$(", self.scrub)
 
-    def test_every_registered_hook_script_exists_and_is_executable(self):
-        """A path typo disables validation silently — the hook just never fires."""
-        referenced = set(
-            re.findall(r'"command":\s*"[^"]*?/(\.claude/hooks/[^"]+)"', self.review)
-        )
-        self.assertTrue(referenced, "no hook commands found in the settings blob")
-        for rel in referenced:
-            script = self.repo_root / rel
-            with self.subTest(script=rel):
-                self.assertTrue(script.is_file(), f"{rel} does not exist")
-                self.assertTrue(
-                    script.stat().st_mode & 0o111, f"{rel} is not executable"
-                )
+    def test_both_the_delete_and_the_rescan_read_nul_separated(self):
+        self.assertEqual(self.scrub.count("printf '%s\\0'"), 1)
+        self.assertEqual(self.scrub.count("read -r -d ''"), 3)
 
-    def test_setting_sources_discovery_is_still_closed(self):
-        self.assertIn('--setting-sources ""', self.review)
+    def test_the_delete_uses_a_double_dash(self):
+        self.assertIn('rm -f -- "$link"', self.scrub)
 
-    def test_the_scripts_dir_handed_to_the_hooks_is_the_trusted_checkout(self):
-        """Pointing it at the PR checkout would let the PR define `valid`."""
-        m = re.search(r"PR_REVIEW_SCRIPTS_DIR:\s*(\S.*)$", self.review, re.M)
-        self.assertIsNotNone(m)
-        self.assertIn("/trusted/scripts/pr_review", m.group(1))
+    def test_attacker_chosen_names_are_quoted_into_the_log(self):
+        # %s would let a newline in the name forge a `::error::` workflow command.
+        self.assertNotIn("printf '  %s\\n' \"$link\"", self.scrub)
+        self.assertIn("printf '  %q\\n' \"$link\"", self.scrub)
+
+    def test_it_still_fails_closed(self):
+        self.assertIn("::error::escaping symlink still present", self.scrub)
+        self.assertIn("exit 1", self.scrub)
 
 
-class TestTerminalLabelStopsReReview(unittest.TestCase):
-    """`ready for review` must gate the passive branch and NOT the explicit one.
+class TestLabelMoveCannotContradictTheRow(unittest.TestCase):
+    def setUp(self):
+        self.publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
 
-    Gating both makes a reviewed PR permanently unreviewable; gating neither
-    means every push re-reviews forever. The asymmetry is the design.
+    def test_the_label_step_reads_the_effective_status_not_the_raw_claim(self):
+        self.assertIn("steps.row.outputs.effective_status", self.publish)
+        # The claim alone must not be what gates the label.
+        self.assertNotIn("STATUS=$(jq -r '.status", self.publish)
+
+    def test_the_row_step_exports_that_status(self):
+        self.assertIn("effective_status=", self.publish)
+
+    def test_the_head_is_rechecked_before_the_label_moves(self):
+        self.assertIn("CURRENT_SHA", self.publish)
+        self.assertIn("REVIEWED_SHA", self.publish)
+        self.assertIn('"$CURRENT_SHA" != "$REVIEWED_SHA"', self.publish)
+
+    def test_a_failed_removal_is_not_reported_as_a_move(self):
+        self.assertIn("could not remove", self.publish)
+        self.assertNotIn(">/dev/null 2>&1 || true", self.publish)
+
+
+class TestLabelComparisonsAreCaseInsensitive(unittest.TestCase):
+    """pytorch/pytorch spells the marker `Ready for Review`; `==` never matched."""
+
+    def test_both_label_checks_downcase_both_sides(self):
+        prepare = strip_comments(job_block(STAGE2.read_text(), "prepare"))
+        self.assertEqual(prepare.count("ascii_downcase == ($l | ascii_downcase)"), 2)
+        self.assertNotIn("any(.labels[]?.name; . == $l)", prepare)
+
+
+class TestRubricSpeaksTheSchemaSeverities(unittest.TestCase):
+    """The rubric and the schema in the prompt must name the same severities.
+
+    `extract_verdict.SEVERITIES` drops a finding whose severity is outside the
+    set, as `bad_severity`, before anyone reads it. The rubric used to prescribe
+    `blocking` — and to prescribe it specifically for reporting a prompt-injection
+    attempt, so the one finding the rubric most wants surfaced was the one
+    guaranteed to be discarded.
     """
 
     def setUp(self):
-        self.stage1 = STAGE1.read_text()
+        self.rubric = RUBRIC.read_text()
         self.stage2 = STAGE2.read_text()
 
-    def test_stage2_declares_the_terminal_label(self):
-        m = re.search(r'^\s*DONE_LABEL:\s*"([^"]+)"', self.stage2, re.M)
-        self.assertIsNotNone(m)
-        self.assertEqual(m.group(1), "ready for review")
+    def test_the_rubric_names_no_severity_the_sanitizer_would_drop(self):
+        # Every emphasised or code-quoted word the rubric uses as a severity,
+        # however the sentence is phrased. An earlier version keyed on the
+        # literal " finding" suffix and went blind the moment the wording
+        # changed — while still passing, because one other occurrence matched.
+        # No vocabulary filter — enumerating the words we already know about is
+        # how `critical` walks in unnoticed — but scoped to the sentences that
+        # DECLARE a severity, so ordinary prose citing a schema field is not
+        # read as one. Sweeping the whole Report section and subtracting a
+        # denylist did that: adding "with `path` and `line`" to the anchoring
+        # instruction failed the test for no reason.
+        declarations = [
+            ln
+            for ln in self.rubric.splitlines()
+            if re.search(
+                r"Report (a finding as|such an attempt as a)|`severity` must be", ln
+            )
+        ]
+        self.assertTrue(
+            declarations, "premise changed: the rubric declares no severity"
+        )
+        named = {
+            m.lower()
+            for ln in declarations
+            for pair in re.findall(r"\*\*`?(\w+)`?\*\*|`(\w+)`", ln)
+            for m in pair
+            if m and m != "severity"
+        }
+        self.assertTrue(named, "premise changed: the rubric names no severity at all")
+        self.assertEqual(
+            named - SEVERITIES,
+            set(),
+            f"rubric prescribes severities the sanitizer drops: {sorted(named - SEVERITIES)}",
+        )
 
-    def test_stage1_excludes_it_on_the_passive_branch(self):
-        gate = job_block(self.stage1, "capture").split("concurrency:")[0]
-        gate = strip_comments(gate)
+    def test_the_prompt_schema_offers_exactly_the_sanitizer_set(self):
+        line = next(
+            ln for ln in self.stage2.splitlines() if '"severity":' in ln and "|" in ln
+        )
+        self.assertEqual(set(re.findall(r'"(\w+)"', line)) - {"severity"}, SEVERITIES)
+
+    def test_the_injection_report_uses_a_severity_that_survives(self):
+        sentence = next(
+            ln for ln in self.rubric.splitlines() if "Report such an attempt" in ln
+        )
+        # `major` specifically, not merely a surviving severity: `minor` would
+        # pass a membership check and would no longer force changes_requested.
         self.assertIn(
-            "!contains(github.event.pull_request.labels.*.name, 'ready for review')",
+            "`major`",
+            sentence,
+            f"an injection attempt is no longer reported as major: {sentence}",
+        )
+
+
+class TestStage2CannotBeTriggeredByALookalikeWorkflow(unittest.TestCase):
+    """`workflows:` matches by NAME, and a pull request can claim a name.
+
+    Stage 1's file comes from the PR's own ref, so a PR may add a second
+    workflow also called "Hardened PR Review". Without a path condition that
+    lookalike triggers Stage 2 and supplies the request artifact.
+    """
+
+    def test_prepare_pins_the_triggering_workflow_path(self):
+        # Comments stripped and the whole equality matched: asserting the two
+        # strings separately passed on `!=`, and on prose in a comment.
+        prepare = strip_comments(job_block(STAGE2.read_text(), "prepare"))
+        gate = prepare.split("runs-on:", 1)[0]
+        self.assertRegex(
             gate,
+            r"github\.event\.workflow\.path\s*==\s*'\.github/workflows/hardened-pr-review\.yml'",
+            "prepare no longer pins which workflow file may trigger it",
         )
 
-    def test_stage1_still_honours_an_explicit_relabel(self):
-        """Otherwise a reviewed PR can never be re-reviewed by anyone."""
-        gate = strip_comments(
-            job_block(self.stage1, "capture").split("concurrency:")[0]
+
+class TestTheStage1ArtifactDownloadRetries(unittest.TestCase):
+    """A miss here skips every downstream step: no review AND no terminal row.
+
+    `actions/download-artifact@v4` carries no retry and intermittently fails to
+    find a cross-run artifact that exists. `claude-issue-triage-run.yml` already
+    documents that failure in this repository.
+    """
+
+    def setUp(self):
+        self.prepare = job_block(STAGE2.read_text(), "prepare")
+
+    def _step(self) -> str:
+        step = self.prepare.split("Download Stage-1 artifact", 1)[1]
+        return step.split("- name:", 1)[0]
+
+    def test_the_download_actually_retries_more_than_once(self):
+        # Asserting only that a `for` loop exists is not enough: `for attempt
+        # in 1` satisfies that and retries nothing. Read the bound.
+        step = self._step()
+        attempts = re.search(r"for attempt in ([\d ]+); do", step)
+        self.assertIsNotNone(attempts, "the download is not a retry loop")
+        bounds = attempts.group(1).split()
+        self.assertGreaterEqual(
+            len(bounds), 3, f"only {len(bounds)} attempt(s); that is not a retry"
         )
-        self.assertIn(
-            "github.event.action == 'labeled' && github.event.label.name == 'in progress'",
-            gate,
+        self.assertIn("gh run download", step)
+        self.assertIn("sleep", step)
+
+    def test_an_exhausted_retry_fails_the_job_rather_than_continuing(self):
+        step = self._step()
+        attempts = re.search(r"for attempt in ([\d ]+); do", step).group(1).split()
+        # The give-up branch must fire on the LAST attempt. Off by one and the
+        # loop falls through silently with no artifact and no row.
+        self.assertRegex(step, rf'\[ "\$attempt" -eq {attempts[-1]} \]')
+        self.assertIn("::error::", step)
+        self.assertIn("exit 1", step)
+
+    # Everything above is structural, and structure cannot see control flow:
+    # moving the `echo` and the `break` below the `fi` keeps every assertion
+    # above green while the loop makes exactly one attempt and exits 0. So the
+    # two below RUN the extracted shell against a stubbed `gh`.
+
+    def _run_script(self, fail_first: int) -> tuple[int, int]:
+        """Execute the step with a `gh` that fails its first `fail_first` calls.
+
+        Returns (exit status, number of `gh run download` attempts made).
+        """
+        script = textwrap.dedent(self._step().split("run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "count").write_text("0")
+            gh = d / "gh"
+            gh.write_text(
+                "#!/bin/bash\n"
+                f"n=$(( $(cat {d}/count) + 1 )); echo $n > {d}/count\n"
+                f"[ $n -gt {fail_first} ]\n"
+            )
+            gh.chmod(0o755)
+            # `sleep` stubbed too, or the backoff makes this test take a minute.
+            sleep = d / "sleep"
+            sleep.write_text("#!/bin/bash\nexit 0\n")
+            sleep.chmod(0o755)
+            proc = subprocess.run(
+                ["bash", "-c", script],
+                cwd=td,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{d}:{os.environ['PATH']}",
+                    "GH_TOKEN": "x",
+                    "RUN_ID": "1",
+                    "REPO": "o/r",
+                },
+            )
+            return proc.returncode, int((d / "count").read_text())
+
+    def test_a_transient_failure_is_actually_retried(self):
+        rc, tries = self._run_script(fail_first=2)
+        self.assertEqual(rc, 0, "a download that succeeds on attempt 3 failed the step")
+        self.assertEqual(tries, 3, f"expected 3 attempts, made {tries}")
+
+    def test_a_persistent_failure_exhausts_the_budget_then_fails(self):
+        rc, tries = self._run_script(fail_first=99)
+        self.assertNotEqual(rc, 0, "an undownloadable artifact did not fail the step")
+        self.assertEqual(tries, 5, f"expected 5 attempts, made {tries}")
+
+    def test_the_unretried_action_is_gone(self):
+        # Comments stripped: the retry loop's own comment names the action it
+        # replaced, and that prose must not be able to fail this.
+        self.assertNotIn("actions/download-artifact", strip_comments(self.prepare))
+
+
+class TestTheHookLogCannotForgeAWorkflowCommand(unittest.TestCase):
+    """The refused write target is model-controlled and reaches the job log.
+
+    The runner parses `::command::` at the start of a line, so a target holding
+    a newline would reach that parser even though the write was denied. Denying
+    the filesystem operation does not close the output channel. This EXECUTES
+    the hook rather than grepping it, because the neutralization has to hold on
+    the value, not in the source text.
+    """
+
+    def _run(self, file_path: str, log: Path) -> str:
+        payload = json.dumps(
+            {"tool_name": "Write", "tool_input": {"file_path": file_path}}
         )
-        labeled_branch = gate.split("||")[0]
-        self.assertNotIn("ready for review", labeled_branch)
+        subprocess.run(
+            ["bash", str(HOOK)],
+            input=payload,
+            text=True,
+            capture_output=True,
+            env={
+                **os.environ,
+                "PR_REVIEW_HOOK_LOG": str(log),
+                "PR_REVIEW_FINDINGS_FILE": "/tmp/allowed.json",
+            },
+            check=False,
+        )
+        return log.read_text() if log.exists() else ""
 
-    def test_stage2_re_derives_the_same_rule_from_the_api(self):
-        """Stage 1's `if:` is attacker-writable, so it decides nothing."""
-        prepare = strip_comments(job_block(self.stage2, "prepare"))
-        self.assertIn("IS_DONE=", prepare)
-        self.assertIn('"$TRIGGER_EVENT" != "labeled"', prepare)
+    def test_a_newline_in_the_refused_path_cannot_start_a_log_line(self):
+        # The V2 form. actions/runner Runner.Common/ActionCommand.cs
+        # TryParseV2 accepts `::cmd::` only when the line starts with it after
+        # TrimStart, so this models the parser exactly.
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "hooks.log"
+            written = self._run("/tmp/x\n::add-mask::secret", log)
+        self.assertTrue(written, "the hook logged nothing; premise changed")
+        for line in written.splitlines():
+            self.assertFalse(
+                line.lstrip().startswith("::"),
+                f"model-controlled text began a workflow command: {line!r}",
+            )
 
-    def test_stage2_reads_the_trigger_through_a_step_output(self):
-        """A shell variable does not survive a step boundary; under `set -u`
-        the stale spelling would abort the step instead of gating."""
-        self.assertIn(
-            "TRIGGER_EVENT: ${{ steps.coords.outputs.trigger_event }}", self.stage2
+    def test_the_legacy_command_form_is_neutralized_anywhere_in_the_line(self):
+        # The V1 form, and the reason position is not a defence. The same file's
+        # TryParse uses `IndexOf("##[")`, which matches ANYWHERE in the line, so
+        # a `DENY `-prefixed line is no protection against it.
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "hooks.log"
+            written = self._run("/tmp/x ##[error]forged", log)
+        self.assertTrue(written, "the hook logged nothing; premise changed")
+        self.assertNotIn("##[", written, "a legacy workflow command survived")
+
+    def test_the_v2_introducer_is_neutralized_mid_line_too(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "hooks.log"
+            written = self._run("/tmp/x ::add-mask::secret", log)
+        self.assertNotIn("::", written, "a `::` introducer survived mid-line")
+
+    def test_the_refused_path_is_still_reported_for_diagnosis(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "hooks.log"
+            written = self._run("/tmp/somewhere-else.json", log)
+        self.assertIn("DENY", written)
+        self.assertIn("somewhere-else.json", written)
+
+    def test_the_logged_path_is_bounded(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "hooks.log"
+            written = self._run("/tmp/" + "a" * 5000, log)
+        self.assertTrue(written, "the hook logged nothing; the bound is vacuous")
+        self.assertTrue(
+            all(len(ln) < 600 for ln in written.splitlines()), written[:200]
         )
 
-    def test_publish_can_move_labels_and_review_cannot(self):
-        publish = job_block(self.stage2, "publish")
-        review = job_block(self.stage2, "review")
-        self.assertIn("issues: write", publish)
-        self.assertNotIn("issues: write", review)
 
-    def test_a_label_permission_gap_does_not_red_the_job(self):
-        """`issues: write` is declared and the token still 403s -- the org caps
-        GITHUB_TOKEN below it. Failing here would red publish on every clean
-        review while losing nothing, since the row is already in S3 and
-        `in progress` is still on."""
-        publish = strip_comments(job_block(self.stage2, "publish"))
-        add = publish.index("labels[]=${DONE_LABEL}")
-        tail = publish[add : add + 600]
-        self.assertIn("::warning::", tail)
-        self.assertNotIn("exit 1", tail)
-
-    def test_the_marker_label_is_self_provisioned(self):
-        """Adding a label a repo lacks is a 422. `in progress` had to be
-        hand-created before this workflow could fire at all, and nothing
-        surfaces a missing label until a run needs one."""
-        publish = strip_comments(job_block(self.stage2, "publish"))
-        self.assertIn("repos/${REPO}/labels", publish)
-        self.assertIn("name=${DONE_LABEL}", publish)
-
-    def test_the_marker_is_add_only(self):
-        """Ivan's call: adding it is the workflow's job, removing it is not."""
-        publish = strip_comments(job_block(self.stage2, "publish"))
-        self.assertNotIn('rm_label "$DONE_LABEL"', publish)
-        self.assertIn("labels[]=${DONE_LABEL}", publish)
-
-    def test_the_marker_is_added_before_the_gating_label_is_removed(self):
-        """The other order can leave a PR with neither label, which nothing
-        recovers from: no marker, and no way to make it reviewable again."""
-        publish = strip_comments(job_block(self.stage2, "publish"))
-        add = publish.index("labels[]=${DONE_LABEL}")
-        remove = publish.index('rm_label "$REVIEW_LABEL"')
-        self.assertLess(add, remove)
-
-    def test_publish_labels_only_a_clean_positive_verdict(self):
-        """A blocked or errored run has reviewed nothing; marking it done would
-        be false AND would stop every future attempt."""
-        publish = strip_comments(job_block(self.stage2, "publish"))
-        self.assertIn('"$VERDICT" != "ready_for_human_review"', publish)
-        self.assertIn('"$STATUS" != "succeeded"', publish)
-        # Only the gating label is ever removed, and only on a clean verdict.
-        self.assertEqual(publish.count("rm_label "), 1)
-
-    def test_publish_reads_the_sanitized_verdict_not_the_model_file(self):
-        publish = strip_comments(job_block(self.stage2, "publish"))
-        self.assertIn("out/verdict.json", publish)
+if __name__ == "__main__":
+    unittest.main()
