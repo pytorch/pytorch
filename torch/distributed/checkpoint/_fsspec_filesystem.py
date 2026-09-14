@@ -2,7 +2,6 @@
 # mypy: ignore-errors
 
 import concurrent.futures
-import inspect
 import io
 import os
 import sys
@@ -12,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from torch.futures import Future
-import fsspec
 from fsspec.core import url_to_fs
 
 from torch.distributed.checkpoint._extension import StreamTransformExtension
@@ -165,7 +163,6 @@ class FsspecReader(FileSystemReader):
         path: str | os.PathLike,
         max_batch_size: int = 64,
         cpu_workers: int | None = None,
-        max_gap: int | str | None = "auto",
         **kwargs,
     ) -> None:
         super().__init__(path)
@@ -173,7 +170,6 @@ class FsspecReader(FileSystemReader):
         self.cpu_workers = max(
             1, cpu_workers if cpu_workers is not None else min(16, os.cpu_count() or 4)
         )
-        self.max_gap = max_gap
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
 
@@ -184,26 +180,9 @@ class FsspecReader(FileSystemReader):
             fut.set_result(None)
             return fut
 
-        # If the underlying fsspec filesystem supports cat_ranges, use batched range reading
+        # If the underlying fsspec filesystem supports cat_ranges, use batched range reading.
+        # Range coalescing policy is left entirely to the backend.
         if self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges"):
-            # Check if backend overrides cat_ranges and supports max_gap
-            # (base fsspec.AbstractFileSystem.cat_ranges raises NotImplementedError when max_gap is passed)
-            supports_max_gap = (
-                self.max_gap is not None
-                and type(self.fs.fs).cat_ranges
-                is not fsspec.AbstractFileSystem.cat_ranges
-            )
-            if supports_max_gap:
-                try:
-                    sig = inspect.signature(self.fs.fs.cat_ranges)
-                    if "max_gap" not in sig.parameters and not any(
-                        p.kind == inspect.Parameter.VAR_KEYWORD
-                        for p in sig.parameters.values()
-                    ):
-                        supports_max_gap = False
-                except Exception:
-                    supports_max_gap = False
-
             batches = []
             for i in range(0, len(reqs), self.max_batch_size):
                 batch = reqs[i : i + self.max_batch_size]
@@ -218,16 +197,7 @@ class FsspecReader(FileSystemReader):
                 batches.append((paths, starts, ends, batch))
 
             def fetch_batch(b):
-                nonlocal supports_max_gap
                 bp, bs, be, br = b
-                if supports_max_gap:
-                    try:
-                        chunks = self.fs.fs.cat_ranges(
-                            bp, bs, be, max_gap=self.max_gap, on_error="raise"
-                        )
-                        return chunks, br
-                    except (NotImplementedError, TypeError):
-                        supports_max_gap = False
                 chunks = self.fs.fs.cat_ranges(bp, bs, be, on_error="raise")
                 return chunks, br
 
