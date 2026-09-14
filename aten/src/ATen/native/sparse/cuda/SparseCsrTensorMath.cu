@@ -36,6 +36,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <ATen/native/cuda/Reduce.cuh>
+#include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
@@ -340,8 +341,12 @@ Tensor& add_out_sparse_compressed_cuda(
       return out;
     }
 
-    at::native::resize_as_sparse_compressed_(out, self);
-    sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
+    if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+      sparse::impl::add_out_sparse_compressed_blocked(self, other, alpha, out);
+    } else {
+      at::native::resize_as_sparse_compressed_(out, self);
+      sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
+    }
   }
   return out;
 }
