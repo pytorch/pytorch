@@ -2020,6 +2020,20 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 self.assertEqual(s.device_index, 2)
                 self.assertEqual(s.device_type, 3)
 
+    def test_mode_returning_too_many_values(self) -> None:
+        # A mode returning more values than the schema declares used to read
+        # past the end of the schema's return list.
+        class TooMany(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return (torch.ones(2), torch.ones(2), torch.ones(2))
+
+        # Built outside the mode: otherwise TooMany also intercepts this
+        # single-return op and fails before max.dim is ever reached.
+        t = torch.ones(2)
+        with self.assertRaisesRegex(RuntimeError, "to return 2 values"):
+            with TooMany():
+                torch.ops.aten.max.dim(t, 0)
+
     def test_none_wrapping(self):
         # A Tensor subclass that returns None when doing add
         # See LoggingTensor above for more details on the subclass
