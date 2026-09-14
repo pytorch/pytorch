@@ -123,6 +123,8 @@ class TORCH_API MPSStream {
   MPSCommandBuffer_t _commandBuffer = nil;
   MPSCommandBuffer_t _prevCommandBuffer = nil;
   MTLComputeCommandEncoder_t _commandEncoder = nil;
+  // encodes accumulated into _commandBuffer since the last flush()
+  uint64_t _encodesSinceFlush = 0;
   MPSGraphExecutionDescriptor* _executionDescriptor = nil;
   MPSGraphCompilationDescriptor* _compilationDescriptor = nil;
   dispatch_queue_t _serialQueue = nullptr;
