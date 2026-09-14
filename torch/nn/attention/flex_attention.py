@@ -19,7 +19,7 @@ from typing_extensions import deprecated, Never, NotRequired, Self, TypedDict
 import torch
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
-from torch._higher_order_ops.utils import setup_compilation_env
+from torch._higher_order_ops.utils import _hop_compile_and_call, setup_compilation_env
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import (
@@ -2587,7 +2587,6 @@ def flex_attention(
         *,
         return_aux: AuxRequest | None,
         return_lse: bool,
-        stats_are_log2: bool,
     ):
         """Normalize stats and build return value (aux-aware, legacy-compatible)."""
         ln2 = math.log(2.0)
@@ -2597,9 +2596,9 @@ def flex_attention(
         lse_scaled = lse if (return_lse and lse.numel() > 0) else None
         max_scaled = max_scores if (return_max and max_scores.numel() > 0) else None
 
-        if stats_are_log2:
-            lse_scaled = lse_scaled * ln2 if lse_scaled is not None else None
-            max_scaled = max_scaled * ln2 if max_scaled is not None else None
+        # The flex_attention HOP returns log2 stats for every backend.
+        lse_scaled = lse_scaled * ln2 if lse_scaled is not None else None
+        max_scaled = max_scaled * ln2 if max_scaled is not None else None
 
         if return_aux is not None:
             return out, AuxOutput(
@@ -2633,7 +2632,6 @@ def flex_attention(
             max_scores,
             return_aux=return_aux,
             return_lse=return_lse,
-            stats_are_log2=kernel_options["BACKEND"] != "FLASH",
         )
 
     if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
@@ -2656,29 +2654,16 @@ def flex_attention(
     def _flex_attention_hop_wrapper(*args, **kwargs):
         return flex_attention_hop(*args, **kwargs)
 
-    with setup_compilation_env() as backend:
-        if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
-            flex_fn = _flex_attention_hop_wrapper
-        else:
-            flex_fn = torch.compile(
-                _flex_attention_hop_wrapper, backend=backend, fullgraph=True
-            )
-
-        out, lse, max_scores = flex_fn(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask.as_tuple(),
-            scale,
-            kernel_options,
-        )
+    args = (query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options)
+    if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+        with setup_compilation_env():
+            out, lse, max_scores = _flex_attention_hop_wrapper(*args)
+    else:
+        out, lse, max_scores = _hop_compile_and_call(_flex_attention_hop_wrapper, args)
     return _finalize_outputs(
         out,
         lse,
         max_scores,
         return_aux=return_aux,
         return_lse=return_lse,
-        stats_are_log2=_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
-        or kernel_options["BACKEND"] != "FLASH",
     )
