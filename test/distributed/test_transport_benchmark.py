@@ -3,11 +3,18 @@
 import contextlib
 import io
 import os
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
 import benchmarks.distributed.transport.benchmark as benchmark
+
+
+sys.path.remove(str(REPO_ROOT))
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
