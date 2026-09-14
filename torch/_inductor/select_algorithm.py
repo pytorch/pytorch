@@ -925,11 +925,11 @@ class TritonTemplateKernel(TritonKernel):
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
         waves_per_eu = self.meta.get("waves_per_eu", None)
         kpack = self.meta.get("kpack", None)
-        if matrix_instr_nonkdim:
+        if matrix_instr_nonkdim is not None:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
-        if waves_per_eu:
+        if waves_per_eu is not None:
             triton_meta["waves_per_eu"] = waves_per_eu
-        if kpack:
+        if kpack is not None:
             triton_meta["kpack"] = kpack
 
         # tlx options carry dynamic string keys outside the TritonMeta schema.
@@ -3913,11 +3913,15 @@ def create_inputs_key(input_nodes) -> str:
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    # bfx9 has no legacy equivalent, and the legacy getter may reject it.
+    if precision != "bfx9":
+        precision = torch.get_float32_matmul_precision()
     return ":".join(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            precision,
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
