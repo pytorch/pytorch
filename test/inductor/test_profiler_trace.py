@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import tempfile
+import types
 import unittest
 
 import torch
@@ -33,6 +34,31 @@ class InductorProfilerTraceTests(TestCase):
         finally:
             current.clear()
             current.update(previous)
+
+    def test_create_inductor_timeline_artifact_manifest_records_existing_files(self):
+        import torch._inductor.debug as inductor_debug
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            readable = os.path.join(tmpdir, "fx_graph_readable.py")
+            output_code = os.path.join(tmpdir, "output_code.py")
+            with open(readable, "w", encoding="utf-8") as fd:
+                fd.write("readable")
+            with open(output_code, "w", encoding="utf-8") as fd:
+                fd.write("output")
+
+            with inductor_debug.V.set_debug_handler(
+                types.SimpleNamespace(_path=tmpdir)
+            ):
+                manifest = inductor_debug.create_inductor_timeline_artifact_manifest()
+
+        self.assertEqual(manifest["dir"], tmpdir)
+        self.assertEqual(
+            manifest["artifacts"],
+            {
+                "readable": "fx_graph_readable.py",
+                "output_code": "output_code.py",
+            },
+        )
 
     def test_build_flow_mapping_supports_sparse_flow_ids(self):
         flow_id = 1_000_000_000
@@ -95,18 +121,26 @@ class InductorProfilerTraceTests(TestCase):
         self.assertFalse(prof._maybe_triton_call("not_triton_related"))
 
     def test_add_inductor_kernel_stack_to_chrome_trace(self):
+        graph_key = str(("Torch-Compiled Region: 0/0", False))
         kernel_name = "triton_poi_fused_add_0"
         stack = ["model.py:7 in forward"]
         kernel_information_jsons = {
-            str(("Torch-Compiled Region: 0/0", False)): {
+            graph_key: {
                 kernel_name: {
                     "stack_traces": stack,
                     "post_grad_nodes": ["add"],
                     "pre_grad_nodes": ["add"],
-                }
+                },
+                "__artifacts__": {
+                    "dir": "/tmp/debug/torchinductor/model__0_forward_1.0",
+                    "artifacts": {"readable": "fx_graph_readable.py"},
+                },
             }
         }
-        with self._kernel_information_jsons(kernel_information_jsons):
+        with (
+            self._kernel_information_jsons(kernel_information_jsons),
+            config.patch({"trace.provenance_tracking_fusion": True}),
+        ):
             trace = {
                 "traceEvents": [
                     {
@@ -160,13 +194,25 @@ class InductorProfilerTraceTests(TestCase):
             prof = _InductorTraceProcessor()
             updated_trace = prof.add_to_chrome_trace(trace)
 
-            self.assertEqual(updated_trace["traceEvents"][3]["args"]["stack"], stack)
+            event_args = updated_trace["traceEvents"][3]["args"]
+            self.assertEqual(event_args["stack"], stack)
+            self.assertEqual(event_args["inductor_graph_key"], graph_key)
+            self.assertEqual(event_args["inductor_kernel_provenance_key"], kernel_name)
+            self.assertEqual(event_args["inductor_pre_grad_nodes"], ["add"])
+            self.assertEqual(event_args["inductor_post_grad_nodes"], ["add"])
+            self.assertEqual(
+                updated_trace["pytorch_inductor_artifacts"][graph_key]["artifacts"][
+                    "readable"
+                ],
+                "fx_graph_readable.py",
+            )
 
     def test_add_inductor_kernel_stack_to_chrome_trace_by_external_id(self):
+        graph_key = str(("Torch-Compiled Region: 0/0", False))
         kernel_name = "triton_poi_fused_add_0"
         stack = ["model.py:7 in forward"]
         kernel_information_jsons = {
-            str(("Torch-Compiled Region: 0/0", False)): {
+            graph_key: {
                 kernel_name + ":1": {
                     "stack_traces": stack,
                     "post_grad_nodes": ["add"],
@@ -174,7 +220,10 @@ class InductorProfilerTraceTests(TestCase):
                 }
             }
         }
-        with self._kernel_information_jsons(kernel_information_jsons):
+        with (
+            self._kernel_information_jsons(kernel_information_jsons),
+            config.patch({"trace.provenance_tracking_fusion": True}),
+        ):
             trace = {
                 "traceEvents": [
                     {
@@ -210,15 +259,23 @@ class InductorProfilerTraceTests(TestCase):
             prof = _InductorTraceProcessor()
             updated_trace = prof.add_to_chrome_trace(trace)
 
-            self.assertEqual(updated_trace["traceEvents"][2]["args"]["stack"], stack)
+            event_args = updated_trace["traceEvents"][2]["args"]
+            self.assertEqual(event_args["stack"], stack)
+            self.assertEqual(event_args["inductor_graph_key"], graph_key)
+            self.assertEqual(
+                event_args["inductor_kernel_provenance_key"], kernel_name + ":1"
+            )
+            self.assertEqual(event_args["inductor_pre_grad_nodes"], ["add"])
+            self.assertEqual(event_args["inductor_post_grad_nodes"], ["add"])
 
     def test_add_inductor_kernel_stack_to_chrome_trace_by_external_id_without_triton_kernel_name(
         self,
     ):
+        graph_key = str(("Torch-Compiled Region: 0/0", False))
         kernel_name = "triton_poi_fused_add_0"
         stack = ["model.py:7 in forward"]
         kernel_information_jsons = {
-            str(("Torch-Compiled Region: 0/0", False)): {
+            graph_key: {
                 kernel_name + ":1": {
                     "stack_traces": stack,
                     "post_grad_nodes": ["add"],
@@ -226,7 +283,10 @@ class InductorProfilerTraceTests(TestCase):
                 }
             }
         }
-        with self._kernel_information_jsons(kernel_information_jsons):
+        with (
+            self._kernel_information_jsons(kernel_information_jsons),
+            config.patch({"trace.provenance_tracking_fusion": True}),
+        ):
             trace = {
                 "traceEvents": [
                     {
@@ -262,7 +322,74 @@ class InductorProfilerTraceTests(TestCase):
             prof = _InductorTraceProcessor()
             updated_trace = prof.add_to_chrome_trace(trace)
 
-            self.assertEqual(updated_trace["traceEvents"][2]["args"]["stack"], stack)
+            event_args = updated_trace["traceEvents"][2]["args"]
+            self.assertEqual(event_args["stack"], stack)
+            self.assertEqual(event_args["inductor_graph_key"], graph_key)
+            self.assertEqual(
+                event_args["inductor_kernel_provenance_key"], kernel_name + ":1"
+            )
+            self.assertEqual(event_args["inductor_pre_grad_nodes"], ["add"])
+            self.assertEqual(event_args["inductor_post_grad_nodes"], ["add"])
+
+    def test_add_inductor_kernel_stack_to_chrome_trace_omits_fusion_metadata_by_default(
+        self,
+    ):
+        graph_key = str(("Torch-Compiled Region: 0/0", False))
+        kernel_name = "triton_poi_fused_add_0"
+        stack = ["model.py:7 in forward"]
+        kernel_information_jsons = {
+            graph_key: {
+                kernel_name: {
+                    "stack_traces": stack,
+                    "post_grad_nodes": ["add"],
+                    "pre_grad_nodes": ["add"],
+                }
+            }
+        }
+        with (
+            self._kernel_information_jsons(kernel_information_jsons),
+            config.patch({"trace.provenance_tracking_fusion": False}),
+        ):
+            trace = {
+                "traceEvents": [
+                    {
+                        "name": "Torch-Compiled Region: 0/0",
+                        "cat": "cpu_op",
+                        "ph": "X",
+                        "ts": 0,
+                        "dur": 100,
+                        "tid": 1,
+                        "args": {},
+                    },
+                    {
+                        "name": kernel_name,
+                        "cat": "cpu_op",
+                        "ph": "X",
+                        "ts": 10,
+                        "dur": 5,
+                        "tid": 1,
+                        "args": {"External id": 6},
+                    },
+                    {
+                        "name": kernel_name,
+                        "cat": "kernel",
+                        "ph": "X",
+                        "ts": 20,
+                        "dur": 3,
+                        "tid": 2,
+                        "args": {"External id": 6},
+                    },
+                ]
+            }
+
+            prof = _InductorTraceProcessor()
+            updated_trace = prof.add_to_chrome_trace(trace)
+
+            event_args = updated_trace["traceEvents"][2]["args"]
+            self.assertEqual(event_args["stack"], stack)
+            self.assertNotIn("inductor_graph_key", event_args)
+            self.assertNotIn("inductor_pre_grad_nodes", event_args)
+            self.assertNotIn("inductor_post_grad_nodes", event_args)
 
     def test_add_inductor_kernel_stack_to_chrome_trace_skips_missing_stack(self):
         kernel_name = "triton_poi_fused_add_0"
@@ -332,10 +459,11 @@ class InductorProfilerTraceTests(TestCase):
 
     def test_add_inductor_kernel_stack_to_chrome_trace_backward_quoted_region(self):
         compile_name = "Torch-Compiled Region: odd', True) name"
+        graph_key = str((compile_name + "_backward_0", True))
         kernel_name = "triton_poi_fused_mul_0"
         stack = ["model.py:9 in backward"]
         kernel_information_jsons = {
-            str((compile_name + "_backward_0", True)): {
+            graph_key: {
                 kernel_name: {
                     "stack_traces": stack,
                     "post_grad_nodes": ["mul"],
@@ -343,7 +471,10 @@ class InductorProfilerTraceTests(TestCase):
                 }
             }
         }
-        with self._kernel_information_jsons(kernel_information_jsons):
+        with (
+            self._kernel_information_jsons(kernel_information_jsons),
+            config.patch({"trace.provenance_tracking_fusion": True}),
+        ):
             trace = {
                 "traceEvents": [
                     {
@@ -415,7 +546,12 @@ class InductorProfilerTraceTests(TestCase):
             prof = _InductorTraceProcessor()
             updated_trace = prof.add_to_chrome_trace(trace)
 
-            self.assertEqual(updated_trace["traceEvents"][6]["args"]["stack"], stack)
+            event_args = updated_trace["traceEvents"][6]["args"]
+            self.assertEqual(event_args["stack"], stack)
+            self.assertEqual(event_args["inductor_graph_key"], graph_key)
+            self.assertEqual(event_args["inductor_kernel_provenance_key"], kernel_name)
+            self.assertEqual(event_args["inductor_pre_grad_nodes"], ["mul"])
+            self.assertEqual(event_args["inductor_post_grad_nodes"], ["mul"])
 
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -436,6 +572,7 @@ class InductorProfilerTraceTests(TestCase):
                     {
                         "force_disable_caches": True,
                         "trace.provenance_tracking_to_timeline": True,
+                        "trace.provenance_tracking_fusion": False,
                         "triton.unique_kernel_names": True,
                     }
                 ),
