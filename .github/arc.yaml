@@ -109,6 +109,8 @@ runner_mapping:
   linux.rocm.gpu.mi300.4: linux.rocm.gpu.mi300.4
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
+  amd-dpx-linux.rocm.gpu.gfx950.1: amd-dpx-linux.rocm.gpu.gfx950.1
+  amd-dpx-linux.rocm.gpu.gfx950.2: amd-dpx-linux.rocm.gpu.gfx950.2
   linux.rocm.gpu.gfx1100: linux.rocm.gpu.gfx1100
   # amd-sandbox experiment routes trunk-rocm-sandbox tests to AMD's dedicated
   # runners via this prefix; passthrough so the OSDC build's runner mapping keeps it.

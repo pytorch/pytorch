@@ -102,12 +102,14 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->a_dtype,
           params->a_scale_dtype,
           params->a_scaling_type,
+          params->a_swizzle_type,
           params->b,
           params->b_scale_ptr,
           params->ldb,
           params->b_dtype,
           params->b_scale_dtype,
           params->b_scaling_type,
+          params->b_swizzle_type,
           params->bias_ptr,
           params->bias_dtype,
           params->c,
@@ -152,11 +154,15 @@ inline const char* TypeName(T v) {
 
 template <>
 inline const char* TypeName(float v) {
-  if (at::globalContext().allowTF32CuBLAS()) {
+  const auto precision = at::globalContext().float32Precision(
+      at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+  if (precision == at::Float32Precision::TF32) {
     return "tf32";
-  } else {
-    return "float";
   }
+  if (at::cuda::blas::useBF16x9()) {
+    return "bfx9";
+  }
+  return "float";
 }
 
 template <>
