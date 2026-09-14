@@ -17210,7 +17210,7 @@ op_db: list[OpInfo] = [
         dtypes=float8_types(),
         # Deliberately e4m3fn even on gfx942 (native fnuz); see _scaled_mm_v2.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
-        dtypesIfMPS=(torch.float8_e4m3fn,),
+        dtypesIfMPS=custom_types(torch.float8_e4m3fn),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
