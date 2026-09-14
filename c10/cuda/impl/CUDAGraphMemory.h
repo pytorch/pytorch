@@ -30,8 +30,8 @@ class CaptureTracker {
  private:
   struct CaptureTreeNode {
     std::optional<CaptureId_t> parent_capture_id;
-    CaptureId_t root_capture_id;
-    bool is_active;
+    CaptureId_t root_capture_id{};
+    bool is_active{false};
     size_t invalid_capture_free_count{0};
   };
 

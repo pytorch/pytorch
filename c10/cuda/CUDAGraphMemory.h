@@ -10,7 +10,7 @@
 namespace c10::cuda::CUDAGraphMemory {
 
 struct CaptureRegistration {
-  CaptureId_t capture_id;
+  CaptureId_t capture_id{};
   std::optional<CaptureId_t> parent_capture_id;
 };
 
