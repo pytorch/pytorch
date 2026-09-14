@@ -1153,7 +1153,10 @@ class TestBoundaryGuardsAreNotDefeatedByAnUnderscore(unittest.TestCase):
         self.assertNotIn("#1234", neutralize("_#1234_"))
 
     def test_underscore_wrapped_url_is_removed(self):
-        self.assertNotIn("evil.example.com", neutralize("_https://evil.example.com/x_"))
+        self.assertNotIn(
+            "evil.example.com",
+            neutralize("_https://evil.example.com/x_"),  # @lint-ignore
+        )
 
     def test_an_email_is_still_left_alone(self):
         self.assertEqual(neutralize("user@example.com"), "user@example.com")
