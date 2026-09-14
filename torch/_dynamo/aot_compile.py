@@ -1266,6 +1266,172 @@ class ModelInput:
     contexts: Sequence[AbstractContextManager[object]]
 
 
+# The redirect's artifact takes the module as its first argument only on the
+# _wrapped_call_impl branch of OptimizedModule._initialize; the wrap_inline branch
+# it takes for config.wrap_top_frame or a skipped model.forward closes over the
+# module instead, so measured, passing it there fails len(L['args']) == 1. What
+# decides that skip is the FILE model.forward is DEFINED in -- _forward_has_skip_rule
+# is trace_rules.check(mod.forward) -- and not what the class is: measured, a
+# subclass of nn.Linear that does not override forward is skipped too. No list
+# spells that rule: check_file consults LEGACY_MOD_INLINELIST before MOD_SKIPLIST,
+# so a file inside a skipped directory can still be inlined (measured, QuantStub's
+# forward under torch/ao/ is), which is why the clause names the predicate itself.
+_REDIRECT_CALL = (
+    "call the artifact it returns with the module as its first argument if you "
+    "define forward yourself; if forward is instead defined in a file dynamo "
+    "skips, as torch.nn's stock modules are -- inheriting it unoverridden counts, "
+    "since dynamo decides on the file forward is defined in rather than on the "
+    "class, and torch._dynamo.eval_frame.OptimizedModule._forward_has_skip_rule("
+    "model) is the exact test -- or config.wrap_top_frame is set, that capture "
+    "wrapped the module rather than its __call__ and the artifact takes only the "
+    "forward arguments"
+)
+
+
+def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
+    # nn.Module's hook dispatch in _call_impl never runs -- the capture traces
+    # model.forward and the load calls what it compiled to -- so every hook on
+    # model itself is dropped, a silently different answer rather than an error.
+    # These four dicts are the per-instance subset of _call_impl's eight-dict
+    # fast-path test; the four _global_* ones still fire on the wrapper's own
+    # _call_impl when the artifact is served through OptimizedModule, so only a
+    # direct AOTCompiledModel drops them, which deserialize's docstring covers
+    # instead.
+    # The *_with_kwargs and *_always_called side tables are keyed by handles
+    # already in these dicts, so they cannot be non-empty alone. Forward and
+    # backward are worded separately because the redirect is unconditional only
+    # for the forward dicts: tracing torch.compile(model).forward keeps those,
+    # while a module-level backward hook needs compiled autograd enabled around
+    # the same trace ("Module-level backwards hooks require compiled autograd"),
+    # which only compiled_autograd._enable does -- aot_compile never enters the
+    # dynamo context that reads the config flag the graph break's hint names --
+    # and the artifact that produces saves but cannot be reloaded. A dropped
+    # backward hook also leaves the forward result alone and changes the
+    # gradients, so it needs different wording than "the result may differ".
+    forward_hooked = [
+        label
+        for label, attr in (
+            ("forward pre-hooks", "_forward_pre_hooks"),
+            ("forward hooks", "_forward_hooks"),
+        )
+        if getattr(model, attr, None)
+    ]
+    backward_hooked = [
+        label
+        for label, attr in (
+            ("backward pre-hooks", "_backward_pre_hooks"),
+            ("backward hooks", "_backward_hooks"),
+        )
+        if getattr(model, attr, None)
+    ]
+    if forward_hooked:
+        # LazyModuleMixin registers its initializer as a forward pre-hook
+        # (nn/modules/lazy.py:178), so every uninitialized lazy module lands here,
+        # and for one OptimizedModule._initialize pins the wrapper's forward to
+        # _call_lazy_check (eval_frame.py:547-549), which carries no aot_compile.
+        # The pin outlives the initializer, so the redirect needs a module already
+        # materialized when torch.compile saw it, not just a materialized one.
+        lazy = ""
+        if inspect.getattr_static(model, "_initialize_hook", None) is not None:
+            lazy = (
+                " -- but not for this module yet: it carries a lazy initializer, "
+                "and while it does torch.compile pins the wrapper's forward to "
+                "_call_lazy_check, which has no aot_compile, so call the module "
+                "once to materialize it and then wrap it again"
+            )
+        log.warning(
+            "%s has %s registered; the AOT compiled forward calls %s.forward "
+            "directly, so those hooks do NOT run and its result may differ from "
+            "eager -- to keep them, AOT compile torch.compile(model).forward "
+            "instead, which traces __call__ and runs them%s; %s",
+            type(model).__name__,
+            ", ".join(forward_hooked),
+            type(model).__name__,
+            lazy,
+            _REDIRECT_CALL,
+        )
+    if backward_hooked:
+        log.warning(
+            "%s has %s registered; the AOT compiled forward calls %s.forward "
+            "directly, so those hooks do NOT run and the gradients it produces "
+            "may differ from eager while the forward result does not -- to keep "
+            "them, AOT compile torch.compile(model).forward with compiled "
+            "autograd enabled around the capture -- only the private "
+            "torch._dynamo.compiled_autograd._enable does that, since the "
+            "config flag of the same name is not read on this path; %s. Note "
+            "that the artifact saves but cannot be reloaded",
+            type(model).__name__,
+            ", ".join(backward_hooked),
+            type(model).__name__,
+            _REDIRECT_CALL,
+        )
+    # Eager dispatches through type(model).__call__ while the artifact calls what
+    # forward compiled to, so an overridden __call__ is dropped just like a hook
+    # -- and no hook dict records it, so the lists above see nothing to report.
+    # The probe is that same type lookup, walked over the MRO: an instance
+    # attribute named __call__ is not an override, because CPython resolves a
+    # special method on the type, so eager ignores it too and the artifact
+    # matches.
+    # fx.GraphModule installs a wrapper as its per-instance class's __call__ on
+    # every GraphModule.recompile, so a bare lookup reports an override for
+    # every one of them, ExportedProgram.module() included. With no class
+    # __call__ to wrap, the wrapper only prettifies tracebacks and delegates to
+    # super(cls, obj), so skip every class carrying one and take the next
+    # __call__ the MRO offers, which is the one that delegation reaches. The
+    # wrapper is told apart by what it is rather than by the class it sits on:
+    # recompile installs it on whatever type(self) is at the time, so a
+    # __class__ swap (FSDP, replicate, parametrize all rebind it after the
+    # trace) followed by another recompile leaves two wrapper classes on the
+    # MRO, while a real __call__ assigned onto the per-instance class afterwards
+    # sits on the very class FX wrapped and still has to count. Skipping those
+    # classes rather than starting past them keeps an override on a base AHEAD
+    # of them visible; a GraphModule subclass that defines __call__ carries it
+    # on a base BEHIND them, where the delegation finds it. A wrapper whose
+    # cls_call was set delegates there instead of to super -- functional_export
+    # hooks a hooked root's wrapper that way -- so it is not skipped. The
+    # wrapper is call_wrapped, a closure GraphModule.recompile mints anew on
+    # every run, so no one function is there to compare by identity; its def
+    # site (module and qualname) is, along with the _WrappedCall it delegates
+    # to, which recompile installs on the same class. Moving either turns this
+    # back into a warning on every GraphModule, which
+    # test_aot_compile_module_fx_call_wrapper_is_not_warned_about catches.
+    # _LazyGraphModule defers that recompile to the first call or code access,
+    # so until then no class on its MRO owns a __call__ and the walk lands on
+    # nn.Module's: silent for want of a wrapper rather than by skipping one.
+    fx_module = torch.fx.graph_module
+    fx_wrapper = (fx_module.__name__, "GraphModule.recompile.<locals>.call_wrapped")
+
+    def is_fx_wrapper(c: type) -> bool:
+        fn, wrapped = vars(c)["__call__"], vars(c).get("_wrapped_call")
+        def_site = (getattr(fn, "__module__", None), getattr(fn, "__qualname__", None))
+        return (
+            def_site == fx_wrapper
+            and isinstance(wrapped, fx_module._WrappedCall)
+            and wrapped.cls_call is None
+        )
+
+    # nn.Module defines __call__ in its own vars, so the default is unreachable,
+    # and only keeps a StopIteration out of a warning helper.
+    call = next(
+        (
+            vars(c)["__call__"]
+            for c in type(model).__mro__
+            if "__call__" in vars(c) and not is_fx_wrapper(c)
+        ),
+        torch.nn.Module.__call__,
+    )
+    if call is not torch.nn.Module.__call__:
+        log.warning(
+            "%s overrides __call__; the AOT compiled forward runs what "
+            "%s.forward compiled to, so that override does NOT run and its "
+            "result may differ from eager -- to keep it, AOT compile "
+            "torch.compile(model).forward instead, which traces __call__; %s",
+            type(model).__name__,
+            type(model).__name__,
+            _REDIRECT_CALL,
+        )
+
+
 @dataclass
 class AOTCompiledModel:
     # Represents a single forward function of a model along with dispatch
@@ -1356,7 +1522,19 @@ class AOTCompiledModel:
         on the same terms.
 
         Hooks registered on ``model`` do not run: the artifact calls ``forward``
-        directly.
+        directly. The artifact records none, so what is warned about here is what
+        ``model`` carries at this call; the ones it carried at capture were
+        warned about there, and one registered after this call is dropped
+        silently. An overridden ``__call__`` is dropped the same way, and warned
+        about the same way. Only ``model`` itself is inspected: a hook or a
+        ``__call__`` override a SUBMODULE carries only in the loading process is
+        dropped silently too, because the graph baked in whatever the capture
+        traced through that submodule's ``nn.Module.__call__``. Hooks registered
+        globally (``register_module_forward_hook`` and friends) are dropped
+        without a warning only when the returned ``AOTCompiledModel`` is called
+        directly: they still run on the wrapper's own ``_call_impl`` when the
+        artifact is served through ``OptimizedModule``, so only the per-instance
+        dicts are worth warning about.
         """
         from torch._dynamo.utils import get_metrics_context
         from torch._guards import compile_context, CompileContext
@@ -1368,6 +1546,7 @@ class AOTCompiledModel:
         # caller of this classmethod may not have.
         model = _unwrap_optimized_module(model)
 
+        _warn_dropped_module_dispatch(model)
         forward_not_resolved_reason = None
         scope = guard_globals
         if scope is None:
@@ -1413,7 +1592,21 @@ def aot_compile_module(
 ) -> AOTCompiledModel:
     """
     Compiles a single nn.Module with any number of inputs, and returns a compiled forward function.
+
+    ``model`` may be the module itself or the wrapper ``torch.compile`` returned
+    for it, which is unwrapped to the module to trace. ``model.forward`` is what
+    gets traced, so the per-instance hooks ``nn.Module.__call__`` would dispatch
+    on, and an overridden ``__call__`` eager reaches instead of it, are dropped
+    from the result; both are warned about, as they are on the load path.
     """
+    # eval_frame's caller hands us _orig_mod; a caller of this function may not
+    # have. Everything below needs the module that was traced: tracing an
+    # OptimizedModule.forward reaches eval_frame's compile_wrapper and dies on
+    # set_eval_frame, the wrapper would be stored as the self the recorded
+    # type-id guard is checked against, and warning about it would report a
+    # __call__ override nobody wrote while missing the hooks that are dropped.
+    model = _unwrap_optimized_module(model)
+    _warn_dropped_module_dispatch(model)
 
     def compile_single_graph(model_input: ModelInput) -> AOTCompiledFunction:
         example_inputs = (model_input.args, model_input.kwargs)
