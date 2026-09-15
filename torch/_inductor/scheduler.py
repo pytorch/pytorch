@@ -5353,7 +5353,8 @@ def pick_loop_order(
 
 
 def _replace_operation_buffer(
-    orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
+    orig_node: ir.MultiTemplateBuffer | ir.MultiSubgraphBuffer,
+    new_node: ir.OperationBuffer,
 ) -> None:
     replaced_buf_name = new_node.get_name()
     orig_buf_name = orig_node.get_name()
@@ -5768,6 +5769,13 @@ class Scheduler:
                 *V.graph.torchbind_constants.keys(),
             ]
         )
+        # Whole subgraph plans can contain several kernels and therefore cannot
+        # use MultiTemplateBuffer's single-renderer swap.  Select them before
+        # creating scheduler nodes so dependency analysis and DCE see only the
+        # winning expansion.
+        for node in list(nodes):
+            if isinstance(node, ir.MultiSubgraphBuffer):
+                _replace_operation_buffer(node, node.finalize())
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.previous_node: BaseSchedulerNode | None = None
         self.current_node: BaseSchedulerNode | None = None
@@ -6913,6 +6921,238 @@ class Scheduler:
             dynamo_compile_column_us="compile_time_autotune_time_us",
         ):
             return backend.benchmark_fused_nodes(nodes)
+
+    @contextlib.contextmanager
+    def _temporary_fusion_plan_state(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> Iterator[None]:
+        """Install the minimal scheduler state needed for speculative codegen."""
+        state = {
+            "current_device": getattr(self, "current_device", None),
+            "name_to_node": {node.get_name(): node for node in nodes},
+            "name_to_buf": {
+                buf.get_name(): buf for node in nodes for buf in node.get_outputs()
+            },
+            "name_to_fused_node": {node.get_name(): node for node in nodes},
+            "mutation_real_name": {},
+            "mutation_renames": {},
+            "name_to_donated_buffer": {},
+            "node_to_stream": {},
+            "buff_to_stream": {},
+            "_multi_stream_nodes": False,
+            "node_to_mempool": {},
+            "buff_to_mempool": {},
+            "_mempool_nodes": False,
+        }
+        previous = {
+            name: (hasattr(self, name), getattr(self, name, None)) for name in state
+        }
+        try:
+            for name, value in state.items():
+                setattr(self, name, value)
+            yield
+        finally:
+            for name, (existed, value) in previous.items():
+                if existed:
+                    setattr(self, name, value)
+                else:
+                    delattr(self, name)
+
+    def benchmark_multi_kernel_fusion_plan(
+        self,
+        choice: torch._inductor.codegen.subgraph.MultiKernelFusionPlanChoice,
+        args: Sequence[Any],
+        out: torch.Tensor,
+    ) -> float:
+        """Validate fused groups, then benchmark their complete launch sequence.
+
+        The choice owns the ordered groups, complete executable, workspace,
+        structural cache identity, and graph transaction.  The scheduler only
+        supplies its existing single-kernel legality/codegen path for each
+        group.  Selection timing comes from the complete executable rather
+        than a sum of isolated group timings.
+
+        Candidate IR is speculative and is always rolled back.  Only the
+        winner is materialized later by ``MultiSubgraphBuffer.finalize``.
+        """
+        # The candidate is lowered after Scheduler construction has started,
+        # but before its dependency maps exist.  Lower it under the same
+        # pre-scheduler contract as ordinary graph lowering, then restore this
+        # scheduler for temporary node construction and benchmarking.
+        V.graph.scheduler = None  # pyrefly: ignore [bad-assignment]
+        try:
+            plan_context = choice.speculative_fusion_plan()
+            plan = plan_context.__enter__()
+        finally:
+            V.graph.scheduler = self
+
+        try:
+            # These operations were lowered after GraphLowering.finalize(), so
+            # their fresh intermediate buffers have not gone through normal
+            # layout finalization yet.  Temporary scheduler nodes require
+            # fixed layouts when extracting dependencies.
+            for buffer in plan.buffers:
+                buffer.decide_layout()
+            node_groups = tuple(
+                tuple(self.create_scheduler_node(op) for op in operation_group)
+                for operation_group in plan.operation_groups
+            )
+            scheduler_nodes = [node for group in node_groups for node in group]
+
+            with self._temporary_fusion_plan_state(scheduler_nodes):
+                users: defaultdict[str, list[NodeUser]] = defaultdict(list)
+                for node in scheduler_nodes:
+                    for read in node.read_writes.reads:
+                        if read.name in self.name_to_buf:
+                            users[read.name].append(NodeUser(node))
+                plan_output_names = OrderedSet(
+                    output.get_name()
+                    for output in pytree.tree_leaves(plan.output)
+                    if hasattr(output, "get_name")
+                )
+                if not plan_output_names:
+                    raise AssertionError("fusion plan must have a tensor output")
+                for output_name in plan_output_names:
+                    if output_name not in self.name_to_buf:
+                        raise AssertionError(
+                            f"fusion-plan output {output_name} has no scheduler buffer"
+                        )
+                    users[output_name].append(
+                        NodeUser(OutputNode(StarDep(output_name)))
+                    )
+                for name, buffer in self.name_to_buf.items():
+                    buffer.set_users(users[name])
+
+                produced_names = [
+                    OrderedSet(
+                        output.get_name()
+                        for node in group
+                        for output in node.get_outputs()
+                    )
+                    for group in node_groups
+                ]
+                workspace_names: OrderedSet[str] = OrderedSet()
+                for group_index, names in enumerate(produced_names[:-1]):
+                    later_reads = OrderedSet(
+                        read.name
+                        for later_group in node_groups[group_index + 1 :]
+                        for node in later_group
+                        for read in node.read_writes.reads
+                        if hasattr(read, "name")
+                    )
+                    workspace_names.update(names & later_reads)
+                plan.workspace_names = tuple(sorted(workspace_names))
+
+                group_paths: list[str] = []
+                for group_index, group in enumerate(node_groups):
+                    group_timing, group_path = self.benchmark_fused_nodes(group)
+                    if not math.isfinite(group_timing):
+                        choice.annotations["fusion_plan_rejection"] = (
+                            f"fusion-plan group {group_index} failed benchmarking"
+                        )
+                        return float("inf")
+                    group_paths.append(group_path)
+
+                input_values = {
+                    input_node.get_name(): value
+                    for input_node, value in zip(choice.input_nodes, args)
+                }
+                modules: list[ModuleType] = []
+                module_defaults: list[tuple[Any, ...]] = []
+                module_arg_names: list[tuple[str, ...]] = []
+                for path in group_paths:
+                    key = os.path.splitext(os.path.basename(path))[0]
+                    module = PyCodeCache.load_by_key_path(key, path)
+                    if getattr(module, "benchmark_artifact_kind", None) != "triton":
+                        raise NotImplementedError(
+                            "ordered fusion-plan benchmarking currently supports "
+                            "only Triton-generated groups"
+                        )
+                    arg_names = getattr(module, "arg_names", None)
+                    if not isinstance(arg_names, tuple) or not all(
+                        isinstance(name, str) for name in arg_names
+                    ):
+                        raise NotImplementedError(
+                            "fusion-plan benchmark module has no argument metadata"
+                        )
+                    defaults = tuple(module.get_args())
+                    if len(arg_names) > len(defaults):
+                        raise AssertionError(
+                            "fusion-plan argument metadata exceeds generated arguments"
+                        )
+                    modules.append(module)
+                    module_defaults.append(defaults)
+                    module_arg_names.append(arg_names)
+
+                allocation_names = OrderedSet[str]()
+                for group_index, arg_names in enumerate(module_arg_names):
+                    allocation_names.update(
+                        name
+                        for name in arg_names
+                        if name in produced_names[group_index]
+                        and name not in input_values
+                        and name not in V.graph.constants
+                    )
+                expected_allocation_names = workspace_names | plan_output_names
+                if allocation_names != expected_allocation_names:
+                    raise AssertionError(
+                        "fusion-plan allocation ABI does not match its workspaces "
+                        f"and outputs: expected {tuple(expected_allocation_names)}, "
+                        f"got {tuple(allocation_names)}"
+                    )
+
+                def run_complete_plan():
+                    values = dict(input_values)
+                    for group_index, (module, defaults, arg_names) in enumerate(
+                        zip(modules, module_defaults, module_arg_names)
+                    ):
+                        call_args = list(defaults)
+                        for arg_index, name in enumerate(arg_names):
+                            if name in values:
+                                call_args[arg_index] = values[name]
+                            elif name in produced_names[group_index]:
+                                default = defaults[arg_index]
+                                if not isinstance(default, torch.Tensor):
+                                    raise AssertionError(
+                                        f"fusion-plan output {name} is not a tensor"
+                                    )
+                                values[name] = torch.empty_strided(
+                                    default.size(),
+                                    default.stride(),
+                                    dtype=default.dtype,
+                                    device=default.device,
+                                )
+                                call_args[arg_index] = values[name]
+                            elif name in V.graph.constants:
+                                call_args[arg_index] = V.graph.constants[name]
+                            elif isinstance(defaults[arg_index], torch.Tensor):
+                                raise NotImplementedError(
+                                    f"cannot bind fusion-plan tensor argument {name}"
+                                )
+                        module.call(tuple(call_args))
+                    return tuple(values[name] for name in plan_output_names)
+
+                timing = choice._benchmark_callable(run_complete_plan, *args)
+            choice.annotations["fusion_plan_group_sizes"] = tuple(
+                len(group) for group in node_groups
+            )
+            choice.annotations["fusion_plan_group_paths"] = tuple(group_paths)
+            choice.annotations["fusion_plan_workspace_names"] = plan.workspace_names
+            choice.annotations["fusion_plan_allocation_names"] = tuple(allocation_names)
+            choice.annotations["fusion_plan_complete_artifacts"] = tuple(group_paths)
+            choice.annotations.pop("fusion_plan_rejection", None)
+            return timing
+        except Exception as error:
+            choice.annotations["fusion_plan_rejection"] = repr(error)
+            if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
+                raise
+            return float("inf")
+        finally:
+            V.graph.scheduler = None  # pyrefly: ignore [bad-assignment]
+            try:
+                plan_context.__exit__(None, None, None)
+            finally:
+                V.graph.scheduler = self
 
     def generate_kernel_code_from_nodes(
         self,

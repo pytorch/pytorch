@@ -8626,6 +8626,61 @@ class SubgraphBuffer(ExternKernel):
         )
 
 
+class MultiSubgraphBuffer(ExternKernel):
+    """A bounded set of whole, potentially multi-kernel subgraph plans.
+
+    Selection is intentionally deferred until scheduler construction.  This is
+    the multi-operation counterpart to ``MultiTemplateBuffer``: the selected
+    choice is materialized into ordinary IR before dependency analysis, so only
+    the winning plan reaches memory planning and code generation.
+
+    This initial form defers complete-plan selection.  A later scheduler
+    transaction can use ``SubgraphChoiceCaller.speculative_inline`` to expose a
+    choice's internal template boundary before calling ``finalize``.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        input_nodes: list[Buffer],
+        choices: list[ChoiceCaller],
+        selection_name: str,
+        *,
+        benchmark_with_cudagraphs: bool = False,
+    ) -> None:
+        super().__init__(None, layout, input_nodes)
+        if not choices:
+            raise AssertionError("MultiSubgraphBuffer requires at least one choice")
+        self.choices = choices
+        self.selection_name = selection_name
+        self.benchmark_with_cudagraphs = benchmark_with_cudagraphs
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    def finalize(self) -> OperationBuffer:
+        from .select_algorithm import autotune_select_algorithm
+
+        output, _ = autotune_select_algorithm(
+            self.selection_name,
+            self.choices,
+            self.inputs,
+            self.layout,
+            benchmark_with_cudagraphs=self.benchmark_with_cudagraphs,
+            return_multi_template=False,
+        )
+        storage = output.data
+        if isinstance(storage, StorageBox):
+            storage = storage.data
+        if not isinstance(storage, OperationBuffer):
+            raise AssertionError(
+                "deferred subgraph choice must materialize an OperationBuffer"
+            )
+        return storage
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        raise AssertionError("MultiSubgraphBuffer must be finalized before codegen")
+
+
 class UserDefinedTritonKernel(ExternKernel):
     """
     A user-defined triton kernel (e.g. via @triton.jit).

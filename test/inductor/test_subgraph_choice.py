@@ -3,9 +3,13 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import torch
-from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+from torch._inductor.codegen.subgraph import (
+    MultiKernelFusionPlanChoice,
+    SubgraphChoiceCaller,
+)
 from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.lowering import register_lowering
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
@@ -50,6 +54,8 @@ class TestSubgraphChoice(TestCase):
         graph.name_to_op = {"op0": old_operation}
         graph.name_to_buffer = {"buf0": old_buffer}
         graph.env = {"old": object()}
+        graph.removed_buffers = {"removed_buffer"}
+        graph.removed_operations = {"removed_operation"}
 
         new_operation = MagicMock(operation_name="op1")
         new_buffer = MagicMock(name="buf1")
@@ -60,6 +66,8 @@ class TestSubgraphChoice(TestCase):
             graph.name_to_op["op1"] = new_operation
             graph.name_to_buffer["buf1"] = new_buffer
             graph.env["candidate"] = object()
+            graph.removed_buffers.add("candidate_buffer")
+            graph.removed_operations.add("candidate_operation")
             return "output"
 
         with (
@@ -79,6 +87,10 @@ class TestSubgraphChoice(TestCase):
         self.assertEqual(graph.name_to_op, {"op0": old_operation})
         self.assertEqual(graph.name_to_buffer, {"buf0": old_buffer})
         self.assertEqual(set(graph.env), {"old"})
+        self.assertEqual(graph.removed_buffers, {"removed_buffer"})
+        self.assertEqual(graph.removed_operations, {"removed_operation"})
+        self.assertIsNone(new_operation.operation_name)
+        self.assertIsNone(new_buffer.name)
 
     def test_speculative_inline_can_commit_graph_registrations(self):
         caller = object.__new__(SubgraphChoiceCaller)
@@ -92,6 +104,8 @@ class TestSubgraphChoice(TestCase):
         graph.name_to_op = {}
         graph.name_to_buffer = {}
         graph.env = {}
+        graph.removed_buffers = set()
+        graph.removed_operations = set()
         new_operation = MagicMock(operation_name="op0")
         new_buffer = MagicMock(name="buf0")
 
@@ -116,6 +130,199 @@ class TestSubgraphChoice(TestCase):
         self.assertEqual(graph.buffers, [new_buffer])
         self.assertEqual(graph.name_to_op, {"op0": new_operation})
         self.assertEqual(graph.name_to_buffer, {"buf0": new_buffer})
+
+    def test_speculative_inline_rolls_back_after_error(self):
+        caller = object.__new__(SubgraphChoiceCaller)
+        caller.gm = MagicMock()
+        caller.input_nodes = []
+        caller.name = "candidate"
+
+        graph = MagicMock()
+        graph.operations = []
+        graph.buffers = []
+        graph.name_to_op = {}
+        graph.name_to_buffer = {}
+        graph.env = {"old": object()}
+        graph.removed_buffers = set()
+        graph.removed_operations = set()
+        new_operation = MagicMock(operation_name="op0")
+        new_buffer = MagicMock(name="buf0")
+
+        def inline(*args, **kwargs):
+            graph.operations.append(new_operation)
+            graph.buffers.append(new_buffer)
+            graph.name_to_op["op0"] = new_operation
+            graph.name_to_buffer["buf0"] = new_buffer
+            return "output"
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.subgraph.inline_subgraph_to_ir_nodes",
+                side_effect=inline,
+            ),
+            self.assertRaisesRegex(RuntimeError, "reject candidate"),
+        ):
+            with caller.speculative_inline():
+                raise RuntimeError("reject candidate")
+
+        self.assertEqual(graph.operations, [])
+        self.assertEqual(graph.buffers, [])
+        self.assertEqual(graph.name_to_op, {})
+        self.assertEqual(graph.name_to_buffer, {})
+        self.assertEqual(set(graph.env), {"old"})
+
+    def test_benchmark_fused_nodes_preserves_flat_backend_contract(self):
+        scheduler = object.__new__(Scheduler)
+        backend = MagicMock()
+        backend.benchmark_fused_nodes.return_value = (1.25, "flat.py")
+        scheduler.get_backend = MagicMock(return_value=backend)
+        node = MagicMock()
+        node.get_device.return_value = torch.device("cuda")
+
+        result = scheduler.benchmark_fused_nodes([node])
+
+        self.assertEqual(result, (1.25, "flat.py"))
+        backend.benchmark_fused_nodes.assert_called_once_with([node])
+
+    def test_multi_kernel_fusion_plan_choice_owns_ordered_groups(self):
+        caller = object.__new__(MultiKernelFusionPlanChoice)
+        caller.gm = MagicMock()
+        caller.input_nodes = []
+        caller.name = "candidate"
+        first_operation = MagicMock(operation_name="op0")
+        second_operation = MagicMock(operation_name="op1")
+        first_buffer = MagicMock(name="buf0")
+        second_buffer = MagicMock(name="buf1")
+        caller.group_builder = lambda plan: (
+            (plan.operations[0],),
+            (plan.operations[1],),
+        )
+
+        graph = MagicMock()
+        graph.operations = []
+        graph.buffers = []
+        graph.name_to_op = {}
+        graph.name_to_buffer = {}
+        graph.env = {}
+        graph.removed_buffers = set()
+        graph.removed_operations = set()
+
+        def inline(*args, **kwargs):
+            graph.operations.extend((first_operation, second_operation))
+            graph.buffers.extend((first_buffer, second_buffer))
+            graph.name_to_op.update(op0=first_operation, op1=second_operation)
+            graph.name_to_buffer.update(buf0=first_buffer, buf1=second_buffer)
+            return "output"
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.subgraph.inline_subgraph_to_ir_nodes",
+                side_effect=inline,
+            ),
+        ):
+            with caller.speculative_fusion_plan() as plan:
+                self.assertEqual(
+                    plan.operation_groups,
+                    ((first_operation,), (second_operation,)),
+                )
+
+        self.assertEqual(graph.operations, [])
+        self.assertEqual(graph.buffers, [])
+
+    def test_multi_kernel_fusion_plan_benchmark_restores_scheduler_state(self):
+        scheduler = object.__new__(Scheduler)
+        scheduler.current_device = torch.device("cpu")
+        original_name_to_buf = {"original": MagicMock()}
+        scheduler.name_to_buf = original_name_to_buf
+
+        workspace = MagicMock()
+        workspace.get_name.return_value = "workspace"
+        output = MagicMock()
+        output.get_name.return_value = "output"
+        workspace_read = MagicMock()
+        workspace_read.name = "workspace"
+
+        first_node = MagicMock()
+        first_node.get_outputs.return_value = [workspace]
+        first_node.read_writes.reads = set()
+        second_node = MagicMock()
+        second_node.get_outputs.return_value = [output]
+        second_node.read_writes.reads = {workspace_read}
+
+        first_operation = MagicMock()
+        second_operation = MagicMock()
+        plan = MagicMock()
+        plan.buffers = []
+        plan.operation_groups = ((first_operation,), (second_operation,))
+        plan_output = MagicMock()
+        plan_output.get_name.return_value = "output"
+        plan.output = plan_output
+        context = MagicMock()
+        context.__enter__.return_value = plan
+
+        choice = MagicMock()
+        choice.input_nodes = []
+        choice.speculative_fusion_plan.return_value = context
+        choice._benchmark_callable.side_effect = lambda fn, *args: (fn(), 0.75)[1]
+        choice.annotations = {}
+
+        scheduler.create_scheduler_node = MagicMock(
+            side_effect=(first_node, second_node)
+        )
+
+        def benchmark_group(group):
+            scheduler.current_device = torch.device("cuda")
+            return 1.0, f"group-{len(group)}.py"
+
+        scheduler.benchmark_fused_nodes = MagicMock(side_effect=benchmark_group)
+        first_module = MagicMock()
+        first_module.benchmark_artifact_kind = "triton"
+        first_module.arg_names = ("workspace",)
+        first_module.get_args.return_value = (torch.empty(1),)
+        second_module = MagicMock()
+        second_module.benchmark_artifact_kind = "triton"
+        second_module.arg_names = ("workspace", "output")
+        second_module.get_args.return_value = (torch.empty(1), torch.empty(1))
+        graph = MagicMock()
+        graph.scheduler = scheduler
+        graph.current_device = torch.device("cpu")
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(
+                torch._inductor.scheduler.PyCodeCache,
+                "load_by_key_path",
+                side_effect=(first_module, second_module),
+            ),
+        ):
+            result = scheduler.benchmark_multi_kernel_fusion_plan(
+                choice, [], MagicMock()
+            )
+
+        self.assertEqual(result, 0.75)
+        self.assertEqual(graph.current_device, torch.device("cpu"))
+        self.assertIs(scheduler.name_to_buf, original_name_to_buf)
+        self.assertEqual(
+            choice.annotations["fusion_plan_workspace_names"], ("workspace",)
+        )
+        self.assertEqual(
+            choice.annotations["fusion_plan_complete_artifacts"],
+            ("group-1.py", "group-1.py"),
+        )
+        self.assertEqual(
+            choice.annotations["fusion_plan_allocation_names"],
+            ("workspace", "output"),
+        )
+        self.assertEqual(scheduler.benchmark_fused_nodes.call_count, 2)
+        first_module.call.assert_called_once()
+        second_module.call.assert_called_once()
+        self.assertIs(
+            first_module.call.call_args.args[0][0],
+            second_module.call.call_args.args[0][0],
+        )
+        context.__exit__.assert_called_once_with(None, None, None)
 
     def test_subgraph_decompose_k(self):
         from torch._inductor.kernel.mm import aten_mm
