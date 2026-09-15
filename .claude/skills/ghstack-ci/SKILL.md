@@ -82,9 +82,9 @@ Set `pr_number` to the selected PR and inspect its current checks:
 gh pr checks "$pr_number" --repo pytorch/pytorch --json name,state,workflow,link,bucket,completedAt
 ```
 
-Set `check_link` to a candidate failed gate's Actions `link`, such as
-`https://github.com/pytorch/pytorch/actions/runs/12345/job/67890`.
-Extract the run ID (12345 in that example) and inspect the run:
+Set `check_link` to a candidate failed gate's Actions `link`. For a link
+with the path `/pytorch/pytorch/actions/runs/12345/job/67890`, the run ID
+is `12345`. Extract it and inspect the run:
 
 ```bash
 run_id="${check_link#*/actions/runs/}"
