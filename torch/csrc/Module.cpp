@@ -30,6 +30,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -56,6 +57,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
@@ -2784,6 +2786,9 @@ PyObject* initModule() {
               c10::OperatorName(name, overload));
         });
   }
+  py_module.def("_current_cpp_fake_tensor_mode", []() -> py::object {
+    return getFakeModePyObj(c10::impl::FakeTensorModeTLS::get_state());
+  });
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def(
