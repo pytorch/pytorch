@@ -564,6 +564,17 @@
   - Lint
   - pull
 
+- name: Testing (Temporarily used for test refactoring)
+  patterns:
+  - torch/testing/**
+  - test/**
+  approved_by:
+  - fffrog
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Metamates
   patterns:
   - '*'
@@ -576,7 +587,6 @@
   - atalman
   - blaine-rister
   - bobrenjc93
-  - ColinPeppler
   - d4l3k
   - dcci
   - desertfire
@@ -598,7 +608,6 @@
   - jathu
   - jbschlosser
   - jeanschmidt
-  - jijunyan
   - kapilsh
   - karthickai
   - kqfu
