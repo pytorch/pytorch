@@ -235,6 +235,7 @@ at::Tensor logcumsumexp_backward(
 at::Tensor logcumsumexp_jvp(
     const at::Tensor& self_p,
     const at::Tensor& self_t,
+    const at::Tensor& result,
     int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
 at::Tensor unbind_backward_nested(
