@@ -210,6 +210,14 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
             f"{_RT} CUDARngStateHelper",
             "CUDARngStateHelper.set_new_offset",
         ),
+        id(rt.XPURngStateHelper.get_torch_state_as_tuple): (
+            f"{_RT} XPURngStateHelper",
+            "XPURngStateHelper.get_torch_state_as_tuple",
+        ),
+        id(rt.XPURngStateHelper.set_new_offset): (
+            f"{_RT} XPURngStateHelper",
+            "XPURngStateHelper.set_new_offset",
+        ),
     }
     return table
 
