@@ -15,7 +15,7 @@ from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
-from torch.distributed.tensor import Shard
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -258,6 +258,48 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_dtype_tp_grad_all_reduce(self):
+        # A parameter left Replicate on the TP mesh (e.g. a norm weight under
+        # sequence parallelism) has a Partial gradient, and FSDP itself issues
+        # the Partial -> Replicate all-reduce during post-backward.
+        # reduce_dtype must cover that collective, not only the reduce-scatter.
+        # The two TP-local partials are 1.0 and 2^-10, both exact in bf16;
+        # their sum is exact in fp32 but rounds back to 1.0 in bf16 (spacing
+        # 2^-8 at 1.0), so the low term is an exact witness of the collective
+        # dtype.
+        class Scale(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(dim))
+
+            def forward(self, x):
+                return x * self.weight
+
+        dp_size, tp_size = self.world_size // 2, 2
+        global_mesh = init_device_mesh(
+            device_type.type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = global_mesh["tp"]
+        dim = 32
+        model = Scale(dim).to(device_type)
+        model.weight = nn.Parameter(
+            distribute_tensor(model.weight.detach(), tp_mesh, [Replicate()])
+        )
+        fully_shard(
+            model,
+            mesh=global_mesh["dp"],
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+            ),
+        )
+        x_local = torch.zeros(8, dim, device=device_type, dtype=torch.bfloat16)
+        x_local[0].fill_(1.0 if tp_mesh.get_local_rank() == 0 else 2.0**-10)
+        x = DTensor.from_local(x_local, tp_mesh, [Shard(0)], run_check=False)
+        model(x).to_local().sum().backward()
+        grad = model.weight.grad.full_tensor()
+        self.assertEqual(grad, torch.full_like(grad, 1.0 + 2.0**-10), atol=0, rtol=0)
 
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
