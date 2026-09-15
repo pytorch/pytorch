@@ -272,6 +272,169 @@ if HAS_CUDA_AND_TRITON:
         def num_checkpoints(self):
             return self.get_manager().debug_checkpointing_counter
 
+        # Each mempool test runs twice: once with slow/fast cudagraph asserts off
+        # ("normal") and once with them on, so check_memory_pool /
+        # debug_assert_invariants are exercised against the managed pools.
+        @parametrize("slow_asserts", (False, True))
+        def test_registered_mempool_intermediate(self, slow_asserts):
+            # An allocation inside a captured region from a registered pool
+            # should be valid / not disable cuda graphs.
+            from torch._inductor.cudagraph_trees import (
+                register_external,
+                unregister_external,
+            )
+
+            pool = torch.cuda.MemPool()
+            register_external(pool, device=self.device_idx)
+            out = None
+            try:
+                with config.patch(
+                    {
+                        "triton.slow_path_cudagraph_asserts": slow_asserts,
+                        "triton.fast_path_cudagraph_asserts": slow_asserts,
+                    }
+                ):
+
+                    def fn(pool, x):
+                        with torch.cuda.use_mem_pool(pool):
+                            y = x + 1
+                        return y + 1
+
+                    opt = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+                    for i in range(3):
+                        torch.compiler.cudagraph_mark_step_begin()
+                        x = torch.full((16,), float(i), device="cuda")
+                        out = opt(pool, x)
+                        self.assertEqual(out, x + 2)
+                    # a tree manager recorded => cudagraphs were not disabled
+                    self.assertIsNotNone(self.get_manager())
+            finally:
+                out = None
+                unregister_external(pool, device=self.device_idx)
+                del pool
+                gc.collect()
+                torch.cuda.empty_cache()
+
+        @parametrize("slow_asserts", (False, True))
+        def test_registered_mempool_returned_output(self, slow_asserts):
+            # A tensor allocated in a registered pool can be a cudagraph output:
+            # it lives in a managed pool and is validated/checkpointed there.
+            from torch._inductor.cudagraph_trees import (
+                register_external,
+                unregister_external,
+            )
+
+            pool = torch.cuda.MemPool()
+            register_external(pool, device=self.device_idx)
+            out = None
+            try:
+                with config.patch(
+                    {
+                        "triton.slow_path_cudagraph_asserts": slow_asserts,
+                        "triton.fast_path_cudagraph_asserts": slow_asserts,
+                    }
+                ):
+
+                    def fn(pool, x):
+                        with torch.cuda.use_mem_pool(pool):
+                            y = x + 1
+                        return y
+
+                    opt = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+                    for i in range(3):
+                        torch.compiler.cudagraph_mark_step_begin()
+                        x = torch.full((16,), float(i), device="cuda")
+                        out = opt(pool, x)
+                        self.assertEqual(out, x + 1)
+                    self.assertIsNotNone(self.get_manager())
+            finally:
+                out = None
+                unregister_external(pool, device=self.device_idx)
+                del pool
+                gc.collect()
+                torch.cuda.empty_cache()
+
+        @parametrize("slow_asserts", (False, True))
+        def test_unregistered_mempool_disables_cudagraphs(self, slow_asserts):
+            # Without registration a user pool is unmanaged, so inductor disables
+            # cudagraphs for the graph. Result is still correct.
+            pool = torch.cuda.MemPool()
+            out = None
+            try:
+                with config.patch(
+                    {
+                        "triton.slow_path_cudagraph_asserts": slow_asserts,
+                        "triton.fast_path_cudagraph_asserts": slow_asserts,
+                    }
+                ):
+
+                    def fn(pool, x):
+                        with torch.cuda.use_mem_pool(pool):
+                            y = x + 1
+                        return y + 1
+
+                    opt = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+                    x = torch.ones(16, device="cuda")
+                    out = opt(pool, x)
+                    self.assertEqual(out, x + 2)
+                    # cudagraphs were disabled: no tree manager was created
+                    self.assertIsNone(self.get_manager())
+            finally:
+                out = None
+                del pool
+                gc.collect()
+                torch.cuda.empty_cache()
+
+        @parametrize("slow_asserts", (False, True))
+        def test_registered_mempool_checkpoint(self, slow_asserts):
+            # A registered pool holding a persistent (non-cudagraph) buffer is
+            # checkpointed/restored alongside the private pool at every tree
+            # branch. Also exercises the shared-pool leak exclusion: the buffer is
+            # a live block in a managed pool that is NOT a cudagraph output.
+            from torch._inductor.cudagraph_trees import (
+                register_external,
+                unregister_external,
+            )
+
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                persistent = torch.ones(8, device="cuda")
+            register_external(pool, device=self.device_idx)
+            out = None
+            try:
+                with config.patch(
+                    {
+                        "triton.slow_path_cudagraph_asserts": slow_asserts,
+                        "triton.fast_path_cudagraph_asserts": slow_asserts,
+                    }
+                ):
+
+                    def foo(x):
+                        x = x + x + x
+                        y = x + 1
+                        torch._dynamo.graph_break()
+                        z = x * x
+                        if z.sum() > 0:
+                            return y + 1
+                        else:
+                            return y
+
+                    foo_opt = torch.compile(foo)
+                    self.run_twc(foo_opt, torch.zeros([5], device="cuda"))
+                    out = self.run_twc(foo_opt, torch.ones([5], device="cuda"))
+                    # x+x+x=3, y=4, z.sum()>0 so returns y+1=5
+                    self.assertEqual(out, torch.full([5], 5.0, device="cuda"))
+                    self.assertGreater(self.num_checkpoints(), 0)
+                    # the registered pool's buffer survived checkpoint/restore
+                    self.assertEqual(persistent, torch.ones(8, device="cuda"))
+            finally:
+                out = None
+                torch._dynamo.reset()
+                unregister_external(pool, device=self.device_idx)
+                del persistent, pool
+                gc.collect()
+                torch.cuda.empty_cache()
+
         def test_run_simple(self):
             def foo(x):
                 return x * x * x
