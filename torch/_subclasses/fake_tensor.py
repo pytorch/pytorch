@@ -389,7 +389,7 @@ def maybe_get_fake_device(x: object) -> torch.device | None:
         return x.fake_device
     if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         try:
-            return torch._C._fake_tensor_device(x)
+            return torch._C._fake_device(x)
         except RuntimeError:
             return None
     return None
