@@ -11,6 +11,7 @@ import re
 import sys
 import tempfile
 import types
+import weakref
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack, nullcontext
 from dataclasses import dataclass
@@ -1457,6 +1458,18 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
+def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
+    # What prepare_f_locals reads, with defaults and cells by identity. Signature
+    # equality is unusable here: Parameter.__eq__ takes bool() of
+    # `default == default`, which raises for a tensor default.
+    env, params = artifacts.runtime_env, artifacts.signature.parameters.values()
+    return (
+        tuple([(p.name, p.kind, id(p.default)) for p in params]),
+        env.bytecode.co_freevars,
+        tuple([id(cell) for cell in env.closure or ()]),
+    )
+
+
 @dataclass
 class AOTCompiledModel:
     """A module's forward compiled for several calls, with dispatch over them.
@@ -1466,6 +1479,12 @@ class AOTCompiledModel:
     ``compiled_results`` must hold at least one result: ``aot_compile_module``
     refuses an empty list, and neither the constructor nor ``deserialize``
     checks, so an empty one is the caller's error.
+
+    ``compiled_results`` may be edited between calls. A call judges the list
+    it began with, and results that bind alike -- equal parameter names, kinds
+    and default objects, the same closure cells, as every result of one
+    ``_aot_compile`` has -- share one binding of the call; whether they do is
+    decided again whenever the list's contents change.
 
     Dispatch walks ``compiled_results`` in order and serves the first result
     whose guard check accepts the call. One exit of ``check()`` refuses without
@@ -1485,15 +1504,47 @@ class AOTCompiledModel:
 
     model: torch.nn.Module
     compiled_results: list[AOTCompiledFunction]
+    # The results last judged and whether one bind of a call serves them all.
+    # compiled_results is public, so a call that finds them changed decides
+    # again. One field on purpose: a single attribute store publishes contents
+    # and verdict together (an instance-dict store is atomic under the GIL and
+    # locked on free-threaded builds), so a reader sees the old pair or the new
+    # one, never one list's contents beside another's verdict; two fields have
+    # no store order that keeps them consistent. Weak references, so a result
+    # the caller dropped is not kept alive here. The default is the verdict
+    # over no results.
+    _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
+        dataclasses.field(default=((), False), init=False, compare=False, repr=False)
+    )
+
+    def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
+        prior, shared = self._binding_verdict
+        if len(results) == len(prior) and all(w() is r for w, r in zip(prior, results)):
+            return shared
+        key = _binding_key(results[0]._artifacts) if results else None
+        shared = key is not None and all(
+            _binding_key(result._artifacts) == key for result in results[1:]
+        )
+        self._binding_verdict = (tuple(weakref.ref(r) for r in results), shared)
+        return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        # compiled_results is public, so read it once: both passes below judge
-        # the results this call began with, each on the binding made for it.
+        # compiled_results is public, so read it once: every stage below judges
+        # the results this call began with, on the binding decided over them.
         results = tuple(self.compiled_results)
         bound: list[dict[str, object]] = []
+        # Whether results that bind alike reuse the first one's binding (a bind
+        # costs more than a check()), decided once a second result is reached
+        # so a call the first result serves pays nothing for it.
+        shared: bool | None = None
         # check() ignores _guard_check_enabled, so scan every result.
         for result in results:
-            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+            if bound and shared is None:
+                shared = self._binds_alike(results)
+            if shared:
+                f_locals = bound[0]
+            else:
+                f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
             bound.append(f_locals)
             if result._live_guard_manager().check(f_locals):
                 # The guards just passed: call fn rather than result(), whose
