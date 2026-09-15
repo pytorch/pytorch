@@ -182,6 +182,29 @@ class TestCodegenTriton(InductorTestCase):
             finally:
                 kernel.range_trees = saved_range_trees
 
+    def test_device_tma_metadata_ignores_removed_buffers(self):
+        kernel = TritonKernel(
+            {"x": sympy.Integer(4), "r0_": sympy.Integer(512)},
+            features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(512)),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        kernel._device_tma_buffers.add("removed_output")
+        kernel.tma_min_block_sizes["XBLOCK"] = 4
+
+        with V.set_kernel_handler(kernel):
+            self.assertTrue(kernel.uses_device_tma)
+            self.assertEqual(
+                kernel.inductor_meta_per_kernel()["tma_min_block_sizes"],
+                {"XBLOCK": 4},
+            )
+            self.assertTrue(kernel.inductor_meta_per_kernel()["uses_device_tma"])
+
+            self._graph.removed_buffers.add("removed_output")
+            self.assertFalse(kernel.uses_tma)
+            self.assertNotIn("tma_min_block_sizes", kernel.inductor_meta_per_kernel())
+            self.assertNotIn("uses_device_tma", kernel.inductor_meta_per_kernel())
+
     def test_importable_constexpr_types_nested_values(self):
         type_specs = get_importable_constexpr_types(
             [
