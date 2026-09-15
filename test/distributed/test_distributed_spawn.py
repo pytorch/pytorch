@@ -9,7 +9,6 @@ if os.environ.get("BACKEND") == "nccl":
 
 import torch
 import torch.distributed as dist
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 _PRIOR_FP32_PRECISION: str | None = None
@@ -72,14 +71,12 @@ BACKEND = os.environ["BACKEND"]
 if BACKEND in _allowed_backends:
 
     class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
-        hw_classification = HardwareClassification.CUDA
+        hw_classification = HardwareClassification.GENERIC
 
         def setUp(self):
             super().setUp()
             self._spawn_processes()
             torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
-
-    instantiate_device_type_tests(TestDistBackendWithSpawn, globals(), only_for="cuda")
 
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")
