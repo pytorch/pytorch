@@ -11,7 +11,7 @@ from torch._utils_internal import justknobs_check
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from .runtime.runtime_utils import triton_cache_dir
+from .runtime.runtime_utils import triton_cache_dir, triton_hash_to_path_key
 from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
 
 
@@ -282,15 +282,45 @@ class TritonBundler:
         with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries
             if entries is not None:
-                # Only bundle winning autotuning configs. If _winners is
-                # non-empty, skip entries whose kernel_hash is not a winner.
-                # When _winners is empty (single-config kernels, or no
-                # autotuning ran), bundle everything.
+                # Collect the statically launchable autotuners first: what
+                # they reference decides what the bundle has to contain.
+                if config.use_static_triton_launcher:
+                    static_autotuners, static_kernel_names = (
+                        cls.collect_static_autotuners()
+                    )
+                else:
+                    static_autotuners = []
+                    static_kernel_names = []
                 winners = cls._winners
+                # load_autotuners() will ask for everything saved; prune to winner
+                required: OrderedSet[str] = OrderedSet()
+                for autotuner in static_autotuners:
+                    if winners:
+                        kept = [
+                            compile_result
+                            for compile_result in autotuner.kernel.compile_results
+                            if triton_hash_to_path_key(compile_result.kernel.hash)
+                            in winners
+                        ]
+                        if kept:
+                            autotuner.kernel.compile_results = kept
+                    for compile_result in autotuner.kernel.compile_results:
+                        required.add(
+                            triton_hash_to_path_key(compile_result.kernel.hash)
+                        )
+                # Only bundle winning autotuning configs. If _winners is
+                # non-empty, skip entries whose kernel_hash is neither a winner
+                # nor referenced by a saved autotuner. When _winners is empty
+                # (single-config kernels, or no autotuning ran), bundle
+                # everything.
                 result: list[TritonKernelArtifacts] = []
                 kernel_names: list[str] = []
                 for entry in entries:
-                    if winners and entry.kernel_hash not in winners:
+                    if (
+                        winners
+                        and entry.kernel_hash not in winners
+                        and entry.kernel_hash not in required
+                    ):
                         log.debug("Skipping non-winning kernel %s", entry.kernel_hash)
                         continue
                     artifacts: list[TritonKernelArtifact] = []
@@ -340,13 +370,6 @@ class TritonBundler:
                                 artifacts,
                             )
                         )
-                if config.use_static_triton_launcher:
-                    static_autotuners, static_kernel_names = (
-                        cls.collect_static_autotuners()
-                    )
-                else:
-                    static_autotuners = []
-                    static_kernel_names = []
                 cls.end_compile()
                 return TritonBundle(result, static_autotuners), TritonBundlerMetadata(
                     kernel_names, static_kernel_names
