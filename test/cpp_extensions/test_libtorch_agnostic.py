@@ -63,6 +63,7 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_12: Extension built with TORCH_TARGET_VERSION=2.12.0
     - libtorch_agn_2_13: Extension built with TORCH_TARGET_VERSION=2.13.0
     - libtorch_agn_2_14: Extension built with TORCH_TARGET_VERSION=2.14.0
+    - libtorch_agn_2_15: Extension built with TORCH_TARGET_VERSION=2.15.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -137,6 +138,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.14 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 15):
+            try:
+                import libtorch_agn_2_15  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_15_extension"
+                )
+        else:
+            print(f"Skipping 2.15 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -427,6 +438,40 @@ class TestLibtorchAgnostic(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
             libtorch_agnostic._interop.pyobject_roundtrip("not a tensor")
+
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_my_add(self, device):
+        """Test add.Tensor op."""
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(3, 4, device=device)
+
+        # Test basic addition (alpha=1.0)
+        result = libtorch_agnostic.ops.my_add(a, b)
+        expected = torch.add(a, b)
+        self.assertEqual(result, expected)
+
+        # Test addition with alpha=2.0
+        result_alpha = libtorch_agnostic.ops.my_add(a, b, alpha=2.0)
+        expected_alpha = torch.add(a, b, alpha=2.0)
+        self.assertEqual(result_alpha, expected_alpha)
+
+        # Test addition with alpha=0.5
+        result_half = libtorch_agnostic.ops.my_add(a, b, alpha=0.5)
+        expected_half = torch.add(a, b, alpha=0.5)
+        self.assertEqual(result_half, expected_half)
+
+        # Test addition with negative alpha
+        result_neg = libtorch_agnostic.ops.my_add(a, b, alpha=-1.0)
+        expected_neg = torch.add(a, b, alpha=-1.0)
+        self.assertEqual(result_neg, expected_neg)
+
+        # Test addition with broadcasting
+        c = torch.randn(4, device=device)
+        result_broadcast = libtorch_agnostic.ops.my_add(a, c)
+        expected_broadcast = torch.add(a, c)
+        self.assertEqual(result_broadcast, expected_broadcast)
 
     # TODO: Debug this:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
