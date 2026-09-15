@@ -1,0 +1,224 @@
+diff --git a/test/cpython/v3_13/test_io.py b/test/cpython/v3_13/test_io.py
+index 0da611a..68435cb 100644
+--- a/test/cpython/v3_13/test_io.py
++++ b/test/cpython/v3_13/test_io.py
+@@ -1,3 +1,23 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_io.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for the io module."""
+ 
+ # Tests of io are scattered over the test suite:
+@@ -333,7 +353,7 @@ class PyMockNonBlockWriterIO(MockNonBlockWriterIO, pyio.RawIOBase):
+     BlockingIOError = pyio.BlockingIOError
+ 
+ 
+-class IOTest(unittest.TestCase):
++class IOTest(CPythonTestCase):
+ 
+     def setUp(self):
+         os_helper.unlink(os_helper.TESTFN)
+@@ -1091,7 +1111,7 @@ class CIOTest(IOTest):
+         self.assertIsNone(wr(), wr)
+ 
+ @support.cpython_only
+-class TestIOCTypes(unittest.TestCase):
++class TestIOCTypes(__TestCase):
+     def setUp(self):
++        super().setUp()
+         _io = import_helper.import_module("_io")
+         self.types = [
+@@ -1199,7 +1219,7 @@ class PyIOTest(IOTest):
+ 
+ 
+ @support.cpython_only
+-class APIMismatchTest(unittest.TestCase):
++class APIMismatchTest(__TestCase):
+ 
+     def test_RawIOBase_io_in_pyio_match(self):
+         """Test that pyio RawIOBase class has all c RawIOBase methods"""
+@@ -1425,7 +1445,7 @@ class SizeofTest:
+         bufio.close()
+         self.assertEqual(sys.getsizeof(bufio), size)
+ 
+-class BufferedReaderTest(unittest.TestCase, CommonBufferedTests):
++class BufferedReaderTest(CPythonTestCase, CommonBufferedTests):
+     read_mode = "rb"
+ 
+     def test_constructor(self):
+@@ -1819,7 +1839,7 @@ class PyBufferedReaderTest(BufferedReaderTest):
+     tp = pyio.BufferedReader
+ 
+ 
+-class BufferedWriterTest(unittest.TestCase, CommonBufferedTests):
++class BufferedWriterTest(CommonBufferedTests):
+     write_mode = "wb"
+ 
+     def test_constructor(self):
+@@ -2115,7 +2135,7 @@ class BufferedWriterTest(unittest.TestCase, CommonBufferedTests):
+ 
+ 
+ 
+-class CBufferedWriterTest(BufferedWriterTest, SizeofTest):
++class CBufferedWriterTest(BufferedWriterTest, SizeofTest, __TestCase):
+     tp = io.BufferedWriter
+ 
+     def test_initialization(self):
+@@ -2151,10 +2171,10 @@ class CBufferedWriterTest(BufferedWriterTest, SizeofTest):
+             self.tp(self.BytesIO(), 1024, 1024, 1024)
+ 
+ 
+-class PyBufferedWriterTest(BufferedWriterTest):
++class PyBufferedWriterTest(BufferedWriterTest, __TestCase):
+     tp = pyio.BufferedWriter
+ 
+-class BufferedRWPairTest(unittest.TestCase):
++class BufferedRWPairTest:
+ 
+     def test_constructor(self):
+         pair = self.tp(self.MockRawIO(), self.MockRawIO())
+@@ -2362,10 +2382,10 @@ class BufferedRWPairTest(unittest.TestCase):
+         brw = None
+         ref = None # Shouldn't segfault.
+ 
+-class CBufferedRWPairTest(BufferedRWPairTest):
++class CBufferedRWPairTest(BufferedRWPairTest, __TestCase):
+     tp = io.BufferedRWPair
+ 
+-class PyBufferedRWPairTest(BufferedRWPairTest):
++class PyBufferedRWPairTest(BufferedRWPairTest, __TestCase):
+     tp = pyio.BufferedRWPair
+ 
+ 
+@@ -2740,7 +2760,7 @@ def lookupTestDecoder(name):
+             incrementaldecoder=StatefulIncrementalDecoder)
+ 
+ 
+-class StatefulIncrementalDecoderTest(unittest.TestCase):
++class StatefulIncrementalDecoderTest(__TestCase):
+     """
+     Make sure the StatefulIncrementalDecoder actually works.
+     """
+@@ -2783,7 +2803,7 @@ class StatefulIncrementalDecoderTest(unittest.TestCase):
+         self.assertEqual(d.decode(b'oiabcd'), '')
+         self.assertEqual(d.decode(b'', 1), 'abcd.')
+ 
+-class TextIOWrapperTest(unittest.TestCase):
++class TextIOWrapperTest:
+ 
+     def setUp(self):
+         self.testdata = b"AAA\r\nBBB\rCCC\r\nDDD\nEEE\r\n"
+@@ -4027,7 +4047,7 @@ def _to_memoryview(buf):
+     return memoryview(arr)
+ 
+ 
+-class CTextIOWrapperTest(TextIOWrapperTest):
++class CTextIOWrapperTest(TextIOWrapperTest, __TestCase):
+     io = io
+     shutdown_error = "LookupError: unknown encoding: ascii"
+ 
+@@ -4127,12 +4147,12 @@ class CTextIOWrapperTest(TextIOWrapperTest):
+                          buf._write_stack)
+ 
+ 
+-class PyTextIOWrapperTest(TextIOWrapperTest):
++class PyTextIOWrapperTest(TextIOWrapperTest, __TestCase):
+     io = pyio
+     shutdown_error = "LookupError: unknown encoding: ascii"
+ 
+ 
+-class IncrementalNewlineDecoderTest(unittest.TestCase):
++class IncrementalNewlineDecoderTest:
+ 
+     def check_newline_decoding_utf8(self, decoder):
+         # UTF-8 specific tests for a newline decoder
+@@ -4249,7 +4269,7 @@ class IncrementalNewlineDecoderTest(unittest.TestCase):
+         decoder = self.IncrementalNewlineDecoder(decoder, translate=0)
+         self.assertEqual(decoder.decode(b"\r\r\n"), "\r\r\n")
+ 
+-class CIncrementalNewlineDecoderTest(IncrementalNewlineDecoderTest):
++class CIncrementalNewlineDecoderTest(IncrementalNewlineDecoderTest, __TestCase):
+     @support.cpython_only
+     def test_uninitialized(self):
+         uninitialized = self.IncrementalNewlineDecoder.__new__(
+@@ -4260,13 +4280,13 @@ class CIncrementalNewlineDecoderTest(IncrementalNewlineDecoderTest):
+         self.assertRaises(ValueError, uninitialized.reset)
+ 
+ 
+-class PyIncrementalNewlineDecoderTest(IncrementalNewlineDecoderTest):
++class PyIncrementalNewlineDecoderTest(IncrementalNewlineDecoderTest, __TestCase):
+     pass
+ 
+ 
+ # XXX Tests for open()
+ 
+-class MiscIOTest(unittest.TestCase):
++class MiscIOTest:
+ 
+     # for test__all__, actual values are set in subclasses
+     name_of_module = None
+@@ -4639,7 +4659,7 @@ class MiscIOTest(unittest.TestCase):
+         self.assertEqual(b"utf-8", proc.out.strip())
+ 
+ 
+-class CMiscIOTest(MiscIOTest):
++class CMiscIOTest(MiscIOTest, __TestCase):
+     io = io
+     name_of_module = "io", "_io"
+     extra_exported = "BlockingIOError",
+@@ -4705,7 +4725,7 @@ class CMiscIOTest(MiscIOTest):
+         self.check_daemon_threads_shutdown_deadlock('stderr')
+ 
+ 
+-class PyMiscIOTest(MiscIOTest):
++class PyMiscIOTest(MiscIOTest, __TestCase):
+     io = pyio
+     name_of_module = "_pyio", "io"
+     extra_exported = "BlockingIOError", "open_code",
+@@ -4713,7 +4733,7 @@ class PyMiscIOTest(MiscIOTest):
+ 
+ 
+ @unittest.skipIf(os.name == 'nt', 'POSIX signals required for this test.')
+-class SignalsTest(unittest.TestCase):
++class SignalsTest:
+ 
+     def setUp(self):
+         self.oldalrm = signal.signal(signal.SIGALRM, self.alarm_interrupt)
+@@ -4967,10 +4987,10 @@ class SignalsTest(unittest.TestCase):
+         self.check_interrupted_write_retry("x", mode="w", encoding="latin1")
+ 
+ 
+-class CSignalsTest(SignalsTest):
++class CSignalsTest(SignalsTest, __TestCase):
+     io = io
+ 
+-class PySignalsTest(SignalsTest):
++class PySignalsTest(SignalsTest, __TestCase):
+     io = pyio
+ 
+     # Handling reentrancy issues would slow down _pyio even more, so the
+@@ -5018,5 +5038,6 @@ def load_tests(loader, tests, pattern):
+         suite.addTest(loader.loadTestsFromTestCase(test))
+     return suite
+ 
++
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
