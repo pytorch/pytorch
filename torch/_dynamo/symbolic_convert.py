@@ -260,18 +260,11 @@ ExceptionTypes: TypeAlias = (
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
     """
-    Resolve the name once per process, at first use, and keep returning that
-    object: a sys.modules rebind before the first call is what gets cached, one
-    after it is never followed. The one caller, nn_modules_globals_vt, wants one
-    fixed module object for the process rather than the live entry
-    import_source follows.
+    Import the named module and cache the result. importlib.import_module()
+    seems to do some filesystem checking to validate the name so not caching
+    this can be slow.
     """
     return importlib.import_module(name)
-
-
-# What import_source last bound under each name: a name gone from sys.modules
-# since is served from here rather than re-imported inside a trace.
-_import_source_cache: dict[str, types.ModuleType] = {}
 
 
 def _registered_module_for_globals(
@@ -2389,10 +2382,6 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self) -> VariableTracker:
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        # Deliberately the module memoized at first use, not the live
-        # sys.modules entry the alias binds: this stands in for the hook dicts
-        # nn.Module._call_impl reads through its own __globals__, which no
-        # sys.modules rebind moves either.
         fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
@@ -2436,18 +2425,7 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            # Not the memoized _import_module: the guards this alias roots
-            # read attributes off whatever IMPORT_NAME pushed, which is what
-            # __import__ returned, i.e. the live sys.modules entry, and a
-            # rebind can have replaced that since _import_module cached its
-            # answer. importlib.import_module returns the live entry and, like
-            # __import__, waits out a module another thread is still executing.
-            # A name removed from sys.modules since keeps the object it last
-            # resolved to: the program's objects came from that one, and
-            # re-importing here would run the module body inside the trace.
-            if module_name in sys.modules or module_name not in _import_source_cache:
-                _import_source_cache[module_name] = importlib.import_module(module_name)
-            value = _import_source_cache[module_name]
+            value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope

@@ -5,7 +5,6 @@ import importlib
 import inspect
 import io
 import logging
-import operator
 import os
 import pickle
 import re
@@ -23,7 +22,7 @@ from torch._dynamo.convert_frame import GraphRuntimeEnv
 from torch._dynamo.graph_utils import _graph_device_type
 from torch._dynamo.package import FunctionPicklerBase, SerializedCode, SystemInfo
 
-from . import convert_frame, external_utils
+from . import convert_frame
 from .aot_compile_types import (
     BundledAOTAutogradSerializableCallable,
     SerializableCallable,
@@ -53,7 +52,6 @@ _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
 # The G['NAME'] operands of a symbolic-shape guard installed as a Python lambda.
 # Anchored: shape exprs are source names, so L['self'].myG['k'] carries no global.
 _SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
-_UNBOUND = object()
 
 # Names Dynamo mints into the scope the guards resolve against, rather than
 # names the caller wrote: the __import_* module aliases, the __builtins_dict___N
@@ -94,37 +92,6 @@ def _names_a_missing_global(text: str) -> bool:
     if match is None:
         return False
     return not match["name"].strip("\"'").startswith(_MINTED_GLOBAL_PREFIXES)
-
-
-def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
-    """What a guard tree meant to raise, as ``(type name, exception)``.
-
-    Every place that names such a raise reads it from here, so a report line and
-    the warning the serving paths log cannot describe one throw differently."""
-    # A tree that returns to pybind with an exception still set arrives here as
-    # a SystemError whose own str() is the bound method's repr and says nothing
-    # about what raised, so report what _PyErr_FormatFromCause chained behind
-    # it. __cause__ and not __context__: that call sets both, but __context__ is
-    # also set implicitly for ANY exception raised while another was being
-    # handled, so reading it would quote the exception the CALLER was handling
-    # for a SystemError that arrived some other way.
-    cause = e.__cause__ if isinstance(e, SystemError) else None
-    reason: BaseException = e if cause is None else cause
-    return type(reason).__name__, reason
-
-
-def _raised_line(index: int, e: Exception) -> str:
-    kind, reason = _unwrapped_raise(e)
-    # Keyed on that chain, not on where the raise came from: the clause explains
-    # why the line quotes a chained exception instead of the one the tree
-    # raised, so a raise with nothing chained -- a TORCH_CHECK inside the tree,
-    # which pybind translates at this same boundary into a plain RuntimeError --
-    # gets the line without it.
-    boundary = "" if reason is e else " (through the guard tree's pybind boundary)"
-    line = f"  [{index}] <guard check raised {kind}: {reason}{boundary}>"
-    # str(reason) is arbitrary user text, and the report is one line per input
-    # read back with splitlines(), so collapse every separator it breaks on.
-    return " ".join(line.splitlines())
 
 
 class _GuardScope(enum.Enum):
@@ -620,8 +587,8 @@ class AOTCompiledFunction:
     _guard_check_enabled: bool = True
     _extra_globals: dict[str, object] | None = None
     # Guard-only scope, held by reference; kept apart from _extra_globals so
-    # nothing in it reaches the compiled bytecode but the names _serve re-takes,
-    # which are the ones __post_init__ certified.
+    # nothing in it reaches the compiled bytecode but the names __post_init__
+    # picks out of it.
     _guard_globals: dict[str, object] | None = None
     # Which of the three scopes the artifact's guards resolve against, so a
     # guard failure can say something actionable about the dict the name was
@@ -640,12 +607,10 @@ class AOTCompiledFunction:
     # Whether a kept guard is rooted at a user global; False until a load
     # decides it. Arms the live-value pick, and deserialize's fallback warning.
     _has_global_guards: bool = dataclasses.field(init=False, default=False)
-    # The globals a kept guard is rooted at, armed only for a supplied live
-    # scope. _serve re-takes them out of _guard_globals before every call: the
-    # guards read that dict by reference while the bytecode's globals are a dict
-    # of their own, so leaving them at their load-time values would let a rebind
-    # the guards ACCEPT compute with whatever the load happened to see.
-    _live_global_names: tuple[str, ...] = dataclasses.field(init=False, default=())
+    # Whether to pick the guarded names out of _guard_globals into the
+    # bytecode's globals snapshot, which only a caller that supplied a guard
+    # scope but no f_globals -- the module load path -- needs.
+    _bytecode_reads_guard_scope: bool = False
     # The rebuilt callable, set by __post_init__ (never absent on a live
     # artifact); a declared field rather than an attribute setattr'd onto the
     # instance. Out of repr and eq because the field has no default: leaving it
@@ -671,28 +636,11 @@ class AOTCompiledFunction:
         f_locals.update(bind_locals(self._artifacts.signature, *args, **kwargs))
         return f_locals
 
-    def _live_guard_manager(self) -> "GuardManagerWrapper":
-        # Narrowing for pyrefly, not a live check: __post_init__ always leaves a
-        # populated guard_manager (only serialize() nulls it, on a copy).
-        if self._artifacts.guard_manager is None:
-            raise AssertionError("live artifact must have a guard_manager")
-        return self._artifacts.guard_manager
-
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals = self.prepare_f_locals(*args, **kwargs)
-        # check_nopybind_template disables the TorchFunction TLS for its
-        # accessors and restores it without RAII, so a C++ throw leaves it
-        # disabled on this thread. This path propagates the throw instead of
-        # serving over it, so put the state back and let it travel out. Every
-        # exit that is not a raise restored the state itself, which is why this
-        # is a handler and not a finally: a finally would pay one more set per
-        # successful check on this dispatch path and repair nothing.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self._live_guard_manager().check(f_locals)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        if self._artifacts.guard_manager is None:
+            raise AssertionError("guard_manager must not be None")
+        return self._artifacts.guard_manager.check(f_locals)
 
     def __post_init__(self) -> None:
         from .package import load_guard_manager, load_guards_state
@@ -721,25 +669,17 @@ class AOTCompiledFunction:
                 # A live scope: a name it lacks must fail the guard rather than
                 # fall back to the value serialized with the artifact.
                 self._guard_scope = _GuardScope.SUPPLIED
-                if self._has_global_guards:
+                if self._bytecode_reads_guard_scope and self._has_global_guards:
                     # The narrow set, because a passing guard is the only thing
                     # that certifies a live value is the one the graph was
                     # compiled for. The builtins dict key is left out as well: a
                     # guard rooted at it certifies the live dict itself, which
-                    # the graph's globals never copy. Not intersected with the
-                    # scope: a name it does not bind yet fails the guard rooted
-                    # at it, so nothing is served on that name until a caller
-                    # who populates the dict after the load binds it -- and then
-                    # the re-read is what the graph gets, not the value the
-                    # artifact was traced with.
-                    certified = _guard_source_globals(output_graph) - {builtins_key}
-                    self._live_global_names = tuple(sorted(certified))
-                    # Bound at load as well as re-taken per call in _serve: a
-                    # certified name the bytecode reads but the graph never
-                    # lifted -- a global the forward mutates or returns -- is
-                    # in external_refs and in no serialized scope, so
-                    # forward_callable's check fails unless it is bound here.
-                    live = {n: guard_scope[n] for n in certified if n in guard_scope}
+                    # the graph's snapshot never copies.
+                    live = {
+                        name: guard_scope[name]
+                        for name in _guard_source_globals(output_graph)
+                        if name != builtins_key and name in guard_scope
+                    }
                     extra_globals = {**(extra_globals or {}), **live}
 
         self.fn = self._artifacts.runtime_env.forward_callable(
@@ -861,117 +801,71 @@ class AOTCompiledFunction:
         # second is this load's own -- when the generated bytecode reads this key,
         # get_runtime_env records a pickle-filtered COPY of the tracing builtins
         # under it and forward_callable spreads that copy into fn.__globals__,
-        # which on the default path IS the guard scope. Re-derive over that
-        # recording; a binding from anywhere else is a value this process chose and
-        # stays.
+        # which IS the default guard scope. Re-derive over that one; a binding from
+        # anywhere else is a value this process chose and stays.
         # Re-deriving it also decides what the bytecode subscripts, since that
         # recording exists only because the bytecode reads this key, and it is
         # filtered for picklability alone: a builtin the tracing process had and
         # this one lacks stops being readable -- a kept guard on that name reports
         # it, and without one the bytecode raises KeyError.
         snapshot = self._artifacts.runtime_env.used_globals.get(builtins_key)
-        # Visit fn.__globals__ only when there is a recording there to replace, and
-        # derive each dict from its OWN __builtins__, so a guard-only scope cannot
-        # rewire what the bytecode resolves.
-        # load_compiled_function forwards one dict as both, so a dict that arrived
-        # by both routes is named by the public one -- guard_globals is not in that
-        # signature.
-        arrived_as_f_globals = (
-            self._guard_globals is None or self._guard_globals is self._extra_globals
-        )
-        guard_param = "f_globals" if arrived_as_f_globals else "guard_globals"
-        namespace = _module_namespace_name(guard_scope)
-        guard_name = guard_param if namespace is None else f"vars({namespace})"
-        scopes = [(guard_scope, guard_name)]
-        if self.fn.__globals__ is not guard_scope and snapshot is not None:
-            scopes.append((self.fn.__globals__, "f_globals"))
-        for scope, param in scopes:
-            if builtins_key in scope and (
-                snapshot is None or scope[builtins_key] is not snapshot
-            ):
-                continue
-            # forward_callable builds fn.__globals__ as a plain dict, so unlike an
-            # exec'd module namespace it carries no __builtins__ to derive from.
-            if "__builtins__" not in scope:
-                scope["__builtins__"] = builtins.__dict__
-            bound = scope["__builtins__"]
-            if not isinstance(bound, (dict, types.ModuleType)):
-                # Name the parameter this dict arrived by: get_builtins_dict would
-                # otherwise raise a bare AttributeError out of Dynamo internals.
-                # The TYPE and not the value -- a repr on a load failure path runs
-                # user code.
-                raise TypeError(
-                    f"{param}['__builtins__'] must be a dict or a module, got "
-                    f"{type(bound).__name__}"
-                )
-            scope[builtins_key] = get_builtins_dict(scope)
+        if builtins_key in guard_scope and (
+            snapshot is None or guard_scope[builtins_key] is not snapshot
+        ):
+            return
+        # forward_callable builds fn.__globals__ as a plain dict, so unlike an
+        # exec'd module namespace it carries no __builtins__ to derive from.
+        guard_scope.setdefault("__builtins__", builtins.__dict__)
+        guard_scope[builtins_key] = get_builtins_dict(guard_scope)
 
-    def _missing_global_hint(self, *, forward: str | None = None) -> str:
+    def _missing_global_hint(self) -> str:
         """Advice for a guard that failed on a global its scope does not define,
-        worded for the scope the guards were actually resolved against. Returns a
-        bare sentence; a caller that continues a line of its own adds the
-        separator. ``forward`` names the instance attribute a module load resolved
-        the scope from, passed only when the guards hold the dict it resolves to,
-        and honoured only in the SUPPLIED branch."""
+        worded for the scope the guards were actually resolved against."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
-            rebuilt = (
-                "a guarded global is missing from the scope rebuilt from the artifact"
-            )
             if self._forward_not_resolved_reason is not None:
                 # A module load takes no f_globals=, which is the function load's
                 # parameter; _load_aot_compiled_module takes only the bytes.
                 return (
-                    f"{rebuilt}. That scope was rebuilt because "
+                    " -- a guarded global is missing from the scope rebuilt from "
+                    "the artifact. That scope was rebuilt because "
                     f"{self._forward_not_resolved_reason}, or pass "
                     "AOTCompiledModel.deserialize a guard_globals= scope that "
                     "carries the name."
                 )
             return (
-                f"{rebuilt}; load with an f_globals= that is a complete live "
-                "scope carrying the name -- normally vars(mod) for the module "
-                "mod that defined the function, which is usually not the module "
-                "doing the loading -- so the guard can resolve it."
+                " -- a guarded global is missing from the scope rebuilt from the "
+                "artifact; load with an f_globals= that is a complete live scope "
+                "carrying the name -- normally vars(mod) for the module mod that "
+                "defined the function, which is usually not the module doing the "
+                "loading -- so the guard can resolve it."
             )
         if self._guard_scope is _GuardScope.SUPPLIED:
-            # SUPPLIED implies a scope; a module's namespace is named by its
-            # module, since a module load resolved it from model.forward and the
-            # caller passed no dict to be sent back to.
+            # SUPPLIED implies a scope; named by its module when it is one,
+            # since a module load resolved it from model.forward and the caller
+            # passed no dict to be sent back to.
             namespace = _module_namespace_name(self._guard_globals or {})
-            named = "" if namespace is None else f", here vars({namespace})"
-            where = (
-                # A rebind to a Dynamo wrapper is resolved THROUGH it
-                # (_resolve_guard_scope), so the sentence sends the reader through too.
-                f"the globals of the function {forward} resolves to, seen through "
-                "any Dynamo wrapper to the function it wraps, since that is the one "
-                f"the load resolved{named}"
-                if forward is not None
-                else f"the live scope this artifact was loaded against{named}"
-            )
+            where = "" if namespace is None else f", here vars({namespace})"
             return (
-                f"a guarded global is missing from {where}; define it there "
-                "so the guard can resolve it."
+                " -- a guarded global is missing from the live scope this "
+                f"artifact was loaded against{where}; define it there so the "
+                "guard can resolve it."
             )
         # CAPTURED: the guards hold the globals they were traced against BY
         # REFERENCE, so a name deleted after capture can be defined there again
         # to make the guard resolve -- the same advice as SUPPLIED, worded for
         # the dict this path actually used.
         return (
-            "a guarded global is missing from the globals of the module the "
+            " -- a guarded global is missing from the globals of the module the "
             "compiled function was traced in, which its guards still resolve "
             "against; define it there so the guard can resolve it."
         )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        if self._artifacts.guard_manager is None:
+            raise AssertionError("guard_manager must not be None")
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
-            # Same non-RAII restore as in guard_check, on the tree's second
-            # evaluation.
-            torch_function_state = torch._C._get_torch_function_state()
-            try:
-                debug_info = self._live_guard_manager().check_verbose(f_locals)
-            except BaseException:
-                torch._C._set_torch_function_state(torch_function_state)
-                raise
+            debug_info = self._artifacts.guard_manager.check_verbose(f_locals)
             msg = f"GuardManager check failed, reason: {debug_info}"
             if any(
                 _names_a_missing_global(part) for part in debug_info.verbose_code_parts
@@ -980,49 +874,8 @@ class AOTCompiledFunction:
                 # ends in a newline, so the hint has to be appended to the
                 # stripped message: otherwise its inline continuation lands on a
                 # line of its own, starting with a stray space.
-                msg = msg.rstrip() + " -- " + self._missing_global_hint()
+                msg = msg.rstrip() + self._missing_global_hint()
             raise RuntimeError(msg)
-        return self._serve(*args, **kwargs)
-
-    def _serve(self, *args: Any, **kwargs: Any) -> Any:
-        """Run the graph, re-reading the globals a kept guard certifies.
-
-        A global a kept guard is rooted at is re-read from the guard scope here,
-        so a rebind that scope took and the guards accepted -- a same-metadata
-        swap under a ``TENSOR_MATCH``, which checks metadata, not values -- is
-        what the graph computes with; every other global keeps the value the
-        bytecode's globals were built with at load. A name the scope no longer
-        binds is skipped rather than deleted, so it keeps whatever was last read
-        from there, and the guard rooted at it refuses the call anyway. A global
-        the graph itself rebinds is re-read from the scope on the next call too:
-        the replayed ``STORE_GLOBAL`` lands in the bytecode's globals, not in the
-        scope, so the stored value is one no guard certified and the scope's is
-        what the check before the call just passed.
-
-        Only a load handed a live scope arms this. An artifact compiled in this
-        process has none, so its globals stay at the values the capture copied
-        while its guards read the module dict they were rooted in: the same two
-        dicts, left to diverge as they already did rather than widened here.
-
-        An artifact that opted out of the check re-reads the same names with
-        nothing certifying them, a value a kept guard would have rejected
-        included: the opt-out is unsafe by construction, and holding those names
-        at their load-time values instead would be no more checked, only stale.
-        The re-read is not atomic with the guard check before it, so a rebind
-        landing between the two is served unchecked -- the same window an eager
-        compiled frame has between guard evaluation and LOAD_GLOBAL. The write
-        lands in this artifact's own ``fn.__globals__``, which every call of it
-        shares, so two threads serving one loaded artifact against scopes that
-        differ, or against a scope rebound concurrently, race on that dict and
-        one can run the graph on the value the other just wrote; a caller who
-        needs isolation loads the artifact once per thread, since each load
-        builds its own dict."""
-        if self._live_global_names and (scope := self._guard_globals) is not None:
-            f_globals = self.fn.__globals__
-            for name in self._live_global_names:
-                value = scope.get(name, _UNBOUND)
-                if value is not _UNBOUND:
-                    f_globals[name] = value
         return self.fn(*args, **kwargs)
 
     def source_info(self) -> "SourceInfo":
@@ -1118,6 +971,7 @@ class AOTCompiledFunction:
         external_closure_data: dict[str, Any] | None = None,
         *,
         guard_globals: dict[str, object] | None = None,
+        bytecode_reads_guard_scope: bool = False,
         forward_not_resolved_reason: str | None = None,
     ) -> "AOTCompiledFunction":
         """Rebuild a compiled function from ``serialize()`` output.
@@ -1129,17 +983,18 @@ class AOTCompiledFunction:
         "no scope" -- and the load WRITES into it, seeding the recorded aliases,
         builtins-dict key and unnamed-scope key a kept guard is rooted at without
         replacing a name it already binds, so pass the dict those should land in.
-        Supplying it also binds the certified globals into the bytecode's globals
-        at load and arms the per-call re-read ``_serve`` performs: a global a kept
-        guard's own source IS -- not one reached only through a sub-path of it,
-        which the guard does not certify, and apart from the recorded
-        ``__builtins_dict___N`` key, excluded by name -- is taken from that dict at
-        load and on every call, one name at a time, so the graph reads only what a
-        guard certifies and never a global whose guard a filter dropped; the
-        load-time bind is what lets a ``guard_globals``-only load succeed where the
-        serialized scope lacks such a global. Passing neither resolves global
-        guards against the scope rebuilt from the artifact, where a rebinding in
-        this process is invisible.
+        Passing neither resolves global guards against the scope rebuilt from the
+        artifact, where a rebinding in this process is invisible.
+
+        ``bytecode_reads_guard_scope`` picks the guarded names out of
+        ``guard_globals`` into the bytecode's globals snapshot as well -- the live
+        value of each global a kept guard's own source IS, not one reached only
+        through a sub-path of it, which the guard does not certify, and apart from
+        the recorded ``__builtins_dict___N`` key, excluded by name -- one name at
+        a time. Only a caller that supplies a guard scope but no ``f_globals``
+        needs it, i.e. the module load path: such a caller cannot inspect the
+        guards itself, so it gets the substitution only where a guard certifies
+        it, and never for a global whose guard a filter dropped.
         """
         f = io.BytesIO(data)
         f.seek(0)
@@ -1160,6 +1015,7 @@ class AOTCompiledFunction:
             artifacts,
             _extra_globals=f_globals,
             _guard_globals=guard_globals,
+            _bytecode_reads_guard_scope=bytecode_reads_guard_scope,
             _forward_not_resolved_reason=forward_not_resolved_reason,
         )
 
@@ -1334,12 +1190,9 @@ def _resolve_guard_scope(
     # attribute keeps winning the lookup), but object.__setattr__ can; refusing
     # here also keeps get_traced_fn's Module branch, whose hook reads can raise
     # AttributeError on an uninitialized module, off this path entirely.
-    from torch._dynamo.eval_frame import _static_getattr, innermost_fn
-
     forward = model.forward
-    # Describe forward AS GIVEN, not what the unwrap below reached, in a bounded
-    # way that avoids dumping the entire module repr (functools.partial embeds
-    # the module's full repr).
+    # Describe forward in a bounded way that avoids dumping the entire module
+    # repr (functools.partial embeds the module's full repr).
     forward_type = type(forward).__name__
     forward_qualname = getattr(forward, "__qualname__", "")
     described = (
@@ -1352,112 +1205,32 @@ def _resolve_guard_scope(
             "that module's forward, rooting the guards in its defining namespace; "
             "bind a plain function or bound method as model.forward instead"
         )
-    # torch.compile(mod.forward) or torch._dynamo.disable(mod.forward) bound
-    # back on the instance is a functools.wraps'd wrapper Dynamo minted, in
-    # eval_frame or (non-recursive disable) external_utils; innermost_fn
-    # follows the chain those set and stops at a wrapper Dynamo did not mint.
-    # Its AssertionError on a non-callable _torchdynamo_orig_callable is not
-    # caught: every Dynamo site that sets the pair on a function checks
-    # callable(fn) first, and the one that sets it on an OptimizedModule is
-    # behind the nn.Module refusal above. The branches of
-    # _TorchDynamoContext.__call__ that wrap their target (config.wrap_top_frame
-    # and trace_rules.check among them) end that chain on
-    # external_utils.wrap_inline's inner, a wraps'd function that only forwards
-    # to the callable it wraps -- the one the module capture traced -- so a
-    # function that OWNS external_utils' dict as its __globals__ is hopped to
-    # its __wrapped__, one hop per stacked compile. external_utils' non-wraps'd
-    # wrappers (wrap_dunder_call_ctx_manager's inner, bound by
-    # error_on_graph_break and its siblings) carry no __wrapped__ to follow.
-    # The predicate is that module's identity, not "defined under
-    # torch._dynamo": functools.wraps copies __module__, so inner reports the
-    # forward's; and torch._dynamo.decorators' wraps'd wrappers
-    # (nonstrict_trace, leaf_function) are what the capture traces as its root
-    # frame, recording decorators' dict, so hopping through them would disagree
-    # with it. _static_getattr reads only what the object owns, never a user
-    # __getattr__: a bound method proxies __globals__ to __func__ but owns
-    # none, so a forward decorated in the class body with
-    # torch.compiler.wrap_numpy (external_utils' other wraps'd wrapper) is not
-    # hopped and resolves to wrap, the root frame the capture traced. Rebound
-    # on the instance, mod.forward = wrap_numpy(mod.forward), wrap is a plain
-    # function owning both, so it IS hopped to the bound method, which a
-    # capture of that shape (root frame wrap) would not record; no such
-    # artifact exists, since wrap's closure holds the bound method and with it
-    # the module instance, which serialize refuses, and a load onto that shape
-    # of an artifact captured from the undecorated forward agrees with that
-    # capture.
-    resolved = innermost_fn(forward)
-    while _static_getattr(resolved, "__globals__") is vars(external_utils):
-        wrapped = _static_getattr(resolved, "__wrapped__")
-        if wrapped is None:
-            return None, (
-                f"{described} is a Dynamo wrapper without a resolvable target, "
-                "a torch._dynamo.external_utils function carrying no "
-                "__wrapped__; bind the forward it wraps as model.forward instead"
-            )
-        resolved = wrapped
-    # torch.compile(mod).forward and torch._dynamo.disable(mod).forward wrap
-    # the module's DISPATCH, not its forward, and the capture traced the
-    # forward, so a dispatch is refused whatever shape it takes: the module
-    # itself (OptimizedModule._initialize hands it to wrap_inline under
-    # config.wrap_top_frame or a skip rule), which only the hop can reach (an
-    # nn.Module given as forward returned above); or a bound method whose
-    # __func__ owns a torch namespace, which the namespace test below refuses
-    # -- nn.Module.__call__ resolving to Module._wrapped_call_impl,
-    # OptimizedModule._call_lazy_check for a lazy module, the compile_wrapper
-    # torch.compile(Cls) rebinds as Cls.__call__, GraphModule's call_wrapped.
-    # That test also catches a dispatch bound with no wrapper in front,
-    # mod.forward = other.__call__: a shape a capture did record nn.Module's
-    # namespace for, so refusing forgoes agreeing with it rather than seed a
-    # process-wide torch namespace with an artifact's aliases.
-    if isinstance(resolved, torch.nn.Module):
-        return None, (
-            f"{described} resolves through a Dynamo wrapper to an nn.Module, "
-            "the module's dispatch rather than its forward; bind that module's "
-            "forward, or a wrapper over the forward rather than over the "
-            "module, as model.forward instead"
-        )
-    # get_traced_fn raises RuntimeError on a callable that is neither a
-    # function nor a method, and its __self__ branch returns __func__
-    # unchecked, so a C-implemented bound method (a tensor's sum) raises
-    # AttributeError there or on the __globals__ read.
     try:
-        traced_fn = convert_frame.get_traced_fn(resolved)[0]
+        # The __globals__ read is inside the try because get_traced_fn's
+        # __self__ branch returns __func__ unchecked.
+        traced_fn = convert_frame.get_traced_fn(forward)[0]
         scope = traced_fn.__globals__
     except (RuntimeError, AttributeError):
-        if resolved is forward:
-            return None, (
-                f"get_traced_fn cannot resolve {described} to a Python function; "
-                "make model.forward a plain function or bound method so its own "
-                "globals are used instead"
-            )
-        # torch.compile over a functools.partial or a tensor method wraps it in
-        # wrap_inline (no source file, not a function), so the unwrap lands on
-        # it; the cannot-resolve advice above would describe the
-        # compile_wrapper, a plain function that resolves fine.
         return None, (
-            f"{described} resolves through a Dynamo wrapper to an instance of "
-            f"{type(resolved).__name__}, which get_traced_fn cannot resolve to "
-            "a Python function; bind a plain function or bound method as "
-            "model.forward instead"
+            f"get_traced_fn cannot resolve {described} to a Python function; "
+            "make model.forward a plain function or bound method so its own "
+            "globals are used instead"
         )
     # A forward that resolves to a function torch itself defines -- the
     # nn.Module.forward a module never overrode, _LazyGraphModule._lazy_forward
-    # before a real recompile, the bound Module._wrapped_call_impl a wrapper over
-    # the module's dispatch hops to -- owns a torch module's namespace, which a
-    # load must neither root guards in nor seed: the seeding is permanent and
-    # installs no CleanupHook. The test is the namespace, not the function's
-    # __module__, which functools.wraps copies; a GraphModule's forward is
-    # exec'd into a private per-instance copy of its codegen globals, no
-    # module's namespace, and resolves.
+    # before a real recompile, the wrapper torch.compile(mod.forward) returns --
+    # owns a torch module's namespace, which a load must neither root guards in
+    # nor seed: the seeding is permanent and installs no CleanupHook. The test
+    # is the namespace, not the function's __module__, which functools.wraps
+    # copies; a GraphModule's forward is exec'd into a private per-instance copy
+    # of its codegen globals, no module's namespace, and resolves.
     namespace = _module_namespace_name(scope)
     if namespace is not None and namespace.partition(".")[0] == "torch":
-        hopped = resolved is not forward
-        via = "resolves through a Dynamo wrapper to" if hopped else "resolves to"
         return None, (
-            f"{described} {via} {traced_fn.__qualname__}, whose globals are "
-            f"{namespace}'s namespace, a torch module a load neither roots guards "
-            "in nor seeds; bind the module's own forward, defined outside torch, "
-            "as model.forward instead"
+            f"{described} resolves to {traced_fn.__qualname__}, whose globals "
+            f"are {namespace}'s namespace, a torch module a load neither roots "
+            "guards in nor seeds; bind the module's own forward, defined outside "
+            "torch, as model.forward instead"
         )
     return scope, None
 
@@ -1659,364 +1432,19 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
-def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
-    # What prepare_f_locals reads, with defaults and cells by identity (id, since
-    # the artifacts keep them alive). Signature equality is unusable here:
-    # Parameter.__eq__ takes bool() of `default == default`, which raises for a
-    # tensor default.
-    env, params = artifacts.runtime_env, artifacts.signature.parameters.values()
-    return (
-        [(p.name, p.kind, id(p.default)) for p in params],
-        env.bytecode.co_freevars,
-        [id(cell) for cell in env.closure or ()],
-    )
-
-
 @dataclass
 class AOTCompiledModel:
     # Represents a single forward function of a model along with dispatch
     # compiled_results is serializable. We require the model to deserialize again.
     model: torch.nn.Module
     compiled_results: list[AOTCompiledFunction]
-    # The (index, exception type) pairs already warned about below, so a hot loop
-    # over a broken artifact logs once per defect rather than once per call. Per
-    # model, not torch._logging.warning_once, whose cache is process-global.
-    _warned: set[tuple[int, str]] = dataclasses.field(
-        default_factory=set, init=False, compare=False, repr=False
-    )
-    # The list contents last judged and whether one bind of a call serves every
-    # one of them, as it does for every artifact aot_compile_module produces:
-    # compiled_results is public, so a call that finds them changed decides
-    # again. The comparison costs about what a bind does, so not once per call.
-    # One field, so a reader never sees the verdict about another list beside
-    # these contents. The default is the verdict over no results, so the first
-    # call decides.
-    _binding_verdict: tuple[tuple[AOTCompiledFunction, ...], bool] = dataclasses.field(
-        default=((), False), init=False, compare=False, repr=False
-    )
-
-    def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
-        # By identity, not ==: the dataclass __eq__ would reach the Signature
-        # compare _binding_key exists to avoid. Measured at 0.27us for four
-        # results, call included, against 0.81us for one check().
-        prior, shared = self._binding_verdict
-        if len(results) == len(prior) and all(map(operator.is_, results, prior)):
-            return shared
-        key = _binding_key(results[0]._artifacts) if results else None
-        shared = key is not None and all(
-            _binding_key(result._artifacts) == key for result in results[1:]
-        )
-        self._binding_verdict = (results, shared)
-        return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        # compiled_results is public, so read it once: every stage below judges
-        # the results this call began with, on the binding decided over them.
-        results = tuple(self.compiled_results)
-        # Guard evaluation ignores _guard_check_enabled, which only the last
-        # resort and the report read, so scan every result.
-        raised: dict[int, Exception] = {}
-        # `unanswered` holds the indices whose LAST evaluation reached no answer,
-        # the only ones with no guard to quote, and `answered` those that reached
-        # one at least once, which is what a ModelInput could have covered.
-        unanswered: set[int] = set()
-        answered: set[int] = set()
-        # Read once per call, not once per check (measured 0.18us against a
-        # 0.93us check): every check that does not throw restores it itself.
-        torch_function_state = torch._C._get_torch_function_state()
-        # Binding this call costs more than a whole check() does, and the passes
-        # below and the report ask the same results about the same call, so it
-        # is bound once per call where the results share a binding, once per
-        # result where they do not, and reused. The shared bind happens ahead of
-        # every guard, so a call the signature cannot bind still surfaces as
-        # bind_locals' TypeError, as the plain module call would.
-        shared = (
-            results[0].prepare_f_locals(self.model, *args, **kwargs)
-            if self._binds_alike(results)
-            else None
-        )
-        # Per-result bindings, kept for the re-check and the report; a shared one
-        # is reused as is.
-        bound: dict[int, dict[str, object]] = {}
-
-        def accepts(i: int, result: AOTCompiledFunction) -> bool:
-            # prepare_f_locals stays outside the try, so a call the signature
-            # cannot bind still surfaces as bind_locals' TypeError, as a plain
-            # module call would, rather than as a tree that did not match.
-            f_locals = shared if shared is not None else bound.get(i)
-            if f_locals is None:
-                f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
-                bound[i] = f_locals
-            guard_manager = result._live_guard_manager()
-            try:
-                answer = guard_manager.check(f_locals)
-            except BaseException as e:
-                # check_nopybind_template disables the TorchFunction TLS for its
-                # accessors and restores it without RAII, so a C++ throw leaves it
-                # disabled on this thread. Put it back before anything runs under
-                # it, for an interrupt through the tree as much as for a throw.
-                torch._C._set_torch_function_state(torch_function_state)
-                if not isinstance(e, Exception):
-                    # An interrupt is not an answer about this call, and not
-                    # dispatch's to swallow.
-                    raise
-                # Keep going so another result can still match; what this tree
-                # last did and what it ever did decide different things.
-                raised[i] = e
-                unanswered.add(i)
-                return False
-            unanswered.discard(i)
-            answered.add(i)
-            return answer
-
-        def warn_swallowed(served: int) -> None:
-            # A raise is not a rejection, so it says nothing about the result
-            # that did answer -- but nothing else records it here: on this path
-            # no report is built. Also where the result that answered IS the one
-            # that raised: its accept is the only answer about this call, and
-            # vetoing it would not contain the stale relational state below --
-            # a scan raise whose call another result serves leaves it stale for
-            # the NEXT call, which has no raise on record at all.
-            for i, e in raised.items():
-                kind, reason = _unwrapped_raise(e)
-                if (i, kind) in self._warned:
-                    continue
-                self._warned.add((i, kind))
-                if results[i]._guard_check_enabled:
-                    advice = (
-                        f"Fix or drop input [{i}]: a tree that raises rejects "
-                        "nothing, and a C++ throw out of it leaves its own "
-                        "relational guard state stale, so its next check can "
-                        "reject a call it fits or accept one it does not."
-                    )
-                else:
-                    # The last resort serves an opted-out result whatever its
-                    # guards say, so a stale rejection costs it nothing and the
-                    # report calls it an opt-out, not a defect; what the raise
-                    # costs it is the match the scan can never find.
-                    advice = (
-                        f"Input [{i}] opted out of guard checks, but a tree that "
-                        "raises never matches in the scan, so its graph is "
-                        "reachable only through the last resort, which a raise "
-                        "from any enabled tree withholds."
-                    )
-                log.warning(
-                    "AOT compiled input [%d]'s guard check raised %s: %s; "
-                    "dispatch served [%d] rather than propagating it. %s",
-                    i,
-                    kind,
-                    reason,
-                    served,
-                    advice,
-                )
-
-        for i, result in enumerate(results):
-            if accepts(i, result):
-                if raised:
-                    warn_swallowed(i)
-                # The guard manager already passed; go through _serve rather
-                # than result(), which would re-run the ~1us guard eval on this
-                # hot dispatch path. _serve costs one Python frame instead
-                # (measured 0.164us), and is what hands the graph the globals
-                # that check just accepted. Gating that frame out per site is
-                # not worth it: _serve is the only caller of the raw fn, and a
-                # site that got the gate wrong would serve a stale global with
-                # every guard passing.
-                return result._serve(self.model, *args, **kwargs)
-        # A check() can reject from the dict-tag fast path without running the
-        # tree; a second check() then evaluates it in full, opted-out results too.
-        for i, result in enumerate(results):
-            if accepts(i, result):
-                if raised:
-                    warn_swallowed(i)
-                return result._serve(self.model, *args, **kwargs)
-        # A result that opted out via disable_guard_check() accepts anything, but
-        # only after both passes failed to find a real match and only if no tree
-        # whose guards someone did ask about raised -- whether or not a later pass
-        # then answered: a rejection following a throw can be about the relational
-        # guard state the throw left stale (see warn_swallowed) rather than about
-        # this call. A raise from the opted-out result itself is not such a case:
-        # nobody wanted its answer.
-        if not any(results[i]._guard_check_enabled for i in raised):
-            for i, result in enumerate(results):
-                if not result._guard_check_enabled:
-                    if raised:
-                        warn_swallowed(i)
-                    return result._serve(self.model, *args, **kwargs)
-        if shared is not None:
-            bound = dict.fromkeys(range(len(results)), shared)
-        report = self._no_match_report(
-            results, raised, unanswered, answered, bound, torch_function_state
-        )
-        if raised:
-            # `raised` is in recording order, so this chains the first index that
-            # raised, not always the raiser the advice names: they differ when an
-            # opted-out result raised first, whose line quotes no exception text.
-            raise RuntimeError(report) from next(iter(raised.values()))
-        # Not `from None`: an ordinary no-match must not suppress an exception
-        # this call was made while handling.
-        raise RuntimeError(report)
-
-    def _no_match_report(
-        self,
-        results: tuple[AOTCompiledFunction, ...],
-        raised: dict[int, Exception],
-        unanswered: set[int],
-        answered: set[int],
-        bound: dict[int, dict[str, object]],
-        torch_function_state: torch._C._TorchFunctionState,
-        /,
-    ) -> str:
-        """A report naming every compiled input and what its guard check said,
-        raised, or -- for a withheld opt-out -- was never asked.
-
-        ``results`` and ``bound`` are the results the dispatch above judged and
-        the f_locals it judged them on, one per result, so the report explains
-        the same call rather than a fresh one, and ``torch_function_state`` the
-        TLS state dispatch read before evaluating anything: a throw here skips
-        the same non-RAII restore, and what has to come back is the state the
-        CALLER had, not one this dispatch left."""
-        lines = [
-            "No AOT compiled graph matched this call. Tried "
-            f"{len(results)} compiled input(s):"
-        ]
-        # An opted-out result is reported at all only because a raise vetoed the
-        # last resort above; without one it is served and there is no report.
-        raiser = next(
-            (i for i in raised if results[i]._guard_check_enabled),
-            None,
-        )
-        # An entry that answered in EITHER dispatch pass rejected this call, so
-        # an input covering it is on the table even where its LAST evaluation
-        # raised and the line below is that raise.
-        covered = any(results[i]._guard_check_enabled for i in answered)
-        # A rejection that FOLLOWED a throw from the same tree is the answer the
-        # veto above refuses to trust, so when no enabled entry rejected the call
-        # before it raised, the advice below says so beside the ModelInput line.
-        answered_first = any(
-            results[i]._guard_check_enabled
-            for i in answered
-            if i not in raised or i in unanswered
-        )
-        missing_at: int | None = None
-        withheld = False
-        for i, result in enumerate(results):
-            if not result._guard_check_enabled:
-                # Nobody asked about this result's guards, so quoting them would
-                # name the wrong thing -- a raise out of them included -- and it
-                # is no mismatch a ModelInput could cover: what kept it from
-                # serving this call is the raise above. Decided before the raise
-                # below so an opted-out tree that raised is reported once, as the
-                # opt-out it is.
-                lines.append(
-                    f"  [{i}] <opted out of guard checks; withheld because "
-                    f"[{raiser}]'s guard check raised>"
-                )
-                withheld = True
-                continue
-            if i in unanswered:
-                # No rejection to quote, so report the raise rather than
-                # evaluating the same tree a third time, whose answer would be
-                # about that evaluation and not the one dispatch acted on. An
-                # entry that raised and THEN answered is not here: its own
-                # rejection is quoted below, and its raise survives only where it
-                # is the one the chain carries -- the FIRST index that raised.
-                lines.append(_raised_line(i, raised[i]))
-                continue
-            guard_manager = result._live_guard_manager()
-            f_locals = bound[i]
-            # A guard that raises only here must not replace the whole report.
-            try:
-                reason = guard_manager.check_verbose(f_locals)
-            except BaseException as e:
-                torch._C._set_torch_function_state(torch_function_state)
-                if not isinstance(e, Exception):
-                    raise
-                # The dispatch passes got an answer out of this tree and it
-                # rejected the call, so only the explanation is missing.
-                lines.append(_raised_line(i, e))
-                continue
-            if reason.result:
-                lines.append(
-                    f"  [{i}] <guards did not accept this call in dispatch and "
-                    "accepted it here: a guard that does not answer consistently, "
-                    "or a tag-safe fast path that refused without running the "
-                    "tree>"
-                )
-                continue
-            if not reason.verbose_code_parts:
-                # A failing accessor can answer false with no parts to quote.
-                lines.append(f"  [{i}] <guard check failed without naming a guard>")
-                continue
-            parts = reason.verbose_code_parts
-            if missing_at is None and any(map(_names_a_missing_global, parts)):
-                missing_at = i
-            # Collapse every separator splitlines() reads the report back on.
-            joined = " ".join("; ".join(parts).splitlines())
-            lines.append(f"  [{i}] {joined}")
-        if missing_at is not None:
-            missing_global = results[missing_at]
-            # Named as the instance attribute: the load resolved the scope from
-            # model.forward, and a rebound instance reads another function's dict.
-            forward: str | None = f"this {type(self.model).__name__} instance's forward"
-            resolved: dict[str, Any] | None = None
-            if missing_global._guard_scope is _GuardScope.SUPPLIED:
-                # Resolving forward runs user code: get_traced_fn formats a
-                # forward it refuses into its error, and that repr can raise past
-                # what _resolve_guard_scope catches. The report must still arrive.
-                try:
-                    resolved, _ = _resolve_guard_scope(self.model)
-                except Exception:
-                    pass
-            if resolved is None or resolved is not missing_global._guard_globals:
-                forward = None
-            hint = missing_global._missing_global_hint(forward=forward)
-            lines.append(f"For [{missing_at}]: {hint}")
-        if withheld:
-            lines.append(
-                f"[{raiser}]'s raise, not a guard failure, is what withheld "
-                "the opted-out input(s) above; fix or drop that artifact."
-            )
-        elif raiser is not None:
-            # Same advice for the same artifact, for a report with no opt-out to
-            # withhold: a tree that raised has to be fixed whether or not its
-            # raise also cost the caller a graph.
-            lines.append(
-                f"[{raiser}]'s guard check raised while checking this call; fix "
-                "or drop that artifact."
-            )
-        # An artifact holding no inputs at all -- which deserialize() accepts --
-        # has no entry to answer, and adding an input is exactly the advice for it.
-        if covered or not results:
-            lines.append(
-                "Add a ModelInput covering this call, or check whether "
-                "guard_filter_fn kept a guard this call cannot satisfy -- both "
-                "belong to the process that compiles the artifacts, which need "
-                "not be the one that loaded them."
-            )
-        if covered and not answered_first:
-            # Every rejection dispatch got out of an enabled tree followed a throw
-            # from the same tree -- the answer the veto above declines to act on
-            # -- so the ModelInput line stands on those alone. Keyed on what
-            # dispatch recorded, not on the entry lines: the re-check is a third
-            # evaluation and may have printed a raise or an accept instead, and a
-            # withheld line says only why the opt-out was withheld.
-            lines.append(
-                "The ModelInput advice above rests only on rejections dispatch "
-                "took after the same tree had raised, so they can be about the "
-                "relational guard state a C++ throw leaves stale rather than "
-                "about this call."
-            )
-        elif raised and not withheld and not covered:
-            # No tree whose guards were asked about ever got as far as rejecting
-            # the call, so adding a ModelInput cannot help. Not with an opted-out
-            # entry reported, whose withheld line has already said what happened,
-            # and not for the empty artifact above, which has no raise to describe.
-            lines.append(
-                "Every guard tree raised while checking this call; the reasons "
-                "above are those raises, not guards this call failed."
-            )
-        return "\n".join(lines)
+        for result in self.compiled_results:
+            if result.guard_check(self.model, *args, **kwargs):
+                return result(self.model, *args, **kwargs)
+        # All guards failed, just run one of them and throw the guard check error.
+        return self.compiled_results[0](self.model, *args, **kwargs)
 
     def serialize(self) -> bytes:
         # Nothing threads external_data down this path (_save_aot_compiled_module
@@ -2042,25 +1470,25 @@ class AOTCompiledModel:
 
         Guards on globals are evaluated, by reference, against the live
         ``__globals__`` of the function ``model.forward`` resolves to, and the
-        compiled bytecode reads the globals serialized with the artifact except
-        for the names a kept guard's own source IS -- not a global reached only
-        through a sub-path of it, and never the recorded ``__builtins_dict___N``
-        key -- which are re-taken from that live dict on every call. So a value
-        the graph reads live is one a passing guard certifies, every other global
-        is the one it was traced with, and a guarded global the live dict lacks
-        fails the guard rather than falling back to the serialized value.
-        Rebinding a guarded global after the load is therefore what the graph
-        computes with once the guards accept it, and the certification is only as
-        strong as the guard's type: a kept ``TENSOR_MATCH`` accepts a same-metadata
-        swap, checking metadata and not values, and a root ``TYPE_MATCH`` on a
-        container checks its type, not the members the graph reads through it.
-        Loading also MUTATES that dict: a recorded ``__import_*`` alias a kept guard
-        still reads, that builtins key when a guard source names it, and the
-        ``___unnamed_scope_*`` key of an inlined frame's globals when the graph
-        lifted a value through it -- bound to the dict serialized with the artifact,
-        since the key embeds an ``id()`` from the tracing process that no live
-        namespace holds -- are inserted (never overwriting an existing key) so
-        guards rooted at them resolve in a process that never traced.
+        compiled bytecode reads a snapshot, taken here, of the globals serialized
+        with the artifact in which the names a kept guard's own source IS -- not a
+        global reached only through a sub-path of it, and never the recorded
+        ``__builtins_dict___N`` key -- are replaced by that live dict's values. So
+        a value the graph reads live is one a passing guard certifies, every other
+        global is the one it was traced with, and a guarded global the live dict
+        lacks fails the guard rather than falling back to the serialized value.
+        Rebinding a global after the load changes nothing the graph reads unless a
+        guard on its value refuses the call, and the certification is only as strong
+        as the guard's type: a kept ``TENSOR_MATCH`` checks metadata, not values,
+        and a root ``TYPE_MATCH`` on a container checks its type, not the members
+        the graph reads through it. Loading also MUTATES that dict: a recorded
+        ``__import_*`` alias a kept guard still reads, that builtins key when a
+        guard source names it, and the ``___unnamed_scope_*`` key of an inlined
+        frame's globals when the graph lifted a value through it -- bound to the
+        dict serialized with the artifact, since the key embeds an ``id()`` from
+        the tracing process that no live namespace holds -- are inserted (never
+        overwriting an existing key) so guards rooted at them resolve in a
+        process that never traced.
 
         A symbolic-shape guard on a global with a dynamic dim resolves its
         operands in that live dict as well, whether it installs as a Python
@@ -2072,20 +1500,15 @@ class AOTCompiledModel:
         There is no live scope only when ``model.forward`` does not resolve to a
         Python function of its own: ``get_traced_fn`` cannot resolve it, or it is
         an ``nn.Module``, or it resolves to a function torch itself defines, whose
-        globals are a torch module's namespace (the module's dispatch,
-        ``torch.compile(mod).forward``, included), or it is a Dynamo wrapper (a
-        ``torch._dynamo.external_utils`` function) with no wrapped forward to
-        follow to, or one whose wrapped target itself does not resolve; guards
-        then resolve against the scope rebuilt from the artifact, where they
-        check nothing useful, and a guard rooted at any global but those aliases
-        and that key warns to say so, naming the cause.
+        globals are a torch module's namespace; guards then resolve against the
+        scope rebuilt from the artifact, where they check nothing useful, and a
+        guard rooted at any global but those aliases and that key warns to say
+        so, naming the cause.
 
-        The function ``model.forward`` resolves to is the one bound as ``forward``
-        seen through Dynamo's own wrappers (``torch.compile``, both
-        ``torch._dynamo.disable`` wrappers), never through a wrapper the caller
-        applied: a ``functools.wraps``'d decorator over it, in the class body or
-        rebound on the instance, resolves to the decorator's own function, so the
-        scope is the decorator's module. That is the scope a capture of the
+        The function ``model.forward`` resolves to is the outermost one bound as
+        ``forward``: a ``functools.wraps``'d decorator over it, in the class body
+        or rebound on the instance, resolves to the decorator's own function, so
+        the scope is the decorator's module. That is the scope a capture of the
         decorated forward records as well -- Dynamo traces the decorator as the
         root frame -- so an artifact captured through the same decorator loads
         and reads that module's guarded globals live, and one captured from the
@@ -2095,8 +1518,8 @@ class AOTCompiledModel:
 
         ``guard_globals``, when supplied, is that scope instead of anything
         resolved from ``model.forward``, so a caller who wants neither the live
-        read nor the write passes its own dict; it is seeded, bound into the
-        bytecode's globals at load, and re-read from on the same terms.
+        read nor the write passes its own dict; it is seeded and substituted from
+        on the same terms.
 
         Hooks registered on ``model`` do not run: the artifact calls ``forward``
         directly. The artifact records none, so what is warned about here is what
@@ -2140,6 +1563,7 @@ class AOTCompiledModel:
                     AOTCompiledFunction.deserialize(
                         result,
                         guard_globals=scope,
+                        bytecode_reads_guard_scope=True,
                         forward_not_resolved_reason=forward_not_resolved_reason,
                     )
                 )
