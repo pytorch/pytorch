@@ -101,20 +101,19 @@ device_module = torch.get_device_module(device_type)
 
 
 class TestFSDPCommContext(TestCase):
-    def test_release_all_gather_state_orders_requested_streams(self):
+    def test_release_all_gather_state_orders_all_gather_streams(self):
         comm_ctx = FSDPCommContext()
         event = MagicMock()
-        streams = (MagicMock(), MagicMock())
-        all_gather_state = AllGatherState(MagicMock(), event)
-        comm_ctx.all_gather_state = all_gather_state
-        for stream in streams:
-            stream.wait_event.side_effect = lambda _event: self.assertIs(
-                comm_ctx.all_gather_state, all_gather_state
-            )
+        comm_ctx.all_gather_copy_in_stream = MagicMock()
+        comm_ctx.all_gather_stream = MagicMock()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
 
-        comm_ctx.release_all_gather_state(*streams)
+        comm_ctx.release_all_gather_state()
 
-        for stream in streams:
+        for stream in (
+            comm_ctx.all_gather_copy_in_stream,
+            comm_ctx.all_gather_stream,
+        ):
             stream.wait_event.assert_called_once_with(event)
         self.assertIsNone(comm_ctx.all_gather_state)
 
