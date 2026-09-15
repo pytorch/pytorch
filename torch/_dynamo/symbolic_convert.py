@@ -2431,15 +2431,11 @@ class InstructionTranslatorBase(
         f_globals = self.output.global_scope
         # The alias outlives the compile that minted it, so a later writer that
         # resolves the name itself -- CompilePackage.install, or an artifact load
-        # seeding a guard scope -- can leave it bound to a module object
-        # sys.modules no longer holds. That is not the name collision this
-        # checks for (two module names still mangle to one alias): rebind it.
-        # The rebind is a deliberate write into a live namespace and nothing
-        # unwinds it -- there is no CleanupHook here, unlike
-        # install_global_unsafe -- so it outlives a trace that graph-breaks or
-        # restarts, as does the unconditional write install makes to this name.
-        if alias in f_globals:
-            bound = f_globals[alias]
+        # seeding a guard scope -- can leave it bound to a module object of this
+        # name that is not the one resolved here. That is not the name collision
+        # this checks for (two module names still mangle to one alias).
+        bound = f_globals.get(alias, value)
+        if bound is not value:
             # __name__ is read out of the instance dict through
             # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
             # class-level __getattribute__ (importlib.util._LazyModule imports on
@@ -2461,7 +2457,7 @@ class InstructionTranslatorBase(
                 else None
             )
             accepted = (module_name, value_name) if value_name else (module_name,)
-            if bound is not value and bound_name not in accepted:
+            if bound_name not in accepted:
                 # Named by type, never repr'd: __repr__ is user code too.
                 # IMPORT_NAME has no break_graph_if_unsupported, so this
                 # Unsupported reaches step(): the frame is skipped outright
@@ -2484,12 +2480,21 @@ class InstructionTranslatorBase(
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
-        # Recorded only once the binding is made: the package entry outlives a
-        # graph break here, and install() rebinds every recorded alias.
+        # Recorded only once the check has passed: the package entry outlives a
+        # graph break here, and install() binds every recorded alias.
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        f_globals[alias] = value
+        # A writer's binding was the live entry when it was made, and the memo
+        # resolved here can predate or postdate a handover of the name since, so
+        # it replaces the writer's module only when it is the live entry now:
+        # the graph is specialized on what IMPORT_NAME pushed, the live entry,
+        # and this alias roots its guards. The write is into a live namespace
+        # and nothing unwinds it -- there is no CleanupHook here, unlike
+        # install_global_unsafe -- so it outlives a trace that graph-breaks or
+        # restarts, as does the write install makes to this name.
+        if bound is value or sys.modules.get(module_name, value) is value:
+            f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
 
