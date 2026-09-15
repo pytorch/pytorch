@@ -338,6 +338,14 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         return NVGemmVerticalFusionDecision.REJECT
 
     @staticmethod
+    def _supports_scalar_reduce() -> bool:
+        try:
+            from cutlass.operators.providers.cutedsl.evt import converter
+        except ImportError:
+            return False
+        return callable(getattr(converter, "make_scalar_reduce", None))
+
+    @staticmethod
     def _lower_pointwise_epilogue(
         gemm_name: str,
         nodes: Sequence[BaseSchedulerNode],
@@ -445,9 +453,22 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         except NotImplementedError as exc:
             log.debug("NVGEMM cannot orient fused reductions: %s", exc)
             return NVGemmVerticalFusionDecision.DEFER
+        if reduction_plan is not None and not self._supports_scalar_reduce():
+            log.debug("NVGEMM local reductions require scalar reduction support")
+            return NVGemmVerticalFusionDecision.DEFER
         if reduction_plan is not None and not all(
             variant.supports_reduction(reduction_plan) for variant in variants
         ):
+            return NVGemmVerticalFusionDecision.DEFER
+        if isinstance(ir_node, MultiTemplateBuffer) and not any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.supports_epilogue_fusion
+            and self._supports_reduction_layout(choice, epilogue_program.min_tile_shape)
+            for choice in ir_node._choices
+        ):
+            log.debug(
+                "NVGEMM epilogue fusion: no EFC kernel supports the reduction layout"
+            )
             return NVGemmVerticalFusionDecision.DEFER
 
         for s_node in all_scheduler_nodes:
@@ -745,6 +766,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         combined_program = self._lower_epilogue(template, (*epilogue_nodes, node2))
         if not combined_program.supported:
             return False
+        if (
+            combined_program.reduction_plan is not None
+            and not self._supports_scalar_reduce()
+        ):
+            return False
         feed_main_ordered = combined_program.feeds_main and (
             bool(epilogue_nodes)
             or all(
@@ -929,6 +955,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 reduction_plan = self._schedule_reduction_plan(
                     epilogue_program, swap_ab
                 )
+                if reduction_plan is not None and not self._supports_scalar_reduce():
+                    raise NotImplementedError(
+                        "cutlass.operators lacks scalar reduction support"
+                    )
                 if feeds_main:
                     if reduction_plan is None:
                         raise AssertionError("expected feed-main reduction plan")
