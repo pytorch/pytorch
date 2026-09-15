@@ -612,6 +612,23 @@ class ModeBranchGlobalModule(torch.nn.Module):
         return x * 2
 
 
+class SetIterModule(torch.nn.Module):
+    # Iterating a set guards each element through a set-index accessor, which
+    # reports a failure with NO verbose code parts when the set it is asked about
+    # is shorter than the index it recorded.
+    def forward(self, x, tags):
+        total = 0
+        for _ in tags:
+            total += 1
+        return x * total
+
+
+def drop_sequence_length_guards(guard_entries):
+    # SEQUENCE_LENGTH is the guard that would otherwise name a set of the wrong
+    # size before the per-element accessors are reached.
+    return [g.guard_type != "SEQUENCE_LENGTH" for g in guard_entries]
+
+
 def make_masked_forward():
     # A tensor default makes inspect.Signature equality raise (Parameter.__eq__
     # takes bool() of `default == default`), whether or not the body reads it.
@@ -2079,6 +2096,44 @@ from user code:
         self.assertFalse(lines[3].startswith(" "), lines[3])
         self.assertIn("Add a ModelInput", message)
 
+    def test_no_match_report_keeps_an_entry_on_one_line_past_odd_separators(self):
+        # A verbose code part embeds the guard's own source line, which the read
+        # producing it ends only at \n, so every other separator splitlines()
+        # breaks on -- a comment can carry the three below -- survives into the
+        # report, where splitlines() reads the entry-per-line format back.
+        src = (
+            "import torch\n"
+            "\n"
+            "\n"
+            "class OddSepModule(torch.nn.Module):\n"
+            "    def forward(self, x, mode):\n"
+            "        if mode == 1:  # page\x0cbreak\x1erec\u2028sep\n"
+            "            return x * 2\n"
+            "        return x * 3\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "aot_odd_sep_mod.py")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(src)
+            sys.path.insert(0, tmp)
+            self.addCleanup(sys.path.remove, tmp)
+            self.addCleanup(sys.modules.pop, "aot_odd_sep_mod", None)
+            mod = importlib.import_module("aot_odd_sep_mod")
+            x = torch.randn(3, 3)
+            model = torch.compile(mod.OddSepModule(), fullgraph=True, backend="eager")
+            model._aot_compile([ModelInput(args=(x, 1), kwargs={}, contexts=[])])
+            with self.assertRaises(RuntimeError) as ctx:
+                model(x, 2)
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual(len(lines), 3, message)
+        self.assertTrue(lines[1].startswith("  [0] L['mode'] == 1"), lines[1])
+        self.assertIn("Add a ModelInput", lines[2])
+        # The source has no spaces there, so this says all three separators
+        # arrived in the part and were collapsed -- without which the test is
+        # vacuous, and the last two a form-feed replace would not cover.
+        self.assertIn("page break rec sep", message)
+
     def test_no_match_message_keeps_the_advice_for_every_entry(self):
         # One entry names a missing global and the other is a plain mismatch, and
         # neither advice covers the other's entry: defining AOT_BRANCH_SCALE
@@ -2667,6 +2722,27 @@ from user code:
         self.assertIn("[1] <guards rejected this call twice and then accepted", message)
         # [0] is a real mismatch, so its advice still applies to the call.
         self.assertIn("[0] L['mode'] == 0", message)
+        self.assertIn("Add a ModelInput", message)
+
+    def test_no_match_message_when_a_failure_names_no_guard(self):
+        # A set index past the end of a shorter set answers
+        # GuardDebugInfo(false, 0): the call did NOT match, yet there is no
+        # verbose code part to quote, so an empty list cannot stand for "this tree
+        # passed" -- reason.result is what says that. Read as a pass, this call
+        # gets served a graph compiled for a set of another size.
+        model = torch.compile(
+            SetIterModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": drop_sequence_length_guards},
+        )
+        x = torch.randn(3, 3)
+        one, two = object(), object()
+        model._aot_compile([ModelInput(args=(x, {one, two}), kwargs={}, contexts=[])])
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, {one})
+        message = str(ctx.exception)
+        self.assertIn("[0] <guard check failed without naming a guard>", message)
         self.assertIn("Add a ModelInput", message)
 
     def test_no_match_report_names_the_results_the_dispatch_judged(self):
