@@ -1,4 +1,6 @@
+#include <ATen/DeviceAccelerator.h>
 #include <torch/csrc/dynamo/utils.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 
 namespace torch::dynamo {
 
@@ -31,6 +33,21 @@ PyObject* torch_c_dynamo_utils_init() {
 
   auto py_m = py::handle(m).cast<py::module>();
   py_m.def("is_instancemethod", is_instancemethod);
+  py_m.def("get_current_stream", [](const at::Device& device) {
+    auto acc_type{at::accelerator::getAccelerator(true).value()};
+
+    TORCH_CHECK_VALUE(
+        acc_type == device.type(),
+        device.type(),
+        " doesn't match the current accelerator ",
+        acc_type);
+
+    torch::utils::maybe_initialize_device(acc_type);
+    auto device_index{
+        device.has_index() ? device.index()
+                           : at::accelerator::getDeviceIndex()};
+    return at::accelerator::getCurrentStream(device_index);
+  });
   return m;
 }
 
