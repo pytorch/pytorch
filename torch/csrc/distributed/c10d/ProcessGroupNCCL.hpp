@@ -38,6 +38,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -365,6 +366,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Synchronize streams by blocking each on the NCCL stream
     void synchronizeStream();
 
+    void recordEndEvent(
+        const at::cuda::CUDAStream& stream,
+        bool asyncOp,
+        c10::cuda::CaptureStatus captureStatus);
+
     // Helper function to handle exception (throw if needed).
     void handleException(ErrorHandlingMode asyncErrorHandling);
 
@@ -421,6 +427,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // The end CUDA event of NCCL operator tracking this work item.
     std::shared_ptr<at::cuda::CUDAEvent> ncclEndEvent_;
+
+    // The external completion event for waits outside the original capture.
+    // Recording and waiting graphs retain it independently of this work item.
+    std::shared_ptr<at::cuda::CUDAEvent> capturedEndEvent_;
+
+    // The original capture ID for captured async work; unset for other work.
+    std::optional<c10::cuda::CaptureId_t> captureId_;
 
     // The NCCL communicator used for this work item.
     std::shared_ptr<NCCLComm> ncclComm_;
