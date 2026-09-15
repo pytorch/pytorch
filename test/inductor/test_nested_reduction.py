@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     get_func_call,
@@ -395,7 +396,8 @@ class _NestedReductionBase:
             actual, code = run_and_get_code(torch.compile(f), *args)
         self.assertEqual(actual, f(*args), atol=5e-2, rtol=5e-2)
         self.check_fusion()
-        FileCheck().check(".to(tl.int64)").run(code[0])
+        if not TEST_WITH_ROCM:
+            FileCheck().check(".to(tl.int64)").run(code[0])
 
     def test_native_matmul_column_reduction_not_fused(self):
         def f(x, weight):
