@@ -60,7 +60,6 @@ from .codegen.common import (
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
-    TensorArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -494,6 +493,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if mode != "atomic_add":
             raise AssertionError("Only atomic_add is supported for inner stores")
 
+        # Record it on the kernel: these atomics never pass through
+        # TritonKernel.store, so nothing else would mark the kernel as using them.
+        self.kernel.atomic_add_found = True
+
         buf_name = self._add_kernel_input(name)
         index_str = self._broadcast_index(index, f"{value}.shape")
         return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
@@ -911,17 +914,21 @@ class TritonTemplateKernel(TritonKernel):
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }
-        triton_meta["configs"] = [config_of(signature)]
+        # Rendered from a deferred hook, so the body -- including any subgraph
+        # modifications that emit atomics -- already exists at this point.
+        triton_meta["configs"] = [
+            config_of(signature, pointer_range_override=self.pointer_range_override())
+        ]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
         waves_per_eu = self.meta.get("waves_per_eu", None)
         kpack = self.meta.get("kpack", None)
-        if matrix_instr_nonkdim:
+        if matrix_instr_nonkdim is not None:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
-        if waves_per_eu:
+        if waves_per_eu is not None:
             triton_meta["waves_per_eu"] = waves_per_eu
-        if kpack:
+        if kpack is not None:
             triton_meta["kpack"] = kpack
 
         # tlx options carry dynamic string keys outside the TritonMeta schema.
@@ -935,50 +942,16 @@ class TritonTemplateKernel(TritonKernel):
         else:
             self.triton_meta.update(triton_meta)
 
-        # Upgrade signature for host-side TMA: pointer args that the launcher
-        # will replace with TensorDescriptors need tensordesc<> types so Triton
-        # compiles the kernel with the correct arg types.
-        if self.host_tma_descriptor_args:
-            from .codegen.triton_utils import _type_of
-
-            sig = self.triton_meta["signature"]
-            for argname, arg in zip(argdefs, signature):
-                if (
-                    isinstance(arg, TensorArg)
-                    and arg.name in self.host_tma_descriptor_args
-                ):
-                    info = self.host_tma_descriptor_args[arg.name]
-                    block_shape = (
-                        info["block_shape"]
-                        if isinstance(info, dict)
-                        else info.block_shape
-                    )
-                    dtype = V.graph.get_dtype(arg.buffer)
-                    inner = _type_of(dtype)[1:]  # strip "*": *bf16 -> bf16
-                    sig[argname.name] = f"tensordesc<{inner}{list(block_shape)}>"
-
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
         if self.host_tma_descriptor_args:
-            # This meta is repr'd into the generated module, so every value must
-            # be a plain resolved dict. Epilogue accesses register a
-            # TensorDescriptorOptions (whose block shape is still symbolic), which
-            # only TritonKernel.inductor_meta_per_kernel knows how to resolve.
-            unsupported = [
-                inner
-                for inner, info in self.host_tma_descriptor_args.items()
-                if not isinstance(info, dict)
-            ]
-            if unsupported:
-                raise NotImplementedError(
-                    "host-side TMA for template epilogue accesses is not supported "
-                    f"(unresolved descriptors: {unsupported})"
-                )
-            inductor_meta["host_tma_descriptor_args"] = dict(
-                self.host_tma_descriptor_args
+            # This meta is repr'd into the generated module, so epilogue-registered
+            # TensorDescriptorOptions must be resolved to plain dims first.
+            inductor_meta["host_tma_descriptor_args"] = (
+                self.resolved_host_tma_descriptor_args()
             )
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -3905,11 +3878,15 @@ def create_inputs_key(input_nodes) -> str:
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    # bfx9 has no legacy equivalent, and the legacy getter may reject it.
+    if precision != "bfx9":
+        precision = torch.get_float32_matmul_precision()
     return ":".join(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            precision,
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
@@ -4216,8 +4193,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
         if config.autotune_in_subproc or has_cutlass:
-            # Warmup the subprocess pool early so it's ready for benchmarking
-            torch._inductor.autotune_process.get_tuning_process_pool()
+            # Initialize the worker pool (subprocess or thread) so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_pool()
 
         precompile_fn = self.make_precompile_fn(
             choices,
