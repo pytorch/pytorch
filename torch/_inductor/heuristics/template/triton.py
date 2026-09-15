@@ -5,7 +5,7 @@ import itertools
 import logging
 import math
 import os
-from functools import partial
+from functools import cache, partial
 from threading import Lock
 from typing import Any, TYPE_CHECKING
 
@@ -87,7 +87,7 @@ ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
 
 
 def _origami_enabled() -> bool:
-    """Check if origami GEMM optimization is enabled."""
+    """Check if Origami template config selection is enabled."""
     return config.rocm.origami and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
 
 
@@ -170,10 +170,10 @@ def _filter_tdm_descriptor_block_configs(
     ]
 
 
-# rocm-origami pip pkg is only available on ROCm builds and is only used when
-# both max_autotune and config.rocm.origami are enabled (env-var driven, set once
-# at config import). Cache the import here so the hot path never pays an exception
-# and CUDA/CPU/origami-disabled processes never attempt the import.
+# rocm-origami is only available on ROCm builds and is used when max_autotune and
+# config.rocm.origami are both enabled (env-var driven, set once at config import).
+# Cache the import here so the hot path never pays an exception and
+# CUDA/CPU/origami-disabled processes never attempt the import.
 # origami is not supported on ROCm 10.0+.
 if (
     IS_ROCM
@@ -186,7 +186,7 @@ if (
     except ImportError:
         origami = None
         log.info(
-            "rocm-origami not installed; ROCm origami GEMM selection disabled. "
+            "rocm-origami not installed; ROCm Origami config selection disabled. "
             "Install via pip install rocm-origami to enable."
         )
 else:
@@ -197,8 +197,8 @@ else:
         and _rocm_version >= ORIGAMI_UNSUPPORTED_ROCM_VERSION
     ):
         log.warning(
-            "ROCm origami GEMM selection is not supported on ROCm %d.%d+ "
-            "(detected %d.%d); origami disabled.",
+            "ROCm Origami config selection is not supported on ROCm %d.%d+ "
+            "(detected %d.%d); Origami disabled.",
             *ORIGAMI_UNSUPPORTED_ROCM_VERSION,
             *_rocm_version,
         )
@@ -218,6 +218,152 @@ def _origami_hardware(selector):  # type: ignore[no-untyped-def]
 
 def _origami_configs(selector):  # type: ignore[no-untyped-def]
     return selector._configs
+
+
+ORIGAMI_FLEX_MIN_SEQUENCE_LENGTH = 1024
+ORIGAMI_FLEX_MIN_BATCH_HEADS = 16
+ORIGAMI_FLEX_QK_TOPK = 1
+ORIGAMI_FLEX_PV_TOPK = 2
+
+
+def _origami_flex_problem(
+    origami_module: Any,
+    m: int,
+    n: int,
+    k: int,
+    *,
+    batch: int,
+    dtype: Any,
+    a_transpose: Any,
+    b_transpose: Any,
+) -> Any:
+    problem = origami_module.problem_t()
+    problem.size = origami_module.dim3_t(m, n, k)
+    problem.batch = batch
+    problem.a_transpose = a_transpose
+    problem.b_transpose = b_transpose
+    problem.a_dtype = dtype
+    problem.b_dtype = dtype
+    problem.c_dtype = dtype
+    problem.d_dtype = dtype
+    problem.mi_dtype = dtype
+    return problem
+
+
+def _origami_flex_config(
+    origami_module: Any,
+    hardware: Any,
+    dtype: Any,
+    block_m: int,
+    block_n: int,
+    block_k: int,
+) -> Any:
+    cfg = origami_module.config_t()
+    cfg.mt = origami_module.dim3_t(block_m, block_n, block_k)
+    cfg.mi = hardware.get_recommended_matrix_instruction(dtype)
+    # Match the retained compiler variants: waves_per_eu=0 leaves occupancy
+    # unconstrained rather than imposing Origami's standalone-GEMM estimate.
+    cfg.occupancy = 0
+    return cfg
+
+
+@cache
+def _origami_flex_attention_tiles(
+    batch_heads: int,
+    seq_len_q: int,
+    seq_len_kv: int,
+    qk_head_dim: int,
+    v_head_dim: int,
+    qk_head_dim_rounded: int,
+    v_head_dim_rounded: int,
+    dtype: torch.dtype,
+    device_index: int,
+    candidate_tiles: tuple[tuple[int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    """Select FlexAttention tiles from Origami's two standalone GEMM rankings.
+
+    FlexAttention does not materialize QK/P, so adding standalone GEMM latencies
+    would pretend both intermediates went through HBM. Keep the union of each
+    sub-GEMM's best tiles instead, then let measured autotuning choose among their
+    backend variants.
+    """
+    origami_module = origami
+    if origami_module is None:
+        return ()
+
+    dtype_name = {
+        torch.float16: "f16",
+        torch.bfloat16: "bf16",
+    }.get(dtype)
+    if dtype_name is None:
+        return ()
+
+    origami_dtype = origami_module.string_to_datatype(dtype_name)
+    hardware = origami_module.get_hardware_for_device(device_index)
+    qk_problem = _origami_flex_problem(
+        origami_module,
+        seq_len_q,
+        seq_len_kv,
+        qk_head_dim,
+        batch=batch_heads,
+        dtype=origami_dtype,
+        a_transpose=origami_module.transpose_t.N,
+        b_transpose=origami_module.transpose_t.T,
+    )
+    pv_problem = _origami_flex_problem(
+        origami_module,
+        seq_len_q,
+        v_head_dim,
+        seq_len_kv,
+        batch=batch_heads,
+        dtype=origami_dtype,
+        a_transpose=origami_module.transpose_t.N,
+        b_transpose=origami_module.transpose_t.N,
+    )
+
+    qk_scores: dict[tuple[int, int], float] = {}
+    pv_scores: dict[tuple[int, int], float] = {}
+    for block_m, block_n in candidate_tiles:
+        qk_config = _origami_flex_config(
+            origami_module,
+            hardware,
+            origami_dtype,
+            block_m,
+            block_n,
+            qk_head_dim_rounded,
+        )
+        pv_config = _origami_flex_config(
+            origami_module,
+            hardware,
+            origami_dtype,
+            block_m,
+            v_head_dim_rounded,
+            block_n,
+        )
+        qk_latency = origami_module.compute_total_latency(
+            qk_problem, hardware, qk_config, hardware.N_CU
+        )
+        pv_latency = origami_module.compute_total_latency(
+            pv_problem, hardware, pv_config, hardware.N_CU
+        )
+        tile = (block_m, block_n)
+        if math.isfinite(qk_latency):
+            qk_scores[tile] = qk_latency
+        if math.isfinite(pv_latency):
+            pv_scores[tile] = pv_latency
+
+    qk_ranked = sorted(qk_scores, key=lambda tile: (qk_scores[tile], tile))
+    pv_ranked = sorted(pv_scores, key=lambda tile: (pv_scores[tile], tile))
+    if not qk_ranked or not pv_ranked:
+        return ()
+    selected = []
+    for tile in (
+        *qk_ranked[:ORIGAMI_FLEX_QK_TOPK],
+        *pv_ranked[:ORIGAMI_FLEX_PV_TOPK],
+    ):
+        if tile not in selected:
+            selected.append(tile)
+    return tuple(selected)
 
 
 # Gemm Configs
@@ -396,6 +542,27 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
     kpack: int = 1
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexAttentionConfigContext:
+    """Shape and layout facts needed to refine a forward config list."""
+
+    batch_size: int | sympy.Expr
+    kv_batch_size: int | sympy.Expr
+    num_heads: int | sympy.Expr
+    num_kv_heads: int | sympy.Expr
+    seq_len_q: int | sympy.Expr
+    seq_len_kv: int | sympy.Expr
+    qk_head_dim: int | sympy.Expr
+    v_head_dim: int | sympy.Expr
+    qk_head_dim_rounded: int
+    v_head_dim_rounded: int
+    dtype: torch.dtype
+    device: torch.device
+    inputs_contiguous: bool
+    is_noop_block_mask: bool
+    kernel_options: dict[str, Any]
 
 
 class BaseHeuristicSingleton(type):
@@ -1338,6 +1505,14 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return flex_attn_fwd_configs
 
+    def filter_flex_attn_fwd_configs(
+        self,
+        configs: list[FlexConfig],
+        context: FlexAttentionConfigContext,
+    ) -> list[FlexConfig]:
+        """Optionally refine forward configs with full attention context."""
+        return configs
+
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
     ) -> list[FlexBwDConfig]:
@@ -2166,6 +2341,156 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             flex_attn_fwd_configs.append(default_config)
 
         return flex_attn_fwd_configs
+
+    def filter_flex_attn_fwd_configs(
+        self,
+        configs: list[FlexConfig],
+        context: FlexAttentionConfigContext,
+    ) -> list[FlexConfig]:
+        """Use Origami to replace the gfx950 dense DEFAULT candidate pool."""
+        if (
+            origami is None
+            or not config.max_autotune
+            or config.max_autotune_flex_search_space != "DEFAULT"
+            or not context.is_noop_block_mask
+            or context.dtype not in (torch.float16, torch.bfloat16)
+        ):
+            return configs
+
+        # Origami models dense row/column-major GEMMs, not padding or overlap.
+        if not context.inputs_contiguous:
+            return configs
+
+        tuning_keys = (
+            "BLOCK_M",
+            "BLOCK_N",
+            "num_stages",
+            "num_warps",
+            "matrix_instr_nonkdim",
+            "waves_per_eu",
+            "kpack",
+        )
+        if any(
+            key in context.kernel_options or f"fwd_{key}" in context.kernel_options
+            for key in tuning_keys
+        ):
+            return configs
+
+        raw_dims = (
+            context.batch_size,
+            context.kv_batch_size,
+            context.num_heads,
+            context.num_kv_heads,
+            context.seq_len_q,
+            context.seq_len_kv,
+            context.qk_head_dim,
+            context.v_head_dim,
+        )
+        if any(getattr(dim, "free_symbols", None) for dim in raw_dims):
+            return configs
+        (
+            batch_size,
+            kv_batch_size,
+            num_heads,
+            num_kv_heads,
+            seq_len_q,
+            seq_len_kv,
+            qk_head_dim,
+            v_head_dim,
+        ) = (int(dim) for dim in raw_dims)
+        min_sequence_length = (
+            2 * ORIGAMI_FLEX_MIN_SEQUENCE_LENGTH
+            if qk_head_dim >= 128
+            else ORIGAMI_FLEX_MIN_SEQUENCE_LENGTH
+        )
+        if (
+            min(seq_len_q, seq_len_kv) < min_sequence_length
+            or batch_size * num_heads < ORIGAMI_FLEX_MIN_BATCH_HEADS
+            or batch_size != kv_batch_size
+            or qk_head_dim != v_head_dim
+            or qk_head_dim not in (32, 64, 128, 256)
+        ):
+            return configs
+        if configs != self.get_flex_attn_fwd_configs(
+            qk_head_dim, context.seq_len_q, context.dtype
+        ):
+            # An out-of-tree choices handler supplied this pool; it owns the
+            # policy unless it explicitly overrides the refinement hook too.
+            return configs
+
+        try:
+            device_index = (
+                context.device.index
+                if context.device.index is not None
+                else torch.cuda.current_device()
+            )
+            arch = torch.cuda.get_device_properties(device_index).gcnArchName.split(
+                ":", 1
+            )[0]
+            # The stage/warp projection below is measured on gfx950. Other Origami
+            # targets retain their stock pool until they have equivalent evidence.
+            if arch != "gfx950":
+                return configs
+
+            candidate_tiles = tuple(
+                dict.fromkeys(
+                    (candidate.block_m, candidate.block_n)
+                    for candidate in self.exhaustive_flex_attn_fwd_configs
+                )
+            )
+            selected_tiles = _origami_flex_attention_tiles(
+                batch_size * num_heads,
+                seq_len_q,
+                seq_len_kv,
+                qk_head_dim,
+                v_head_dim,
+                context.qk_head_dim_rounded,
+                context.v_head_dim_rounded,
+                context.dtype,
+                device_index,
+                candidate_tiles,
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+            log.debug("Origami FlexAttention selection failed: %s", error)
+            return configs
+        if not selected_tiles:
+            return configs
+
+        # Build the safety config for the query's verified gfx950 target instead
+        # of recovering it from `configs`: for D=32 the generic default is also
+        # present in the autotune list, and a heterogeneous process may have
+        # initialized that list using another device's architecture.
+        generic_default = ROCmFlexConfig(128, 64, 1, 4, kpack=2)
+        stock_default = self.gfx950_default_flex_config.get(
+            (context.dtype, qk_head_dim), generic_default
+        )
+        stock_default = dataclasses.replace(stock_default, kpack=2)
+        # Origami has no stage/warp/MFMA/kpack model for this fused kernel.
+        # gfx950 exhaustive measurements project tiles to stage 2 and
+        # unconstrained occupancy; MHA uses four warps while GQA retains two and
+        # four. The autotuner keeps both MFMA and kpack variants.
+        allowed_warps = (2, 4) if num_heads != num_kv_heads else (4,)
+        selected: list[FlexConfig] = [
+            candidate
+            for candidate in self.exhaustive_flex_attn_fwd_configs
+            if isinstance(candidate, ROCmFlexConfig)
+            and (candidate.block_m, candidate.block_n) in selected_tiles
+            and candidate.num_stages == 2
+            and candidate.num_warps in allowed_warps
+            and candidate.waves_per_eu == 0
+        ]
+        # Keep the stock architecture default even when Origami did not select
+        # its tile (or when its generic D=32 form uses a different stage count).
+        if stock_default not in selected:
+            selected.append(stock_default)
+        if not selected:
+            return configs
+        log.debug(
+            "Origami selected FlexAttention tiles %s (%d configs)",
+            selected_tiles,
+            len(selected),
+        )
+        return selected
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
