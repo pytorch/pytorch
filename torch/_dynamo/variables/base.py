@@ -178,6 +178,9 @@ class AttrMutationKind(Enum):
     GENERIC_SETATTR = 0
     # Replay a direct object.__dict__ mutation while bypassing descriptors.
     INSTANCE_DICT = 1
+    # Replay a module-global deletion by mutating module.__dict__ directly,
+    # preserving DELETE_GLOBAL's NameError semantics.
+    GLOBAL_DELETE = 2
 
 
 class ValueMutationNew(MutationType):
