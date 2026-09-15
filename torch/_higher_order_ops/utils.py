@@ -404,7 +404,7 @@ def setup_compilation_env():
 
 @contextmanager
 def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._get_is_fx_tracing()
+    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_tls.flag
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
     _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
@@ -418,13 +418,13 @@ def _set_compilation_env():
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dynamo
         # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._set_is_fx_tracing(False)
+        torch.fx._symbolic_trace._is_fx_tracing_tls.flag = False
         # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
-        torch.fx._symbolic_trace._set_is_fx_tracing(_old_is_tracing)
+        torch.fx._symbolic_trace._is_fx_tracing_tls.flag = _old_is_tracing
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
         torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 

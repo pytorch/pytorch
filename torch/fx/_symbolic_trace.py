@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable, Iterator
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType, TracebackType
 from typing import Any, get_args, NamedTuple, overload, ParamSpec, TypeAlias, TypeVar
+from typing_extensions import Self
 
 import torch
 import torch.utils._pytree as pytree
@@ -42,7 +43,12 @@ _orig_module_getattr: Callable[..., Any] = torch.nn.Module.__getattr__
 
 _proxyable_classes: dict[type, None] = {}
 
-_is_fx_tracing_tls = threading.local()
+
+class _FxTracingFlag(threading.local):
+    flag: bool = False
+
+
+_is_fx_tracing_tls = _FxTracingFlag()
 
 _ConstantAttributeType: TypeAlias = (
     torch.Tensor | torch.ScriptObject | FakeScriptObject | pytree.TreeSpec
@@ -62,31 +68,23 @@ def is_fx_tracing_warning() -> None:
     )
 
 
-def _set_is_fx_tracing(value: bool) -> None:
-    _is_fx_tracing_tls.flag = value
-
-
-def _get_is_fx_tracing() -> bool:
-    return getattr(_is_fx_tracing_tls, "flag", False)
-
-
 @contextlib.contextmanager
 def _is_fx_tracing_context(value: bool) -> Iterator[None]:
-    previous = _get_is_fx_tracing()
-    _set_is_fx_tracing(value)
+    previous = _is_fx_tracing_tls.flag
+    _is_fx_tracing_tls.flag = value
     try:
         yield
     finally:
-        _set_is_fx_tracing(previous)
+        _is_fx_tracing_tls.flag = previous
 
 
 def is_fx_tracing() -> bool:
     is_fx_tracing_warning()
-    return _get_is_fx_tracing()
+    return _is_fx_tracing_tls.flag
 
 
 def is_fx_symbolic_tracing() -> bool:
-    return _get_is_fx_tracing() and not torch.compiler.is_compiling()
+    return _is_fx_tracing_tls.flag and not torch.compiler.is_compiling()
 
 
 @compatibility(is_backward_compatible=True)
@@ -824,8 +822,8 @@ class Tracer(TracerBase):
 
             A ``Graph`` representing the semantics of the passed-in ``root``.
         """
-        old_is_fx_tracing_flag = _get_is_fx_tracing()
-        _set_is_fx_tracing(True)
+        old_is_fx_tracing_flag = _is_fx_tracing_tls.flag
+        _is_fx_tracing_tls.flag = True
         try:
             if isinstance(root, torch.nn.Module):
                 # do real recompilation for _LazyGraphModule before retracing since the trace
@@ -957,7 +955,7 @@ class Tracer(TracerBase):
 
             raise
         finally:
-            _set_is_fx_tracing(old_is_fx_tracing_flag)
+            _is_fx_tracing_tls.flag = old_is_fx_tracing_flag
         return self.graph
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "Tracer":
@@ -1226,7 +1224,7 @@ class _Patcher:
             patch.patch()
         return self.patches_made
 
-    def __enter__(self) -> "_Patcher":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(
