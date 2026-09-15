@@ -6,15 +6,18 @@ import sys
 import unittest
 from pathlib import Path
 from typing import NamedTuple, Optional
+from unittest.mock import patch
 
 import torch
 from torch import Tensor
+from torch.jit._serialization import validate_map_location
 from torch.testing._internal.common_cuda import SM120OrLater
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     raise_on_run_directly,
     skipIfTorchDynamo,
     TemporaryFileName,
+    TEST_CUDA,
 )
 
 
@@ -608,6 +611,78 @@ class TestSaveLoad(JitTestCase):
         self.assertTrue(m_loaded_params["bar.weight"].is_cpu)
         self.assertTrue(m_params["bar.bias"].is_cpu)
         self.assertTrue(m_loaded_params["bar.bias"].is_cpu)
+
+    def test_validate_map_location_fast_path(self):
+        # None and cpu targets skip device validation and return unchanged.
+        self.assertIsNone(validate_map_location(None))
+        self.assertEqual(validate_map_location("cpu"), torch.device("cpu"))
+        self.assertEqual(
+            validate_map_location(torch.device("cpu:0")), torch.device("cpu:0")
+        )
+
+    def test_validate_map_location_unregistered_device_module_passthrough(self):
+        # Preserve the existing pass-through behavior when torch.<device>
+        # does not provide a module that can validate availability and indices.
+        dev = torch.device("meta")
+        with patch("torch.jit._serialization._validate_device") as mock_validate:
+            self.assertEqual(validate_map_location(dev), dev)
+            self.assertEqual(validate_map_location("meta"), dev)
+        mock_validate.assert_not_called()
+
+    def test_validate_map_location_invalid_type(self):
+        with self.assertRaisesRegex(ValueError, "map_location should be either None"):
+            validate_map_location(123)
+
+    def test_validate_map_location_non_cuda_device_validation(self):
+        # Verify the generalized validation path (the core of this change)
+        # is taken for non-cuda device types: attach a fake module for a
+        # valid but usually-unregistered device type and confirm
+        # _validate_device raises on both the is_available and
+        # device_count checks.
+        backend = "hpu"
+        had_module = hasattr(torch, backend)
+        orig_module = getattr(torch, backend, None)
+
+        class UnavailableModule:
+            @staticmethod
+            def is_available():
+                return False
+
+            @staticmethod
+            def device_count():
+                return 0
+
+        class AvailableModule:
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def device_count():
+                return 0
+
+        try:
+            setattr(torch, backend, UnavailableModule)
+            with self.assertRaisesRegex(RuntimeError, "is_available"):
+                validate_map_location(torch.device(f"{backend}:0"))
+
+            setattr(torch, backend, AvailableModule)
+            with self.assertRaisesRegex(RuntimeError, "device_count"):
+                validate_map_location(torch.device(f"{backend}:5"))
+        finally:
+            if had_module:
+                setattr(torch, backend, orig_module)
+            else:
+                delattr(torch, backend)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_validate_map_location_cuda_invalid_index(self):
+        # Regression guard for the previously cuda-only path, now routed
+        # through the generic _validate_device: an out-of-range cuda index
+        # must raise RuntimeError.
+        invalid_idx = torch.cuda.device_count()
+        with self.assertRaisesRegex(RuntimeError, "device_count"):
+            validate_map_location(torch.device(f"cuda:{invalid_idx}"))
 
     def test_save_load_with_saved_traced_inputs(self):
         """
