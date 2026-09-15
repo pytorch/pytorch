@@ -44,7 +44,7 @@ from .. import graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
-    ObservedTypeError,
+    ObservedException,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -79,6 +79,7 @@ from ..utils import (
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
+    specialize_symnode,
     str_methods,
     tensortype_to_dtype,
     unpack_iterable,
@@ -123,6 +124,7 @@ from .object_protocol import (
     maybe_get_python_type,
     pycallable_check,
     pyiter_check,
+    pylong_as_ssize_t,
     pylong_from_base,
     pynumber_absolute,
     pynumber_add,
@@ -581,6 +583,17 @@ def _uses_custom_classinfo_check(
             and subclasscheck is not abc.ABCMeta.__subclasscheck__
         )
     return False
+
+
+def _observed_exception_matches(
+    tx: "InstructionTranslatorBase", exc: type[BaseException]
+) -> bool:
+    """Mirror PyErr_ExceptionMatches for the exception currently being raised."""
+    try:
+        raised = tx.exn_vt_stack.get_raised_exception()
+    except AssertionError:
+        return False
+    return issubclass(raised.exc_type, exc)  # type: ignore[union-attr]
 
 
 class BuiltinVariable(BaseBuiltinVariable):
@@ -2515,27 +2528,84 @@ class BuiltinVariable(BaseBuiltinVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker:
         # ref: PyObject_LengthHint (Objects/abstract.c): try __len__, then
-        # __length_hint__, falling back to the supplied default for either a
-        # missing slot or a TypeError raised by the slot.
+        # __length_hint__, falling back to the supplied default for a missing
+        # slot, a TypeError raised by the slot, or a NotImplemented result.
         if kwargs or not (1 <= len(args) <= 2):
             raise_type_error(
                 tx, f"length_hint expected 1 or 2 arguments, got {len(args)}"
             )
         obj = args[0]
-        default = args[1] if len(args) == 2 else ConstantVariable.create(0)
+        if len(args) == 2:
+            # The C entry point takes the default as Py_ssize_t: __index__ is
+            # applied and the result must fit an ssize_t before the body runs,
+            # even when the default is never used.
+            default = specialize_symnode(pynumber_index(tx, args[1]))
+            if not default.is_python_constant():
+                unimplemented(
+                    gb_type="length_hint with a non-constant default",
+                    context=f"length_hint default {args[1]}",
+                    explanation="Dynamo cannot convert a non-constant default "
+                    "to an integer index.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            default = ConstantVariable.create(int(pylong_as_ssize_t(tx, default)))
+        else:
+            default = ConstantVariable.create(0)
 
         obj_type = maybe_get_python_type(obj)
 
         if type_implements_sq_length(obj_type) or type_implements_mp_length(obj_type):
-            return generic_size(tx, obj)
+            try:
+                return generic_size(tx, obj)
+            except ObservedException:
+                # __len__ raised a TypeError (subclasses included): CPython
+                # clears it and falls back to __length_hint__.
+                if not _observed_exception_matches(tx, TypeError):
+                    raise
+                handle_observed_exception(tx)
 
         if getattr(obj_type, "__length_hint__", None) is None:
             return default
         try:
-            return obj.call_method(tx, "__length_hint__", [], {})
-        except ObservedTypeError:
+            hint = obj.call_method(tx, "__length_hint__", [], {})
+        except ObservedException:
+            if not _observed_exception_matches(tx, TypeError):
+                raise
             handle_observed_exception(tx)
             return default
+
+        if hint.is_python_constant():
+            val = hint.as_python_constant()
+            if val is NotImplemented:
+                return default
+            if not isinstance(val, int):
+                raise_type_error(
+                    tx,
+                    f"__length_hint__ must be an integer, not {type(val).__name__}",
+                )
+            val = pylong_as_ssize_t(tx, hint)
+            if val < 0:
+                raise_value_error(tx, "__length_hint__() should return >= 0")
+            return ConstantVariable.create(int(val))
+
+        # A non-constant hint (e.g. a symbolic int) cannot be type- or
+        # range-checked at trace time; refuse it rather than return a value
+        # CPython might reject for being negative or out of ssize_t range.
+        try:
+            hint_type = hint.python_type()
+        except NotImplementedError:
+            hint_type = None
+        if hint_type is not None and not issubclass(hint_type, int):
+            raise_type_error(
+                tx, f"__length_hint__ must be an integer, not {hint_type.__name__}"
+            )
+        unimplemented(
+            gb_type="length_hint with a non-constant result",
+            context=f"length_hint {obj} returned {hint}",
+            explanation="Dynamo cannot verify the type and range of a "
+            "non-constant __length_hint__ result.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_getitem(
         self,
