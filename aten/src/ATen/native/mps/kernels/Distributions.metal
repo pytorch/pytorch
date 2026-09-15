@@ -125,7 +125,7 @@ kernel void uniform_dist(
     T value = static_cast<T>(from + scale * u);
     // Casting to T can round up to the excluded upper bound.
     output[base + i] =
-        static_cast<T>(float(value) == params.w ? params.z : float(value));
+        float(value) == params.w ? static_cast<T>(params.z) : value;
   }
 }
 
