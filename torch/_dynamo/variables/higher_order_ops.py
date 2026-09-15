@@ -57,6 +57,7 @@ from .. import graph_break_hints, variables
 from ..exc import (
     FakeTensorObservedException,
     ObservedException,
+    TorchRuntimeError,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
@@ -804,6 +805,67 @@ def _call_while_loop(
         )
     additional_inputs_seq = unpack_iterable(tx, additional_inputs)
 
+    num_carried_inputs = len(operands_seq)
+
+    def check_carried_input_mutation(
+        fn_name: str, graph: torch.fx.Graph
+    ) -> set[StorageWeakRef]:
+        from torch._prims_common import compute_required_storage_length
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        mutated_inputs = set(getattr(graph, "_dynamo_mutated_input_indices", ()))
+        mutated_storages = subgraph_mutated_input_storages(graph, mutated_inputs)
+        if any(idx < num_carried_inputs for idx in mutated_inputs):
+            raise TorchRuntimeError(f"{fn_name} might be modifying a carried input!")
+
+        def byte_range(tensor):
+            start = tensor.storage_offset() * tensor.element_size()
+            end = compute_required_storage_length(
+                tensor.shape, tensor.stride(), tensor.storage_offset()
+            )
+            return start, end * tensor.element_size()
+
+        graphs = [graph]
+        for node in graph.find_nodes(op="get_attr"):
+            subgraph = tx.output.nn_modules.get(node.target)
+            if isinstance(subgraph, GraphModule):
+                graphs.extend(
+                    module.graph
+                    for module in subgraph.modules()
+                    if isinstance(module, GraphModule)
+                )
+        writes = [
+            tensor
+            for subgraph in graphs
+            for node in subgraph.nodes
+            for tensor in node.meta.get("dynamo_mutated_tensors", ())
+        ]
+        for tensor in writes:
+            mutated_storages |= get_tensor_storages(tensor)
+        aliased_carries = parent_mutated_input_indices(operands_seq, mutated_storages)
+        for carry_idx in aliased_carries:
+            carried = operands_seq[carry_idx].as_proxy().node.meta["example_value"]
+            if guard_or_false(carried.numel() == 0):
+                continue
+            carry_start, carry_end = byte_range(carried)
+            carried_storages = get_tensor_storages(carried)
+            for mutated in writes:
+                if not carried_storages & get_tensor_storages(mutated):
+                    continue
+                if guard_or_false(mutated.numel() == 0):
+                    continue
+                start, end = byte_range(mutated)
+                # Bounding spans conservatively include gaps in strided views.
+                if guard_or_false(end <= carry_start) or guard_or_false(
+                    carry_end <= start
+                ):
+                    continue
+                raise TorchRuntimeError(
+                    f"{fn_name} mutates a tensor that aliases carried input {carry_idx}; "
+                    "clone it before mutating, or update the carry through the return value."
+                )
+        return mutated_storages
+
     with discard_graph_changes(tx):
         # Note: this must be run under discard graph changes.
         def unspecialize_carried_inputs(
@@ -899,6 +961,7 @@ def _call_while_loop(
     )
     cond_nn_modules = dict(tx.output.nn_modules)
     validate_subgraph_output_types(cond_r)
+    cond_mutated_input_storages = check_carried_input_mutation("cond_fn", cond_graph)
     if cond_r.is_tensor():
         cond_r_meta = _extract_tensor_metadata(
             # type: ignore[attr-defined]
@@ -948,12 +1011,9 @@ def _call_while_loop(
         remove_consts_from_outputs=False,
     )
     validate_subgraph_output_types(body_r)
-    cond_mutated_inputs = set(getattr(cond_graph, "_dynamo_mutated_input_indices", ()))
-    body_mutated_inputs = set(getattr(body_graph, "_dynamo_mutated_input_indices", ()))
+    body_mutated_input_storages = check_carried_input_mutation("body_fn", body_graph)
 
-    mutated_input_storages = subgraph_mutated_input_storages(
-        cond_graph, cond_mutated_inputs
-    ) | subgraph_mutated_input_storages(body_graph, body_mutated_inputs)
+    mutated_input_storages = cond_mutated_input_storages | body_mutated_input_storages
 
     # We set include contiguity=False because we have vmap x HOP tests, where if
     # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
@@ -980,9 +1040,13 @@ def _call_while_loop(
         + list(additional_inputs_seq)
         + list(additional_lifted_inputs)
     )
-    mutated_inputs = parent_mutated_input_indices(
-        all_while_loop_inputs, mutated_input_storages
-    )
+    # The checks above proved that writes do not overlap any carried input.
+    mutated_inputs = [
+        num_carried_inputs + idx
+        for idx in parent_mutated_input_indices(
+            all_while_loop_inputs[num_carried_inputs:], mutated_input_storages
+        )
+    ]
 
     mutated_arg_indices = ",".join(str(i) for i in mutated_inputs)
 
