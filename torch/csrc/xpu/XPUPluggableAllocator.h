@@ -17,7 +17,7 @@ struct _AllocationMetadata {
   sycl::queue* queue{};
 };
 
-struct TORCH_PYTHON_API XPUPluggableAllocator
+struct TORCH_XPU_API XPUPluggableAllocator
     : public c10::xpu::XPUCachingAllocator::XPUAllocator {
   XPUPluggableAllocator(
       std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
