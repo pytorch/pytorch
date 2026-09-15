@@ -3,6 +3,7 @@
 import functools
 import gc
 import importlib
+import importlib.machinery
 import os
 import pickle
 import re
@@ -78,6 +79,18 @@ def _import_alias_getattr_boom(name):
     raise RuntimeError(f"module __getattr__ ran inside a trace for {name}")
 
 
+def _import_source_on_stack():
+    # InstructionTranslatorBase.import_source, matched by module as well as by
+    # name; _ImportAliasProbeSpec pins that the match still finds it.
+    frame = sys._getframe(1)
+    while frame is not None:
+        where = (frame.f_code.co_name, frame.f_globals.get("__name__"))
+        if where == ("import_source", "torch._dynamo.symbolic_convert"):
+            return True
+        frame = frame.f_back
+    return False
+
+
 class _ImportAliasHookedModule(types.ModuleType):
     # A class-level __getattribute__ intercepts every read, __dict__ included,
     # as importlib.util._LazyModule's does, and that one runs the module body
@@ -86,12 +99,24 @@ class _ImportAliasHookedModule(types.ModuleType):
     # the resolution or the alias check, which take the instance dict through
     # object.__getattribute__ instead -- raises.
     def __getattribute__(self, name):
-        frame = sys._getframe(1)
-        while frame is not None and frame.f_code.co_name != "import_source":
-            frame = frame.f_back
-        if frame is not None:
+        if _import_source_on_stack():
             raise RuntimeError(f"module __getattribute__ read {name} inside a trace")
         return object.__getattribute__(self, name)
+
+
+class _ImportAliasProbeSpec(importlib.machinery.ModuleSpec):
+    # The one read import_source makes by design is _initializing off the
+    # spec it took out of the module dict, so this is where a test sees that
+    # the frame walk above still names the real import_source.
+    def __init__(self, name):
+        super().__init__(name, None)
+        self.seen_import_source = False
+
+    @property
+    def _initializing(self):
+        if _import_source_on_stack():
+            self.seen_import_source = True
+        return False
 
 
 def _bound_method_guard_target(self, x):
@@ -1345,7 +1370,7 @@ def add(x, y):
             _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
-    def test_import_alias_keeps_the_installed_module_when_neither_is_live(self):
+    def test_import_alias_rebinds_the_installed_module_to_the_live_entry(self):
         # install() binds the module a handover put in sys.modules, and a
         # second handover precedes the next trace. The alias is rebound to the
         # live entry, the module the graph is specialized on, so a change to
@@ -1402,6 +1427,7 @@ def add(x, y):
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
+            _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
     def test_import_alias_of_a_dotted_name_is_the_module_import_name_resolves(self):
@@ -1450,6 +1476,8 @@ def add(x, y):
             sys.modules.pop(helper_name, None)
             fn_pkg.__globals__.pop(pkg_alias, None)
             fn_pkg.__globals__.pop(helper_alias, None)
+            _import_source_cache.pop(pkg_name, None)
+            _import_source_cache.pop(helper_name, None)
             torch._dynamo.reset()
 
     def test_import_alias_accepts_a_stale_torch_package_module(self):
@@ -1596,10 +1624,14 @@ def add(x, y):
         # each module's name, both out of the instance dict without running
         # that hook; __import__ and PythonModuleVariable read __spec__ and
         # __name__ off the live one by design, and the frame reads nothing else
-        # off it.
+        # off it. The live module's spec records whether the hook's frame walk
+        # saw import_source on the _initializing read the resolution makes, so
+        # a hook that no longer recognizes the frame fails here, not silently.
         name = "torch_test_package_import_alias_hooked"
         alias = f"__import_{name}"
         live = _ImportAliasHookedModule(name)
+        spec = _ImportAliasProbeSpec(name)
+        live.__spec__ = spec
         stale = _ImportAliasHookedModule(name)
         args = (torch.randn(3, 2),)
 
@@ -1615,6 +1647,45 @@ def add(x, y):
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(fn(*args), compiled_fn(*args))
             self.assertIs(fn.__globals__[alias], live)
+            self.assertTrue(spec.seen_import_source)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            _import_source_cache.pop(name, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_of_an_initializing_module_waits_on_its_import(self):
+        # _load_unlocked publishes a module to sys.modules with its spec marked
+        # _initializing before running its body, so a present entry can be one
+        # still executing. import_source hands such a name to
+        # importlib.import_module, which waits on the module lock the way an
+        # import statement would, instead of serving the half-initialized
+        # entry. The wait itself is a two-thread affair; with the lock free the
+        # call returns the entry at once, and the spy pins the dispatch.
+        name = "torch_test_package_import_alias_initializing"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 4
+        spec = importlib.machinery.ModuleSpec(name, None)
+        spec._initializing = True
+        module.__spec__ = spec
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_initializing as mod
+
+            return x + mod.VALUE
+
+        real_import = importlib.import_module
+        spy = mock.patch.object(importlib, "import_module", wraps=real_import)
+        try:
+            sys.modules[name] = module
+            with spy as import_module:
+                compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(*args), compiled_fn(*args))
+            asked = [call.args[0] for call in import_module.call_args_list]
+            self.assertIn(name, asked)
+            self.assertIs(fn.__globals__[alias], module)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
