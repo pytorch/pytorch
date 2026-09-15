@@ -1457,15 +1457,24 @@ class AOTCompiledModel:
 
     Private and experimental, like ``_aot_compile`` which builds one. Only
     ``compiled_results`` serializes; ``deserialize`` needs the model again.
+    ``compiled_results`` must hold at least one result: ``aot_compile_module``
+    refuses an empty list, and neither the constructor nor ``deserialize``
+    checks, so an empty one is the caller's error.
 
     Dispatch walks ``compiled_results`` in order and serves the first result
-    whose guard check accepts the call. A first ``check()`` can refuse
-    without evaluating the tree (the recursive dict-tag fast path), so if no
-    check accepted, every refused tree is checked once more before dispatch
-    gives up on it; a result whose guards would pass can therefore be outranked
-    by a later result whose first check accepted. Opting a result out through
-    ``disable_guard_check()`` does not skip its guard evaluation: it is served
-    in index order when its check accepts.
+    whose guard check accepts the call. One exit of ``check()`` refuses without
+    evaluating the tree -- the no-tensor-aliasing exit of the recursive
+    dict-tag fast path in ``GuardManager::check_nopybind``, reached only with
+    ``use_recursive_dict_tags_for_guards`` on -- so if no check accepted, every
+    result is checked once more before dispatch gives up; a result whose guards
+    would pass can therefore be outranked by a later result whose first check
+    accepted. When neither pass accepts, the call is handed to
+    ``compiled_results[0]`` as a plain call of that function: it raises
+    ``GuardManager check failed`` unless that one result opted out through
+    ``disable_guard_check()``, in which case its graph runs for a call its
+    guards refused. That is all the flag does here: ``check()`` never reads it,
+    so an opted-out result is scanned and re-checked like any other and is
+    served in index order when its check accepts.
     """
 
     model: torch.nn.Module
@@ -1476,7 +1485,7 @@ class AOTCompiledModel:
         # the results this call began with, each on the binding made for it.
         results = tuple(self.compiled_results)
         bound: list[dict[str, object]] = []
-        # Guard evaluation ignores _guard_check_enabled, so scan every result.
+        # check() ignores _guard_check_enabled, so scan every result.
         for result in results:
             f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
             bound.append(f_locals)
@@ -1484,13 +1493,18 @@ class AOTCompiledModel:
                 # The guards just passed: call fn rather than result(), whose
                 # __call__ would bind and evaluate them again.
                 return result.fn(self.model, *args, **kwargs)
-        # A check() can reject from the dict-tag fast path without running the
-        # tree; a second check() then runs the tree the fast path skipped,
-        # opted-out results too.
+        # One exit of check() refuses without running the tree: a tag-safe root's
+        # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
+        # disarms that root, so a second check() runs the tree it skipped. With
+        # use_recursive_dict_tags_for_guards off (the default) no root is tag
+        # safe and this pass re-runs trees that genuinely failed, lambda guards
+        # included, bumping the failing node's _fail_count a second time; about
+        # 1us per result, accepted.
         for result, f_locals in zip(results, bound):
             if result._live_guard_manager().check(f_locals):
                 return result.fn(self.model, *args, **kwargs)
-        # All guards failed, just run one of them and throw the guard check error.
+        # No check accepted: results[0] raises the guard check error, or runs
+        # the call if it opted out. See the class docstring.
         return results[0](self.model, *args, **kwargs)
 
     def serialize(self) -> bytes:
