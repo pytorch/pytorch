@@ -17203,6 +17203,7 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
         dtypes=float8_types(),
+        dtypesIfMPS=empty_types(),
         # Deliberately e4m3fn even on gfx942 (native fnuz); see _scaled_mm_v2.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
