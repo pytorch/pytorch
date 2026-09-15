@@ -227,8 +227,6 @@ struct C10_API BackendMeta : intrusive_ptr_target {
   }
 };
 
-struct C10_API ExtraMeta;
-
 // same as Python's FakeTensorMode
 // storing shape env and converter from Python, we'll use these later
 // to implement sym ints, real tensor conversion, etc
@@ -237,41 +235,20 @@ struct C10_API ExtraMeta;
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  // weak reference to the Python CppFakeTensorMode object backing this mode
-  // (used by callbacks)
-  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
 
-  // when true, fake tensors carry a real tensor and the fallback runs the
-  // real op to
-  // hint unbacked symbols. Read once at mode creation, matching Python.
-  bool propagate_real_tensors_ = false;
-
   // allows data_ptr() calls on a FakeTensor's storage
   bool allow_unsafe_data_ptr_access_ = true;
-
-  // if set, prefer this device type when resolving the common device for
-  // mixed-device ops
-  std::optional<c10::DeviceType> prefer_device_type_ = std::nullopt;
-
-  // Mode state python reads and writes through CppFakeTensorMode's accessors.
-  uint64_t epoch_ = 0;
-  bool allow_fallback_kernels_ = true;
-  bool allow_scalar_outputs_ = false;
-  bool allow_non_fake_inputs_ = false;
-  bool static_shapes_ = false;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
-      bool allow_meta = true,
-      std::optional<c10::DeviceType> prefer_device_type = std::nullopt)
+      bool allow_meta = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta),
-        prefer_device_type_(prefer_device_type) {}
+        allow_meta_(allow_meta) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
@@ -312,11 +289,6 @@ struct C10_API ExtraMeta {
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
-  // per tensor memoization for scalars so that repeated calls on same fake
-  // scalar returns the same symint
-  std::unique_ptr<c10::SafePyObject> fake_item_memo_ = nullptr;
-  std::optional<uint32_t> fake_item_memo_version_ = std::nullopt;
-  uint64_t fake_item_memo_epoch_ = 0;
 
   ExtraMeta() = default;
   ~ExtraMeta();
@@ -1521,13 +1493,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->fake_device_;
   }
 
-  // Make a fake tensor report the mkldnn (opaque) layout without real mkldnn
-  // storage.
-  void set_fake_mkldnn(bool value) {
-    key_set_ = value ? key_set_.add(DispatchKey::MkldnnCPU)
-                     : key_set_.remove(DispatchKey::MkldnnCPU);
-  }
-
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
     auto& extra_meta = get_extra_meta();
     // python validates allow_meta against the mode that owns the tensor, which
@@ -1567,32 +1532,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->real_tensor_;
-  }
-
-  void set_fake_item_memo(
-      std::unique_ptr<c10::SafePyObject> memo,
-      uint64_t epoch) {
-    auto& extra_meta = get_extra_meta();
-    extra_meta.fake_item_memo_ = std::move(memo);
-    extra_meta.fake_item_memo_version_ = is_inference()
-        ? std::nullopt
-        : std::optional<uint32_t>(version_counter().current_version());
-    extra_meta.fake_item_memo_epoch_ = epoch;
-  }
-
-  std::pair<c10::SafePyObject*, uint64_t> fake_item_memo() {
-    if (!extra_meta_ || extra_meta_->fake_item_memo_ == nullptr) {
-      return {nullptr, 0};
-    }
-    if (extra_meta_->fake_item_memo_version_.has_value() &&
-        *extra_meta_->fake_item_memo_version_ !=
-            version_counter().current_version()) {
-      extra_meta_->fake_item_memo_.reset();
-      extra_meta_->fake_item_memo_version_.reset();
-      return {nullptr, 0};
-    }
-    return {
-        extra_meta_->fake_item_memo_.get(), extra_meta_->fake_item_memo_epoch_};
   }
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
