@@ -33,8 +33,18 @@ _KERNEL_VARIANTS = sorted(
 class TestLinearCrossEntropyOverride(TestCase):
     def setUp(self):
         super().setUp()
-        if not cu.runtime_available() or cu.check_native_jit_disabled():
-            self.skipTest("CuTeDSL runtime unavailable or native DSL disabled")
+        # The version check belongs here too: `cu.register_op_override` drops
+        # every registration when the installed CuTeDSL is not known-good, so
+        # these tests would look for overrides that were never installed and
+        # fail where they should skip.
+        if (
+            not cu.runtime_available()
+            or cu.check_native_jit_disabled()
+            or not cu._version_is_ok()
+        ):
+            self.skipTest(
+                "CuTeDSL runtime unavailable, disabled, or at an unsupported version"
+            )
 
     def _cutedsl_nodes(self, op_symbol):
         key = ("torch_nn", op_symbol, "CUDA")
@@ -186,6 +196,64 @@ class TestLinearCrossEntropyOverride(TestCase):
                 0,
                 f"{generator.__name__} admits none of its samples",
             )
+
+    @unittest.skipIf(
+        not TEST_CUDA or not cutedsl_impl._arch_supported(),
+        "no kernel variant is eligible on this device, so there is no kernel "
+        "path to test -- the call would fall back to eager",
+    )
+    def test_noncontiguous_target_reads_the_right_classes(self):
+        """The kernel is compiled for a stride-1 target, and `_corrected_target`
+        returns the caller's tensor untouched when `ignore_index` is itself a
+        valid class -- so without a contiguity fix a strided target reaches the
+        kernel and is read at the wrong offsets.
+
+        Checked against the SAME call with a contiguous target rather than
+        against eager: identical values through an identical path, so the
+        comparison is exact and the only difference under test is the layout.
+        Eager would need tolerances for the formulation difference in
+        `grad_linear_weight`, which is the noise this test has to see through.
+        """
+        torch.manual_seed(0)
+        num_batches, in_features, num_classes = 64, 64, 512
+        input = torch.randn(
+            num_batches, in_features, device="cuda", dtype=torch.bfloat16
+        )
+        linear_weight = (
+            torch.randn(num_classes, in_features, device="cuda", dtype=torch.bfloat16)
+            / in_features**0.5
+        )
+        # One column of a 2-column tensor: 1-D, correct values, stride 2.
+        pairs = torch.randint(0, num_classes, (num_batches, 2), device="cuda")
+        strided = pairs[:, 0]
+        self.assertFalse(strided.is_contiguous())
+        options = LinearCrossEntropyOptions(
+            acc_policy="compact",
+            acc_dtype=torch.float32,
+            chunking_method=None,
+            batch_chunk_size=16,
+        )
+
+        def run(target):
+            leaves = [
+                t.detach().clone().requires_grad_() for t in (input, linear_weight)
+            ]
+            loss = torch.nn.functional.linear_cross_entropy(
+                leaves[0],
+                leaves[1],
+                target,
+                # In range, so `_corrected_target` passes `target` through with
+                # its stride intact.
+                ignore_index=0,
+                options=options,
+            )
+            loss.backward()
+            return (loss.detach(), *(t.grad for t in leaves))
+
+        got = run(strided)
+        want = run(strided.contiguous())
+        for name, a, b in zip(("loss", "grad_input", "grad_linear_weight"), got, want):
+            self.assertEqual(a, b, atol=0, rtol=0, msg=f"{name} depends on the layout")
 
     @unittest.skipIf(
         not TEST_CUDA or not cutedsl_impl._arch_supported(),

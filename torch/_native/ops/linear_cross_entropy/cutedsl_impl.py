@@ -310,7 +310,10 @@ def _batch_chunked_kernel(
     # `neg_weight_target * (onehot - softmax)` while the kernel writes
     # `s * (softmax - onehot)` -- and the negation is in place on a tensor the
     # function allocates fresh.
-    target_hat = _corrected_target(target, ignore_index, num_classes)
+    # `.contiguous()`: the kernel is compiled for a stride-1 target, and
+    # `_corrected_target` hands a caller's tensor straight back when
+    # `ignore_index` is itself a valid class. A no-op in the common case.
+    target_hat = _corrected_target(target, ignore_index, num_classes).contiguous()
     row_scale = _neg_weight_target(
         target_hat, target == ignore_index, weight, acc_dtype, reduction
     ).neg_()
@@ -523,11 +526,15 @@ _OVERRIDES = tuple(
 
 
 def register_linear_cross_entropy_overrides() -> None:
-    # Bail out before the import below when the DSL is unavailable or disabled;
-    # cu.register_op_override would drop the registration anyway, and the
-    # import is not free. Don't gate on torch.cuda.is_available() here -- it
-    # calls cuInit and poisons fork.
-    if not cu.runtime_available() or cu.check_native_jit_disabled():
+    # Bail out before the import below whenever `cu.register_op_override` would
+    # drop the registration anyway -- the DSL missing, disabled, or at a version
+    # that is not known-good -- since the import is not free. Don't gate on
+    # torch.cuda.is_available() here: it calls cuInit and poisons fork.
+    if (
+        not cu.runtime_available()
+        or cu.check_native_jit_disabled()
+        or not cu._version_is_ok()
+    ):
         return
 
     # This import is what defines the ops named in `_OVERRIDES`. torch.nn cannot pull
