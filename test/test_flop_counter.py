@@ -13,8 +13,14 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_device_type import (
+    Capability,
+    e4m3_type,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -487,70 +493,6 @@ class TestFlopCounter(TestCase):
         flops_fw_bw_math, flops_fw_bw_efficient = flops
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
-
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Flash attention not supported (pre-SM80 hardware on CUDA)",
-    )
-    def test_sdpa_gqa(self):
-        """Test flop counting for grouped-query attention (GQA)."""
-        batch_size = 2
-        n_heads_q = 32
-        n_heads_kv = 8
-        seq_len = 128
-        head_dim = 64
-        dtype = torch.float16
-
-        query = torch.randn(
-            batch_size,
-            n_heads_q,
-            seq_len,
-            head_dim,
-            device="cuda",
-            dtype=dtype,
-        )
-        key = torch.randn(
-            batch_size,
-            n_heads_kv,
-            seq_len,
-            head_dim,
-            device="cuda",
-            dtype=dtype,
-        )
-        value = torch.randn(
-            batch_size,
-            n_heads_kv,
-            seq_len,
-            head_dim,
-            device="cuda",
-            dtype=dtype,
-        )
-
-        mode = FlopCounterMode()
-        with mode:
-            out = F.scaled_dot_product_attention(
-                query, key, value, dropout_p=0, is_causal=True, enable_gqa=True
-            )
-        gqa_flops = int(get_total_flops(mode))
-
-        # Compare with MHA (KV heads expanded to match Q heads)
-        key_expanded = key.repeat_interleave(n_heads_q // n_heads_kv, dim=1)
-        value_expanded = value.repeat_interleave(n_heads_q // n_heads_kv, dim=1)
-        mode_mha = FlopCounterMode()
-        with mode_mha:
-            out_mha = F.scaled_dot_product_attention(
-                query,
-                key_expanded,
-                value_expanded,
-                dropout_p=0,
-                is_causal=True,
-            )
-        mha_flops = int(get_total_flops(mode_mha))
-
-        # GQA flops should equal MHA flops (kernel broadcasts KV heads)
-        self.assertEqual(gqa_flops, mha_flops)
-        self.assertTrue(gqa_flops > 0)
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
@@ -1351,6 +1293,73 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
 
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
+class TestFlopCounterDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.attention.flash_attention)
+    def test_sdpa_gqa(self, device):
+        """Test flop counting for grouped-query attention (GQA)."""
+        batch_size = 2
+        n_heads_q = 32
+        n_heads_kv = 8
+        seq_len = 128
+        head_dim = 64
+        dtype = torch.float16
+
+        query = torch.randn(
+            batch_size,
+            n_heads_q,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        key = torch.randn(
+            batch_size,
+            n_heads_kv,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        value = torch.randn(
+            batch_size,
+            n_heads_kv,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+
+        mode = FlopCounterMode()
+        with mode:
+            out = F.scaled_dot_product_attention(
+                query, key, value, dropout_p=0, is_causal=True, enable_gqa=True
+            )
+        gqa_flops = int(get_total_flops(mode))
+
+        # Compare with MHA (KV heads expanded to match Q heads)
+        key_expanded = key.repeat_interleave(n_heads_q // n_heads_kv, dim=1)
+        value_expanded = value.repeat_interleave(n_heads_q // n_heads_kv, dim=1)
+        mode_mha = FlopCounterMode()
+        with mode_mha:
+            out_mha = F.scaled_dot_product_attention(
+                query,
+                key_expanded,
+                value_expanded,
+                dropout_p=0,
+                is_causal=True,
+            )
+        mha_flops = int(get_total_flops(mode_mha))
+
+        # GQA flops should equal MHA flops (kernel broadcasts KV heads)
+        self.assertEqual(gqa_flops, mha_flops)
+        self.assertTrue(gqa_flops > 0)
+
+
 class TestFlexAttentionEstimation(TestCase):
     def test_flex_attention_flop_registration(self):
         """flex_attention HOPs are registered in flop_registry and recognized as compute nodes."""
@@ -1519,6 +1528,14 @@ class TestFlexAttentionEstimation(TestCase):
         sparse_flops = get_flops(sparse_node)
         self.assertGreater(dense_flops, 0)
         self.assertEqual(sparse_flops, dense_flops // 2)
+
+
+instantiate_device_type_tests(
+    TestFlopCounterDeviceType,
+    globals(),
+    except_for=("cpu", "mps", "hpu", "privateuse1"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
