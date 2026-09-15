@@ -7929,11 +7929,13 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
 
     @parametrize(
         "case",
-        ((False, (1,)), (True, ()), (True, (1, 1))),
-        name_fn=lambda case: f"shared_{case[0]}_rank_{len(case[1])}",
+        ((False, (1,), True), (True, (), False), (True, (1, 1), True)),
+        name_fn=lambda case: f"shared_{case[0]}_rank_{len(case[1])}_tuned_{case[2]}",
     )
     def test_nvfp4_scaled_mm_global_scales(self, device, case):
-        shared_global_scale, shape = case
+        from torch._inductor.kernel.flex_gemm.template import FlexGemmEpilogueCaller
+
+        shared_global_scale, shape, tuned = case
         global_a = torch.full(shape, 0.5, device=device, dtype=torch.float32)
         global_b = (
             global_a
@@ -7955,21 +7957,33 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
                 (a_data, b_data, [a_scale, g], [b_scale, b_global]),
                 epilogue_fn,
                 gemm_kwargs=gemm_kwargs,
-                kernel_options={"backend": "QUACK"},
+                kernel_options={"backend": "QUACK", "tuned": tuned},
             )
 
         expected = epilogue_fn(base)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a,
-            b,
-            scale_a[0],
-            scale_b[0],
-            *((global_a,) if shared_global_scale else (global_a, global_b)),
-        )
+        with (
+            self.limitEpiModAutotune(),
+            inductor_config.patch(autotune_in_subproc=False, force_disable_caches=True),
+            mock.patch.object(
+                FlexGemmEpilogueCaller,
+                "benchmark",
+                autospec=True,
+                side_effect=FlexGemmEpilogueCaller.benchmark,
+            ) as benchmark,
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True),
+                a,
+                b,
+                scale_a[0],
+                scale_b[0],
+                *((global_a,) if shared_global_scale else (global_a, global_b)),
+            )
+        if tuned:
+            self.assertGreaterEqual(benchmark.call_count, 2)
 
         self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
-        self.assertIn("((acc * operand0) * operand1)", code)
+        self.assertIn("(acc * (operand0 * operand1))", code)
         self.assertIn("epilogue_arg_kinds=('scalar', 'scalar')", code)
         self.assertNotIn("operand2", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
@@ -8027,7 +8041,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
             self.assertEqual(actual, expected, rtol=0.03, atol=0.3)
             self.assertIn("OutputContraction(group=2", code)
         if global_scales is not None:
-            self.assertIn("((acc * operand0) * operand1)", code)
+            self.assertIn("(acc * (operand0 * operand1))", code)
             self.assertIn("epilogue_arg_kinds=('scalar', 'scalar')", code)
             self.assertNotIn("operand2", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
@@ -8058,6 +8072,47 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True)(
                 a, b, scale_a, scale_b
             )
+
+    def test_nvfp4_scaled_mm_global_scale_product_avoids_overflow(self, device):
+        m = n = 128
+        k = 256
+        a = _bfloat16_to_float4_e2m1fn_x2(
+            torch.ones(m, k, device=device, dtype=torch.bfloat16)
+        )
+        b = _bfloat16_to_float4_e2m1fn_x2(
+            torch.ones(n, k, device=device, dtype=torch.bfloat16)
+        ).t()
+        block_a = to_blocked_reference(
+            torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
+        )
+        block_b = to_blocked_reference(
+            torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
+        )
+        scale_a = [block_a, torch.tensor([1e37], device=device)]
+        scale_b = [block_b, torch.tensor([1e-37], device=device)]
+        options = {
+            "scale_recipe_a": [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+            "scale_recipe_b": [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+            "swizzle_a": [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            "swizzle_b": [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            "output_dtype": torch.bfloat16,
+        }
+
+        def fn(a, b, scale_a, scale_b):
+            return flex_gemm(
+                F.scaled_mm,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc,
+                gemm_kwargs=options,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        expected = F.scaled_mm(a, b, scale_a, scale_b=scale_b, **options)
+        self.assertEqual(expected, torch.full_like(expected, k), rtol=0, atol=0)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+            a, b, scale_a, scale_b
+        )
+        self.assertEqual(actual, expected, rtol=0, atol=0)
 
     def test_scaled_mm_quantized_output(self, device):
         m = n = 256
