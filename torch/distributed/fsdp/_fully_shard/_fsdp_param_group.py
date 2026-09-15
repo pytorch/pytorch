@@ -383,7 +383,21 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
-            return  # no-op
+            if all(
+                fsdp_param._sharded_param_version is None
+                or (
+                    fsdp_param.sharded_param._version,
+                    fsdp_param._sharded_local_tensor._version,
+                )
+                == fsdp_param._sharded_param_version
+                for fsdp_param in self.fsdp_params
+            ):
+                for fsdp_param in self.fsdp_params:
+                    fsdp_param.to_unsharded()
+                return
+            # An optimizer may update the published sharded parameter while
+            # its unsharded allocation is retained across backwards.
+            self._to_sharded()
         if (
             not self.unshard_in_backward
             and self._training_state == TrainingState.PRE_BACKWARD
@@ -656,6 +670,9 @@ class FSDPParamGroup:
                         unsharded_grads.append(fsdp_param.unsharded_zero_grad_data)
                 if self.reshard_after_backward:
                     self.reshard()
+                else:
+                    for fsdp_param in self.fsdp_params:
+                        fsdp_param._setattr_on_modules(fsdp_param.sharded_param)
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
             # `max_input_buffers` in flight: reclaim the oldest (wait on its
             # reduce-scatter, then drop the keepalive ref that was deferring the
