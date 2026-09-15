@@ -223,6 +223,82 @@ def rebuild_cuda_tensor(
     return t
 
 
+def _device_supports_ipc(device_type):
+    if device_type in ("cpu", "meta", "cuda"):
+        return False
+    if device_type != torch._C._get_privateuse1_backend_name():
+        return False
+    try:
+        return torch._C._acc._is_privateuse1_ipc_supported()
+    except AttributeError:
+        return False
+
+
+def rebuild_device_tensor(
+    tensor_cls,
+    tensor_size,
+    tensor_stride,
+    tensor_offset,
+    storage_cls,
+    dtype,
+    storage_device,
+    storage_handle,
+    storage_size_bytes,
+    storage_offset_bytes,
+    requires_grad,
+    ref_counter_handle,
+    ref_counter_offset,
+    event_handle,
+    event_sync_required,
+):
+    # If storage_handle is None, storage points to nullptr.
+    if storage_handle is None or storage_size_bytes == 0:
+        storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
+    else:
+        device_type = torch._C._get_privateuse1_backend_name()
+        cache_key = (device_type, storage_handle, storage_offset_bytes)
+        storage = storage_from_cache(storage_cls, cache_key)
+        if storage is None:
+            storage = storage_cls._new_shared_device(
+                storage_device,
+                storage_handle,
+                storage_size_bytes,
+                storage_offset_bytes,
+                ref_counter_handle,
+                ref_counter_offset,
+                event_handle,
+                event_sync_required,
+            )
+            shared_cache[cache_key] = StorageWeakRef(storage)
+        else:
+            # We already ref counting this Storage, but producer needs new ref-counters to be released.
+            storage_cls._release_ipc_counter_device(
+                ref_counter_handle, ref_counter_offset, device=storage_device
+            )
+
+    _storage = (
+        storage
+        if isinstance(storage, torch.UntypedStorage)
+        else storage._untyped_storage
+    )
+
+    t = torch._utils._rebuild_tensor(
+        torch.storage.TypedStorage(wrap_storage=_storage, dtype=dtype, _internal=True),
+        tensor_offset,
+        tensor_size,
+        tensor_stride,
+    )
+
+    if tensor_cls == torch.nn.parameter.Parameter:
+        # It is crucial for integer tensors to receive
+        # the requires_grad=False as an argument in the constructor
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+
+    return t
+
+
 def reduce_tensor(tensor):
     if tensor.requires_grad and not tensor.is_leaf:
         raise RuntimeError(
@@ -371,6 +447,42 @@ def reduce_tensor(tensor):
                 handle,  # identifier which CUDA allocation is the storage in.
                 storage_size_bytes,  # size(in bytes) of the storage
                 storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
+                tensor.requires_grad,
+                ref_counter_handle,
+                ref_counter_offset,
+                event_handle,
+                event_sync_required,
+            ),
+        )
+    elif _device_supports_ipc(storage._untyped_storage.device.type):
+        (
+            device,
+            handle,
+            storage_size_bytes,
+            storage_offset_bytes,
+            ref_counter_handle,
+            ref_counter_offset,
+            event_handle,
+            event_sync_required,
+        ) = storage._share_device_()
+        tensor_offset = tensor.storage_offset()
+        device_type = storage._untyped_storage.device.type
+        shared_cache[(device_type, handle)] = StorageWeakRef(storage)
+        # _backward_hooks purposely omitted here, see
+        # Note [Don't serialize hooks]
+        return (
+            rebuild_device_tensor,
+            (
+                type(tensor),
+                tensor.size(),
+                tensor.stride(),
+                tensor_offset,  # tensor offset in its storage
+                type(storage),
+                tensor.dtype,
+                device,
+                handle,  # identifier which device allocation is the storage in.
+                storage_size_bytes,  # size(in bytes) of the storage
+                storage_offset_bytes,  # offset(in bytes) of the storage in the device allocation
                 tensor.requires_grad,
                 ref_counter_handle,
                 ref_counter_offset,
