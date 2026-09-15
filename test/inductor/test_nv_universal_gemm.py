@@ -2022,6 +2022,28 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         epilogue_fused = EPILOGUE_FN_NAME in code and "EpilogueArguments" in code
         return result, code, epilogue_fused
 
+    def _make_bf16_grouped_reduce_epilogue(self, axis, group, reduction):
+        m, n, k = 128, 128, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = (
+                result.float().view(-1, group, n)
+                if axis == 0
+                else result.float().view(m, -1, group)
+            )
+            source, _, reduce_op = reduction.rpartition("_")
+            if source == "square":
+                grouped = grouped.square()
+            elif source == "abs":
+                grouped = grouped.abs()
+            reduced = getattr(grouped, reduce_op)(1 if axis == 0 else -1)
+            return torch.relu(result), reduced
+
+        return fn, a, b
+
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_matmul_pointwise_epilogue_fusion(self, dtype):
         """Pointwise op (relu) is fused into the GEMM epilogue."""
@@ -2140,27 +2162,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     )
     def test_bf16_grouped_reduce_epilogue_fusion(self, case):
         axis, group, reduction = case
-        m, n, k = 128, 128, 64
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+        fn, a, b = self._make_bf16_grouped_reduce_epilogue(axis, group, reduction)
 
-        def fn(a, b):
-            result = a @ b
-            grouped = (
-                result.float().view(-1, group, n)
-                if axis == 0
-                else result.float().view(m, -1, group)
-            )
-            source, _, reduce_op = reduction.rpartition("_")
-            if source == "square":
-                grouped = grouped.square()
-            elif source == "abs":
-                grouped = grouped.abs()
-            reduced = getattr(grouped, reduce_op)(1 if axis == 0 else -1)
-            return torch.relu(result), reduced
-
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        if not epilogue_fused:
+            self.assertEqual(case, (1, 64, "abs_amax"))
+            self.assertNotIn("has_epilogue=True", code)
+            return
         self._assert_scalar_reduce_marker(code, "VendoredDenseGemmEFCOperator")
         self._assert_scalar_reduce_marker(code, f"axis={axis}")
         self._assert_scalar_reduce_marker(code, f"group={group}")
@@ -2169,6 +2178,30 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
         if axis == 0 or group > 32:
             self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_COMBINE_FN_SRC")
+
+    def test_bf16_axis_1_group_64_abs_amax_defers_without_compatible_efc(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
+        fn, a, b = self._make_bf16_grouped_reduce_epilogue(1, 64, "abs_amax")
+        supports_reduction_layout = NVUniversalGemmScheduling._supports_reduction_layout
+
+        def reject_efc_choices(choice, min_tile_shape):
+            return not choice.supports_epilogue_fusion and supports_reduction_layout(
+                choice, min_tile_shape
+            )
+
+        with mock.patch.object(
+            NVUniversalGemmScheduling,
+            "_supports_reduction_layout",
+            side_effect=reject_efc_choices,
+        ):
+            result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertFalse(epilogue_fused)
+        self.assertNotIn("has_epilogue=True", code)
 
     @parametrize(
         "axis_group",

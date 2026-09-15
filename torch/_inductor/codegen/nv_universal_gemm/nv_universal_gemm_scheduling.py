@@ -460,6 +460,16 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             variant.supports_reduction(reduction_plan) for variant in variants
         ):
             return NVGemmVerticalFusionDecision.DEFER
+        if isinstance(ir_node, MultiTemplateBuffer) and not any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.supports_epilogue_fusion
+            and self._supports_reduction_layout(choice, epilogue_program.min_tile_shape)
+            for choice in ir_node._choices
+        ):
+            log.debug(
+                "NVGEMM epilogue fusion: no EFC kernel supports the reduction layout"
+            )
+            return NVGemmVerticalFusionDecision.DEFER
 
         for s_node in all_scheduler_nodes:
             node = s_node.node
