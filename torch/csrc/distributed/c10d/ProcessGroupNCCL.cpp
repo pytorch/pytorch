@@ -291,6 +291,22 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
   return flag;
 }
 
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+// Retire this process group's registry entry. Identity-safe, so a delayed
+// caller cannot erase a same-name successor's entry. Aborted comms are skipped
+// because deregistering through one fails on the tested ROCm stack.
+void unregisterSymmetricMemoryComm(
+    const std::shared_ptr<NCCLComm>& ncclComm,
+    const std::string& groupUid) {
+  if (!ncclComm || ncclComm->isAborted()) {
+    return;
+  }
+  c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
+  c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
+      groupUid, ncclComm->getNcclComm());
+}
+#endif
+
 } // namespace
 
 // Map each communicator to the memory pools registered with it.
@@ -1452,6 +1468,12 @@ void ProcessGroupNCCL::abortCommsFromMap(
     auto& ncclComm = it.second;
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
             << ncclComm->repr() << " on CUDA device: " << devName;
+#if defined(USE_ROCM) && defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)
+    // A retained symmetric-memory handle must stop resolving this RCCL
+    // communicator before abort invalidates it. Identity-safe removal also
+    // leaves a same-name successor untouched.
+    unregisterSymmetricMemoryComm(ncclComm, getGroupUid());
+#endif
     // abort() call now has GPU guard inside
     ncclComm->abort(abortReason);
     // Note that we don't remove the aborted communicators from the
@@ -1596,6 +1618,12 @@ void ProcessGroupNCCL::shutdown() {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
+#if defined(USE_ROCM) && defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)
+      // Retire the registry entry while the RCCL communicator is still valid.
+      // Late deregistration through a destroyed communicator produced
+      // "invalid device ordinal" on the tested ROCm stack.
+      unregisterSymmetricMemoryComm(ncclComm, getGroupUid());
+#endif
       ncclComm->destroy();
     }
   }
@@ -1611,15 +1639,14 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // comms -- a successor PG may have already re-registered under the same
   // group_uid (e.g. restart-after-error), and unconditionally clearing
   // would silently wipe the successor's entry.
+  //
+  // On ROCm this is only a fallback for process groups that reach destruction
+  // without shutdown() or abort(); both of those retire the identity earlier,
+  // while the RCCL communicator is still valid.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
-      if (!ncclComm || ncclComm->isAborted()) {
-        continue;
-      }
-      c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
-      c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
-          getGroupUid());
+      unregisterSymmetricMemoryComm(ncclComm, getGroupUid());
     }
   }
 #endif
@@ -3312,8 +3339,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
-    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT.
     // Unregistered in ~ProcessGroupNCCL.
     c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
         getGroupUid(), ncclComm->getNcclComm());
