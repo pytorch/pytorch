@@ -1479,7 +1479,8 @@ class AOTCompiledModel:
     gives up on it; a result whose guards would pass can therefore be outranked
     by a later result whose first check accepted. Opting a result out through
     ``disable_guard_check()`` does not skip its guard evaluation: it is served
-    in index order when its check accepts.
+    in index order when its check accepts, and on the strength of its opt-out
+    alone only when no check accepted the call.
     """
 
     model: torch.nn.Module
@@ -1540,6 +1541,11 @@ class AOTCompiledModel:
         for i, result in enumerate(results):
             f_locals = shared if shared is not None else bound[i]
             if result._live_guard_manager().check(f_locals):
+                return result.fn(self.model, *args, **kwargs)
+        # A result that opted out via disable_guard_check() accepts anything, but
+        # only after both passes above have failed to find a real match.
+        for result in results:
+            if not result._guard_check_enabled:
                 return result.fn(self.model, *args, **kwargs)
         # All guards failed, just run one of them and throw the guard check error.
         return results[0](self.model, *args, **kwargs)
