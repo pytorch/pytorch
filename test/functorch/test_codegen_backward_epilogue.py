@@ -19,7 +19,11 @@ from contextlib import contextmanager
 
 import torch
 import torch._functorch.config
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -27,6 +31,8 @@ trace_log = logging.getLogger("torch.__trace")
 
 
 class TestCodegenBackwardEpilogue(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextmanager
     def _capture_codegen_source(self, artifact_name):
         """Capture codegen artifacts from the structured trace log."""
