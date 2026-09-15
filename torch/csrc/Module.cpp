@@ -2818,7 +2818,7 @@ Call this whenever a new thread is created in order to propagate values from
     return t.is_fake();
   });
 
-  py_module.def("_fake_tensor_device", [](const at::Tensor& t) -> c10::Device {
+  py_module.def("_fake_device", [](const at::Tensor& t) -> c10::Device {
     auto fd = t.unsafeGetTensorImpl()->fake_device();
     TORCH_CHECK(fd.has_value(), "Tensor does not have a fake device");
     return *fd;
