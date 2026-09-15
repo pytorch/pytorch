@@ -1,5 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+import gc
+import threading
+import weakref
+from datetime import timedelta
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -10,6 +14,11 @@ from torch.distributed._transport import (
     new_transport,
     register_transport,
     Transport,
+    Work,
+)
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -17,9 +26,10 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 class _TestTransport(Transport):
     is_supported = True
 
-    def __init__(self, device=None, *, value=None):
+    def __init__(self, device=None, *, value=None, operation=None):
         super().__init__(device)
         self.value = value
+        self.operation = operation or (lambda local, remote: 0)
         self.closed = False
 
     @staticmethod
@@ -38,13 +48,23 @@ class _TestTransport(Transport):
     def register_memory(self, tensor):
         return tensor
 
-    def write(self, local_buffer, remote_buffer) -> int:
-        return 0
+    def write(self, local_buffer, remote_buffer, *, async_op=False):
+        device = (
+            local_buffer.device
+            if isinstance(local_buffer, torch.Tensor)
+            else torch.device("cpu")
+        )
+        return self._run_transfer(
+            lambda: self.operation(local_buffer, remote_buffer),
+            device,
+            async_op=async_op,
+        )
 
-    def read(self, local_buffer, remote_buffer) -> int:
-        return 0
+    def read(self, local_buffer, remote_buffer, *, async_op=False):
+        return self.write(local_buffer, remote_buffer, async_op=async_op)
 
     def close(self) -> None:
+        self._close_work()
         self.closed = True
 
 
@@ -134,6 +154,189 @@ class TestTransportRegistry(TestCase):
             _registry, "_iter_entry_points", return_value=iter([entry_point])
         ):
             self.assertEqual(available_transports(), ("external",))
+
+
+class TestTransportWork(TestCase):
+    def blocked_transport(self):
+        started = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def operation(local, remote):
+            started.set()
+            if not release.wait(5):
+                raise RuntimeError("test operation was not released")
+            calls.append(local)
+            return 0
+
+        transport = _TestTransport(operation=operation)
+        self.addCleanup(transport.close)
+        self.addCleanup(release.set)
+        return transport, started, release, calls
+
+    def test_work_completion_and_timeout(self):
+        transport, started, release, _ = self.blocked_transport()
+        work = transport.write(None, None, async_op=True)
+        self.assertIsInstance(work, Work)
+        self.assertTrue(started.wait(5))
+        self.assertFalse(work.is_completed())
+        self.assertFalse(work.is_success())
+        self.assertFalse(work.get_future().done())
+        with self.assertRaises(TimeoutError):
+            work.wait(timedelta(milliseconds=1))
+        self.assertFalse(work.is_completed())
+        release.set()
+        self.assertTrue(work.wait())
+        self.assertTrue(work.wait())
+        self.assertTrue(work.is_completed())
+        self.assertTrue(work.is_success())
+        self.assertIsNone(work.exception())
+        self.assertEqual(work.get_future().wait(), [])
+        self.assertEqual(work.result(), [])
+
+    def test_work_error(self):
+        def operation(local, remote):
+            raise ValueError("transfer failed")
+
+        with _TestTransport(operation=operation) as transport:
+            work = transport.read(None, None, async_op=True)
+            with self.assertRaisesRegex(ValueError, "transfer failed"):
+                work.wait()
+            self.assertTrue(work.is_completed())
+            self.assertFalse(work.is_success())
+            self.assertIsInstance(work.exception(), ValueError)
+            with self.assertRaisesRegex(ValueError, "transfer failed"):
+                work.get_future().wait()
+
+    def test_work_error_status(self):
+        with _TestTransport(operation=lambda local, remote: -1) as transport:
+            work = transport.write(None, None, async_op=True)
+            with self.assertRaisesRegex(RuntimeError, "status -1"):
+                work.wait()
+            with self.assertRaisesRegex(RuntimeError, "status -1"):
+                work.get_future().wait()
+            self.assertFalse(work.is_success())
+
+    def test_close_drains_work(self):
+        transport, started, release, calls = self.blocked_transport()
+        first = transport.write(1, None, async_op=True)
+        self.assertTrue(started.wait(5))
+        second = transport.write(2, None, async_op=True)
+        closed = threading.Event()
+
+        def close():
+            transport.close()
+            closed.set()
+
+        thread = threading.Thread(target=close, daemon=True)
+        thread.start()
+        try:
+            self.assertFalse(closed.wait(0.05))
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(closed.is_set())
+        self.assertTrue(first.wait())
+        self.assertTrue(second.wait())
+        self.assertEqual(calls, [1, 2])
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            transport.write(3, None, async_op=True)
+
+    def test_sync_follows_queued_work(self):
+        transport, started, release, calls = self.blocked_transport()
+        first = transport.write(1, None, async_op=True)
+        self.assertTrue(started.wait(5))
+        second = transport.write(2, None, async_op=True)
+        release.set()
+        self.assertEqual(transport.write(3, None), 0)
+        self.assertEqual(calls, [1, 2, 3])
+        self.assertTrue(first.is_completed())
+        self.assertTrue(second.is_completed())
+
+    def test_work_retains_buffer(self):
+        transport, started, release, _ = self.blocked_transport()
+        first = transport.write(None, None, async_op=True)
+        self.assertTrue(started.wait(5))
+        tensor = torch.ones(16)
+        reference = weakref.ref(tensor)
+        work = transport.write(tensor, None, async_op=True)
+        del tensor, work
+        gc.collect()
+        self.assertIsNotNone(reference())
+        release.set()
+        first.wait()
+        transport.close()
+
+    def test_callback_cannot_block_its_worker(self):
+        transport, started, release, _ = self.blocked_transport()
+        first = transport.write(1, None, async_op=True)
+        self.assertTrue(started.wait(5))
+        second = transport.write(2, None, async_op=True)
+
+        def callback(future):
+            with self.assertRaisesRegex(RuntimeError, "synchronous transfer"):
+                transport.write(3, None)
+            with self.assertRaisesRegex(RuntimeError, "pending work"):
+                second.wait()
+            with self.assertRaisesRegex(RuntimeError, "close a transport"):
+                transport.close()
+            return 1
+
+        done = first.get_future().then(callback)
+        release.set()
+        self.assertEqual(done.wait(), 1)
+        self.assertTrue(second.wait())
+
+
+class TestTransportWorkDevice(TestCase):
+    def test_stream_ordering(self, device):
+        source = torch.zeros(1024, device=device)
+        destination = torch.zeros_like(source)
+
+        def operation(local, remote):
+            remote.copy_(local)
+            return 0
+
+        with _TestTransport(operation=operation) as transport:
+            if source.is_cuda:
+                producer = torch.cuda.Stream(device=device)
+                producer.wait_stream(torch.cuda.current_stream(device))
+                with torch.cuda.stream(producer):
+                    torch.cuda._sleep(10_000_000)
+                    source.fill_(7)
+                    work = transport.write(source, destination, async_op=True)
+            else:
+                source.fill_(7)
+                work = transport.write(source, destination, async_op=True)
+            self.assertTrue(work.wait())
+            self.assertEqual(destination, torch.full_like(destination, 7))
+
+    @onlyCUDA
+    def test_cuda_graph_after_async(self, device):
+        source = torch.ones(1024, device=device)
+        destination = torch.zeros_like(source)
+
+        def operation(local, remote):
+            remote.copy_(local)
+            return 0
+
+        with _TestTransport(operation=operation) as transport:
+            transport.write(source, destination, async_op=True).wait()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                self.assertEqual(transport.write(source, destination), 0)
+            source.fill_(9)
+            graph.replay()
+            self.assertEqual(destination, torch.full_like(destination, 9))
+            with patch.object(
+                torch.cuda, "is_current_stream_capturing", return_value=True
+            ):
+                with self.assertRaisesRegex(RuntimeError, "cannot be captured"):
+                    transport.write(source, destination, async_op=True)
+
+
+instantiate_device_type_tests(TestTransportWorkDevice, globals())
 
 
 if __name__ == "__main__":
