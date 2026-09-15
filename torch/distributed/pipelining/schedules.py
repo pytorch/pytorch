@@ -245,6 +245,97 @@ def _assign_pipeline_resource_slots(
     return assignments, next_slot
 
 
+@dataclass(frozen=True)
+class _PipelineRecvBufferSlots:
+    """Receive-slot assignments and allocation counts for one stage."""
+
+    forward: Mapping[int, int]
+    num_forward_slots: int
+    backward: Mapping[int, int]
+    num_backward_slots: int
+
+
+def _assign_pipeline_recv_buffer_slots(
+    actions: Sequence[_Action],
+    *,
+    has_backward: bool,
+) -> dict[int, _PipelineRecvBufferSlots]:
+    """Color receive lifetimes in a finalized local schedule."""
+    starts: dict[tuple[int, _ComputationType, int], int] = {}
+    releases: dict[tuple[int, _ComputationType, int], int] = {}
+
+    def process(action: _Action, position: int) -> None:
+        if action.sub_actions is not None:
+            for sub_action in action.sub_actions:
+                process(sub_action, position)
+            return
+        microbatch_index = action.microbatch_index
+        if microbatch_index is None:
+            return
+        if action.computation_type in (RECV_F, RECV_B):
+            if action.computation_type == RECV_B and not has_backward:
+                return
+            key = (action.stage_index, action.computation_type, microbatch_index)
+            if key in starts:
+                raise ValueError(f"Receive {key} appears more than once")
+            starts[key] = position
+        elif has_backward and action.computation_type in (
+            FULL_BACKWARD,
+            BACKWARD_WEIGHT,
+        ):
+            for direction in (RECV_F, RECV_B):
+                key = (action.stage_index, direction, microbatch_index)
+                if key in starts:
+                    if key in releases:
+                        raise ValueError(f"Receive {key} is released more than once")
+                    releases[key] = position
+
+    for position, action in enumerate(actions):
+        process(action, position)
+
+    if not has_backward:
+        # Inference sends have no per-microbatch completion action. Retain the
+        # input until the runtime waits for every outstanding send.
+        releases.update(dict.fromkeys(starts, len(actions)))
+
+    missing_releases = sorted(starts.keys() - releases.keys())
+    if missing_releases:
+        raise ValueError(
+            f"Receive-buffer lifetimes have no release action: {missing_releases}"
+        )
+
+    intervals: dict[
+        tuple[int, _ComputationType], list[tuple[_PipelineResourceKey, int, int]]
+    ] = defaultdict(list)
+    for key, start in starts.items():
+        stage_index, direction, microbatch_index = key
+        intervals[(stage_index, direction)].append(
+            (microbatch_index, start, releases[key])
+        )
+
+    by_stage: dict[int, dict[_ComputationType, tuple[dict[int, int], int]]] = (
+        defaultdict(dict)
+    )
+    for (stage_index, direction), direction_intervals in intervals.items():
+        assignments, num_slots = _assign_pipeline_resource_slots(direction_intervals)
+        by_stage[stage_index][direction] = (
+            {cast(int, key): slot for key, slot in assignments.items()},
+            num_slots,
+        )
+
+    result = {}
+    for stage_index, by_direction in by_stage.items():
+        forward, num_forward = by_direction.get(RECV_F, ({}, 0))
+        backward, num_backward = by_direction.get(RECV_B, ({}, 0))
+        result[stage_index] = _PipelineRecvBufferSlots(
+            MappingProxyType(forward),
+            num_forward,
+            MappingProxyType(backward),
+            num_backward,
+        )
+    return result
+
+
 @lru_cache
 def _get_profiler_function_name(action: _Action) -> str:
     return f"PP:{str(action)}"
@@ -2529,11 +2620,18 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
     Can be instantiated directly by creating _PipelineScheduleRuntime and calling load_csv, or can be
     subclassed and the subclass can be responsible for creating a schedule IR.
+
+    ``reuse_recv_buffers`` gives receive destinations stable addresses by
+    retaining a schedule-colored pool. Inference keeps each received input
+    alive until all sends complete because the runtime has no per-send wait
+    action. Switching between training and inference may therefore resize the
+    single pool for each direction.
     """
 
     def __init__(self, *args, **kwargs):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
         self._max_active_stages: int = kwargs.pop("max_active_stages", 3)
+        self._reuse_recv_buffers: bool = kwargs.pop("reuse_recv_buffers", False)
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2543,6 +2641,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
         self.bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
         self.fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+        self._recv_buffer_slots: (
+            tuple[bool, dict[int, _PipelineRecvBufferSlots]] | None
+        ) = None
 
         # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
         self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
@@ -2596,6 +2697,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         Given an in-memory representation for a simple compute-only schedule, lower it to a complex schedule including
         communication actions.  Stores the schedule in self, and must be called before running step_mo()
         """
+        self._recv_buffer_slots = None
         # validate the provided actions are valid and overrides the default stage_index_to_group_rank
         super()._validate_and_set_stage_mapping(actions)
 
@@ -2715,6 +2817,33 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             if stage_idx not in self.unsharded_stages:
                 raise AssertionError(f"Attempted to compute on sharded {stage_idx=}")
 
+    def _assign_recv_buffer_slots(self) -> None:
+        """Assign and allocate deterministic receive slots before execution."""
+        if not self._reuse_recv_buffers:
+            return
+        if (
+            self._recv_buffer_slots is None
+            or self._recv_buffer_slots[0] != self._has_backward
+        ):
+            slots_by_stage = _assign_pipeline_recv_buffer_slots(
+                self.pipeline_order_with_comms[self.rank],
+                has_backward=self._has_backward,
+            )
+            self._recv_buffer_slots = (self._has_backward, slots_by_stage)
+        else:
+            slots_by_stage = self._recv_buffer_slots[1]
+        for stage in self._stages:
+            slots = slots_by_stage.get(
+                stage.stage_index,
+                _PipelineRecvBufferSlots({}, 0, {}, 0),
+            )
+            stage._prepare_recv_buffer_pools(
+                slots.forward,
+                slots.num_forward_slots,
+                slots.backward,
+                slots.num_backward_slots,
+            )
+
     def _step_microbatches(
         self,
         arg_mbs: list | None = None,
@@ -2735,6 +2864,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._initialize_stages(
             arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
         )
+        self._assign_recv_buffer_slots()
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -2919,6 +3049,23 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
+        def _release_recv_buffers(action: _Action) -> None:
+            if action.sub_actions is not None:
+                for sub_action in action.sub_actions:
+                    _release_recv_buffers(sub_action)
+                return
+            microbatch_index = action.microbatch_index
+            if microbatch_index is None:
+                return
+
+            stage = stage_index_to_stage[action.stage_index]
+            if stage.has_backward and action.computation_type in (
+                FULL_BACKWARD,
+                BACKWARD_WEIGHT,
+            ):
+                stage._release_bwd_recv_buffers(microbatch_index)
+                stage._release_fwd_recv_buffers(microbatch_index)
+
         # count either full_backward or backward_weight together, to determine when to sync DP grads
         self.backward_counter.clear()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
@@ -2954,6 +3101,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             _perform_action(sub_a)
                     else:
                         _perform_action(action)
+                    _release_recv_buffers(action)
             except Exception as e:
                 logger.error(
                     "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
@@ -2971,6 +3119,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
         while send_ops:
             _wait_batch_p2p(send_ops.pop())
+        if not self._has_backward:
+            for stage in self._stages:
+                stage._release_all_recv_buffers()
 
         if len(self.unshard_ops) != 0:
             raise AssertionError("Unused unshard operations")
@@ -2998,6 +3149,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
     ):
         super().__init__(
@@ -3008,6 +3160,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
         )
 
@@ -3237,6 +3390,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
     ):
         self.pp_group_size = stages[0].group_size
@@ -3250,6 +3404,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
         )
         self.n_local_stages = len(stages)
@@ -3348,6 +3503,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
@@ -3363,6 +3519,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
         )
         self.n_local_stages = len(stages)
@@ -3547,6 +3704,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
@@ -3562,6 +3720,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
@@ -3735,6 +3894,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
+        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
@@ -3750,6 +3910,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
+            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
