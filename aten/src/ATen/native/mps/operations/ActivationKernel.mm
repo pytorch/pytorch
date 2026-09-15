@@ -120,6 +120,7 @@ static void mish_backward_kernel(TensorIterator& iter) {
 }
 
 static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negative_slope) {
+  lib.exec_unary_kernel(iter, "leaky_relu", negative_slope);
 }
 
 static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negative_slope) {
