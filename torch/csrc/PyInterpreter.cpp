@@ -1,3 +1,4 @@
+#include <ATen/FakeTensor.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
@@ -159,7 +160,8 @@ struct ConcretePyInterpreterVTable final
   bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
-      bool has_symbolic_sizes) const override;
+      bool has_symbolic_sizes,
+      bool* has_python_cia) const override;
   bool fake_try_custom_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const override;
@@ -1069,7 +1071,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
     if (!t.defined() || (skip_fake && t.is_fake())) {
       return obj;
     }
-    t.unsafeGetTensorImpl()->set_and_normalize_fake_device(common_device);
+    at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
     t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
     return obj;
   };
@@ -1169,9 +1171,13 @@ ActiveFakeMode get_active_fake_mode() {
 bool ConcretePyInterpreterVTable::fake_try_decomp(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    bool has_symbolic_sizes) const {
+    bool has_symbolic_sizes,
+    bool* has_python_cia) const {
   py::gil_scoped_acquire gil;
   py::handle py_op = getTorchApiFunction(op);
+  py::dict py_kernels = py_op.attr("py_kernels");
+  py::object cia_key = py::cast(c10::DispatchKey::CompositeImplicitAutograd);
+  *has_python_cia = py_kernels.contains(cia_key);
 
   if (get_meta_table().contains(py_op)) {
     return false;
@@ -1220,9 +1226,7 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
   }
 
   if (decomp_fn.is_none()) {
-    py::dict py_kernels = py_op.attr("py_kernels");
-    py::object cia_key = py::cast(c10::DispatchKey::CompositeImplicitAutograd);
-    if (!py_kernels.contains(cia_key)) {
+    if (!*has_python_cia) {
       return false;
     }
     decomp_fn = py_kernels[cia_key];

@@ -146,7 +146,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   bool fake_try_decomp(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
-      bool /*has_symbolic_sizes*/) const override {
+      bool /*has_symbolic_sizes*/,
+      bool* has_python_cia) const override {
+    *has_python_cia = false;
     return false;
   }
   bool fake_try_custom_op_impl(

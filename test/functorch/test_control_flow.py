@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_cuda,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
@@ -10949,6 +10950,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled_out[1].size(0), 3)
         self.assertEqual(compiled_out, mod(x))
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_autograd_simple(self):
         backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
