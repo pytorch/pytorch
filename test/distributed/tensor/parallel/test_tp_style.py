@@ -17,7 +17,8 @@ from torch.distributed.tensor.parallel.style import (
     SequenceParallel,
 )
 from torch.distributed.tensor.placement_types import _Partial
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -31,12 +32,14 @@ c10d_functional = torch.ops.c10d_functional
 
 
 class TensorParallelStyleTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return NUM_DEVICES
 
     @with_comms
-    def test_colwise_parallel_style(self):
+    def test_colwise_parallel_style(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         comm_mode = CommDebugMode()
@@ -77,7 +80,7 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
     @with_comms
-    def test_colwise_parallel_embedding(self):
+    def test_colwise_parallel_embedding(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         comm_mode = CommDebugMode()
@@ -98,7 +101,7 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
-    def test_colwise_parallel_preserves_requires_grad(self):
+    def test_colwise_parallel_preserves_requires_grad(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         model = nn.Linear(16, 16, device=self.device_type)
@@ -111,7 +114,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertTrue(colwise_mod.bias.requires_grad)
 
     @with_comms
-    def test_rowwise_parallel_style(self):
+    def test_rowwise_parallel_style(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         comm_mode = CommDebugMode()
@@ -154,7 +157,7 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
     @with_comms
-    def test_rowwise_parallel_embedding(self):
+    def test_rowwise_parallel_embedding(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         comm_mode = CommDebugMode()
@@ -200,7 +203,7 @@ class TensorParallelStyleTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_rowwise_parallel_preserves_requires_grad(self):
+    def test_rowwise_parallel_preserves_requires_grad(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         model = nn.Linear(16, 16, device=self.device_type)
@@ -213,7 +216,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertTrue(rowwise_mod.bias.requires_grad)
 
     @with_comms
-    def test_prepare_module_input(self):
+    def test_prepare_module_input(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         tensor = torch.ones(2, 16, device=self.device_type)
@@ -228,7 +231,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output, expected_tensor)
 
     @with_comms
-    def test_prepare_module_input_multiple_inputs(self):
+    def test_prepare_module_input_multiple_inputs(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestModule(torch.nn.Module):
@@ -280,7 +283,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output.shape, (self.world_size * 2, 8 // self.world_size))
 
     @with_comms
-    def test_prepare_module_kwargs_input(self):
+    def test_prepare_module_kwargs_input(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestKwargModule(torch.nn.Module):
@@ -351,7 +354,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output.shape, (1 * self.world_size, 8))
 
     @with_comms
-    def test_prepare_module_output(self):
+    def test_prepare_module_output(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         tensor = torch.ones(8, 16, device=self.device_type)
@@ -366,7 +369,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output, expected_tensor)
 
     @with_comms
-    def test_sequence_parallel_style(self):
+    def test_sequence_parallel_style(self, device):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         # early init RNG tracker
         torch.distributed.tensor._random.manual_seed(0, mesh)
@@ -463,6 +466,10 @@ class TensorParallelStyleTest(DTensorTestBase):
 
 TensorParallelStyleTestWithLocalTensor = create_local_tensor_test_class(
     TensorParallelStyleTest,
+)
+instantiate_device_type_tests(TensorParallelStyleTest, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TensorParallelStyleTestWithLocalTensor, globals(), allow_xpu=True
 )
 
 if __name__ == "__main__":
