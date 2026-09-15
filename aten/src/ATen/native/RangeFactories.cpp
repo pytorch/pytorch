@@ -190,7 +190,7 @@ Tensor& range_out_no_step(const Scalar& start, const Scalar& end, Tensor& result
 }
 
 Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     int64_t size = compute_arange_size<scalar_t>(start, end, step);
     int64_t numel = result.numel();
 
@@ -210,7 +210,17 @@ Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, T
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
     auto iter = TensorIterator::borrowing_nullary_op(r);
-    arange_stub(iter.device_type(), iter, start, size, step);
+    if(isComplexType(r.scalar_type())) {
+      if(size <= 1) {
+        result.fill_(start);
+      } else {
+        Scalar endc = start.to<c10::complex<double>>() + step.to<c10::complex<double>>() * static_cast<double>(size - 1);
+        linspace_stub(iter.device_type(), iter, start, endc, size);
+      }
+
+    } else {
+      arange_stub(iter.device_type(), iter, start, size, step);
+    }
     if (!result.is_contiguous()) {
       result.copy_(r);
     }
