@@ -793,18 +793,9 @@ class InductorChoices:
             abs(node2.min_order - node1.max_order),
         )
 
-        # Prologue fusion normally comes last so an ordinary producer fusion
-        # can avoid recomputing shared values. A template may opt into being
-        # considered first when consuming its single-use tail is itself the
-        # materialization we are trying to eliminate.
+        # prologue fusion always last
         if node2.is_template():
-            template = node2.get_template_node()
-            template_score = (
-                3
-                if template is not None
-                and template.annotations.get("prefer_template_prologue_fusion", False)
-                else 0
-            )
+            template_score = 0
         else:
             template_score = 1 + (
                 (node1.is_template() == config.epilogue_fusion_first)

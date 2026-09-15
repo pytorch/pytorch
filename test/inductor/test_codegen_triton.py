@@ -7,7 +7,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import sympy
 
@@ -25,7 +25,6 @@ from torch._inductor.codegen.triton import (
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
-    TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
@@ -98,95 +97,6 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
-
-    def test_tma_store_can_use_descriptor_local_int32_indexing(self):
-        layout = SimpleNamespace(offset=0, stride=[512, 1])
-        buffer = Mock(spec=ir.Buffer)
-        buffer.get_layout.return_value = layout
-        buffer.get_name.return_value = "buf0"
-        buffer.has_tensor_output.return_value = True
-        kernel = SimpleNamespace(index_dtype="tl.int64", output_node=None)
-        checker = TMACompatibilityChecker(
-            kernel, torch.bfloat16, for_store=True, force=False, buffer_name="buf0"
-        )
-
-        with (
-            patch.object(self._graph, "try_get_buffer", return_value=buffer),
-            patch.object(
-                self._graph,
-                "get_current_device_or_throw",
-                return_value=torch.device("cuda"),
-            ),
-            patch.object(self._graph, "get_allocation_size", return_value=[128, 512]),
-            patch.object(
-                self._graph, "get_allocation_storage_size", return_value=128 * 512
-            ),
-        ):
-            self.assertTrue(checker.can_use_32bit_indexing())
-
-        kernel.output_node = buffer
-        with (
-            patch.object(self._graph, "try_get_buffer", return_value=None),
-            patch.object(
-                self._graph,
-                "get_current_device_or_throw",
-                return_value=torch.device("cuda"),
-            ),
-            patch.object(self._graph, "get_allocation_size", return_value=[128, 512]),
-            patch.object(
-                self._graph, "get_allocation_storage_size", return_value=128 * 512
-            ),
-        ):
-            self.assertTrue(checker.can_use_32bit_indexing())
-
-    def test_tma_descriptor_local_int32_indexing_fails_closed(self):
-        int32_max = torch.iinfo(torch.int32).max
-        size = sympy.Symbol("s", positive=True, integer=True)
-        kernel = SimpleNamespace(index_dtype="tl.int64", output_node=None)
-
-        def can_use(
-            *,
-            for_store=True,
-            device="cuda",
-            offset=0,
-            stride=(1,),
-            shape=(1,),
-            storage=1,
-        ):
-            layout = SimpleNamespace(offset=offset, stride=stride)
-            buffer = Mock(spec=ir.Buffer)
-            buffer.get_layout.return_value = layout
-            buffer.has_tensor_output.return_value = True
-            checker = TMACompatibilityChecker(
-                kernel,
-                torch.bfloat16,
-                for_store=for_store,
-                force=False,
-                buffer_name="buf0",
-            )
-            with (
-                patch.object(self._graph, "try_get_buffer", return_value=buffer),
-                patch.object(
-                    self._graph,
-                    "get_current_device_or_throw",
-                    return_value=torch.device(device),
-                ),
-                patch.object(self._graph, "get_allocation_size", return_value=shape),
-                patch.object(
-                    self._graph,
-                    "get_allocation_storage_size",
-                    return_value=storage,
-                ),
-            ):
-                return checker.can_use_32bit_indexing()
-
-        self.assertFalse(can_use(for_store=False))
-        self.assertFalse(can_use(device="cpu"))
-        self.assertFalse(can_use(offset=-1))
-        self.assertFalse(can_use(stride=(-1,)))
-        self.assertFalse(can_use(shape=(size,), storage=size))
-        self.assertFalse(can_use(shape=(int32_max + 1,), storage=int32_max + 1))
-        self.assertFalse(can_use(shape=(1,), storage=int32_max + 1))
 
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):

@@ -17,6 +17,7 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+from torch.distributed.distributed_c10d import _World
 from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
@@ -28,6 +29,11 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     run_tests,
     TestCase,
+)
+from torch.testing._internal.distributed.multi_threaded_pg import (
+    _install_threaded_pg,
+    _uninstall_threaded_pg,
+    ThreadLocalWorld,
 )
 
 
@@ -384,6 +390,35 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         )
         x = MyFunc.apply(x)
         x.sum().backward()
+
+
+class TestThreadLocalWorld(TestCase):
+    def test_mirrors_world_state(self):
+        # ThreadLocalWorld stands in for _World while a threaded PG is
+        # installed, and distributed_c10d reaches for world state by name. A
+        # state attribute added to _World alone makes those reads raise
+        # AttributeError under every MultiThreadedTestCase.
+        missing = sorted(
+            name
+            for name, attr in vars(_World).items()
+            if isinstance(attr, property) and not hasattr(ThreadLocalWorld, name)
+        )
+        self.assertEqual(missing, [])
+
+    def test_destroy_process_group_runs_to_completion(self):
+        world = _install_threaded_pg()
+        try:
+            dist.init_process_group(
+                backend="threaded", rank=0, world_size=1, store=dist.HashStore()
+            )
+            dist.destroy_process_group()
+            # Set by the last statement of destroy_process_group, so a non-zero
+            # count means teardown bailed out partway through.
+            self.assertEqual(world.group_count, 0)
+            self.assertEqual(len(world.pg_map), 0)
+            self.assertEqual(len(world.pg_flight_recorder_hooks), 0)
+        finally:
+            _uninstall_threaded_pg()
 
 
 if __name__ == "__main__":
