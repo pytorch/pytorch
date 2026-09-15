@@ -1670,10 +1670,10 @@ class AOTCompiledModel:
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, at most one
-    ``For [i]:`` hint, for the first entry whose guards failed on a global the
-    process does not define, and the advice to add a ``ModelInput`` or check
-    which guards ``guard_filter_fn`` kept.
+    per compiled result quoting the guards that refused it, one ``For [i, j]:``
+    line per distinct missing-global hint naming the entries whose guards failed
+    on a global the process does not define, and the advice to add a
+    ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
     """
 
     model: torch.nn.Module
@@ -1757,14 +1757,18 @@ class AOTCompiledModel:
             "No AOT compiled graph matched this call. Tried "
             f"{len(results)} compiled input(s):"
         ]
-        missing_at: int | None = None
+        # Hint text -> the entries it is for, in first-seen order: entries that
+        # share a scope share a sentence, and one whose scope differs keeps its
+        # own rather than being read the first entry's advice.
+        hinted: dict[str, list[int]] = {}
+        resolved: dict[str, Any] | None = None
+        tried_forward = False
         for i, result in enumerate(results):
             reason = result._live_guard_manager().check_verbose(bound[i])
             if reason.result:
                 lines.append(
                     f"  [{i}] <guards rejected this call twice and then accepted "
-                    "it here: a guard that does not answer consistently, or a "
-                    "tag-safe fast path that refused without running the tree>"
+                    "it here: a guard that does not answer consistently>"
                 )
                 continue
             if not reason.verbose_code_parts:
@@ -1772,29 +1776,28 @@ class AOTCompiledModel:
                 lines.append(f"  [{i}] <guard check failed without naming a guard>")
                 continue
             parts = reason.verbose_code_parts
-            if missing_at is None and any(map(_names_a_missing_global, parts)):
-                missing_at = i
+            if any(map(_names_a_missing_global, parts)):
+                forward: str | None = None
+                if result._guard_scope is _GuardScope.SUPPLIED and not tried_forward:
+                    tried_forward = True
+                    # Resolving forward runs user code: get_traced_fn formats a
+                    # forward it refuses into its error, and that repr can raise past
+                    # what _resolve_guard_scope catches. The report must still arrive.
+                    try:
+                        resolved, _ = _resolve_guard_scope(self.model)
+                    except Exception:
+                        pass
+                if resolved is not None and resolved is result._guard_globals:
+                    # Named as the instance attribute: the load resolved the scope from
+                    # model.forward, and a rebound instance reads another function's dict.
+                    forward = f"this {type(self.model).__name__} instance's forward"
+                hint = result._missing_global_hint(forward=forward)
+                hinted.setdefault(hint, []).append(i)
             # Collapse every separator splitlines() reads the report back on.
             joined = " ".join("; ".join(parts).splitlines())
             lines.append(f"  [{i}] {joined}")
-        if missing_at is not None:
-            missing_global = results[missing_at]
-            # Named as the instance attribute: the load resolved the scope from
-            # model.forward, and a rebound instance reads another function's dict.
-            forward: str | None = f"this {type(self.model).__name__} instance's forward"
-            resolved: dict[str, Any] | None = None
-            if missing_global._guard_scope is _GuardScope.SUPPLIED:
-                # Resolving forward runs user code: get_traced_fn formats a
-                # forward it refuses into its error, and that repr can raise past
-                # what _resolve_guard_scope catches. The report must still arrive.
-                try:
-                    resolved, _ = _resolve_guard_scope(self.model)
-                except Exception:
-                    pass
-            if resolved is None or resolved is not missing_global._guard_globals:
-                forward = None
-            hint = missing_global._missing_global_hint(forward=forward)
-            lines.append(f"For [{missing_at}]: {hint}")
+        for hint, at in hinted.items():
+            lines.append(f"For [{', '.join(map(str, at))}]: {hint}")
         lines.append(
             "Add a ModelInput covering this call, or check whether "
             "guard_filter_fn kept a guard this call cannot satisfy -- both "
