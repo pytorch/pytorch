@@ -7145,10 +7145,10 @@ def grouped_mm(
 
     Computes a grouped matrix multiply that shares weight shapes across experts but
     allows jagged token counts per expert, which is common in Mixture-of-Experts
-    (MoE) layers. Both ``mat_a`` and ``mat_b`` must be 2D or 3D tensors that already
-    satisfy the physical layout restrictions of grouped GEMM kernels (e.g., row-major
-    ``mat_a`` and column-major ``mat_b`` for FP8 inputs). Inputs are currently
-    expected to be ``torch.bfloat16`` values on CUDA devices with :math:`SM \ge 80`.
+    (MoE) layers. Both ``mat_a`` and ``mat_b`` must be 2D or 3D tensors that satisfy
+    the physical layout restrictions of grouped GEMM kernels. Inputs may be
+    ``torch.float16``, ``torch.bfloat16``, or ``torch.float32`` values. CUDA
+    execution is supported on devices with :math:`SM \ge 80`.
 
     Args:
         mat_a: Left operand. When 2D, its leading dimension is sliced into groups
@@ -7166,11 +7166,9 @@ def grouped_mm(
             of group ``i`` and ``offs[-1]`` must be strictly less than the total
             length of that operand's sliced dimension; elements beyond ``offs[-1]``
             are ignored.
-        bias: Optional tensor that is added to the grouped outputs. Bias is not
-            jagged and must be broadcastable to the result shape of each group.
-        out_dtype: Optional dtype that controls the accumulation/output dtype.
-            Passing ``torch.float32`` accumulates BF16 inputs in FP32 while keeping
-            the grouped GEMM API non-differentiable.
+        bias: Reserved for future use. It must currently be ``None``.
+        out_dtype: Optional output dtype. When provided, it must match the dtype of
+            ``mat_a``.
 
     Returns:
         A tensor containing the concatenated results of each per-group GEMM with
