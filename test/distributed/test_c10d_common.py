@@ -2993,6 +2993,7 @@ class SplitGroupOptionsTest(TestCase):
         self.assertEqual(store.clone_count, 0)
         for backend in (cpu_backend, default_backend):
             self.assertIsInstance(backend.split_store, dist.PrefixStore)
+        self.assertIs(cpu_backend.split_store, default_backend.split_store)
         self.assertIsInstance(child.get_group_store(), dist.PrefixStore)
 
     def test_split_group_clones_parent_options(self):

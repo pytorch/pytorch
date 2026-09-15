@@ -60,6 +60,18 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+_PIPELINE_STAGE_INDEX_KEY = "pipeline_stage_index"
+_PIPELINE_MICROBATCH_INDEX_KEY = "pipeline_microbatch_index"
+_PIPELINE_METADATA_KEYS = frozenset(
+    (_PIPELINE_STAGE_INDEX_KEY, _PIPELINE_MICROBATCH_INDEX_KEY)
+)
+_INCOMPLETE_RECV_BUFFER_ERROR = (
+    "Receive buffer for {input_name!r} is still owned by an incomplete pipeline "
+    "step; in-flight P2P work may still write to it. Call "
+    "dist.destroy_process_group(), then reconstruct the stages and schedule; "
+    "recreating the schedule alone does not make the storage safe to reuse"
+)
+
 
 def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
     """[Note: pipeline model output type]
@@ -121,37 +133,34 @@ class _RecvInfo:
         # Whether this is a root-level model input (no recv needed)
         self.is_root_arg = is_root_arg
 
-    def allocate_buffer(self, device: torch.device | str) -> torch.Tensor | None:
+    def allocate_buffer(self, device: torch.device | str) -> torch.Tensor:
         """Allocate and retain this receive's runtime buffer."""
         if self.tensor_meta is None:
-            return None
+            raise PipeliningMetadataError(
+                f"Receive '{self.input_name}' has no tensor metadata to allocate from"
+            )
         if self.buffer is not None:
             raise PipeliningMetadataError(
-                f"Receive buffer for '{self.input_name}' is still owned by an "
-                "incomplete pipeline step; recreate the schedule and process "
-                "group before retrying"
+                _INCOMPLETE_RECV_BUFFER_ERROR.format(input_name=self.input_name)
             )
         self.buffer = _make_tensor_from_meta(self.tensor_meta, device)
         return self.buffer
 
     def set_buffer(self, buffer: torch.Tensor) -> None:
         """Retain a receive buffer supplied by the runtime or a local stage."""
-        if self.is_root_arg or self.tensor_meta is None:
+        if self.tensor_meta is None:
             raise PipeliningMetadataError(
-                f"Receive buffer for '{self.input_name}' is not expected"
+                f"Receive '{self.input_name}' expects no gradient because its "
+                "tensor metadata is None, but a gradient tensor was provided"
             )
         if self.buffer is not None:
             raise PipeliningMetadataError(
-                f"Receive buffer for '{self.input_name}' is still owned by an "
-                "incomplete pipeline step; recreate the schedule and process "
-                "group before retrying"
+                _INCOMPLETE_RECV_BUFFER_ERROR.format(input_name=self.input_name)
             )
         self.buffer = buffer
 
-    def take_buffer(self) -> torch.Tensor | None:
+    def take_buffer(self) -> torch.Tensor:
         """Transfer this descriptor's buffer reference to stage computation."""
-        if self.tensor_meta is None:
-            return None
         if self.buffer is None:
             raise PipeliningMetadataError(
                 f"Receive buffer for '{self.input_name}' has not been set"
@@ -192,8 +201,8 @@ class _RecvBufferPool:
         if self._owners:
             raise PipeliningMetadataError(
                 f"The {self._direction} receive buffer pool still has storage "
-                "owned by an incomplete pipeline step; recreate the schedule "
-                "and process group before retrying"
+                "owned by an incomplete pipeline step; destroy the process "
+                "group, then reconstruct the stages and schedule before retrying"
             )
 
         metas = tuple(
@@ -262,8 +271,9 @@ class _RecvBufferPool:
 
     def aliases(self, tensor: torch.Tensor) -> bool:
         """Return whether ``tensor`` shares storage with any pooled buffer."""
+        storage_id = tensor.untyped_storage()._cdata
         return any(
-            buffer is not None and torch._C._is_alias_of(buffer, tensor)
+            buffer is not None and buffer.untyped_storage()._cdata == storage_id
             for slot_buffers in self._buffers
             for buffer in slot_buffers
         )
@@ -352,6 +362,7 @@ def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
 def _build_p2p_edge_groups(
     group: dist.ProcessGroup | None,
     stage_index_to_group_rank: dict[int, int],
+    device: torch.device,
 ) -> tuple[dict[tuple[int, int], dist.ProcessGroup], tuple[_P2PWarmupRound, ...]]:
     """Create communicators for the directed rank edges used by a schedule."""
     parent = group if group is not None else dist.distributed_c10d._get_default_group()
@@ -374,16 +385,24 @@ def _build_p2p_edge_groups(
 
     parent_backend_config = dist.BackendConfig(dist.get_backend_config(parent))
     device_backend_map = parent_backend_config.get_device_backend_map()
-    accelerator = torch.accelerator.current_accelerator()
-    backend_filter = None
-    backend_device = torch.device("cpu")
-    if accelerator is not None and accelerator.type in device_backend_map:
-        backend_device = accelerator
-        accelerator_backend = device_backend_map[accelerator.type]
-        backend_filter = f"{accelerator.type}:{accelerator_backend}"
-    elif "cpu" not in device_backend_map:
-        raise ValueError("Pipeline process group has no usable device backend")
-    parent_backend = parent._get_backend(backend_device)
+    if device.type not in device_backend_map:
+        raise ValueError(
+            f"Pipeline process group has no backend for device type {device.type!r}"
+        )
+    backend_name = device_backend_map[device.type]
+    backend_filter = (
+        f"{device.type}:{backend_name}"
+        if len(set(device_backend_map.values())) > 1
+        else None
+    )
+    parent_backend = parent._get_backend(device)
+    if not parent_backend.supports_splitting:
+        raise RuntimeError(
+            f"Pipeline P2P edge groups require backend {backend_name!r} to "
+            "support split_group"
+        )
+    # Do not fall back to a backend-name default: the child must preserve the
+    # timeout configured on this exact parent backend.
     timeout = parent_backend.options._timeout
     for round_index, round_edges in enumerate(rounds):
         child = dist.split_group(
@@ -393,16 +412,13 @@ def _build_p2p_edge_groups(
             backend=backend_filter,
             timeout=timeout,
         )
-        local_edges = [edge for edge in round_edges if group_rank in edge]
-        if local_edges:
-            if len(local_edges) != 1:
-                raise AssertionError("P2P split round is not a matching")
+        local_edge = next((edge for edge in round_edges if group_rank in edge), None)
+        if local_edge is not None:
             if not isinstance(child, dist.ProcessGroup):
                 raise AssertionError(
-                    f"expected process group for edge {local_edges[0]}, "
-                    f"got {type(child)}"
+                    f"expected process group for edge {local_edge}, got {type(child)}"
                 )
-            groups[local_edges[0]] = child
+            groups[local_edge] = child
 
     logger.info(
         "Pipeline P2P: using %d directed rank-edge split rounds",
@@ -420,6 +436,8 @@ def _warmup_p2p_edge_groups(
 ) -> None:
     """Exercise each directed child communicator before graph capture."""
     group_rank = dist.get_rank(parent)
+    # Matching edges are disjoint. Waiting before the next round lets every
+    # round safely reuse this one setup-only buffer.
     tensor = torch.zeros(1, dtype=torch.int32, device=device)
     for round_edges in rounds:
         local_edge = next((edge for edge in round_edges if group_rank in edge), None)
@@ -468,8 +486,9 @@ class _PipelineStageBase(ABC):
                 for deferred weight updates in F/I/W zero-bubble
                 schedules. If ``None``, a runner is generated
                 automatically via autograd graph traversal.
-            pass_pipeline_metadata: Pass the global stage and microbatch indices
-                as reserved keyword arguments to each manual stage forward.
+            pass_pipeline_metadata: Inject the global stage and microbatch indices
+                as reserved keyword arguments at the forward dispatch boundary.
+                Only ``PipelineStage`` exposes this option.
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -496,7 +515,6 @@ class _PipelineStageBase(ABC):
             or dist.distributed_c10d._use_torchcomms_enabled()
         )
         self._p2p_edge_groups: dict[tuple[int, int], dist.ProcessGroup] = {}
-        self._p2p_edge_warmup_rounds: tuple[_P2PWarmupRound, ...] = ()
         self._p2p_edge_topology: _P2PTopology | None = None
 
         self.dw_builder = dw_builder
@@ -563,21 +581,21 @@ class _PipelineStageBase(ABC):
         """Return this stage's explicit or default pipeline process group."""
         return self.group or dist.distributed_c10d._get_default_group()
 
-    def _configure_p2p_edge_groups(self) -> None:
+    def _configure_p2p_edge_groups(self) -> tuple[_P2PWarmupRound, ...]:
         """Create directed P2P groups from the schedule's final stage mapping."""
         if not self.p2p_per_edge:
-            return
+            return ()
         topology = _p2p_topology(self.stage_index_to_group_rank, self.group_size)
         if self._p2p_edge_topology is not None and self._p2p_edge_topology != topology:
             raise ValueError(
                 "Pipeline stage mapping changed after P2P communicator initialization"
             )
         groups, rounds = _build_p2p_edge_groups(
-            self.group, self.stage_index_to_group_rank
+            self.group, self.stage_index_to_group_rank, self.device
         )
         self._p2p_edge_groups = groups
-        self._p2p_edge_warmup_rounds = rounds
         self._p2p_edge_topology = topology
+        return rounds
 
     @property
     def has_backward(self) -> bool:
@@ -817,7 +835,7 @@ class _PipelineStageBase(ABC):
             pool.acquire(slot, microbatch_index, recv_infos)
             return
         for info in recv_infos:
-            if not info.is_root_arg:
+            if not info.is_root_arg and info.tensor_meta is not None:
                 info.allocate_buffer(self.device)
 
     def _release_fwd_recv_buffers(self, microbatch_index: int) -> None:
@@ -916,9 +934,8 @@ class _PipelineStageBase(ABC):
         recv_infos = self.grad_recv_info[mb_index]
         for info, tensor in zip(recv_infos, next_stage_bwd_outputs, strict=True):
             if tensor is None:
-                buffer = info.allocate_buffer(self.device)
-                if buffer is not None:
-                    buffer.zero_()
+                if info.tensor_meta is not None:
+                    info.allocate_buffer(self.device).zero_()
                 continue
             if not isinstance(tensor, torch.Tensor):
                 raise AssertionError(
@@ -1193,10 +1210,10 @@ class _PipelineStageBase(ABC):
                     f"Expected _RecvInfo but got {type(info)}"
                 )
             if not info.is_root_arg:
-                buffer = info.take_buffer()
-                if buffer is None:
+                if info.tensor_meta is None:
                     grads.append(None)
                     continue
+                buffer = info.take_buffer()
                 if isinstance(info.tensor_meta, _DTensorMeta):
                     # Reconstruct DTensor gradient from local tensor + metadata
                     mesh = self._mesh_cache.get_mesh(info.tensor_meta.mesh_cache_key)
@@ -1348,14 +1365,14 @@ class _PipelineStageBase(ABC):
         composite_kwargs = user_kwargs
         if self._pass_pipeline_metadata:
             metadata = {
-                "pipeline_stage_index": self.stage_index,
-                "pipeline_microbatch_index": fwd_chunk_id,
+                _PIPELINE_STAGE_INDEX_KEY: self.stage_index,
+                _PIPELINE_MICROBATCH_INDEX_KEY: fwd_chunk_id,
             }
-            collisions = metadata.keys() & user_kwargs.keys()
+            collisions = _PIPELINE_METADATA_KEYS & user_kwargs.keys()
             if collisions:
                 names = ", ".join(sorted(collisions))
                 raise ValueError(
-                    f"Pipeline forward kwargs contain reserved name(s): {names}"
+                    f"pass_pipeline_metadata reserves forward kwarg name(s): {names}"
                 )
             composite_kwargs = {**user_kwargs, **metadata}
 
@@ -2150,10 +2167,12 @@ class PipelineStage(_PipelineStageBase):
         get_mesh: `GetMeshCallback` used during
             dynamic DTensor inference. Ignored in fully static DTensor mode.
         pass_pipeline_metadata: Pass ``pipeline_stage_index`` and
-            ``pipeline_microbatch_index`` to each forward. This requires
-            complete static metadata. The wrapped module may accept the
-            reserved keywords directly or consume them in a ``with_kwargs``
-            forward pre-hook.
+            ``pipeline_microbatch_index`` to each forward. The values are the
+            global logical stage index and the global microbatch index within
+            the current step. This requires complete static metadata across the
+            schedule. The wrapped module may accept the reserved keywords
+            directly or consume them in a ``with_kwargs`` forward pre-hook.
+            Compiled modules may specialize on these Python integer values.
     """
 
     def __init__(
@@ -2203,15 +2222,6 @@ class PipelineStage(_PipelineStageBase):
             input_grads=extract_tensor_metas(in_grads, allow_none=True),
             output_grads=extract_tensor_metas(out_grads, allow_none=True),
         )
-        if (
-            self._pass_pipeline_metadata
-            and not self._user_meta.is_complete_for_forward()
-        ):
-            raise PipeliningMetadataError(
-                "pass_pipeline_metadata requires static input_args and output_args; "
-                "dynamic metadata inference has no real microbatch identity"
-            )
-
         # Cache meshes from user-provided DTensors
         for args in (inputs, outputs, in_grads, out_grads):
             if args is not None:
@@ -2263,11 +2273,10 @@ class PipelineStage(_PipelineStageBase):
     ) -> torch.Tensor:
         """Forward phase of the warm-up vote protocol (stage 0 → N−1).
 
-        Each stage computes a vote (1 = STATIC, 0 = DYNAMIC) based on
-        ``InferenceMode.needs_dynamic``, multiplies it with the accumulated
-        product from the previous stage, and forwards the result to the next
-        stage.  The final product at stage N−1 is 1 iff *every* stage voted
-        STATIC.
+        Each stage contributes whether it supports static metadata and whether
+        it permits dynamic inference. Elementwise multiplication with the
+        accumulated vote computes schedule-wide conjunctions. Dynamic inference
+        is invalid if any stage requests pipeline metadata.
 
         Args:
             has_backward: Whether the schedule includes a backward pass.
@@ -2276,11 +2285,17 @@ class PipelineStage(_PipelineStageBase):
                 stage / cross-rank.
 
         Returns:
-            The accumulated product tensor after this stage's vote.
+            The two-element accumulated vote after this stage.
         """
-        my_vote = 0 if InferenceMode.needs_dynamic(self._user_meta, has_backward) else 1
-
-        my_vote_t = torch.tensor([my_vote], dtype=torch.int32, device=self.device)
+        supports_static = int(
+            not InferenceMode.needs_dynamic(self._user_meta, has_backward)
+        )
+        permits_dynamic = int(not self._pass_pipeline_metadata)
+        my_vote_t = torch.tensor(
+            [supports_static, permits_dynamic],
+            dtype=torch.int32,
+            device=self.device,
+        )
 
         if self.is_first:
             acc = my_vote_t
@@ -2290,7 +2305,7 @@ class PipelineStage(_PipelineStageBase):
             acc = received_acc * my_vote_t
         else:
             peer_global = self._resolve_peer_global_rank(self.stage_index - 1)
-            acc = torch.zeros(1, dtype=torch.int32, device=self.device)
+            acc = torch.zeros(2, dtype=torch.int32, device=self.device)
             dist.recv(acc, src=peer_global, group=self.group)
             acc = acc * my_vote_t
 
@@ -2322,7 +2337,7 @@ class PipelineStage(_PipelineStageBase):
             result = received_result
         else:
             peer_global = self._resolve_peer_global_rank(self.stage_index + 1)
-            result = torch.zeros(1, dtype=torch.int32, device=self.device)
+            result = torch.zeros(2, dtype=torch.int32, device=self.device)
             dist.recv(result, src=peer_global, group=self.group)
 
         if not self.is_first and not self._is_same_rank(self.stage_index - 1):
@@ -2768,7 +2783,9 @@ class PipelineStage(_PipelineStageBase):
         if self._inference_mode == InferenceMode.DYNAMIC:
             if self._pass_pipeline_metadata:
                 raise PipeliningMetadataError(
-                    "pass_pipeline_metadata requires complete static metadata"
+                    "pass_pipeline_metadata requires complete static metadata: "
+                    "provide input_args and output_args for every stage, plus "
+                    "input_grads and output_grads for DTensors with backward"
                 )
             # DYNAMIC mode: run forward metadata inference
             # args may be _StageForwardMeta for same-rank V-schedule stages

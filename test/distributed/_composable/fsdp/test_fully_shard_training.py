@@ -9,6 +9,7 @@ import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from typing import Any
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -1324,7 +1325,14 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model(tokens, skip_head=True)
         model.body.armed = False
 
-        model.reset_iter_state()
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        with patch.object(
+            comm_ctx,
+            "release_all_gather_state",
+            wraps=comm_ctx.release_all_gather_state,
+        ) as release_all_gather_state:
+            model.reset_iter_state()
+        release_all_gather_state.assert_called_once_with()
 
         # Proves the reset is real: the next iteration completes cleanly.
         model(tokens).sum().backward()

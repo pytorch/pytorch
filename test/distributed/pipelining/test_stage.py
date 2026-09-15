@@ -111,20 +111,25 @@ class PipelineStageMetadataInferenceTest(TestCase):
                 output_args=torch.ones(1),
                 pass_pipeline_metadata=True,
             )
-            schedule = ScheduleGPipe(stage, n_microbatches=2)
-            x = torch.ones(2)
+            schedule = ScheduleGPipe(
+                stage,
+                n_microbatches=2,
+                loss_fn=lambda output, target: (output - target).square().sum(),
+            )
+            x = torch.ones(2, requires_grad=True)
 
-            self.assertEqual(schedule.step(x), x)
+            self.assertEqual(schedule.step(x, target=torch.zeros(2)), x)
             self.assertEqual(module.received, [(0, 0), (0, 1)])
+            self.assertEqual(x.grad, torch.full_like(x, 2))
 
-            with self.assertRaisesRegex(ValueError, "reserved name"):
+            with self.assertRaisesRegex(ValueError, "reserves forward kwarg"):
                 stage.forward_one_chunk(
-                    4,
+                    0,
                     (x,),
-                    {"pipeline_microbatch_index": 4},
+                    {"pipeline_microbatch_index": 0},
                 )
 
-    def test_pipeline_metadata_pre_hook_and_static_contract(self):
+    def test_pipeline_metadata_pre_hook(self):
         class StrictModule(torch.nn.Module):
             def forward(self, x):
                 return x.square()
@@ -162,16 +167,21 @@ class PipelineStageMetadataInferenceTest(TestCase):
             self.assertEqual(received[-1], (1, 2))
             self.assertEqual(stage.fwd_cache[2][1], [x])
 
+    def test_pipeline_metadata_requires_static_schedule(self):
+        with single_rank_process_group():
+            stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=0,
+                num_stages=1,
+                device=torch.device("cpu"),
+                pass_pipeline_metadata=True,
+            )
+            schedule = ScheduleGPipe(stage, n_microbatches=2)
+
             with self.assertRaisesRegex(
-                PipeliningMetadataError, "requires static input_args and output_args"
+                PipeliningMetadataError, "complete static metadata across the pipeline"
             ):
-                PipelineStage(
-                    module,
-                    stage_index=0,
-                    num_stages=1,
-                    device=torch.device("cpu"),
-                    pass_pipeline_metadata=True,
-                )
+                schedule.step(torch.ones(2))
 
     def test_pipeline_metadata_disabled(self):
         class KwargsModule(torch.nn.Module):
