@@ -175,6 +175,9 @@ class _FusionMemoryCandidate:
     def get_outputs(self) -> tuple[SchedulerBuffer, ...]:
         return self.outputs
 
+    def get_buffer_names(self) -> OrderedSet[str]:
+        return OrderedSet(buf.get_name() for buf in self.outputs)
+
 
 @dataclasses.dataclass(slots=True)
 class FusionMemoryUpdate:
@@ -184,7 +187,7 @@ class FusionMemoryUpdate:
     candidate_step: int
     region_start: int
     region_end: int
-    local_nodes: list[BaseSchedulerNode]
+    region_nodes: list[BaseSchedulerNode]
     live_before: list[int]
     live_after: list[int]
     peak: int
@@ -245,7 +248,7 @@ class FusionMemoryState:
             raise AssertionError("unexpected live-before region length")
 
         region_nodes: list[BaseSchedulerNode | None] = [None] * (end - start)
-        for idx, node in enumerate(update.local_nodes):
+        for idx, node in enumerate(update.region_nodes):
             if idx >= len(region_nodes):
                 raise AssertionError("too many nodes in fused memory region")
             region_nodes[idx] = fused_node if node is update.candidate else node
@@ -5849,7 +5852,6 @@ class Scheduler:
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
         self._fusion_memory_state: FusionMemoryState | None = None
-        self._fusion_memory_peak_limit: int | None = None
 
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
@@ -6946,7 +6948,7 @@ class Scheduler:
         with dynamo_timed(
             "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
         ):
-            self._fusion_memory_peak_limit = None
+            self._fusion_memory_state = None
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -6973,7 +6975,7 @@ class Scheduler:
                 or config.loop_index_inversion_in_fusion
             ):
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
-            self._fusion_memory_peak_limit = None
+            self._fusion_memory_state = None
             return nodes
 
     def process_grouped_nodes(self) -> None:
@@ -8179,6 +8181,7 @@ class Scheduler:
             tuple[BaseSchedulerNode, BaseSchedulerNode]
         ] = []
 
+        old_state = self._fusion_memory_state
         self._fusion_memory_state = None
         possible_fusions = self.get_possible_fusions(
             nodes,
@@ -8190,12 +8193,16 @@ class Scheduler:
                 possible_fusions, deferred_prologue_fusions
             )
 
-        fusion_memory_state = None
         if nodes and (
             config.fusion_memory_timeline_peak_memory_increase_gb is not None
             or config.fusion_memory_timeline_peak_memory_pct_threshold is not None
         ):
-            fusion_memory_state = self._init_fusion_memory_state(nodes)
+            peak_limit = old_state.peak_limit if old_state is not None else None
+            fusion_memory_state = self._init_fusion_memory_state(
+                nodes, peak_limit=peak_limit
+            )
+        else:
+            fusion_memory_state = None
         self._fusion_memory_state = fusion_memory_state
 
         self._try_fusion_pairs(
@@ -8238,7 +8245,6 @@ class Scheduler:
                 self.name_to_buf,
                 name_to_freeable,
             )
-        self._fusion_memory_state = None
         return nodes
 
     def _combo_kernel_context_key(
@@ -8949,7 +8955,7 @@ class Scheduler:
         return False
 
     def _init_fusion_memory_state(
-        self, nodes: list[BaseSchedulerNode]
+        self, nodes: list[BaseSchedulerNode], peak_limit: int | None = None
     ) -> FusionMemoryState:
         from .memory import (
             assign_memory_planning_info_for_scheduler_buffers,
@@ -8985,13 +8991,11 @@ class Scheduler:
         pct_thr = config.fusion_memory_timeline_peak_memory_pct_threshold
         if abs_thr_gb is None and pct_thr is None:
             raise AssertionError("expected fusion memory guard to be enabled")
-        peak_limit = self._fusion_memory_peak_limit
         if peak_limit is None:
             limits = [float(abs_thr_gb) * (1024**3)] if abs_thr_gb is not None else []
             if pct_thr is not None:
                 limits.append(pct_thr * baseline_peak)
             peak_limit = baseline_peak + int(min(limits))
-            self._fusion_memory_peak_limit = peak_limit
 
         state = FusionMemoryState(
             nodes=list(nodes),
@@ -9008,6 +9012,17 @@ class Scheduler:
     def _fusion_node_step(
         state: FusionMemoryState, node: BaseSchedulerNode | OutputNode
     ) -> int | None:
+        r"""
+        Node's step in the fusion-memory timeline.
+
+        Args:
+            state (FusionMemoryState): timeline containing recorded node positions.
+            node (BaseSchedulerNode or OutputNode): node whose position is requested.
+
+        Returns:
+            int or None: Directly recorded step, or the earliest recorded step.
+              Output nodes and nodes without recorded constituents have no timeline step.
+        """
         if isinstance(node, OutputNode):
             return None
         if node in state.node_to_idx:
@@ -9032,26 +9047,16 @@ class Scheduler:
             for dep in node.unmet_dependencies
             if dep.name not in buffer_names
         )
-        candidate = _FusionMemoryCandidate(
-            snodes=snodes,
-            outputs=outputs,
-            unmet_dependencies=unmet_dependencies,
-        )
         input_buffers = OrderedSet()
         for node in (node1, node2):
             input_buffers.update(node.mpi_node.pred_buffers)
-        candidate.mpi_node = MemoryPlanningInfoForNode(
-            size=sum(buffer.mpi_buffer.size_alloc for buffer in candidate.outputs),
-            pred_buffers=input_buffers,
-        )
-        return candidate
-
-    def _fusion_dep_producer(self, dep: Dep) -> BaseSchedulerNode | None:
-        buf = self.name_to_buf.get(dep.name)
-        return (
-            self.name_to_fused_node.get(buf.defining_op_name())
-            if buf is not None
-            else None
+        return _FusionMemoryCandidate(
+            snodes=snodes,
+            outputs=outputs,
+            unmet_dependencies=unmet_dependencies,
+            mpi_node=MemoryPlanningInfoForNode(
+                pred_buffers=input_buffers,
+            ),
         )
 
     def _fusion_memory_update(
@@ -9060,90 +9065,84 @@ class Scheduler:
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
     ) -> FusionMemoryUpdate:
+        r"""_fusion_memory_update(state, node1, node2) -> FusionMemoryUpdate
+
+        Simulate how fusing two nodes changes their memory timeline region.
+
+        The affected region spans the original positions of ``node1`` and
+        ``node2``. Replace both with one synthetic candidate, topologically place
+        that candidate among the unaffected nodes, and assign the proposed
+        schedule steps. Recalculate allocation and freeing from the region's
+        original live-in value so the result can replace the same region after
+        fusion.
+
+        Args:
+            state (FusionMemoryState): current fusion-memory timeline.
+            node1 (BaseSchedulerNode): first node in the proposed fusion.
+            node2 (BaseSchedulerNode): second node in the proposed fusion.
+
+        Returns:
+            FusionMemoryUpdate: proposed schedule and memory values for the
+              affected timeline region.
+        """
         from .memory import estimate_region_memory
 
-        step1 = self._fusion_node_step(state, node1)
-        step2 = self._fusion_node_step(state, node2)
-        if step1 is None or step2 is None:
-            missing = node1 if step1 is None else node2
+        node1_step = self._fusion_node_step(state, node1)
+        node2_step = self._fusion_node_step(state, node2)
+        if node1_step is None or node2_step is None:
+            missing = node1 if node1_step is None else node2
             raise AssertionError(
                 f"expected {missing.get_name()} in the fusion memory timeline"
             )
 
-        region_start = min(step1, step2)
-        region_end = max(step1, step2)
+        region_start = min(node1_step, node2_step)
+        region_end = max(node1_step, node2_step)
 
         candidate = self._make_fusion_memory_candidate(node1, node2)
         candidate_node = typing.cast(BaseSchedulerNode, candidate)
 
-        local_nodes: list[BaseSchedulerNode] = [candidate_node]
+        region_nodes: list[BaseSchedulerNode] = [candidate_node]
         for idx in range(region_start, region_end + 1):
             node = state.nodes[idx]
             if node is None or node is node1 or node is node2:
                 continue
-            local_nodes.append(node)
+            region_nodes.append(node)
 
-        needs_topological_sort = False
-        for dep in candidate.unmet_dependencies:
-            producer = self._fusion_dep_producer(dep)
-            if producer is None or producer is node1 or producer is node2:
-                continue
-            producer_step = state.node_to_idx.get(producer)
-            if (
-                producer_step is not None
-                and region_start <= producer_step <= region_end
-            ):
-                needs_topological_sort = True
-                break
+        # Move the candidate behind any of its producers inside this region.
+        region_buffer_names = OrderedSet(
+            name for node in region_nodes[1:] for name in node.get_buffer_names()
+        )
+        has_in_region_predecessor = any(
+            dep.name in region_buffer_names for dep in candidate.unmet_dependencies
+        )
+        if has_in_region_predecessor:
+            region_nodes = self.topological_sort_schedule(region_nodes)
 
-        if needs_topological_sort:
-            local_set = OrderedSet(local_nodes)
-            seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
-            ordered_nodes: list[BaseSchedulerNode] = []
-
-            def visit(node: BaseSchedulerNode) -> None:
-                if node in seen:
-                    return
-                seen.add(node)
-                for node_dep in sorted(node.unmet_dependencies, key=lambda d: d.name):
-                    dep_producer = self._fusion_dep_producer(node_dep)
-                    if dep_producer is not None and dep_producer in local_set:
-                        visit(dep_producer)
-                ordered_nodes.append(node)
-
-            visit(candidate_node)
-            ordered_nodes.extend(node for node in local_nodes if node not in seen)
-            local_nodes = ordered_nodes
-
-        new_step = {node: region_start + idx for idx, node in enumerate(local_nodes)}
-        candidate_step = new_step[candidate_node]
-        for node in local_nodes:
-            step = new_step[node]
+        # Preserve positions outside the region and replace positions inside it.
+        proposed_steps = dict(state.node_to_idx)
+        proposed_steps.update(
+            {node: region_start + idx for idx, node in enumerate(region_nodes)}
+        )
+        candidate_step = proposed_steps[candidate_node]
+        for node in region_nodes:
+            step = proposed_steps[node]
             for snode in node.get_nodes():
-                new_step[snode] = step
+                proposed_steps[snode] = step
         for node in (node1, node2):
-            new_step[node] = candidate_step
+            proposed_steps[node] = candidate_step
 
-        step_cache = {}
-
-        def step_of(node: BaseSchedulerNode) -> int:
-            if node not in step_cache:
-                if node in new_step:
-                    step_cache[node] = new_step[node]
-                else:
-                    step = self._fusion_node_step(state, node)
-                    if step is None:
-                        raise AssertionError(
-                            f"expected {node.get_name()} in the fusion memory timeline"
-                        )
-                    step_cache[node] = step
-            return step_cache[node]
+        def get_proposed_step(node: BaseSchedulerNode) -> int:
+            if node not in proposed_steps:
+                raise AssertionError(
+                    f"expected {node.get_name()} in the fusion memory timeline"
+                )
+            return proposed_steps[node]
 
         region_peak, live_before, live_after = estimate_region_memory(
-            local_nodes,
+            region_nodes,
             region_start=region_start,
             region_end=region_end,
-            step_of=step_of,
+            step_of=get_proposed_step,
             graph_outputs=state.graph_outputs,
             cur_memory=state.baseline_live_before[region_start],
         )
@@ -9154,7 +9153,7 @@ class Scheduler:
             candidate_step=candidate_step,
             region_start=region_start,
             region_end=region_end,
-            local_nodes=local_nodes,
+            region_nodes=region_nodes,
             live_before=live_before,
             live_after=live_after,
             peak=region_peak,
@@ -10230,7 +10229,6 @@ class Scheduler:
         rolled back if the fusion decision ultimately fails.
         """
         tracker = _LoopMutationTracker.create((node1, node2))
-        memory_update = None
         can_fuse = self._can_fuse_impl(
             node1,
             node2,
@@ -10240,6 +10238,7 @@ class Scheduler:
         if can_fuse and self.will_fusion_create_cycle(node1, node2):
             can_fuse = False
         state = self._fusion_memory_state
+        memory_update = None
         if can_fuse and state is not None:
             can_fuse, memory_update = self._can_fuse_peak_memory_check(
                 state, node1, node2
