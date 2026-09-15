@@ -13,7 +13,9 @@ if TYPE_CHECKING:
 
 
 _ENTRY_POINT_GROUP = "torch.distributed.transports"
-_BUILTIN_ENTRY_POINTS: dict[str, str] = {}
+_BUILTIN_ENTRY_POINTS = {
+    "tcp": "torch.distributed._transport._tcp:TCPTransport",
+}
 
 TransportFactory = Callable[..., Transport]
 _registered_transports: dict[str, TransportFactory] = {}
