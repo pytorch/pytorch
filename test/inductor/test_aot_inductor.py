@@ -6479,8 +6479,9 @@ class AOTInductorTestsTemplate:
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
+    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_debug_printer_codegen(self):
-        # basic addmm model to test codegen for aoti intermediate debug printer
+        # The debug-printer assertions require the addmm out shim.
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
                 super().__init__()
@@ -6703,6 +6704,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler_multi_output_fallback_input_shapes(self):
         # A tuple-returning fallback (scaled_dot_product_attention) is the
         # representative kernel reaching generate_c_shim_fallback_kernel;
