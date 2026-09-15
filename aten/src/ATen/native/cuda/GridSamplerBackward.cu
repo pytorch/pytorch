@@ -12,6 +12,8 @@
 #include <ATen/native/cuda/GridSampler.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 
+#include <type_traits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
@@ -47,13 +49,14 @@ __device__ int64_t spatial_offset(int64_t index, const TensorInfo<scalar_t, int6
 
 // A record is identified by (batch, output spatial index, interpolation corner).
 // Invalid neighbors sort after all valid destinations and never reach the output.
-template <typename scalar_t, int D>
+// 3-D bicubic stores its three opmath coefficients; other modes store scalar_t factors.
+template <typename scalar_t, int D, typename weight_t>
 C10_LAUNCH_BOUNDS_1(THREADS)
 __global__ void make_records(
     TensorInfo<const scalar_t, int64_t> input,
     TensorInfo<const scalar_t, int64_t> grid,
     TensorInfo<const scalar_t, int64_t> grad,
-    int64_t* keys, int64_t* ids, scalar_t* weights, int64_t* sample_offsets,
+    int64_t* keys, int64_t* ids, weight_t* weights, int64_t* sample_offsets,
     int64_t count, int64_t first_output, int64_t output_spatial, int64_t input_spatial,
     int neighbors, GridSamplerInterpolation mode, GridSamplerPadding padding,
     bool align_corners) {
@@ -65,6 +68,34 @@ __global__ void make_records(
         + spatial_offset<const scalar_t, D>(t % output_spatial, grid, 1);
     sample_offsets[local_t] = n * grad.strides[0]
         + spatial_offset<const scalar_t, D>(t % output_spatial, grad, 2);
+    if constexpr (D == 3 && std::is_same_v<weight_t, at::opmath_type<scalar_t>>) {
+      if (mode == GridSamplerInterpolation::Bicubic) {
+        // Match the native 3-D bicubic taps: z-major, then y, then x.
+        weight_t coeffs[D][4];
+        int64_t taps[D][4];
+        for (int axis = 0; axis < D; ++axis) {
+          const int64_t size = input.sizes[D + 1 - axis];
+          const weight_t value = grid.data[grid_offset + axis * grid.strides[D + 1]];
+          at::native::resolve_cubic_taps(
+              at::native::grid_sampler_unnormalize_sized(value, size, align_corners),
+              size, padding, align_corners, coeffs[axis], static_cast<weight_t*>(nullptr),
+              taps[axis]);
+        }
+        const int64_t W = input.sizes[D + 1], H = input.sizes[D];
+        for (int q = 0; q < neighbors; ++q) {
+          const int64_t r = local_t * neighbors + q;
+          const int x = q % 4, y = (q / 4) % 4, z = q / 16;
+          const bool valid = taps[0][x] >= 0 && taps[1][y] >= 0 && taps[2][z] >= 0;
+          keys[r] = valid ? n * input_spatial + (taps[2][z] * H + taps[1][y]) * W + taps[0][x]
+                          : invalid;
+          ids[r] = r;
+          weights[r * 3] = coeffs[0][x];
+          weights[r * 3 + 1] = coeffs[1][y];
+          weights[r * 3 + 2] = coeffs[2][z];
+        }
+        continue;
+      }
+    }
     scalar_t coord[D];
     int64_t size[D];
     for (int axis = 0; axis < D; ++axis) {
@@ -129,15 +160,19 @@ __global__ void make_records(
   }
 }
 
-// Evaluate one weighted contribution with the native scalar_t rounding order.
-template <typename scalar_t>
+// Evaluate one weighted contribution with the native kernels' rounding order.
+template <typename scalar_t, typename weight_t>
 __device__ at::opmath_type<scalar_t> record_value(
-    TensorInfo<const scalar_t, int64_t> grad, const scalar_t* weights,
+    TensorInfo<const scalar_t, int64_t> grad, const weight_t* weights,
     const int64_t* sample_offsets, int64_t r, int64_t c, int neighbor_bits,
-    bool bicubic) {
+    int factors) {
+  using acc_t = at::opmath_type<scalar_t>;
   const scalar_t g = grad.data[sample_offsets[r >> neighbor_bits] + c * grad.strides[1]];
-  return bicubic ? scalar_t(scalar_t(g * weights[r * 2]) * weights[r * 2 + 1])
-                 : scalar_t(weights[r] * g);
+  if (factors == 3) {
+    return scalar_t(static_cast<acc_t>(g) * weights[r * 3] * weights[r * 3 + 1] * weights[r * 3 + 2]);
+  }
+  return factors == 2 ? scalar_t(scalar_t(g * weights[r * 2]) * weights[r * 2 + 1])
+                      : scalar_t(weights[r] * g);
 }
 
 // Logical 32-lane groups also work on devices with wider hardware warps.
@@ -168,14 +203,14 @@ __global__ void count_long_segments(
 }
 
 // Independent fixed-size ranges expose parallelism even if all samples collide.
-template <typename scalar_t>
+template <typename scalar_t, typename weight_t>
 C10_LAUNCH_BOUNDS_1(THREADS)
 __global__ void partial_gradients(
     TensorInfo<const scalar_t, int64_t> grad, const int64_t* offsets,
-    const int64_t* sorted_ids, const scalar_t* weights, const int64_t* sample_offsets,
+    const int64_t* sorted_ids, const weight_t* weights, const int64_t* sample_offsets,
     const int64_t* num_segments, const int64_t* counts, const int64_t* prefix,
     at::opmath_type<scalar_t>* partials, int64_t max_segments, int64_t max_partials,
-    int64_t records, int neighbor_bits, int channel_bits, bool bicubic) {
+    int64_t records, int neighbor_bits, int channel_bits, int factors) {
   using acc_t = at::opmath_type<scalar_t>;
   const int lane = threadIdx.x % 32;
   const int channel_tile = 1 << channel_bits;
@@ -200,7 +235,7 @@ __global__ void partial_gradients(
     const int64_t end = min(begin + PARTIAL_ROWS, segment_end);
     acc_t acc = 0;
     for (int64_t i = begin + (lane >> channel_bits); i < end; i += 32 >> channel_bits) {
-      if (c < channels) acc += record_value(grad, weights, sample_offsets, sorted_ids[i], c, neighbor_bits, bicubic);
+      if (c < channels) acc += record_value(grad, weights, sample_offsets, sorted_ids[i], c, neighbor_bits, factors);
     }
     acc = channel_sum(acc, channel_tile);
     if (lane < channel_tile && c < channels) partials[part * channels + c] = acc;
@@ -209,14 +244,14 @@ __global__ void partial_gradients(
 
 // One warp owns the final write for a segment/channel tile. Short segments are
 // reduced directly; long ones use fixed-order partials, never floating atomics.
-template <typename scalar_t>
+template <typename scalar_t, typename weight_t>
 C10_LAUNCH_BOUNDS_1(THREADS)
 __global__ void reduce_segments(
     TensorInfo<const scalar_t, int64_t> grad,
     scalar_t* output, const int64_t* sorted_keys, const int64_t* offsets,
-    const int64_t* sorted_ids, const scalar_t* weights, const int64_t* sample_offsets,
+    const int64_t* sorted_ids, const weight_t* weights, const int64_t* sample_offsets,
     const int64_t* num_segments, int64_t max_segments, int64_t records,
-    int64_t input_spatial, int neighbor_bits, int channel_bits, bool bicubic,
+    int64_t input_spatial, int64_t invalid_key, int neighbor_bits, int channel_bits, int factors,
     const int64_t* partial_counts, const int64_t* partial_prefix,
     const at::opmath_type<scalar_t>* partials) {
   using acc_t = at::opmath_type<scalar_t>;
@@ -231,7 +266,7 @@ __global__ void reduce_segments(
     if (segment >= *num_segments) continue;
     const int64_t begin = offsets[segment];
     const int64_t key = sorted_keys[begin];
-    if (key == grad.sizes[0] * input_spatial) continue;
+    if (key == invalid_key) continue;
     const int64_t c = ((item % channel_tiles) << channel_bits) + (lane & (channel_tile - 1));
     const int64_t end = segment + 1 < *num_segments ? offsets[segment + 1] : records;
     acc_t acc = 0;
@@ -243,7 +278,7 @@ __global__ void reduce_segments(
       }
     } else {
       for (int64_t i = begin + (lane >> channel_bits); i < end; i += 32 >> channel_bits) {
-        if (c < channels) acc += record_value(grad, weights, sample_offsets, sorted_ids[i], c, neighbor_bits, bicubic);
+        if (c < channels) acc += record_value(grad, weights, sample_offsets, sorted_ids[i], c, neighbor_bits, factors);
       }
     }
     acc = channel_sum(acc, channel_tile);
@@ -256,7 +291,7 @@ __global__ void reduce_segments(
   }
 }
 
-template <typename scalar_t, int D>
+template <typename scalar_t, int D, typename weight_t>
 void launch_grouped(const TensorBase& input, const TensorBase& grid,
                     const TensorBase& grad, const TensorBase& output,
                     GridSamplerInterpolation mode, GridSamplerPadding padding, bool align) {
@@ -270,7 +305,9 @@ void launch_grouped(const TensorBase& input, const TensorBase& grid,
   }
   const int64_t destinations = input.size(0) * input_spatial;
   const bool bicubic = mode == GridSamplerInterpolation::Bicubic;
-  const int neighbor_bits = mode == GridSamplerInterpolation::Nearest ? 0 : bicubic ? 4 : D;
+  const int neighbor_bits = mode == GridSamplerInterpolation::Nearest ? 0 : bicubic ? 2 * D : D;
+  // Bicubic weights are stored per axis: two scalar_t factors in 2-D, three opmath ones in 3-D.
+  const int factors = bicubic ? D : 1;
   const int neighbors = 1 << neighbor_bits;
   int channel_bits = 0;
   while ((1 << channel_bits) < std::min<int64_t>(input.size(1), 32)) ++channel_bits;
@@ -287,14 +324,15 @@ void launch_grouped(const TensorBase& input, const TensorBase& grid,
     auto sorted_keys = at::empty_like(keys);
     auto ids = at::empty_like(keys);
     auto sorted_ids = at::empty_like(keys);
-    auto weights = at::empty({records, bicubic ? 2 : 1}, input.options());
+    Tensor weights = at::empty(
+        {records, factors}, input.options().dtype(c10::CppTypeToScalarType<weight_t>::value));
     auto sample_offsets = at::empty({chunk}, input.options().dtype(at::kLong));
     auto num_segments = at::empty({}, input.options().dtype(at::kLong));
     const int blocks = (chunk + THREADS - 1) / THREADS;
-    make_records<scalar_t, D><<<blocks, THREADS, 0, stream>>>(
+    make_records<scalar_t, D, weight_t><<<blocks, THREADS, 0, stream>>>(
         getTensorInfo<const scalar_t, int64_t>(input), getTensorInfo<const scalar_t, int64_t>(grid),
         getTensorInfo<const scalar_t, int64_t>(grad), keys.mutable_data_ptr<int64_t>(), ids.mutable_data_ptr<int64_t>(),
-        weights.mutable_data_ptr<scalar_t>(), sample_offsets.mutable_data_ptr<int64_t>(),
+        weights.mutable_data_ptr<weight_t>(), sample_offsets.mutable_data_ptr<int64_t>(),
         chunk, first, output_spatial, input_spatial,
         neighbors, mode, padding, align);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -304,6 +342,7 @@ void launch_grouped(const TensorBase& input, const TensorBase& grid,
         records, false, 0, at::cuda::cub::get_num_bits(destinations));
     // Release consumed keys before unique_by_key allocates its temporary key output.
     keys = Tensor();
+    // The sort consumed ids; reuse its storage for segment start offsets.
     at::cuda::cub::unique_by_key(
         sorted_keys.const_data_ptr<int64_t>(), cccl_counting_iterator<int64_t>{0},
         ids.mutable_data_ptr<int64_t>(), num_segments.mutable_data_ptr<int64_t>(), records);
@@ -328,23 +367,23 @@ void launch_grouped(const TensorBase& input, const TensorBase& grid,
       partial_storage = c10::cuda::CUDACachingAllocator::get()->allocate(max_partials * input.size(1) * sizeof(acc_t));
       const int64_t partial_warps = max_partials * ((input.size(1) + channel_tile - 1) >> channel_bits);
       const int partial_blocks = std::min<int64_t>((partial_warps + THREADS / 32 - 1) / (THREADS / 32), 65535);
-      partial_gradients<scalar_t><<<partial_blocks, THREADS, 0, stream>>>(
+      partial_gradients<scalar_t, weight_t><<<partial_blocks, THREADS, 0, stream>>>(
           getTensorInfo<const scalar_t, int64_t>(grad), ids.const_data_ptr<int64_t>(),
-          sorted_ids.const_data_ptr<int64_t>(), weights.const_data_ptr<scalar_t>(),
+          sorted_ids.const_data_ptr<int64_t>(), weights.const_data_ptr<weight_t>(),
           sample_offsets.const_data_ptr<int64_t>(), num_segments.const_data_ptr<int64_t>(),
           partial_counts.const_data_ptr<int64_t>(), partial_prefix.const_data_ptr<int64_t>(),
           static_cast<acc_t*>(partial_storage.get()), max_segments, max_partials, records,
-          neighbor_bits, channel_bits, bicubic);
+          neighbor_bits, channel_bits, factors);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     const int64_t warps = max_segments * ((input.size(1) + channel_tile - 1) >> channel_bits);
     const int reduce_blocks = std::min<int64_t>((warps + THREADS / 32 - 1) / (THREADS / 32), 65535);
-    reduce_segments<scalar_t><<<reduce_blocks, THREADS, 0, stream>>>(
+    reduce_segments<scalar_t, weight_t><<<reduce_blocks, THREADS, 0, stream>>>(
         getTensorInfo<const scalar_t, int64_t>(grad), output.mutable_data_ptr<scalar_t>(),
         sorted_keys.const_data_ptr<int64_t>(), ids.const_data_ptr<int64_t>(), sorted_ids.const_data_ptr<int64_t>(),
-        weights.const_data_ptr<scalar_t>(), sample_offsets.const_data_ptr<int64_t>(),
-        num_segments.const_data_ptr<int64_t>(), max_segments, records, input_spatial,
-        neighbor_bits, channel_bits, bicubic,
+        weights.const_data_ptr<weight_t>(), sample_offsets.const_data_ptr<int64_t>(),
+        num_segments.const_data_ptr<int64_t>(), max_segments, records, input_spatial, destinations,
+        neighbor_bits, channel_bits, factors,
         partial_counts.defined() ? partial_counts.const_data_ptr<int64_t>() : nullptr,
         partial_prefix.defined() ? partial_prefix.const_data_ptr<int64_t>() : nullptr,
         static_cast<const acc_t*>(partial_storage.get()));
@@ -364,9 +403,12 @@ void launch_grid_sampler_input_backward_kernel(
       ScalarType::Half, ScalarType::BFloat16, input.scalar_type(),
       "grid_sampler_input_backward_cuda", [&] {
         if (input.dim() == 4) {
-          launch_grouped<scalar_t, 2>(input, grid, grad_output, grad_input, mode, padding, align_corners);
+          launch_grouped<scalar_t, 2, scalar_t>(input, grid, grad_output, grad_input, mode, padding, align_corners);
+        } else if (mode == GridSamplerInterpolation::Bicubic) {
+          launch_grouped<scalar_t, 3, at::opmath_type<scalar_t>>(
+              input, grid, grad_output, grad_input, mode, padding, align_corners);
         } else {
-          launch_grouped<scalar_t, 3>(input, grid, grad_output, grad_input, mode, padding, align_corners);
+          launch_grouped<scalar_t, 3, scalar_t>(input, grid, grad_output, grad_input, mode, padding, align_corners);
         }
       });
 }
