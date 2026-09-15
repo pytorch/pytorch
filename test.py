@@ -4,12 +4,12 @@ torch.manual_seed(42)
 def diff(a, b):
     return (a - b).abs().max()
 
-for n in range(32, 1, -1):
-    for nexp in range(500):
+for n in range(36, 1, -1):
+    for nexp in range(750):
         x = torch.randn(n, n, dtype=torch.cdouble)
         q, _ = torch.linalg.qr(x)
         s = 2 * torch.rand(n, dtype=torch.double) + 1
-        x = (q * s.unsqueeze(-2)) @ q
+        x = (q * s.unsqueeze(-2)) @ q.mH
         x = x + x.mH
 
         ld, piv, _ = torch.linalg.ldl_factor_ex(x, hermitian=True)
