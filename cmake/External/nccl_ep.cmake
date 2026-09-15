@@ -7,6 +7,9 @@ if(NOT __NCCL_EP_INCLUDED)
     get_filename_component(NCCL_EP_JIT_HOME "${NCCL_EP_JIT_INCLUDE_DIR}" DIRECTORY)
     list(GET NCCL_INCLUDE_DIRS 0 __nccl_ep_nccl_include)
     get_filename_component(NCCL_EP_JIT_NCCL_HOME "${__nccl_ep_nccl_include}" DIRECTORY)
+    # Baked into _nccl_ep's INSTALL_RPATH so the loader resolves libnccl_ep
+    # without relying on ldconfig/LD_LIBRARY_PATH.
+    get_filename_component(NCCL_EP_LIBRARY_DIR "${NCCL_EP_LIBRARIES}" DIRECTORY)
 
     add_library(__caffe2_nccl_ep INTERFACE)
     target_link_libraries(__caffe2_nccl_ep INTERFACE ${NCCL_EP_LIBRARIES})

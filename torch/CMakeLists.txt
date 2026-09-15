@@ -485,7 +485,8 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
   #    headers baked from the submodule build dir; no nccl4py).
   #  - USE_SYSTEM_NCCL_EP=ON: __caffe2_nccl_ep is a system libnccl_ep.so;
-  #    its EP and NCCL JIT header roots are baked in as defaults.
+  #    its EP and NCCL JIT header roots are baked in as defaults, and its
+  #    library dir is baked into the install RPATH.
   #  - USE_SYSTEM_NCCL=ON and USE_SYSTEM_NCCL_EP=OFF: libnccl_ep.so is built
   #    from the NCCL submodule and resolved with its JIT headers from nccl4py.
   if(USE_NCCL_EP)
@@ -505,7 +506,7 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
         "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\""
         "NCCL_EP_JIT_NCCL_HOME=\"${NCCL_EP_JIT_NCCL_HOME}\"")
       set_target_properties(_nccl_ep PROPERTIES
-        INSTALL_RPATH "${_rpath_portable_origin}/lib")
+        INSTALL_RPATH "${_rpath_portable_origin}/lib;${NCCL_EP_LIBRARY_DIR}")
     elseif(USE_SYSTEM_NCCL)
       # Dynamic: resolve nccl4py's libnccl_ep.so (site-packages/nccl/ep/lib, one
       # dir up from torch/ via $ORIGIN/..) at import.
