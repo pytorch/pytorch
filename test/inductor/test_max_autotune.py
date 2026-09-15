@@ -310,12 +310,17 @@ class TestMaxAutotune(TestCase):
             "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
         }
         with config.patch(patches):
-            actual, code = run_and_get_code(torch.compile(f), a, b, index, out.clone())
+            actual, kernels = run_and_get_kernels(
+                torch.compile(f), a, b, index, out.clone()
+            )
 
         self.assertEqual(actual, f(a, b, index, out.clone()))
-        FileCheck().check("block_local_").check("torch.ops.aten.index_add.default").run(
-            code[0]
-        )
+        self.assertEqual(len(kernels), 2)
+        block_local_kernels = [code for code in kernels if "block_local_" in code]
+        atomic_add_kernels = [code for code in kernels if "tl.atomic_add" in code]
+        self.assertEqual(len(block_local_kernels), 1)
+        self.assertEqual(len(atomic_add_kernels), 1)
+        self.assertNotEqual(block_local_kernels, atomic_add_kernels)
 
     @unittest.skipIf(
         not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"

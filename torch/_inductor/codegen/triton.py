@@ -8754,7 +8754,7 @@ class TritonScheduling(SIMDScheduling):
         if root is not None:
             return OrderedSet(root.prevalidated_dep_names), OrderedSet(), OrderedSet()
 
-        _, (numel, rnumel) = node.group
+        numel, rnumel = cast(tuple[sympy.Expr, sympy.Expr], node.group[1])
         local_deps = [
             dep for dep in node.read_writes.reads if dep.name in local_buffers
         ]
