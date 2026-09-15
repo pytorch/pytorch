@@ -2086,13 +2086,14 @@ from user code:
         message = str(ctx.exception)
         self.assertIn("No AOT compiled graph matched this call", message)
         self.assertIn("Tried 2 compiled input(s)", message)
-        self.assertIn("[0]", message)
-        self.assertIn("[1]", message)
         # One line per input, not a multi-line GuardDebugInfo repr per input: the
-        # two entries are the two lines after the header, and the advice that
-        # follows is not indented, so it is not a continuation of the second.
+        # two entries are the two lines after the header, each says something
+        # after its index, and the advice that follows is not indented, so it
+        # is not a continuation of the second.
         lines = message.splitlines()
-        self.assertEqual([line[:5] for line in lines[1:3]], ["  [0]", "  [1]"])
+        self.assertEqual([line[:6] for line in lines[1:3]], ["  [0] ", "  [1] "])
+        for line in lines[1:3]:
+            self.assertTrue(line[6:].strip(), f"entry says nothing: {line!r}")
         self.assertFalse(lines[3].startswith(" "), lines[3])
         self.assertIn("Add a ModelInput", message)
 
@@ -2134,12 +2135,12 @@ from user code:
         # vacuous, and the last two a form-feed replace would not cover.
         self.assertIn("page break rec sep", message)
 
-    def test_no_match_message_keeps_the_advice_for_every_entry(self):
+    def test_no_match_message_hints_only_the_entry_that_named_a_missing_global(self):
         # One entry names a missing global and the other is a plain mismatch, and
         # neither advice covers the other's entry: defining AOT_BRANCH_SCALE
         # cannot make mode=2 satisfy [1]'s L['mode'] == 1, and a new ModelInput
-        # for mode=2 would not resolve the global [1] failed on. Reporting only
-        # one of them asserts something untrue about the whole call.
+        # for mode=2 would not resolve the global [1] failed on. Both entries
+        # keep the name they failed on, and the one hint is addressed to [1].
         model = torch.compile(
             ModeBranchGlobalModule(),
             fullgraph=True,
@@ -2164,8 +2165,49 @@ from user code:
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("[1] KeyError on G['AOT_BRANCH_SCALE']", message)
         self.assertIn("For [1]: a guarded global is missing", message)
+        self.assertEqual(message.count("a guarded global is missing"), 1)
         self.assertIn("the module the compiled function was traced in", message)
         self.assertIn("Add a ModelInput", message)
+
+    def test_no_match_message_hints_each_scope_a_mixed_model_failed_in(self):
+        # The public constructor takes results of differing scopes: here a
+        # CAPTURED one, whose guards still read this module's globals, next to
+        # a SUPPLIED one a load re-rooted at vars(this module). The same deleted
+        # name fails both, but the advice differs -- define it in the module the
+        # function was traced in, or in the scope the artifact was loaded
+        # against -- so each entry gets its own For line rather than [1] being
+        # read [0]'s.
+        global GLOBAL_POOLING_CONFIG
+
+        x = torch.randn(4, 8)
+        loaded = AOTCompiledModel.deserialize(
+            GlobalConfigModule(), self._two_input_global_guard_artifact(x)
+        )
+        captured = torch.compile(
+            GlobalConfigModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        captured._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        results = captured.forward.compiled_results + loaded.compiled_results[:1]
+        self.assertEqual(
+            [r._guard_scope for r in results],
+            [_GuardScope.CAPTURED, _GuardScope.SUPPLIED],
+        )
+        mixed = AOTCompiledModel(GlobalConfigModule(), results)
+        saved = GLOBAL_POOLING_CONFIG
+        self.addCleanup(globals().__setitem__, "GLOBAL_POOLING_CONFIG", saved)
+        del GLOBAL_POOLING_CONFIG
+        with self.assertRaises(RuntimeError) as ctx:
+            mixed(x)
+        message = str(ctx.exception)
+        self.assertIn("[0] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
+        self.assertIn("[1] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
+        hints = [line for line in message.splitlines() if line.startswith("For [")]
+        self.assertEqual([line[:9] for line in hints], ["For [0]: ", "For [1]: "])
+        self.assertIn("the module the compiled function was traced in", hints[0])
+        self.assertIn(f"here vars({__name__})", hints[1])
 
     def _install_global_probe(self, name, misses):
         # Re-keys this module's global `name` under a CountedKey. Both cleanups
@@ -2219,17 +2261,17 @@ from user code:
         counting = patch.object(AOTCompiledFunction, "prepare_f_locals", counted)
         with counting, patch.object(results[3], "fn", wraps=results[3].fn) as served:
             self.assertEqual(model(xs[3]), mod(xs[3]))
-            served.assert_called_once()
-            self.assertEqual(binds, [results[0]])
-            binds.clear()
             with self.assertRaises(RuntimeError) as ctx:
                 model(torch.ones(3, 3, dtype=torch.float16))
-            self.assertEqual(len(binds), 1)
-        # One entry per result off that single bind, whatever else the report
+        message = str(ctx.exception)
+        served.assert_called_once()
+        # One bind for the matched call and one for the call nothing matched, and
+        # one entry per result off that second bind, whatever else the report
         # carries.
-        lines = str(ctx.exception).splitlines()
+        self.assertEqual(binds, [results[0], results[0]])
+        lines = message.splitlines()
         self.assertEqual(sum(line.startswith("  [") for line in lines), len(xs))
-        self.assertIn("Add a ModelInput", str(ctx.exception))
+        self.assertIn("Add a ModelInput", message)
 
     def test_module_dispatch_decides_a_shared_binding_past_the_first_result(self):
         # Whether results bind alike is asked only once the first result has
@@ -2696,20 +2738,7 @@ from user code:
         # so an accept while the report asks why contradicts them rather than
         # correcting them: neither the guards it just passed nor "add a
         # ModelInput" says anything true about that entry.
-        mod = ModeBranchGlobalModule()
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        x = torch.randn(3, 3)
-        model._aot_compile(
-            [
-                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
-                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
-            ]
-        )
+        model, x = self._aot_compile_mode_branches()
         probe, _ = self._install_global_probe("AOT_BRANCH_SCALE", misses=2)
         with self.assertRaises(RuntimeError) as ctx:
             model(x, 1)
@@ -2719,7 +2748,10 @@ from user code:
         # fast path that would skip it is off -- the probe's pop/insert bumped
         # this module dict's version past the one the last accept recorded.
         self.assertEqual(probe.compares, 3)
-        self.assertIn("[1] <guards rejected this call twice and then accepted", message)
+        self.assertIn(
+            "  [1] <guards rejected this call twice and then accepted it here: a guard that does not answer consistently>",
+            message,
+        )
         # [0] is a real mismatch, so its advice still applies to the call.
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("Add a ModelInput", message)
@@ -4353,6 +4385,10 @@ from user code:
         message = str(ctx.exception)
         self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']", message)
         self.assertIn(f", here vars({__name__}); define it there", message)
+        # Both entries failed on the same name in the one scope the load
+        # resolved, so they share one hint line rather than repeating it.
+        self.assertEqual(message.count("a guarded global is missing"), 1)
+        self.assertIn("For [0, 1]: a guarded global is missing", message)
 
         # A copy of that namespace carries its __name__ but is not the module, and
         # sending the reader to the module would be wrong: the name has to land
@@ -4366,6 +4402,8 @@ from user code:
         message = str(ctx.exception)
         self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']", message)
         self.assertIn("loaded against; define it there", message)
+        self.assertEqual(message.count("a guarded global is missing"), 1)
+        self.assertIn("For [0, 1]: a guarded global is missing", message)
         self.assertNotIn("vars(", message)
 
     def test_aot_compile_module_deserialize_takes_a_guard_globals_scope(self):
