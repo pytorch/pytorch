@@ -77,7 +77,7 @@ def mul_forward(X, scalar):  # no device mesh needed since we don't do collectiv
     return torch.mul(X, scalar)
 
 
-class TestLocalMap(DTensorTestBase):
+class TestLocalMapDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -767,7 +767,7 @@ If the forward and backward layouts intentionally diverge in a way not represent
 
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
-class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
+class TestLocalMapSpmdTypesMultiGPUDevice(DTensorTestBase):
     """Multi-GPU tests for local_map with spmd_types type checking."""
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1090,8 +1090,8 @@ class TestLocalMapSpmdTypesMesh(TestCase):
         )
 
 
-instantiate_device_type_tests(TestLocalMap, globals())
-instantiate_device_type_tests(TestLocalMapSpmdTypesMultiGPU, globals())
+instantiate_device_type_tests(TestLocalMapDevice, globals())
+instantiate_device_type_tests(TestLocalMapSpmdTypesMultiGPUDevice, globals())
 
 if __name__ == "__main__":
     run_tests()
