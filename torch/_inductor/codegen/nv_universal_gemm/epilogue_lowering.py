@@ -26,12 +26,7 @@ import torch
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._ordered_set import OrderedSet
 
-from ...ir import (
-    Buffer,
-    ComputedBuffer,
-    Pointwise,
-    Reduction,
-)
+from ...ir import Buffer, ComputedBuffer, Pointwise, Reduction
 from ...kernel.gemm_epilogue import (
     GEMM_REDUCTION_IDENTITY_SOURCE,
     GemmReductionConfig,
@@ -853,9 +848,10 @@ class NVGemmEpilogueLowering:
     ) -> NVGemmReductionRegion:
         def is_mean_finalizer(store: GemmEpilogueIRStore) -> bool:
             expression = store.value
-            while (
-                getattr(expression, "op", None)
-                in ("to_dtype", "to_dtype_bitcast", "identity")
+            while getattr(expression, "op", None) in (
+                "to_dtype",
+                "to_dtype_bitcast",
+                "identity",
             ):
                 expression = expression.args[0]
 

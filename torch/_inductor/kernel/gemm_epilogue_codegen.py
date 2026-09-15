@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+    CuteDSLArg,
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
     tensorssa_reduction,
@@ -494,11 +495,21 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
         return GemmEpilogueCuteDSLOpOverrides.to_dtype(x, dtype)
 
     @staticmethod
-    def to_dtype(x: Any, dtype: torch.dtype, **kwargs: Any) -> Any:
+    def to_dtype(
+        x: CuteDSLArg,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype | None = None,
+        use_compute_types: bool = True,
+    ) -> CuteDSLArg:
         x_cse = CuteDSLOpOverrides._get_cse_var(x)
         if x_cse is not None and x_cse.dtype == dtype:
             return x
-        return CuteDSLOpOverrides.to_dtype(x, dtype, **kwargs)
+        return CuteDSLOpOverrides.to_dtype(
+            x,
+            dtype,
+            src_dtype=src_dtype,
+            use_compute_types=use_compute_types,
+        )
 
     @staticmethod
     def where(condition: Any, a: Any, b: Any) -> Any:
