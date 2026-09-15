@@ -13799,6 +13799,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([144, 144]),))
 
+    @parametrize("dynamic", (False, True))
+    @parametrize("op", ("argmax", "argmin"))
+    @parametrize(
+        "dtype,error_type",
+        ((torch.bool, NotImplementedError), (torch.complex64, TypeError)),
+    )
+    def test_argmax_argmin_unsupported_input_raises(
+        self, dynamic, op, dtype, error_type
+    ):
+        arg_reduce = getattr(torch, op)
+
+        def fn(x, values):
+            idx = arg_reduce(x, dim=1)
+            return values[idx].sum()
+
+        scores = torch.tensor(
+            [[-1.0, 2.0, -3.0], [4.0, -5.0, 6.0]],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        values = torch.tensor([10.0, 20.0, 30.0], device=self.device)
+        x = scores > 0.0 if dtype is torch.bool else scores.to(dtype)
+        dtype_name = "bool" if dtype is torch.bool else "complex"
+        msg = rf"{op}\(\): does not support {dtype_name} input"
+
+        with self.assertRaisesRegex(error_type, msg):
+            arg_reduce(x.to("meta"), dim=1)
+
+        compiled = torch.compile(
+            fn, backend="inductor", fullgraph=True, dynamic=dynamic
+        )
+        compiled_error = RuntimeError
+        if dtype is torch.bool and dynamic:
+            # FakeTensor converts NotImplementedError when symbolic sizes prevent fallback.
+            compiled_error = torch._dynamo.exc.Unsupported
+            msg = rf"unsupported operator: aten\.{op}\.default"
+        with self.assertRaisesRegex(compiled_error, msg):
+            compiled(x, values)
+
     def test_argmax_argmin_with_duplicates(self):
         def fn(x):
             return (
