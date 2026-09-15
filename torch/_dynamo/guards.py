@@ -779,6 +779,7 @@ class GuardManagerWrapper:
             raise
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
+        # check_verbose_nopybind has the same non-RAII exit as check() above.
         torch_function_state = torch._C._get_torch_function_state()
         try:
             return self.root.check_verbose(x)
