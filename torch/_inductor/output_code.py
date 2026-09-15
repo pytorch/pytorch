@@ -1018,6 +1018,20 @@ class CompiledFxGraph(OutputCode):
     def write_to_disk(self) -> str:
         from torch._dynamo.utils import counters
         from torch._inductor.codecache import get_path, write_atomic
+        from torch._inductor.runtime.sqlite_cache import (
+            local_cache,
+            sqlite_cache_enabled,
+        )
+
+        if sqlite_cache_enabled():
+            cache = local_cache()
+            cache.put(
+                "python",
+                self.cache_key,
+                self.source_code.encode("utf-8"),
+                overwrite=False,
+            )
+            return cache.materialize_python(self.cache_key)
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
