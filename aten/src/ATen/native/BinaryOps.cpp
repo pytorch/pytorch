@@ -43,6 +43,7 @@
 #include <ATen/ops/divide_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/eq_native.h>
+#include <ATen/ops/exp2.h>
 #include <ATen/ops/floor_divide.h>
 #include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/fmax_native.h>
@@ -1563,7 +1564,7 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
   const auto self_dtype = self.scalar_type();
   // All integral types are promoted to float32
   if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
-      return at::pow(2.0, other);
+      return at::exp2(other);
   }
   // For double and reduced floating types do regular type promotion
   return at::full({}, 2.0, self.options()).pow(other);
