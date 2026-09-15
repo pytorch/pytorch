@@ -37,7 +37,6 @@ import os
 import re
 import sys
 import textwrap
-from pathlib import Path
 
 
 REPO = os.path.normpath(
@@ -48,8 +47,6 @@ REPO = os.path.normpath(
 # checkout hides this, that tree being the installed torch there. export.py carries
 # the same note.
 sys.path.append(REPO)
-
-from tools.native_aot import dependencies
 
 from torchgen import native_aot_decl as decl
 
@@ -944,8 +941,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    dependency_manifest = Path(args.artifacts_dir) / dependencies.MANIFEST
-
     from tools.native_aot import export as export_mod
 
     # Artifact dirs are named by decl_id (a family module under one ops/<dir>
@@ -1024,7 +1019,6 @@ def main(argv: list[str] | None = None) -> None:
 
     all_prefixes: list[str] = []
     link_objects: list[str] = []
-    source_closures: list[dict[str, str]] = []
     # (out_dir, path, source, kernel count) -- written only once every
     # declaration has passed its refusals; see the commit step after the loop.
     pending: list[tuple[str, str, str, int]] = []
@@ -1230,9 +1224,7 @@ def main(argv: list[str] | None = None) -> None:
         pending.append((out_dir, out, src, len(sidecars)))
         all_prefixes.extend(sc["prefix"] for sc in sidecars)
         link_objects.extend(entry_objects)
-        source_closures.extend(sc.get("sources", {}) for sc in sidecars)
 
-    kernel_sources = dependencies.merge_sources(source_closures)
     # Past every refusal: commit the sources, the version script, then the new
     # native_aot.cmake LAST -- its presence is what tells CMake a generation
     # finished. The previous one is already gone (see the top of main()).
@@ -1245,7 +1237,6 @@ def main(argv: list[str] | None = None) -> None:
         print(f"wrote {out} ({n} kernels)")
     ver = write_version_script(args.artifacts_dir, all_prefixes)
     print(f"wrote {ver}")
-    dependencies.write_manifest(dependency_manifest, kernel_sources)
     written = write_cmake_include(
         args.artifacts_dir,
         [p[1] for p in pending],

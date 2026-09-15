@@ -40,7 +40,6 @@ import importlib
 import json
 import os
 import sys
-from pathlib import Path
 
 
 REPO = os.path.normpath(
@@ -57,7 +56,6 @@ sys.path.append(REPO)
 # torchgen is pure Python and imports without a built torch, which this module scope
 # needs: stage-1 codegen and the linter image that runs the tools tests both lack it.
 from tools.native_aot import toolchains
-from tools.native_aot.dependencies import file_hash as _file_hash
 
 from torchgen import native_aot_decl as decl
 from torchgen.native_aot_spec_grid import expand_specs
@@ -103,20 +101,11 @@ def load_builder(op: str, kernel_module: str):
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def _source_path(name: str, filename: str) -> str:
-    path = Path(filename).resolve()
-    # Stage 2 imports the installed wheel, possibly from a venv inside REPO.
-    # Normalize to the package first, but hash the file actually compiled.
-    package = name.partition(".")[0]
-    package_file = getattr(sys.modules.get(package), "__file__", None)
-    if package_file is not None:
-        try:
-            relative = path.relative_to(Path(package_file).resolve().parent)
-        except ValueError:
-            pass
-        else:
-            return (Path(package) / relative).as_posix()
-    return path.relative_to(Path(REPO).resolve()).as_posix()
+def _file_hash(path: str) -> str:
+    import hashlib
+
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]
 
 
 # Loaded modules whose contents decide what an artifact means, and which the
@@ -132,21 +121,19 @@ _CLOSURE_EXCLUDED = frozenset({"gen_aot_lib.py", "build_stage2.py"})
 
 
 def source_closure(decl_path: str | None = None) -> dict[str, str]:
-    """Hash loaded kernel/declaration modules, exporter sources, and the declaration.
+    """{repo-relative path: content hash} for every loaded source that can change
+    what an artifact means: the builder's import closure, the declaration machinery
+    (_CLOSURE_PREFIXES), this tool's own sources, and the op's aot.py.
 
-    Path-loaded declarations need explicit inclusion. Workers retain earlier
-    imports, so the dependency set is conservative.
-    """
+    Recorded per sidecar; gen_aot_lib re-hashes from disk and refuses to pair edited
+    sources with stale artifacts, so this over-approximates on purpose.
+
+    Only imported modules appear in sys.modules, hence the glob for tools/ sources
+    and the explicit decl_path: declarations load by file path and never enter
+    sys.modules, so a KERNEL_MODULE or grid edit would otherwise go unnoticed."""
     import glob
 
-    out: dict[str, str] = {}
-
-    def add_source(relative: str, path: str) -> None:
-        digest = _file_hash(path)
-        if relative in out and out[relative] != digest:
-            raise ValueError(f"conflicting native-AOT dependency hashes for {relative}")
-        out[relative] = digest
-
+    out = {}
     # A snapshot, because hashing can trigger imports and mutating sys.modules
     # mid-iteration raises.
     for name, mod in list(sys.modules.items()):
@@ -154,13 +141,13 @@ def source_closure(decl_path: str | None = None) -> dict[str, str]:
             continue
         f = getattr(mod, "__file__", None)
         if f and os.path.exists(f):
-            add_source(_source_path(name, f), f)
+            out[os.path.relpath(f, REPO)] = _file_hash(f)
     for f in glob.glob(os.path.join(_HERE, "*.py")):
         if os.path.basename(f) in _CLOSURE_EXCLUDED:
             continue
-        add_source(os.path.relpath(f, REPO).replace(os.sep, "/"), f)
+        out[os.path.relpath(f, REPO)] = _file_hash(f)
     if decl_path and os.path.exists(decl_path):
-        add_source(os.path.relpath(decl_path, REPO).replace(os.sep, "/"), decl_path)
+        out[os.path.relpath(decl_path, REPO)] = _file_hash(decl_path)
     return dict(sorted(out.items()))
 
 

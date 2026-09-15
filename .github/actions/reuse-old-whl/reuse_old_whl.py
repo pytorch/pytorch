@@ -5,7 +5,6 @@ import os
 import shutil
 import subprocess
 import sys
-import zipfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
@@ -15,7 +14,6 @@ import requests
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
-from tools.native_aot import dependencies
 from tools.stats.upload_metrics import emit_metric
 
 
@@ -123,7 +121,10 @@ def ok_changed_file(file: str) -> bool:
     if (
         file.startswith("torch/")
         and file.endswith(".py")
-        and not file.startswith("torch/csrc/")
+        # Python DSL sources are compiled into the wheel.
+        and not file.startswith(
+            ("torch/csrc/", "torch/_native/", "torch/_vendor/quack/")
+        )
     ):
         return True
     if file.startswith("test/") and file.endswith(".py"):
@@ -364,28 +365,10 @@ def can_reuse_whl(args: argparse.Namespace) -> tuple[bool, str]:
         return (False, "No old whl found")
         # TODO: go backwards from merge base to find more runs
 
-    if "cuda" in args.build_environment:
-        artifact = Path("artifacts.zip")
-        try:
-            with zipfile.ZipFile(artifact) as archive:
-                sources = dependencies.read_manifest(
-                    archive.read(str(dependencies.CI_MANIFEST))
-                )
-            changed = dependencies.changed_source(sources, Path.cwd())
-            if changed is not None:
-                raise ValueError(f"native-AOT dependency changed or missing: {changed}")
-        except (KeyError, OSError, ValueError, zipfile.BadZipFile) as exc:
-            reason = f"Cannot reuse native-AOT kernels: {exc}"
-            print(reason)
-            # The fallback build updates artifacts.zip in place with zip -r.
-            # Remove the rejected candidate so none of its entries survive.
-            artifact.unlink(missing_ok=True)
-            return (False, reason)
-
     return (True, "Found old whl")
 
 
-def main() -> None:
+if __name__ == "__main__":
     args = parse_args()
 
     reuse_whl, reason = can_reuse_whl(args)
@@ -405,7 +388,3 @@ def main() -> None:
             "head_sha": get_head_sha(),
         },
     )
-
-
-if __name__ == "__main__":
-    main()
