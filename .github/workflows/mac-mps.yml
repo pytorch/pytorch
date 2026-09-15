@@ -25,11 +25,13 @@ jobs:
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.12.7
+      # GitHub currently publishes macOS 27 as xcode-27-xlarge.
       test-matrix: |
         { include: [
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-26" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "xcode-27-xlarge" },
         ]}
     secrets: inherit
 
