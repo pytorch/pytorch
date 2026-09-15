@@ -2,6 +2,7 @@
 import copy
 import importlib
 import pkgutil
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
@@ -24,6 +25,51 @@ do_imports()
 
 @skipIfTorchDynamo("not applicable")
 class TestHOPInfra(TestCase):
+    def test_cpp_fake_dispatch_uses_python_fake_mode_handler(self):
+        from torch._ops import HigherOrderOperator
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        class TestHOP(HigherOrderOperator):
+            def __init__(self):
+                super().__init__("test_cpp_fake_dispatch")
+
+            def __call__(self, value):
+                return super().__call__(value)
+
+        hop = TestHOP()
+        expected_mode = object()
+
+        @hop.py_impl(FakeTensorMode)
+        def fake_handler(mode, value):
+            self.assertIs(mode, expected_mode)
+            return value + 1
+
+        with mock.patch.object(
+            torch._C, "_current_cpp_fake_tensor_mode", return_value=expected_mode
+        ):
+            self.assertEqual(hop.dispatch(torch._C.DispatchKey.Fake, 4), 5)
+
+    def test_cpp_fake_op_overload_uses_python_fake_mode_handler(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with torch.library._scoped_library("test_cpp_fake_dispatch", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+            op = torch.ops.test_cpp_fake_dispatch.foo.default
+            expected_mode = object()
+
+            @op.py_impl(FakeTensorMode)
+            def fake_handler(mode, value):
+                self.assertIs(mode, expected_mode)
+                return value
+
+            with mock.patch.object(
+                torch._C, "_current_cpp_fake_tensor_mode", return_value=expected_mode
+            ):
+                handler = op._get_dispatch(torch._C.DispatchKey.Fake)
+                if not callable(handler):
+                    raise AssertionError(f"expected a callable, got {handler}")
+                self.assertEqual(handler("result"), "result")
+
     def test_all_hops_have_opinfo(self):
         """All HOPs should have an OpInfo in torch/testing/_internal/hop_db.py"""
         from torch._ops import _higher_order_ops

@@ -520,6 +520,16 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
 
+        if dispatch_key == DispatchKey.Fake and not self.has_kernel_for_dispatch_key(
+            dispatch_key
+        ):
+            cpp_fake_mode = torch._C._current_cpp_fake_tensor_mode()
+            fake_handler = self.python_key_table.get(
+                torch._subclasses.fake_tensor.FakeTensorMode
+            )
+            if cpp_fake_mode is not None and fake_handler is not None:
+                return fake_handler(cpp_fake_mode, *args, **kwargs)
+
         final_key = resolve_key(self, dispatch_key)
 
         # This can current fail due to backend fallbacks.  You just have to
@@ -1082,6 +1092,20 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                 # is the handler itself (in python).
                 # Also, not caching means that we don't have to reset the cache when any existing
                 # modes go out of scope (which in of itself takes time to loop through all operators).
+                return handler
+
+        if key == DispatchKey.Fake and not self.has_kernel_for_dispatch_key(key):
+            fake_handler = self.python_key_table.get(
+                torch._subclasses.fake_tensor.FakeTensorMode
+            )
+            if fake_handler is not None:
+
+                def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+                    cpp_fake_mode = torch._C._current_cpp_fake_tensor_mode()
+                    if cpp_fake_mode is None:
+                        raise AssertionError("C++ FakeTensorMode must be active")
+                    return fake_handler(cpp_fake_mode, *args, **kwargs)
+
                 return handler
 
         final_key = resolve_key(self, key)
