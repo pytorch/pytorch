@@ -252,6 +252,7 @@ def flex_gemm_epimod(
             if kind == "scalar"
             else op_types[kind](name, dtype=dtype)
         )
+    aux_output_names = tuple(f"output{index}" for index in range(aux_output_count))
     if output_contraction is not None:
         from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
             GroupedMainStore,
@@ -270,9 +271,10 @@ def flex_gemm_epimod(
                 output_contraction.group,
                 min_fragment_n=min_fragment_n,
             ),
+            *aux_output_names,
         )
     else:
-        outputs = tuple(f"output{index}" for index in range(aux_output_count))
+        outputs = aux_output_names
     sinks: dict[str, Any] = {}
     extra_ops = ()
     if indexed_dtypes is not None:
@@ -494,21 +496,15 @@ def gemm_epilogue(
 
     from torch._vendor.quack.cache import cache_dir_override
 
-    output_buffers = (
-        {"main": quack_epilogue_arg(out)}
-        if output_contraction is not None
-        else {
-            "D": quack_epilogue_arg(out),
-            **dict(
-                zip(
-                    epimod.outputs,
-                    (quack_epilogue_arg(aux_out) for aux_out in aux_outs),
-                    strict=True,
-                )
-            ),
-        }
-    )
     main_name = "main" if output_contraction is not None else "D"
+    output_names = (main_name, *(f"output{index}" for index in range(len(aux_outs))))
+    output_buffers = dict(
+        zip(
+            output_names,
+            (quack_epilogue_arg(out), *map(quack_epilogue_arg, aux_outs)),
+            strict=True,
+        )
+    )
     concat_layout = (
         None if output_contraction is None else output_contraction.concat_layout
     )
