@@ -6087,6 +6087,246 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     @skip_on_cpu
     @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
+    def test_backward_calls_flex_attention_backward_choices_hook(self, device):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.virtualized import V
+
+        class ForwardChoices(InductorChoices):
+            def __init__(self):
+                self.calls = 0
+
+            def append_flex_attention_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+            ):
+                self.calls += 1
+                return choices
+
+        class SelectedChoice:
+            def __init__(self, choice, owner):
+                self.choice = choice
+                self.owner = owner
+
+            def __getattr__(self, name):
+                return getattr(self.choice, name)
+
+            def output_node(self):
+                self.owner.selected = True
+                return self.choice.output_node()
+
+        class RecordingChoices(InductorChoices):
+            def __init__(self):
+                self.calls = []
+                self.selected = False
+                self.stock_input_nodes = None
+                self.stock_mutated_inputs = None
+
+            def append_flex_attention_backward_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+                *,
+                mutated_inputs,
+            ):
+                self.calls.append((input_nodes, subgraphs, mutated_inputs))
+                stock_choice = choices[0]
+                self.stock_input_nodes = stock_choice.input_nodes
+                self.stock_mutated_inputs = stock_choice.mutated_inputs
+                choices.clear()
+                choices.append(SelectedChoice(stock_choice, self))
+                return choices
+
+        class MutatingChoices(InductorChoices):
+            def __init__(self):
+                self.stock_input_node_count = None
+                self.stock_mutated_input_count = None
+
+            def append_flex_attention_backward_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+                *,
+                mutated_inputs,
+            ):
+                input_nodes.clear()
+                subgraphs.clear()
+                mutated_inputs.clear()
+                self.stock_input_node_count = len(choices[0].input_nodes)
+                self.stock_mutated_input_count = len(choices[0].mutated_inputs)
+                return choices
+
+        shape = (1, 1, 128, 16)
+        query = torch.randn(shape, device=device)
+        key = torch.randn(shape, device=device)
+        value = torch.randn(shape, device=device)
+        block_mask = _create_empty_block_mask(query, key)
+        scale = 1.0 / shape[-1] ** 0.5
+        out, logsumexp = flex_attention_fwd(
+            query,
+            key,
+            value,
+            _identity,
+            block_mask,
+            scale,
+        )
+        grad_out = torch.randn_like(out)
+
+        def compiled_bw(query, key, value, out, logsumexp, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                grad_out,
+                None,
+                _identity,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {"BACKEND": "TRITON"},
+                (),
+                (),
+            )
+
+        def run_with_choices(choices):
+            torch._dynamo.reset()
+            with (
+                config.patch(force_disable_caches=True),
+                V.set_choices_handler(choices),
+                torch.no_grad(),
+            ):
+                return torch.compile(compiled_bw, fullgraph=True)(
+                    query, key, value, out, logsumexp, grad_out
+                )
+
+        forward_choices = ForwardChoices()
+        stock_result = run_with_choices(forward_choices)
+        self.assertEqual(forward_choices.calls, 0)
+
+        recording_choices = RecordingChoices()
+        recording_result = run_with_choices(recording_choices)
+
+        self.assertEqual(len(recording_choices.calls), 1)
+        self.assertTrue(recording_choices.selected)
+        self.assertEqual(recording_result, stock_result)
+        input_nodes, subgraphs, mutated_inputs = recording_choices.calls[0]
+        self.assertEqual(len(input_nodes), 16)
+        self.assertEqual(len(subgraphs), 4)
+        self.assertEqual(len(mutated_inputs), 2)
+        self.assertEqual(len(recording_choices.stock_input_nodes), len(input_nodes))
+        for stock_node, hook_node in zip(
+            recording_choices.stock_input_nodes, input_nodes
+        ):
+            self.assertIs(hook_node, stock_node)
+        self.assertEqual(
+            len(recording_choices.stock_mutated_inputs), len(mutated_inputs)
+        )
+        for stock_node, hook_node in zip(
+            recording_choices.stock_mutated_inputs, mutated_inputs
+        ):
+            self.assertIs(hook_node, stock_node)
+        self.assertIs(mutated_inputs[0], input_nodes[6])
+        self.assertIs(mutated_inputs[1], input_nodes[7])
+
+        mutating_choices = MutatingChoices()
+        mutating_result = run_with_choices(mutating_choices)
+        self.assertEqual(mutating_result, stock_result)
+        self.assertEqual(mutating_choices.stock_input_node_count, 16)
+        self.assertEqual(mutating_choices.stock_mutated_input_count, 2)
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
+    def test_backward_choices_hook_preserves_captured_grad_mutations(self, device):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.virtualized import V
+
+        class RecordingChoices(InductorChoices):
+            def __init__(self):
+                self.calls = []
+
+            def uuid(self):
+                return "captured_grad_mutation_test"
+
+            def append_flex_attention_backward_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+                *,
+                mutated_inputs,
+            ):
+                self.calls.append((input_nodes, subgraphs, mutated_inputs))
+                return choices
+
+        shape = (1, 1, 128, 16)
+        query = torch.randn(shape, device=device, requires_grad=True)
+        key = torch.randn(shape, device=device, requires_grad=True)
+        value = torch.randn(shape, device=device, requires_grad=True)
+        score_bias = torch.randn((1,), device=device, requires_grad=True)
+
+        def compiled_attention(query, key, value, bias):
+            def score_mod(score, b, h, m, n):
+                return score * bias[0]
+
+            return flex_attention(
+                query,
+                key,
+                value,
+                score_mod=score_mod,
+                kernel_options={"BACKEND": "TRITON"},
+            )
+
+        choices = RecordingChoices()
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                force_disable_caches=True,
+                inductor_choices_class=lambda: choices,
+            ),
+            V.set_choices_handler(choices),
+        ):
+            torch.compile(compiled_attention, fullgraph=True)(
+                query, key, value, score_bias
+            ).sum().backward()
+
+        backward_calls = [call for call in choices.calls if len(call[0]) == 16]
+        self.assertEqual(len(backward_calls), 1)
+        input_nodes, subgraphs, mutated_inputs = backward_calls[0]
+        self.assertEqual(len(subgraphs), 4)
+        self.assertEqual(len(mutated_inputs), 3)
+        self.assertIs(mutated_inputs[0], input_nodes[6])
+        self.assertIs(mutated_inputs[1], input_nodes[7])
+        self.assertEqual(mutated_inputs[2].get_size(), [1])
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
     def test_direct_backward_preserves_explicit_buffers(self, device):
         mask_buffer = torch.full((), 128, device=device, dtype=torch.int32)
 
