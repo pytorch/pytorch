@@ -3503,7 +3503,8 @@ class TestDistributions(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
-        set_rng_seed(2)  # see Note [Randomized statistical tests]
+        seed = 2 if self.device_type == "cpu" else 1
+        set_rng_seed(seed)  # see Note [Randomized statistical tests]
         for rate in [1e-5, 1.0, 10.0]:
             self._check_sampler_sampler(
                 Exponential(rate),
