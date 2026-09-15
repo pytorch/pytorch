@@ -1561,11 +1561,12 @@ class TestCppExtensionJIT(common.TestCase):
             )
 
     def test_torch_check_eq_stacktrace(self):
-        """Test that TORCH_CHECK_EQ includes C++ stack trace when TORCH_SHOW_CPP_STACKTRACES=1.
+        """Test that TORCH_CHECK_EQ includes C++ stack trace when debug env enables it.
 
-        When TORCH_SHOW_CPP_STACKTRACES=1, errors from TORCH_CHECK_EQ should include
-        a C++ stack trace via DealWithFatal's call to GetFetchStackTrace.
-        Since this env var is cached on first use, we use subprocess to test both cases.
+        Errors from TORCH_CHECK_EQ should include a C++ stack trace via
+        DealWithFatal's call to GetFetchStackTrace when enabled explicitly or via
+        TORCH_DISTRIBUTED_DEBUG=DETAIL. Since this setting is cached on first
+        use, we use subprocess to test each case.
         """
         test_script = """
 import torch
@@ -1594,10 +1595,26 @@ except RuntimeError as e:
     print(str(e))
 """
 
-        for show_cpp_stacktraces in [False, True]:
-            with self.subTest(show_cpp_stacktraces=show_cpp_stacktraces):
+        cases = (
+            ({}, False),
+            ({"TORCH_SHOW_CPP_STACKTRACES": "0"}, False),
+            ({"TORCH_SHOW_CPP_STACKTRACES": "1"}, True),
+            ({"TORCH_DISTRIBUTED_DEBUG": "DETAIL"}, True),
+            (
+                {
+                    "TORCH_SHOW_CPP_STACKTRACES": "0",
+                    "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
+                },
+                False,
+            ),
+        )
+
+        for stacktrace_env, expect_cpp_stacktraces in cases:
+            with self.subTest(stacktrace_env=stacktrace_env):
                 env = os.environ.copy()
-                env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+                env.pop("TORCH_DISTRIBUTED_DEBUG", None)
+                env.pop("TORCH_SHOW_CPP_STACKTRACES", None)
+                env.update(stacktrace_env)
                 env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
                 result = subprocess.run(
@@ -1615,7 +1632,7 @@ except RuntimeError as e:
                     f"Expected 'Check failed: a == b' in error message, got: {error_message}",
                 )
 
-                if show_cpp_stacktraces:
+                if expect_cpp_stacktraces:
                     # C++ CapturedTraceback is not available on aarch64 due to:
                     # #if !defined(FBCODE_CAFFE2) && !defined(__aarch64__)
                     # in torch/csrc/Module.cpp
@@ -1626,7 +1643,7 @@ except RuntimeError as e:
                         self.assertIn(
                             "C++ CapturedTraceback:",
                             error_message,
-                            f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",
+                            f"Expected C++ stack trace info in error message for {stacktrace_env}, got: {error_message}",
                         )
                     self.assertRegex(
                         error_message,
@@ -1636,7 +1653,7 @@ except RuntimeError as e:
                     self.assertNotIn(
                         "C++ CapturedTraceback:",
                         error_message,
-                        f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
+                        f"Did not expect 'C++ CapturedTraceback:' in error message for {stacktrace_env}, got: {error_message}",
                     )
 
 
