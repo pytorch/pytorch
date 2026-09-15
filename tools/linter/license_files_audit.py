@@ -3,7 +3,7 @@
 #
 # Included paths: [project].license-files in pyproject.toml (only explicit list).
 # Excluded paths + SPDX expressions per shipped file: license_audit_manifest.toml
-# next to this file. Discovery uses git ls-files (not filesystem glob) so
+# next to this file. Discovery uses git ls-files --recurse-submodules so
 # gitignored FetchContent trees (e.g. third_party/nccl/) are not walked.
 # Authoritative in CI via quick-checks (_lint.yml / setup-linux).
 
@@ -79,7 +79,7 @@ def discover_license_files(repo_root: Path) -> set[str]:
         return set()
     try:
         result = subprocess.run(
-            ["git", "ls-files", "--", *LICENSE_GLOBS],
+            ["git", "ls-files", "--recurse-submodules", "--", *LICENSE_GLOBS],
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -158,8 +158,38 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
             + ", ".join(sorted(unknown))
         )
 
-    if missing := sorted(p for p in inc if not (repo_root / p).is_file()):
-        if _checkout_looks_populated(repo_root, inc):
+    if _checkout_looks_populated(repo_root, inc):
+        # inc - discovered: included paths not returned by git ls-files
+        # --recurse-submodules (e.g. file removed from a submodule).
+        if not_discoverable := sorted(inc - discovered):
+            err.append(
+                "license-files lists path(s) not returned by git ls-files "
+                "--recurse-submodules (removed from submodule or glob mismatch?): "
+                + ", ".join(not_discoverable)
+            )
+
+        # excluded - discovered, scoped to submodules that are checked out:
+        # only flag an excluded entry as stale when another file from the same
+        # third_party/<dep>/ is visible in discovered, meaning the submodule
+        # is populated but the specific file is no longer tracked.
+        populated_deps = {
+            "/".join(p.split("/")[:2])
+            for p in discovered
+            if p.startswith("third_party/")
+        }
+        if stale_excluded := sorted(
+            p for p in excluded
+            if "/".join(p.split("/")[:2]) in populated_deps
+            and p not in discovered
+        ):
+            err.append(
+                f"{_MANIFEST_PATH.name} excluded list has stale path(s) whose "
+                "submodule is populated but the file is no longer tracked "
+                "(removed from submodule?): "
+                + ", ".join(stale_excluded)
+            )
+
+        if missing := sorted(p for p in inc if not (repo_root / p).is_file()):
             err.append(
                 "license-files lists path(s) that do not exist in the checkout: "
                 + ", ".join(missing)

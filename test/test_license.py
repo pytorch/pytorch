@@ -136,6 +136,39 @@ class TestLicense(TestCase):
             any("does not match SPDX manifest" in e for e in errors), msg=errors
         )
 
+
+    def test_audit_not_discoverable(self) -> None:
+        """inc - discovered: path in license-files not returned by git ls-files."""
+        # Need >=90% of inc on disk so _checkout_looks_populated lets the check run.
+        present = [(f"third_party/dep{i}/LICENSE", "MIT\n") for i in range(9)]
+        present += [("third_party/shipped/LICENSE", "MIT\n")]
+        listed = [p for p, _ in present] + ["third_party/removed/LICENSE"]
+        paths_literal = ", ".join(f'"{p}"' for p in listed)
+        errors, skip_reason = _audit_fixture(
+            f'license = "MIT"\nlicense-files = [{paths_literal}]',
+            f'excluded = []\n\n[[spdx]]\nexpression = "MIT"\npaths = [{paths_literal}]',
+            present,
+        )
+        self.assertIsNone(skip_reason)
+        self.assertTrue(
+            any("not returned by git ls-files" in e for e in errors), msg=errors
+        )
+
+    def test_audit_stale_excluded(self) -> None:
+        """excluded - discovered: stale excluded entry whose submodule IS populated."""
+        # third_party/dep/OLD_LICENSE is excluded but not tracked; third_party/dep/LICENSE
+        # IS tracked, so the dep subtree is "populated" and OLD_LICENSE is stale.
+        errors, skip_reason = _audit_fixture(
+            'license = "MIT"\nlicense-files = ["third_party/dep/LICENSE"]',
+            'excluded = ["third_party/dep/OLD_LICENSE"]\n\n[[spdx]]\nexpression = "MIT"\n'
+            'paths = ["third_party/dep/LICENSE"]',
+            [("third_party/dep/LICENSE", "MIT\n")],
+        )
+        self.assertIsNone(skip_reason)
+        self.assertTrue(
+            any("stale path" in e for e in errors), msg=errors
+        )
+
     @unittest.skipIf(len(distinfo) == 0, "no installation in site-package to test")
     def test_distinfo_license(self):
         """Installed wheel ships pyproject.toml license-files."""
