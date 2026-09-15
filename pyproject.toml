@@ -185,6 +185,10 @@ exclude = [
     # torch/lib/libshm_windows/libshm.h).
     "torch/nativert/**",
     "!torch/nativert/**/*.py",
+    # TheRock generates torch/_rocm_init.py before ROCm wheel builds; it is
+    # gitignored (see .gitignore) so scikit-build-core's package walk drops it.
+    # Un-exclude when present (same negation pattern as nativert .py above).
+    "!torch/_rocm_init.py",
     "torch/headeronly/**",
     "torch/lib/libshm/**",
     "!torch/lib/libshm/**/*.h",
