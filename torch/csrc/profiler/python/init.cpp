@@ -406,7 +406,18 @@ void initPythonBindings(PyObject* module) {
           "``{ProfilerActivity.XPU: [\"CONCURRENT_KERNEL\", \"XPU_RUNTIME\", "
           "\"GpuTime\"]}``.")
       .value("MTIA", ActivityType::MTIA, "MTIA device activity.")
-      .value("CUDA", ActivityType::CUDA, "CUDA kernels and runtime.")
+      .value(
+          "CUDA",
+          ActivityType::CUDA,
+          "CUDA kernels and runtime. To sample CUDA hardware performance "
+          "counters, use ``ProfilerActivityConfig`` with a "
+          "``PerformanceMetricsConfig`` in the activity dict, e.g. "
+          "``{ProfilerActivity.CUDA: ProfilerActivityConfig("
+          "profiler_configs=[PerformanceMetricsConfig("
+          "metric_names=[\"sm__cycles_active.avg\"])])}``. "
+          "Metric names are CUPTI PM sampling metrics supported by the "
+          "current CUDA device. Hardware counter collection requires a "
+          "Kineto build with CUPTI PM sampling support.")
       .value("HPU", ActivityType::HPU, "HPU device activity.")
       .value(
           "PrivateUse1",

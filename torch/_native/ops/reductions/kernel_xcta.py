@@ -5,7 +5,8 @@
 # ragged split. Measured 1.13-1.66x of ATen.
 
 import math
-from typing import NamedTuple
+from collections.abc import Sequence
+from typing import Any, NamedTuple
 
 import cuda.bindings.driver as cuda
 
@@ -44,7 +45,9 @@ class _XctaConfig(NamedTuple):
     subrow_target: int = _SUBROW_TARGET
 
 
-def _split_C(N, vec, max_subrow_elems, subrow_target=None):
+def _split_C(
+    N: int, vec: int, max_subrow_elems: int, subrow_target: int | None = None
+) -> int | None:
     # Find C | N whose vector-aligned sub-row fits the tile and is nearest the target.
     # Maximizing sub-row size can halve bandwidth by leaving ~1 block/SM. Bound the search
     # by the sub-row cap because nearby divisors may be far apart.
@@ -70,7 +73,7 @@ def _split_C(N, vec, max_subrow_elems, subrow_target=None):
 class FusedTwoStage:
     # Fuse both serialized launches into one compilation and host call, paying Python
     # dispatch and argument marshalling once.
-    def __init__(self, s1, s2):
+    def __init__(self, s1: Any, s2: _RB.ReduceBlock) -> None:
         self.s1 = s1
         self.s2 = s2
 
@@ -89,7 +92,7 @@ class FusedTwoStage:
         s1_nchunks: cutlass.Int32,
         s1_nwaves: cutlass.Int32,
         stream: cuda.CUstream,
-    ):
+    ) -> None:
         s1 = self.s1
         # Stage 1 emits raw accumulators. Runtime loop counts share a kernel across N;
         # wide sub-rows coalesce directly, so omit TMA and unused axis arguments.
@@ -141,8 +144,14 @@ _GEOM = {}
 
 
 def reduce_row_xcta(
-    trait, trait_key, x, out_dtype, block=None, flatten=False, subrow_target=None
-):
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtype: torch.dtype,
+    block: int | None = None,
+    flatten: bool = False,
+    subrow_target: int | None = None,
+) -> torch.Tensor | None:
     res = _reduce_row_xcta(
         trait, trait_key, x, [out_dtype], 1, block, flatten, subrow_target
     )
@@ -150,8 +159,14 @@ def reduce_row_xcta(
 
 
 def reduce_row_xcta_2out(
-    trait, trait_key, x, out_dtypes, block=None, flatten=False, subrow_target=None
-):
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtypes: Sequence[torch.dtype],
+    block: int | None = None,
+    flatten: bool = False,
+    subrow_target: int | None = None,
+) -> tuple[torch.Tensor, ...] | None:
     # Project both fields from one accumulator at no extra split cost; None means declined.
     return _reduce_row_xcta(
         trait, trait_key, x, list(out_dtypes), 2, block, flatten, subrow_target
@@ -159,8 +174,15 @@ def reduce_row_xcta_2out(
 
 
 def _reduce_row_xcta(
-    trait, trait_key, x, out_dtypes, nouts, block, flatten, subrow_target
-):
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int,
+    block: int | None,
+    flatten: bool,
+    subrow_target: int | None,
+) -> tuple[torch.Tensor, ...] | None:
     # flatten makes M == 1 scalar for reduce-all, unlike reduce-dim. Fusing both launches
     # improved ~0.6x of ATen to ~1.15-1.44x and remains graph-capturable.
     if not (x.is_cuda and x.is_contiguous()):
@@ -214,7 +236,17 @@ def _reduce_row_xcta(
     return tuple(outs)
 
 
-def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_target):
+def _build_geom(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int,
+    M: int,
+    N: int,
+    block: int,
+    subrow_target: int,
+) -> tuple[Any, ...] | None:
     # Derive C, then compile or reuse its bucket; memoized None records a decline.
     device = x.device
     elsize = x.element_size()
@@ -311,7 +343,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
     return (C, s, fn, *_s2_args(C, M, N), *s1_counts)
 
 
-def _s2_args(C, M, N):
+def _s2_args(C: int, M: int, N: int) -> tuple[Any, ...]:
     # Memoize boxed stage-2 arguments; single-pair decode ignores seed M, keeping it dynamic.
     return (
         _RB._exts([(C, 1)]),

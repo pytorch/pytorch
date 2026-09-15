@@ -22,6 +22,7 @@ import torch
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     SM100OrLater,
+    SM90OrLater,
     TEST_CUDA,
 )
 from torch.testing._internal.common_utils import (
@@ -41,6 +42,7 @@ def _cutedsl_impl():
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "Hopper+ required")
 @skipIfNoCuteDSL
 class TestSumCuteDSLOverride(TestCase):
     """Tests for the CuTeDSL inner-tree reduction sum override."""

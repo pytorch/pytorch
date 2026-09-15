@@ -14,7 +14,7 @@ def _acc(dtype):
     return cutlass.Float64 if dtype is torch.float64 else cutlass.Float32
 
 
-def _layout_ok(out, src):
+def _layout_ok(out: torch.Tensor, src: torch.Tensor) -> bool:
     # Require compact input and unit-stride output; otherwise use the same-bit reference.
     # Misalignment selects a bit-neutral unstaged plan rather than falling back.
     return src.stride(0) == src.shape[1] and out.stride(0) == 1
