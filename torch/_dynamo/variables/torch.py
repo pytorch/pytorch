@@ -2820,10 +2820,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device.type == "cpu":
                 return ConstantVariable.create(None)
 
+            device_index = device.index
+            if device_index is None:
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                if not _coor_enabled():
+                    torch_source = ImportSource("torch")
+                    install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
+                    current_device_source = CallFunctionNoArgsSource(
+                        AttrSource(
+                            AttrSource(torch_source, "accelerator"),
+                            "current_device_index",
+                        )
+                    )
+                    install_guard(
+                        current_device_source.make_guard(GuardBuilder.EQUALS_MATCH)
+                    )
+                    device_index = torch.accelerator.current_device_index()
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index),
+                (device.type, device_index),
                 {},
             )
             return ConstantVariable.create(None)
