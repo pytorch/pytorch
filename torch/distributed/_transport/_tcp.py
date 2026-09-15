@@ -170,7 +170,7 @@ class TCPTransport(Transport):
 
     def __init__(
         self,
-        device: torch.device | str,
+        device: torch.device | str | None = None,
         *,
         num_flows: int | None = None,
         host: str | None = None,
@@ -277,10 +277,7 @@ class TCPTransport(Transport):
             raise TypeError("tensor must be a torch.Tensor")
         if not tensor.is_contiguous():
             raise ValueError("TCP transport requires a contiguous tensor")
-        if tensor.device.type != self.device.type or (
-            self.device.index is not None and tensor.device.index != self.device.index
-        ):
-            raise ValueError(f"expected a tensor on {self.device}, got {tensor.device}")
+        self._check_device(tensor.device)
         length = tensor.numel() * tensor.element_size()
         registration_key = (tensor.data_ptr(), length, str(tensor.device))
         with self._state_lock:
