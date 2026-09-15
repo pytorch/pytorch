@@ -19,6 +19,7 @@ from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from .. import config
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
@@ -38,6 +39,12 @@ if TYPE_CHECKING:
     from .common import OpVarT
 
 log = logging.getLogger(__name__)
+
+
+def _metal_math(name: str, *args: object) -> str:
+    namespace = "fast" if config.use_fast_math else "precise"
+    return f"metal::{namespace}::{name}({', '.join(map(str, args))})"
+
 
 DTYPE_TO_METAL = {
     torch.bool: "bool",
@@ -153,7 +160,9 @@ class MetalExprPrinter(ExprPrinter_):
         if len(expr.args) != 2:
             raise AssertionError(f"expected 2 args, got {len(expr.args)}")
         x, y = map(self.doprint, expr.args)
-        return f"metal::precise::pow(static_cast<float>({x}), static_cast<float>({y}))"
+        return _metal_math(
+            "pow", f"static_cast<float>({x})", f"static_cast<float>({y})"
+        )
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
@@ -188,7 +197,7 @@ class MetalExprPrinter(ExprPrinter_):
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         x = self.doprint(expr.args[0])
-        return f"metal::precise::log2({x})"
+        return _metal_math("log2", x)
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (
@@ -319,12 +328,12 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def log(x: CSEVariable) -> str:
-        return f"metal::precise::log({x})"
+        return _metal_math("log", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
-        return f"metal::precise::exp({x})"
+        return _metal_math("exp", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -339,7 +348,7 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sin(x: CSEVariable) -> str:
-        return f"metal::precise::sin({x})"
+        return _metal_math("sin", x)
 
     @staticmethod
     def sinc(x: CSEVariable) -> str:
@@ -348,37 +357,37 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def cos(x: CSEVariable) -> str:
-        return f"metal::precise::cos({x})"
+        return _metal_math("cos", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def tan(x: CSEVariable) -> str:
-        return f"metal::precise::tan({x})"
+        return _metal_math("tan", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def asin(x: CSEVariable) -> str:
-        return f"metal::precise::asin({x})"
+        return _metal_math("asin", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def acos(x: CSEVariable) -> str:
-        return f"metal::precise::acos({x})"
+        return _metal_math("acos", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def atan(x: CSEVariable) -> str:
-        return f"metal::precise::atan({x})"
+        return _metal_math("atan", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def atan2(x: CSEVariable, y: CSEVariable) -> str:
-        return f"::metal::precise::atan2({x}, {y})"
+        return _metal_math("atan2", x, y)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sqrt(x: CSEVariable) -> str:
-        return f"metal::precise::sqrt({x})"
+        return _metal_math("sqrt", x)
 
     @staticmethod
     def neg(x: CSEVariable) -> str:
@@ -389,17 +398,17 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def rsqrt(x: CSEVariable) -> str:
-        return f"metal::precise::rsqrt({x})"
+        return _metal_math("rsqrt", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def tanh(x: CSEVariable) -> str:
-        return f"metal::precise::tanh({x})"
+        return _metal_math("tanh", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def atanh(x: CSEVariable) -> str:
-        return f"metal::precise::atanh({x})"
+        return _metal_math("atanh", x)
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
