@@ -214,6 +214,7 @@ class _PipelineStageBase(ABC):
         device: torch.device,
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
+        *,
         pass_pipeline_metadata: bool = False,
     ):
         """
@@ -228,8 +229,8 @@ class _PipelineStageBase(ABC):
                 for deferred weight updates in F/I/W zero-bubble
                 schedules. If ``None``, a runner is generated
                 automatically via autograd graph traversal.
-            pass_pipeline_metadata: Add the global stage index and microbatch
-                index to every executed forward.
+            pass_pipeline_metadata: Pass the global stage and microbatch indices
+                as reserved keyword arguments to each manual stage forward.
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -242,7 +243,7 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
-        self.pass_pipeline_metadata = pass_pipeline_metadata
+        self._pass_pipeline_metadata = pass_pipeline_metadata
 
         _warn_if_eager_nccl(group)
 
@@ -989,19 +990,20 @@ class _PipelineStageBase(ABC):
             # Activations only come in args form
             composite_args = self._retrieve_recv_activations(fwd_chunk_id)
 
-        composite_kwargs = kwargs or {}
-        if self.pass_pipeline_metadata:
+        user_kwargs = kwargs or {}
+        composite_kwargs = user_kwargs
+        if self._pass_pipeline_metadata:
             metadata = {
                 "pipeline_stage_index": self.stage_index,
                 "pipeline_microbatch_index": fwd_chunk_id,
             }
-            collisions = metadata.keys() & composite_kwargs.keys()
+            collisions = metadata.keys() & user_kwargs.keys()
             if collisions:
                 names = ", ".join(sorted(collisions))
                 raise ValueError(
                     f"Pipeline forward kwargs contain reserved name(s): {names}"
                 )
-            composite_kwargs = {**composite_kwargs, **metadata}
+            composite_kwargs = {**user_kwargs, **metadata}
 
         if self._runtime_validate:
             self._validate_stage_tensors(
@@ -1031,7 +1033,8 @@ class _PipelineStageBase(ABC):
             self.output_chunks.append(output)
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)
-        flat_kwargs = flatten_args(composite_kwargs)
+        # Pipeline metadata is execution context, not an autograd input.
+        flat_kwargs = flatten_args(user_kwargs)
         flatten_input_tensors = flat_args + flat_kwargs
         self.fwd_cache[fwd_chunk_id] = (
             output_tuple,  # stage_output
@@ -1332,8 +1335,6 @@ class _PipelineStage(_PipelineStageBase):
         pipe_info: PipeInfo,
         device: torch.device,
         group: dist.ProcessGroup | None = None,
-        *,
-        pass_pipeline_metadata: bool = False,
     ):
         """
         Create a pipeline stage given a stage_module to be wrapped by this stage
@@ -1345,8 +1346,6 @@ class _PipelineStage(_PipelineStageBase):
             pipe_info (PipeInfo): information about the pipeline, can be retrieved by `pipe.info()`
             device (torch.device): the device to be used by this stage
             group (Optional[dist.ProcessGroup]): the process group to be used by this stage
-            pass_pipeline_metadata: Add the global stage index and microbatch
-                index to every executed forward.
         """
         _PipelineStageBase.__init__(
             self,
@@ -1355,7 +1354,6 @@ class _PipelineStage(_PipelineStageBase):
             pipe_info.num_stages,
             device,
             group,
-            pass_pipeline_metadata=pass_pipeline_metadata,
         )
         self.pipe_info = pipe_info
 
@@ -1746,8 +1744,6 @@ def build_stage(
     pipe_info: PipeInfo,
     device: torch.device,
     group: dist.ProcessGroup | None = None,
-    *,
-    pass_pipeline_metadata: bool = False,
 ) -> _PipelineStage:
     """
     Create a pipeline stage given a stage_module to be wrapped by this stage
@@ -1759,8 +1755,6 @@ def build_stage(
         pipe_info (PipeInfo): information about the pipeline, can be retrieved by `pipe.info()`
         device (torch.device): the device to be used by this stage
         group (Optional[dist.ProcessGroup]): the process group to be used by this stage
-        pass_pipeline_metadata: Add the global stage index and microbatch index
-            to every executed forward.
 
     Returns:
         _PipelineStage: a pipeline stage that can run with `PipelineSchedules`.
@@ -1771,7 +1765,6 @@ def build_stage(
         pipe_info,
         device,
         group,
-        pass_pipeline_metadata=pass_pipeline_metadata,
     )
 
 
@@ -1803,8 +1796,11 @@ class PipelineStage(_PipelineStageBase):
             zero-bubble (F/I/W) schedules.
         get_mesh: `GetMeshCallback` used during
             dynamic DTensor inference. Ignored in fully static DTensor mode.
-        pass_pipeline_metadata: Add the global stage index and microbatch index
-            to every executed forward.
+        pass_pipeline_metadata: Pass ``pipeline_stage_index`` and
+            ``pipeline_microbatch_index`` to each forward. This requires
+            complete static metadata. The wrapped module may accept the
+            reserved keywords directly or consume them in a ``with_kwargs``
+            forward pre-hook.
     """
 
     def __init__(
@@ -1854,6 +1850,14 @@ class PipelineStage(_PipelineStageBase):
             input_grads=extract_tensor_metas(in_grads, allow_none=True),
             output_grads=extract_tensor_metas(out_grads, allow_none=True),
         )
+        if (
+            self._pass_pipeline_metadata
+            and not self._user_meta.is_complete_for_forward()
+        ):
+            raise PipeliningMetadataError(
+                "pass_pipeline_metadata requires static input_args and output_args; "
+                "dynamic metadata inference has no real microbatch identity"
+            )
 
         # Cache meshes from user-provided DTensors
         for args in (inputs, outputs, in_grads, out_grads):
@@ -2409,6 +2413,10 @@ class PipelineStage(_PipelineStageBase):
         fwd_meta_output: _StageForwardMeta | None = None
 
         if self._inference_mode == InferenceMode.DYNAMIC:
+            if self._pass_pipeline_metadata:
+                raise PipeliningMetadataError(
+                    "pass_pipeline_metadata requires complete static metadata"
+                )
             # DYNAMIC mode: run forward metadata inference
             # args may be _StageForwardMeta for same-rank V-schedule stages
             fwd_meta_output = self._forward_metadata_inference(
