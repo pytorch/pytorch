@@ -1,4 +1,4 @@
-# a.h
+# tools/test/header_only_linter_testdata/a.h
   a
 
   # indented comment should do nothing
@@ -6,5 +6,5 @@ symC
 
 
 
-# bbb.h
+# tools/test/header_only_linter_testdata/bbb.h
   symDef
