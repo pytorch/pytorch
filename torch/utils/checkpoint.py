@@ -9,7 +9,6 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from contextvars import ContextVar
 from typing import *  # noqa: F403
 from typing_extensions import Self
 import enum
@@ -17,7 +16,6 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._higher_order_ops.effects import has_effects
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -1503,6 +1501,11 @@ class CheckpointPolicy(enum.Enum):
         NOT equivalent to not using checkpointing. Using such a policy would
         save additional tensors not limited to ones that are actually needed for
         gradient computation.
+
+        Selective checkpointing always saves explicitly registered, non-aliasing
+        ordered effects that are valid SAC cache boundaries instead of replaying
+        them, even when the policy requests recomputation. Raw c10d launches are
+        not valid cache boundaries and are excluded.
     """
     MUST_SAVE = 0
     PREFER_SAVE = 1
@@ -1518,13 +1521,16 @@ def _policy_from_bool(b):
 
 
 def _is_cacheable_effect(op) -> bool:
-    """Return whether selective checkpointing can cache an effectful op.
+    """Return whether SAC can cache an effectful op instead of replaying it.
 
-    Raw c10d launches return an asynchronous Work handle and mutate separately
-    allocated outputs. Their enclosing functional collective is the valid cache
-    boundary.
+    Raw c10d launches mutate separately allocated outputs and return an
+    asynchronous Work handle, so their return value is not a valid cache
+    boundary. Functional collectives are handled separately by the AOT
+    partitioner.
     """
-    return has_effects(op) and getattr(op, "namespace", None) != "c10d"
+    from torch._higher_order_ops.effects import has_effects
+
+    return has_effects(op) and op.namespace != "c10d"
 
 
 SAC_IGNORED_OPS = {
@@ -1535,29 +1541,6 @@ SAC_IGNORED_OPS = {
     # can result in incorrectness if these ops are selected cached.
     torch.ops.prim.device.default,
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
-SAC_IGNORED_OPS.update({
-    # Profiler annotations may legitimately differ between forward and recompute
-    # since they can depend on global runtime state such as FSDP hook ordering.
-    torch.ops.profiler._record_function_enter.default,
-    torch.ops.profiler._record_function_enter_new.default,
-    torch.ops.profiler._record_function_exit._RecordFunction,
-    torch.ops.profiler._record_function_exit.default,
-})
-
-
-_sac_dispatch_mode_bypass: ContextVar[bool] = ContextVar(
-    "_sac_dispatch_mode_bypass", default=False
-)
-
-
-@contextlib.contextmanager
-def _bypass_sac_dispatch_modes():
-    """Bypass SAC bookkeeping without disabling unrelated TorchDispatchModes."""
-    token = _sac_dispatch_mode_bypass.set(True)
-    try:
-        yield
-    finally:
-        _sac_dispatch_mode_bypass.reset(token)
 
 
 def _sac_storage_key(func, args):
@@ -1597,9 +1580,6 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
-        if _sac_dispatch_mode_bypass.get():
-            return func(*args, **kwargs)
-
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling:
@@ -1627,7 +1607,10 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
-        if _is_cacheable_effect(func):
+        if policy in (
+            CheckpointPolicy.MUST_RECOMPUTE,
+            CheckpointPolicy.PREFER_RECOMPUTE,
+        ) and _is_cacheable_effect(func):
             policy = CheckpointPolicy.MUST_SAVE
 
         if is_compiling:
@@ -1707,10 +1690,6 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         return super().__enter__()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = {} if kwargs is None else kwargs
-        if _sac_dispatch_mode_bypass.get():
-            return func(*args, **kwargs)
-
         if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
@@ -1736,6 +1715,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
                 "on any region computed under selective activation checkpoint."
             )
         elif entry is _RECOMPUTE:
+            kwargs = {} if kwargs is None else kwargs
             return func(*args, **kwargs)
         else:
             func_storage[idx] = _CONSUMED

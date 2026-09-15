@@ -23,6 +23,8 @@ from schedule_registry import (
 import torch
 import torch.distributed as dist
 import torch.distributed.config as dist_config
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard
 from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
     pipeline,
@@ -239,6 +241,16 @@ def make_none_grad_flags(pattern: str, device: torch.device) -> torch.Tensor:
     )
 
 
+def assert_recv_buffers_drained(test_case, stages) -> None:
+    """Assert that a completed pipeline step transferred every recv buffer."""
+    stage_list = stages if isinstance(stages, (list, tuple)) else (stages,)
+    for stage in stage_list:
+        for recv_info_by_chunk in (stage.args_recv_info, stage.grad_recv_info):
+            for recv_infos in recv_info_by_chunk.values():
+                for info in recv_infos:
+                    test_case.assertIsNone(info.buffer)
+
+
 def setup_none_grad_model_and_data(config: PipelineTestConfig, n_layers: int):
     torch.manual_seed(0)
     mod = ConditionalGradStack(none_grad_d_hid, n_layers).to(config.device)
@@ -379,17 +391,20 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize(
-        "ScheduleClass",
+        "ScheduleClass,reuse_recv_buffers",
         [
-            ScheduleGPipe,
-            Schedule1F1B,
-            ScheduleInterleaved1F1B,
-            ScheduleLoopedBFS,
-            ScheduleInterleavedZeroBubble,
+            (ScheduleGPipe, False),
+            (Schedule1F1B, False),
+            (ScheduleInterleaved1F1B, False),
+            (ScheduleInterleaved1F1B, True),
+            (ScheduleLoopedBFS, False),
+            (ScheduleLoopedBFS, True),
+            (ScheduleInterleavedZeroBubble, False),
+            (ScheduleInterleavedZeroBubble, True),
         ],
     )
     @skip_if_lt_x_gpu(4)
-    def test_eval_inference_mode(self, ScheduleClass):
+    def test_eval_inference_mode(self, ScheduleClass, reuse_recv_buffers):
         num_microbatches = 4
         if ScheduleClass in [
             ScheduleInterleaved1F1B,
@@ -412,7 +427,7 @@ class ScheduleTest(MultiProcContinuousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 scale_grads=False,
-                reuse_recv_buffers=True,
+                reuse_recv_buffers=reuse_recv_buffers,
             )
         else:
             # Single-stage schedules
@@ -543,13 +558,7 @@ class ScheduleTest(MultiProcContinuousTest):
             else:
                 schedule.step()
 
-            for recv_info_by_chunk in (
-                stage.args_recv_info,
-                stage.grad_recv_info,
-            ):
-                for recv_infos in recv_info_by_chunk.values():
-                    for info in recv_infos:
-                        self.assertIsNone(info.buffer)
+            assert_recv_buffers_drained(self, stage)
 
         dist.barrier(device_ids=[self.rank])
 
@@ -756,8 +765,11 @@ class ScheduleTest(MultiProcContinuousTest):
         ],
     )
     @parametrize("pre_split", [False, True])
+    @parametrize("reuse_recv_buffers", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_interleaved(self, ScheduleClass, pre_split):
+    def test_grad_with_manual_interleaved(
+        self, ScheduleClass, pre_split, reuse_recv_buffers
+    ):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -785,13 +797,14 @@ class ScheduleTest(MultiProcContinuousTest):
             num_microbatches,
             loss_fn=loss_fn,
             scale_grads=False,
-            reuse_recv_buffers=True,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
 
         # Run pipeline with tensor leak checking
         out = None
         losses = []
         with check_leaked_tensors() as garbage_tensors:
+            recv_pool_ptrs = None
             for _ in range(2):
                 zero_gradients(stage_modules)
                 if self.rank == 0:
@@ -815,12 +828,26 @@ class ScheduleTest(MultiProcContinuousTest):
                         num_microbatches,
                         pre_split=pre_split,
                     )
+                if reuse_recv_buffers:
+                    current_ptrs = tuple(
+                        buffer.data_ptr()
+                        for stage in stages
+                        for pool in (stage._fwd_recv_pool, stage._bwd_recv_pool)
+                        for slot in pool._buffers
+                        for buffer in slot
+                        if buffer is not None
+                    )
+                    if recv_pool_ptrs is None:
+                        recv_pool_ptrs = current_ptrs
+                    else:
+                        self.assertEqual(current_ptrs, recv_pool_ptrs)
 
         self.assertEqual(
             len(garbage_tensors),
             0,
             "Found leaked tensors, check logs above for debug info",
         )
+        assert_recv_buffers_drained(self, stages)
         dist.barrier()
 
         # Verify results
@@ -1427,6 +1454,76 @@ class ScheduleTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
+    @skip_if_lt_x_gpu(4)
+    def test_unshard_lookahead_fsdp_parity(self):
+        mesh = init_device_mesh(device_type, (2, 2), mesh_dim_names=("dp", "pp"))
+        pp_mesh = mesh["pp"]
+        dp_mesh = mesh["dp"]
+        pp_group = pp_mesh.get_group()
+        pp_rank = pp_mesh.get_local_rank()
+        pp_size = pp_mesh.size()
+        config = PipelineTestConfig(pp_size, self.device, pp_rank)
+        num_stages = 2 * pp_size
+        base_mod, _, x, target, loss_fn = setup_models_and_data(
+            config, n_layers=num_stages
+        )
+        results = []
+
+        for lookahead in ("full", (1,) * pp_size):
+            mod = copy.deepcopy(base_mod)
+            stage_indices = [pp_rank + i * pp_size for i in range(2)]
+            stage_modules = [mod.layers[index] for index in stage_indices]
+            stages = [
+                PipelineStage(
+                    module,
+                    stage_index,
+                    num_stages,
+                    self.device,
+                    group=pp_group,
+                )
+                for module, stage_index in zip(
+                    stage_modules, stage_indices, strict=True
+                )
+            ]
+            for stage_module in stage_modules:
+                fully_shard(stage_module, mesh=dp_mesh)
+            schedule = ScheduleInterleaved1F1B(
+                stages,
+                2 * pp_size,
+                loss_fn=loss_fn,
+                scale_grads=False,
+                max_active_stages=2,
+                unshard_lookahead=lookahead,
+            )
+
+            losses = []
+            if pp_rank == 0:
+                output = schedule.step(x)
+            else:
+                output = schedule.step(target=target, losses=losses)
+            grads = []
+            for module in stage_modules:
+                for parameter in module.parameters():
+                    grad = parameter.grad
+                    if grad is None:
+                        raise AssertionError("FSDP parameter gradient is missing")
+                    grads.append(grad.to_local().clone())
+            results.append((output, list(losses), grads))
+
+        full_output, full_losses, full_grads = results[0]
+        limited_output, limited_losses, limited_grads = results[1]
+        if pp_rank == pp_size - 1:
+            torch.testing.assert_close(limited_output, full_output)
+            torch.testing.assert_close(
+                torch.stack(limited_losses), torch.stack(full_losses)
+            )
+        for limited_grad, full_grad in zip(limited_grads, full_grads, strict=True):
+            torch.testing.assert_close(limited_grad, full_grad)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
     @parametrize(
         "ScheduleClass",
         [ScheduleGPipe, ScheduleInterleaved1F1B, ScheduleZBVZeroBubble],
@@ -1640,8 +1737,8 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 instantiate_parametrized_tests(CustomSchedulesTest)
 
 
-class PerDirectionScheduleTest(MultiProcContinuousTest):
-    """Per-direction PP communicators (``config.pipeline_per_direction_p2p``).
+class PerEdgeScheduleTest(MultiProcContinuousTest):
+    """Per-edge PP communicators (``config.pipeline_per_edge_p2p``).
 
     A single PP communicator serializes all send/recv in one FIFO. The schedule
     initializes the PP parent and derives directed children from its final
@@ -1686,19 +1783,22 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @skip_if_lt_x_gpu(4)
-    def test_creates_distinct_direction_groups(self):
+    def test_creates_distinct_edge_groups(self):
         """Schedule warm-up builds only the directed edges in its topology."""
-        with dist_config.patch(pipeline_per_direction_p2p=True):
+        with dist_config.patch(pipeline_per_edge_p2p=True):
             mod, _, x, _, _ = setup_models_and_data(self.config)
             chunks = 2 * self.world_size
             stage, _, _ = create_single_stage_pipeline(
                 self.config, mod, x, chunks, use_tracer=False
             )
-            self.assertTrue(stage.p2p_per_direction)
-            self.assertFalse(stage._p2p_direction_groups)
+            self.assertTrue(stage.p2p_per_edge)
+            self.assertFalse(stage._p2p_edge_groups)
 
             schedule = ScheduleGPipe(stage, chunks, scale_grads=False)
-            schedule._warmup_p2p([stage], has_backward=False, p2p_done=False)
+            if self.rank == 0:
+                schedule.step(x)
+            else:
+                schedule.step()
 
             directed_edges = {
                 edge
@@ -1706,10 +1806,10 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
                 for edge in ((rank, rank + 1), (rank + 1, rank))
             }
             self.assertEqual(
-                set(stage._p2p_direction_groups),
+                set(stage._p2p_edge_groups),
                 {edge for edge in directed_edges if self.rank in edge},
             )
-            groups = list(stage._p2p_direction_groups.values())
+            groups = list(stage._p2p_edge_groups.values())
             self.assertEqual(len({id(group) for group in groups}), len(groups))
             self.assertTrue(all(group is not dist.group.WORLD for group in groups))
             self.assertTrue(
@@ -1727,10 +1827,10 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @parametrize("use_tracer", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_per_direction(self, ScheduleClass, use_tracer):
-        """Per-direction P2P only changes which communicator carries the bytes,
+    def test_grad_with_per_edge(self, ScheduleClass, use_tracer):
+        """Per-edge P2P only changes which communicator carries the bytes,
         not the math: gradients/outputs must still match the reference model."""
-        with dist_config.patch(pipeline_per_direction_p2p=True):
+        with dist_config.patch(pipeline_per_edge_p2p=True):
             mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
             # Run reference
@@ -1740,8 +1840,8 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             stage, stage_module, _ = create_single_stage_pipeline(
                 self.config, mod, x, chunks, use_tracer=use_tracer
             )
-            self.assertTrue(stage.p2p_per_direction)
-            self.assertFalse(stage._p2p_direction_groups)
+            self.assertTrue(stage.p2p_per_edge)
+            self.assertFalse(stage._p2p_edge_groups)
 
             schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
@@ -1757,7 +1857,15 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
                 else:
                     schedule.step()
 
-            self.assertGreater(len(stage._p2p_direction_groups), 1)
+            directed_edges = {
+                edge
+                for rank in range(self.world_size - 1)
+                for edge in ((rank, rank + 1), (rank + 1, rank))
+            }
+            self.assertEqual(
+                set(stage._p2p_edge_groups),
+                {edge for edge in directed_edges if self.rank in edge},
+            )
 
             dist.barrier(device_ids=[self.rank])
 
@@ -1774,25 +1882,31 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
-    @parametrize("reuse_recv_buffers", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_interleaved_virtual_stages(self, reuse_recv_buffers):
-        """Directed edge groups preserve looped-schedule P2P ordering."""
-        with dist_config.patch(pipeline_per_direction_p2p=True):
+    def test_grad_with_v_schedule(self):
+        """A V schedule uses local transfer at its turn and P2P elsewhere."""
+        with dist_config.patch(pipeline_per_edge_p2p=True):
             num_stages = 2 * self.world_size
+            rank_stages = {
+                0: [0, 7],
+                1: [1, 6],
+                2: [2, 5],
+                3: [3, 4],
+            }
             mod, ref_mod, x, target, loss_fn = setup_models_and_data(
                 self.config, n_layers=num_stages
             )
             ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
+            stage_indices = rank_stages[self.rank]
             stages, stage_modules, submod_names = create_multi_stage_pipeline(
-                self.config, mod, 2, num_stages
+                self.config, mod, len(stage_indices), num_stages, stage_indices
             )
-            schedule = ScheduleInterleaved1F1B(
+            schedule = ScheduleDualPipeV(
                 stages,
                 2 * self.world_size,
                 loss_fn=loss_fn,
                 scale_grads=False,
-                reuse_recv_buffers=reuse_recv_buffers,
+                reuse_recv_buffers=True,
             )
 
             out = None
@@ -1801,14 +1915,12 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             for step in range(2):
                 zero_gradients(stage_modules)
                 if self.rank == 0:
-                    schedule.step(x)
-                elif self.rank == self.world_size - 1:
-                    out = schedule.step(target=target, losses=losses)
+                    out = schedule.step(x, target=target, losses=losses)
                 else:
                     schedule.step()
                 current_group_ids = {
                     edge: id(group)
-                    for edge, group in stages[0]._p2p_direction_groups.items()
+                    for edge, group in stages[0]._p2p_edge_groups.items()
                 }
                 if step == 0:
                     group_ids = current_group_ids
@@ -1817,25 +1929,22 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
 
             expected_edges = {
                 edge
-                for rank in range(self.world_size)
-                for edge in (
-                    (rank, (rank + 1) % self.world_size),
-                    ((rank + 1) % self.world_size, rank),
-                )
+                for rank in range(self.world_size - 1)
+                for edge in ((rank, rank + 1), (rank + 1, rank))
             }
             self.assertEqual(
-                set(stages[0]._p2p_direction_groups),
+                set(stages[0]._p2p_edge_groups),
                 {edge for edge in expected_edges if self.rank in edge},
             )
 
             dist.barrier(device_ids=[self.rank])
-            if self.rank == self.world_size - 1:
+            if self.rank == 0:
                 torch.testing.assert_close(out, ref_out)
                 torch.testing.assert_close(sum(losses), ref_loss)
             check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
 
-instantiate_parametrized_tests(PerDirectionScheduleTest)
+instantiate_parametrized_tests(PerEdgeScheduleTest)
 
 
 if __name__ == "__main__":

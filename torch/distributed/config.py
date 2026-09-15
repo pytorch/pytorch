@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from torch.utils._config_module import Config, install_config_module
 
 
-__all__ = ["compile_on_one_rank", "use_torchcomms", "pipeline_per_direction_p2p"]
+__all__ = ["compile_on_one_rank", "use_torchcomms", "pipeline_per_edge_p2p"]
 
 # Deprecated alias. The canonical flag now lives in torch.compiler.config -- it is read
 # across the compiler stack (make_fx, inductor) not just by distributed. Kept here for
@@ -28,18 +28,16 @@ use_torchcomms: bool = Config(
     env_name_default="TORCH_DISTRIBUTED_USE_TORCHCOMMS",
 )
 
-# When enabled, pipeline stages carry each adjacent directed physical-rank edge
-# on a separate communicator instead of sharing one FIFO. This preserves P2P
-# ordering across looped schedules where distinct virtual-stage edges can reach
-# the same ranks in different orders. The schedule initializes the actual PP
-# parent before deriving child communicators.
+# When enabled, each adjacent directed physical-rank edge uses a separate
+# communicator. Opposite directions and distinct rank pairs are isolated;
+# logical-stage edges mapped to the same directed rank pair share one FIFO.
 #
 # This flag force-enables the behavior; it is auto-enabled when TorchComms is in
 # use regardless of this flag (see PipelineStage), so it mainly matters for the
 # non-TorchComms backends.
-pipeline_per_direction_p2p: bool = Config(
+pipeline_per_edge_p2p: bool = Config(
     default=False,
-    env_name_default="TORCH_DISTRIBUTED_PIPELINE_PER_DIRECTION_P2P",
+    env_name_default="TORCH_DISTRIBUTED_PIPELINE_PER_EDGE_P2P",
 )
 
 

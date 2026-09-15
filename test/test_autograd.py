@@ -17275,136 +17275,36 @@ class TestSelectiveActivationCheckpoint(TestCase):
         out.sum().backward()
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
-    def test_profiler_record_function_ignored(self):
-        call_count = [0]
-        policy_calls = []
-        profiler_ops = {
-            torch.ops.profiler._record_function_enter.default,
-            torch.ops.profiler._record_function_enter_new.default,
-            torch.ops.profiler._record_function_exit._RecordFunction,
-            torch.ops.profiler._record_function_exit.default,
-        }
+    def test_effect_lookup_only_for_recompute_policies(self):
+        from torch.utils.checkpoint import _CachingTorchDispatchMode
 
-        def policy_fn(ctx, op, *args, **kwargs):
-            policy_calls.append(op)
-            return CheckpointPolicy.PREFER_RECOMPUTE
+        for policy in (
+            CheckpointPolicy.MUST_SAVE,
+            CheckpointPolicy.PREFER_SAVE,
+            CheckpointPolicy.MUST_CPU_OFFLOAD,
+            CheckpointPolicy.PREFER_CPU_OFFLOAD,
+        ):
+            with self.subTest(policy=policy):
+                storage = defaultdict(dict)
 
-        def fn(x):
-            call_count[0] += 1
-            with torch.profiler.record_function("shared"):
-                y = x.sin()
-            if call_count[0] > 1:
-                with torch.profiler.record_function("recompute_only"):
-                    pass
-            return y.cos()
+                def policy_fn(_ctx, _op, *args, **kwargs):
+                    return policy
 
-        x = torch.randn(3, requires_grad=True)
-        x_ref = x.detach().clone().requires_grad_()
-        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
-        out = checkpoint(
-            fn, x, use_reentrant=False, context_fn=context_fn, early_stop=False
-        )
-        out.sum().backward()
+                with unittest.mock.patch(
+                    "torch.utils.checkpoint._is_cacheable_effect",
+                    side_effect=AssertionError("unexpected effect lookup"),
+                ):
+                    with _CachingTorchDispatchMode(policy_fn, storage):
+                        torch.ones(1).sin()
 
-        ref = x_ref.sin().cos()
-        ref.sum().backward()
-        self.assertEqual(x.grad, x_ref.grad)
-        self.assertTrue(profiler_ops.isdisjoint(policy_calls))
-
-    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
-    def test_effectful_op_overrides_recompute_policy(self):
-        call_count = [0]
-        with torch.library._scoped_library("test_sac_effect", "FRAGMENT"):
-
-            @torch.library.custom_op("test_sac_effect::identity", mutates_args=())
-            def effectful_identity(x: torch.Tensor) -> torch.Tensor:
-                call_count[0] += 1
-                return x.clone()
-
-            def backward(_ctx, grad_output):
-                return grad_output
-
-            effectful_identity.register_autograd(backward)
-            effectful_identity.register_effect(torch.library.EffectType.ORDERED)
-
-            def fn(x):
-                return effectful_identity(x).sin()
-
-            def recompute_all(_ctx, _op, *args, **kwargs):
-                return CheckpointPolicy.MUST_RECOMPUTE
-
-            x = torch.randn(3, requires_grad=True)
-            context_fn = functools.partial(
-                create_selective_checkpoint_contexts, recompute_all
-            )
-            out = checkpoint(
-                fn, x, use_reentrant=False, context_fn=context_fn, early_stop=False
-            )
-            out.sum().backward()
-
-            self.assertEqual(call_count[0], 1)
-            self.assertEqual(x.grad, x.cos())
-
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_raw_c10d_launch_is_not_a_cacheable_effect(self):
+        from torch._higher_order_ops.effects import has_effects
         from torch.utils.checkpoint import _is_cacheable_effect
 
-        self.assertFalse(_is_cacheable_effect(torch.ops.c10d.alltoall_.default))
-
-    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
-    def test_sac_bypass_context_skips_storage_and_counters(self):
-        from torch.utils.checkpoint import (
-            _bypass_sac_dispatch_modes,
-            _CachedTorchDispatchMode,
-            _CachingTorchDispatchMode,
-        )
-
-        policy_calls = []
-
-        def policy_fn(ctx, op, *args, **kwargs):
-            policy_calls.append(op)
-            return CheckpointPolicy.MUST_SAVE
-
-        x = torch.randn(3)
-        storage = defaultdict(dict)
-        with _CachingTorchDispatchMode(policy_fn, storage) as caching_mode:
-            with _bypass_sac_dispatch_modes():
-                bypassed_out = x.sin()
-            saved_out = x.sin()
-
-        self.assertEqual(policy_calls, [torch.ops.aten.sin.default])
-        self.assertEqual(caching_mode.func_counter[torch.ops.aten.sin.default], 1)
-        self.assertIn(0, storage[torch.ops.aten.sin.default])
-
-        cached_mode = _CachedTorchDispatchMode(None, storage, False)
-        with cached_mode:
-            with _bypass_sac_dispatch_modes():
-                cached_bypassed_out = x.sin()
-            replayed_out = x.sin()
-
-        self.assertEqual(cached_bypassed_out, bypassed_out)
-        self.assertEqual(replayed_out, saved_out)
-        self.assertEqual(cached_mode.func_counter[torch.ops.aten.sin.default], 1)
-
-        nested_policy_calls = []
-
-        def nested_policy_fn(ctx, op, *args, **kwargs):
-            nested_policy_calls.append(op)
-            return CheckpointPolicy.MUST_SAVE
-
-        nested_storage = defaultdict(dict)
-        with _CachingTorchDispatchMode(nested_policy_fn, nested_storage) as nested_mode:
-            with _bypass_sac_dispatch_modes():
-                with _bypass_sac_dispatch_modes():
-                    x.cos()
-                x.cos()
-            x.cos()
-
-        self.assertEqual(nested_policy_calls, [torch.ops.aten.cos.default])
-        self.assertEqual(nested_mode.func_counter[torch.ops.aten.cos.default], 1)
-
-        with _CachedTorchDispatchMode(None, {}, False):
-            with self.assertRaisesRegex(RuntimeError, "not found in storage"):
-                x.sin()
+        op = torch.ops.c10d.alltoall_.default
+        self.assertTrue(has_effects(op))
+        self.assertFalse(_is_cacheable_effect(op))
 
     def test_bad_inputs(self):
         bad_op_list1 = [2]
