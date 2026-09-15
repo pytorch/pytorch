@@ -16,12 +16,23 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.types import _device, _dtype
 
 
-def throw_on_non_cuda(device):
-    raise RuntimeError(
-        f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
-        f"use Philox/counter-based RNG. Therefore, functionalizing a {device.type} RNG operator is "
-        "not supported. We are discussing the possibility of a Philox-based RNG implementation for CPU."
-    )
+# Backends that expose a Philox/counter-based RNG with the same
+# (initial_seed, _get_rng_state_offset, _set_rng_state_offset, set_rng_state)
+# API as torch.cuda. Imported by torch._decomp.decompositions_for_rng.
+PHILOX_BACKENDS = ("cuda", "xpu")
+
+
+def throw_on_non_philox_device(device):
+    if device.type not in PHILOX_BACKENDS:
+        raise RuntimeError(
+            f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
+            f"use Philox/counter-based RNG. Therefore, functionalizing a {device.type} RNG operator is "
+            "not supported. We are discussing the possibility of a Philox-based RNG implementation for CPU."
+        )
+
+
+# Back-compat alias for external callers that imported the old name.
+throw_on_non_cuda = throw_on_non_philox_device
 
 
 def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
@@ -113,14 +124,18 @@ def register_philox_rand():
         else:
             devices = [device]
 
-        if device.type != "cuda":
-            raise throw_on_non_cuda(device)
+        throw_on_non_philox_device(device)
+        device_mod = getattr(torch, device.type)
 
-        with torch.random.fork_rng(devices):
+        with torch.random.fork_rng(devices, device_type=device.type):
+            # CUDARngStateHelper is a back-compat alias for the device-agnostic
+            # RngStateHelper which routes via torch.accelerator.current_accelerator().
             CUDARngStateHelper.set_torch_state_tensor(seed, offset)
             random_values = torch.rand(shape, device=device, dtype=dtype)
+            new_offset = device_mod._get_rng_state_offset(device)
 
-        return random_values, philox_rand_offset(shape)
+        consumed = new_offset - int(offset.item())
+        return random_values, torch.scalar_tensor(consumed, dtype=torch.int64)
 
     register_rng_prim(
         name=name,
