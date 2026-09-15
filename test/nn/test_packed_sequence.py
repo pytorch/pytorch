@@ -13,55 +13,53 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class PackedSequenceTest(TestCase):
-    _type_by_name = {
-        "torch.DoubleTensor": (torch.DoubleTensor, "double"),
-        "torch.FloatTensor": (torch.FloatTensor, "float"),
-        # We leave out `'torch.HalfTensor': (torch.HalfTensor, 'half'),`
-        # because of an error in `pad_packed_sequence`
-        # > AttributeError: 'torch.HalfTensor' object has no attribute 'fill_'
-        "torch.LongTensor": (torch.LongTensor, "long"),
-        "torch.IntTensor": (torch.IntTensor, "int"),
-        "torch.ShortTensor": (torch.ShortTensor, "short"),
-        "torch.CharTensor": (torch.CharTensor, "char"),
-        "torch.ByteTensor": (torch.ByteTensor, "byte"),
+class _PackedSequenceTestMixin:
+    batch_size = 5
+    max_length = 6
+
+    _dtype_by_name = {
+        "torch.DoubleTensor": (torch.float64, "double"),
+        "torch.FloatTensor": (torch.float32, "float"),
+        # float16 is excluded because `pad_packed_sequence` raised `AttributeError:
+        # 'torch.HalfTensor' object has no attribute 'fill_'` back when this map held
+        # legacy tensor types. Probably stale now, but enabling a dtype is out of scope.
+        "torch.LongTensor": (torch.int64, "long"),
+        "torch.IntTensor": (torch.int32, "int"),
+        "torch.ShortTensor": (torch.int16, "short"),
+        "torch.CharTensor": (torch.int8, "char"),
+        "torch.ByteTensor": (torch.uint8, "byte"),
     }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.batch_size = 5
-        self.max_length = 6
-
-    def _ordered_sequence(self, tensor_type):
+    def _ordered_sequence(self, dtype, device=None):
         """Create ordered list of random sequences"""
         seqs = [
-            tensor_type(random.randint(1, self.max_length))
+            torch.empty(random.randint(1, self.max_length), dtype=dtype, device=device)
             for _ in range(self.batch_size)
         ]
-        if tensor_type == torch.ByteTensor:
-            seqs = [s.random_(0, 256) for s in seqs]
-        else:
-            seqs = [s.random_(-128, 128) for s in seqs]
+        low, high = (0, 256) if dtype == torch.uint8 else (-128, 128)
+        seqs = [s.random_(low, high) for s in seqs]
         ordered = sorted(seqs, key=len, reverse=True)
         return ordered
 
-    def _padded_sequence(self, tensor_type):
+    def _padded_sequence(self, dtype, device=None):
         """Create Tensor of random padded sequences"""
-        ordered = self._ordered_sequence(tensor_type)
+        ordered = self._ordered_sequence(dtype, device)
         lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
+
+class PackedSequenceTest(_PackedSequenceTestMixin, TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
         "Frame Handling Difference between Python versions",
     )
     def test_type_casts(self):
         """Test type casting of `PackedSequence` against type casting of tensor"""
-        for input_type, _ in self._type_by_name.values():
-            for expected_type_str, (_, cast_str) in self._type_by_name.items():
+        for input_dtype, _ in self._dtype_by_name.values():
+            for expected_type_str, (_, cast_str) in self._dtype_by_name.items():
                 for enforce_sorted in [True, False]:
-                    padded, lengths = self._padded_sequence(input_type)
+                    padded, lengths = self._padded_sequence(input_dtype)
                     packed = rnn_utils.pack_padded_sequence(
                         padded, lengths, enforce_sorted=enforce_sorted
                     )
@@ -99,7 +97,7 @@ class PackedSequenceTest(TestCase):
         "Frame Handling Difference between Python versions",
     )
     def test_total_length(self):
-        padded, lengths = self._padded_sequence(torch.FloatTensor)
+        padded, lengths = self._padded_sequence(torch.float32)
         max_length = max(lengths)
         packed = rnn_utils.pack_padded_sequence(padded, lengths)
         # test ValueError if total_length < max_length
@@ -149,7 +147,7 @@ class PackedSequenceTest(TestCase):
     )
     def test_to(self):
         for enforce_sorted in (True, False):
-            padded, lengths = self._padded_sequence(torch.IntTensor)
+            padded, lengths = self._padded_sequence(torch.int32)
             a = rnn_utils.pack_padded_sequence(
                 padded, lengths, enforce_sorted=enforce_sorted
             ).cpu()
