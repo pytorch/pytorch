@@ -256,7 +256,7 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(len(cfgs), 1)
         self.assertEqual(
             cfgs[0].kwargs,
-            {"XBLOCK": 128, "YBLOCK": 16, "R0_BLOCK": 16},
+            {"XBLOCK": 128, "YBLOCK": 8, "R0_BLOCK": 32},
         )
 
     def test_reduction_min_block_preserves_tile_product(self):

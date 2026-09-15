@@ -3836,9 +3836,9 @@ def _enforce_native_matmul_config_min_xblock(
             ):
                 cfg.kwargs[field] //= 2
 
-        # Native matmul requires at least 16 elements in the Y and dot tiles.
+        # Native matmul requires at least 16 elements in the dot tile.
         # Prefer shrinking the independent output-row tile when raising X.
-        shrink("YBLOCK", 16)
+        shrink("YBLOCK", 1)
         if r0_block is None:
             shrink("R0_BLOCK", 16)
 
