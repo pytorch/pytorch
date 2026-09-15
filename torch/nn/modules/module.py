@@ -972,13 +972,6 @@ class Module:
                 or is_traceable_wrapper_subclass(param_applied)
                 or isinstance(param, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             )
-            p_should_restore_grad = (
-                p_should_use_swap_tensors or not p_should_use_set_data
-            )
-            has_grad_dtype_override, grad_dtype = False, None
-            if p_should_restore_grad:
-                has_grad_dtype_override = param._has_grad_dtype_override
-                grad_dtype = param.grad_dtype
 
             param_grad = param.grad
             if p_should_use_swap_tensors:
@@ -1012,7 +1005,6 @@ class Module:
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
-            converted_grad = param_grad
             if param_grad is not None:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
@@ -1027,24 +1019,17 @@ class Module:
                         raise RuntimeError(
                             f"_apply(): Couldn't swap {self._get_name()}.{key}.grad"
                         ) from e
-                elif g_should_use_set_data and not p_should_restore_grad:
+                    out_param.grad = param_grad
+                elif g_should_use_set_data:
                     if out_param.grad is None:
                         raise AssertionError("out_param.grad must not be None")
                     out_param.grad.data = grad_applied
                 else:
                     if not param_grad.is_leaf:
                         raise AssertionError("param_grad must be a leaf tensor")
-                    converted_grad = grad_applied.requires_grad_(
+                    out_param.grad = grad_applied.requires_grad_(
                         param_grad.requires_grad
                     )
-                    if not p_should_restore_grad:
-                        out_param.grad = converted_grad
-            if p_should_restore_grad:
-                # Match .data conversion: preserve the policy even when fn
-                # gives the existing gradient a different dtype.
-                torch._C._set_grad_after_module_conversion(
-                    out_param, converted_grad, has_grad_dtype_override, grad_dtype
-                )
 
         for key, buf in self._buffers.items():
             if buf is not None:

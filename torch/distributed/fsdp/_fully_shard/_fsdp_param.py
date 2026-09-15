@@ -235,7 +235,7 @@ class FSDPParam:
         )
         self.grad_offload_event: torch.Event | None = None
         self._sharded_param_version: tuple[int, int] | None = None
-        self._unsharded_param_needs_reset = False
+        self._sharded_grad_dtype_initialized = False
         self._grad_is_partial = False
         self._pending_grad_reduce_op = "avg"
         self._pending_grad_divide_factor: float | None = None
@@ -372,7 +372,8 @@ class FSDPParam:
             self.to_sharded_dtensor(sharded_param),
             requires_grad=param.requires_grad,
         )
-        self.sharded_param.grad_dtype = self.sharded_grad_dtype
+        if self._has_sharded_grad_dtype_override:
+            self.sharded_param.grad_dtype = self.sharded_grad_dtype
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
@@ -889,9 +890,6 @@ class FSDPParam:
         ]
 
     def init_unsharded_param(self):
-        if self._unsharded_param_needs_reset:
-            del self._unsharded_param
-            self._unsharded_param_needs_reset = False
         if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
@@ -1391,17 +1389,7 @@ class FSDPParam:
                     partition_spec=self._spmd_partition_spec,
                 )
             if self._unsharded_param.grad is None:
-                if unsharded_grad.dtype == self._unsharded_param.grad_dtype:
-                    self._unsharded_param.grad = unsharded_grad
-                else:
-                    # Module conversion casts an existing gradient independently
-                    # of its policy. Preserve that buffer when restoring it.
-                    torch._C._set_grad_after_module_conversion(
-                        self._unsharded_param,
-                        unsharded_grad,
-                        True,
-                        self.unsharded_grad_dtype,
-                    )
+                self._unsharded_param.grad = unsharded_grad
             else:
                 # Synchronization may be enabled after pre-backward, or a
                 # partial group may not have run its pre-backward hook.
@@ -1675,7 +1663,14 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
-    def reset_sharded_param(self, *, reset_dtype: bool = False):
+    def reset_sharded_param(self):
+        if (
+            not self._sharded_grad_dtype_initialized
+            and self.sharded_param._has_grad_dtype_override
+        ):
+            # Capture user overrides before a replacement can lose the metadata.
+            self._has_sharded_grad_dtype_override = True
+            self.sharded_grad_dtype = self.sharded_param.grad_dtype
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the
         # sharded local tensor and re-save the reference.
@@ -1695,39 +1690,22 @@ class FSDPParam:
             if self._grad_is_partial and new_param.grad is not None
             else self.sharded_grad_dtype
         )
-        if reset_dtype:
-            # Restore the original override, including an unset default, without
-            # rejecting an existing gradient cast independently by Module._apply.
+        if (
+            new_param.grad is not None
+            and grad_dtype is not None
+            and new_param.grad.dtype != grad_dtype
+        ):
+            # Conversion casts an existing gradient independently of its policy.
             torch._C._set_grad_after_module_conversion(
                 new_param,
                 new_param.grad,
-                self._has_sharded_grad_dtype_override or self._grad_is_partial,
+                self._has_sharded_grad_dtype_override,
                 grad_dtype,
             )
-            if self._grad_is_partial and new_param.grad is not None:
-                grad_meta = new_param.grad._spec.tensor_meta
-                if self._pending_grad_spec is not None:
-                    self._pending_grad_spec = replace(
-                        self._pending_grad_spec, tensor_meta=grad_meta
-                    )
-                if self._pending_unsharded_grad_spec is not None:
-                    self._pending_unsharded_grad_spec = replace(
-                        self._pending_unsharded_grad_spec, tensor_meta=grad_meta
-                    )
-            # Recreate typed allocations and the compute leaf on the next
-            # unshard. Preserve pending gradients and communication state.
-            self.all_gather_outputs.clear()
-            self.init_dtype_attrs(self.mp_policy)
-            if hasattr(self, "_unsharded_param"):
-                # An unused group may still reduce its pending gradient before
-                # its next unshard. Keep the leaf as that gradient's owner.
-                self._unsharded_param.grad_dtype = self.unsharded_grad_dtype
-                self._unsharded_param_needs_reset = True
-            self._sharded_param_version = None
-            self._sharded_post_forward_param = None
-            self._sharded_post_forward_param_data = None
-            self._init_extensions()
-        elif self.sharded_param.grad_dtype != grad_dtype:
+        elif self.sharded_param.grad_dtype != grad_dtype or (
+            self._has_sharded_grad_dtype_override
+            and not self.sharded_param._has_grad_dtype_override
+        ):
             self.sharded_param.grad_dtype = grad_dtype
 
         local_tensor = new_param._local_tensor

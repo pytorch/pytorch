@@ -12,7 +12,11 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatt
 from torch.distributed.tensor import DTensor
 
 from ._fsdp_api import _ReduceOp
-from ._fsdp_common import _get_dim0_padded_size, _to_dtype_if_needed
+from ._fsdp_common import (
+    _get_dim0_padded_size,
+    _raise_assert_with_print,
+    _to_dtype_if_needed,
+)
 from ._fsdp_param import FSDPParam, ShardedState
 
 
@@ -544,14 +548,14 @@ def foreach_reduce(
     autograd, so clearing the list frees the gradients.
     """
 
-    reduce_dtype = reduce_dtype or fsdp_params[0].unsharded_grad_dtype
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     if len(grad_dtypes) != 1:
-        # Module conversion may cast an existing accumulated gradient while
-        # fresh gradients still follow the compute leaf's policy. Normalize
-        # mixed inputs for chunk_cat after accumulation has finished.
-        for i, grad in enumerate(unsharded_grads):
-            unsharded_grads[i] = grad.to(reduce_dtype)
+        # Check this at runtime since it could be a real runtime error if e.g.
+        # fp8 weights do not produce the correct higher precision gradients
+        _raise_assert_with_print(
+            f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
+        )
+    reduce_dtype = reduce_dtype or unsharded_grads[0].dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
             reduce_scatter_group,
