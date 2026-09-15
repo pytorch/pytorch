@@ -288,3 +288,26 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+    def test_create_backend_closes_mkstemp_file_descriptor(self) -> None:
+        # FileStore opens the path on its own, so the file descriptor returned
+        # by mkstemp() must be closed by the backend to avoid leaking it on
+        # every rendezvous creation. Use a real fd + path so FileStore can open
+        # the path, but assert the exact descriptor is closed once.
+        real_fd, real_path = tempfile.mkstemp()
+        self._params_filestore.endpoint = ""
+        try:
+            with (
+                mock.patch("tempfile.mkstemp", return_value=(real_fd, real_path)),
+                mock.patch("os.close") as os_close_mock,
+            ):
+                _, store = create_backend(self._params_filestore)
+
+            os_close_mock.assert_called_once_with(real_fd)
+            self.assertIsInstance(store, FileStore)
+            self.assertEqual(store.path, real_path)  # type: ignore[attr-defined]
+        finally:
+            # os.close was mocked, so the real descriptor is still open here.
+            os.close(real_fd)
+            if os.path.exists(real_path):
+                os.remove(real_path)
