@@ -4,6 +4,23 @@ Most backends accept `new_transport(backend)` and infer devices from registered
 tensors. Passing `device` preserves each backend's device selection and
 validation. Torchcomms and ibverbs CUDA graph mode require an explicit device.
 
+Reads and writes block by default. Use `async_op=True` to return a
+`torch.distributed.Work` and overlap a transfer with host computation:
+
+```python
+work = transport.write(local_view, remote_buffer, async_op=True)
+work.wait()
+```
+
+`is_completed()` polls completion; `wait()` raises transfer errors.
+`wait(datetime.timedelta(...))` bounds the wait without cancelling the transfer.
+`get_future()` resolves to an empty list or raises the transfer error.
+Backends process queued operations in order on one worker per transport.
+The worker retains local buffers and waits for prior work on the submitting
+CUDA stream. Do not modify or resize buffers until completion. Peers must finish
+all accesses before releasing exposed memory; `close()` drains local work.
+Asynchronous operations cannot be captured in CUDA graphs.
+
 Install the optional backend package matching the operation:
 
 ```bash
@@ -41,6 +58,9 @@ address, such as isolated network namespaces.
 Add `--cuda-graph` to capture one write and one read and benchmark graph
 replay. The `ibverbs` backend also needs `"cuda_graph":true` in each rank's
 options to select GPUNetIO.
+
+Add `--async-op` to measure submission plus `Work.wait()` for each transfer.
+It includes worker dispatch overhead and keeps one transfer outstanding per pair.
 
 ## Concurrent GPU/NIC pairs
 

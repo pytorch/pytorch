@@ -154,11 +154,13 @@ class TestTransportBenchmark(TestCase):
                 "cpu",
                 "--one-way-connect",
                 "--rdma-counters",
+                "--async-op",
             ]
         )
         self.assertEqual(args.tensor_device, "cpu")
         self.assertTrue(args.one_way_connect)
         self.assertTrue(args.rdma_counters)
+        self.assertTrue(args.async_op)
         self.assertEqual(
             args.sizes,
             [
@@ -182,6 +184,12 @@ class TestTransportBenchmark(TestCase):
             self.assertRaises(SystemExit),
         ):
             benchmark.parse_args(["--backend", "ibverbs", "--one-way-connect"])
+
+        with (
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            benchmark.parse_args(["--backend", "ibverbs", "--async-op", "--cuda-graph"])
 
     def test_output_metadata(self):
         args = benchmark.parse_args(
