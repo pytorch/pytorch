@@ -1722,6 +1722,13 @@ static inline void ensure_triton_kernel_compiles_started() {{
         self.writeline(f"{fn}({args});")
 
     def _generate_stable_tma_descriptor(self, desc):
+        descriptor_path = f"{desc.descriptor_module}.{desc.descriptor_class}"
+        if descriptor_path != "triton.tools.tensor_descriptor.TensorDescriptor":
+            raise NotImplementedError(
+                "AOTI GPU cpp_wrapper does not support backend-specific stable "
+                f"TMA descriptors, got {descriptor_path}"
+            )
+
         source = self.generate_args_decl(
             code=self,
             call_args=[self.val_to_arg_str(desc.tensor)],
