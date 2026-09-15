@@ -2298,6 +2298,31 @@ from user code:
             result.disable_guard_check()
         self._rescued_by_the_recheck(model, x)
 
+    def test_module_dispatch_serves_an_opted_out_result_from_any_position(self):
+        # With [0] still checked and [1] opted out, a call neither guards is
+        # served by [1]; the fall-through this stage precedes re-enters
+        # compiled_results[0] alone and raised its guard error. x * 3 is
+        # deliberately not eager's answer for mode=2 (x * 2): serving a graph
+        # compiled for a different call is what the opt-out exists to do.
+        mod = ModeBranchGlobalModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile(
+            [
+                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
+                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
+            ]
+        )
+        model.forward.compiled_results[1].disable_guard_check()
+        self.assertEqual(model(x, 2), x * AOT_BRANCH_SCALE)
+        # [0]'s real match still outranks [1]'s opt-out, so this stage cannot
+        # be hoisted into the scan.
+        self.assertEqual(model(x, 0), x * 2)
+        # With both opted out and nothing matching, index order decides, as it
+        # did at the fall-through.
+        model.forward.compiled_results[0].disable_guard_check()
+        self.assertEqual(model(x, 2), x * 2)
+
     def test_module_dispatch_rechecks_before_honouring_an_opt_out(self):
         # [0] opted out, [1] checked and falsely rejected once: the re-check
         # finds [1]'s real match before the fall-through can hand the call to [0].

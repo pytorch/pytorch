@@ -1487,13 +1487,14 @@ class AOTCompiledModel:
     ``use_recursive_dict_tags_for_guards`` on -- so if no check accepted, every
     result is checked once more before dispatch gives up; a result whose guards
     would pass can therefore be outranked by a later result whose first check
-    accepted. When neither pass accepts, the call is handed to
-    ``compiled_results[0]`` as a plain call of that function: it raises
-    ``GuardManager check failed`` unless that one result opted out through
-    ``disable_guard_check()``, in which case its graph runs for a call its
-    guards refused. That is all the flag does here: ``check()`` never reads it,
-    so an opted-out result is scanned and re-checked like any other and is
-    served in index order when its check accepts.
+    accepted. When neither pass accepts, the call is served by the first result
+    that opted out through ``disable_guard_check()``, from any index, and only
+    when none did is it handed to ``compiled_results[0]``, which raises
+    ``GuardManager check failed``. That is all the flag does here: ``check()``
+    never reads it, so an opted-out result is scanned and re-checked like any
+    other and is served in index order when its check accepts, and on the
+    strength of its opt-out alone only after both the scan and the re-check
+    found no match.
     """
 
     model: torch.nn.Module
@@ -1554,8 +1555,13 @@ class AOTCompiledModel:
         for result, f_locals in zip(results, bound):
             if result._live_guard_manager().check(f_locals):
                 return result.fn(self.model, *args, **kwargs)
-        # No check accepted: results[0] raises the guard check error, or runs
-        # the call if it opted out. See the class docstring.
+        # A result that opted out via disable_guard_check() accepts anything, but
+        # only after both passes above have failed to find a real match.
+        for result in results:
+            if not result._guard_check_enabled:
+                return result.fn(self.model, *args, **kwargs)
+        # Every result's guards failed and none opted out, so results[0] is
+        # enabled and raises the guard check error.
         return results[0](self.model, *args, **kwargs)
 
     def serialize(self) -> bytes:
