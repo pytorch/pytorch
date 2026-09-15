@@ -26,6 +26,7 @@ from ._utils import (
     generate_rank_to_stage_mapping,
     generate_stage_to_rank_mapping,
     InferenceMode,
+    PipeliningMetadataError,
 )
 from .microbatch import (
     _split_tensor,
@@ -397,16 +398,22 @@ class _PipelineSchedule(ABC):
             for stage in cast(list[PipelineStage], stages):
                 acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
             result: torch.Tensor | None = acc
-            determined_mode: InferenceMode | None = None
             for stage in reversed(cast(list[PipelineStage], stages)):
                 result = stage._warmup_backward_result(received_result=result)
-                if result is None:
-                    raise RuntimeError("P2P warm-up voting failed")
-                determined_mode = (
-                    InferenceMode.STATIC
-                    if result.item() == 1
-                    else InferenceMode.DYNAMIC
+            if result is None:
+                raise RuntimeError("P2P warm-up voting failed")
+            supports_static, permits_dynamic = (bool(value.item()) for value in result)
+            if not supports_static and not permits_dynamic:
+                raise PipeliningMetadataError(
+                    "pass_pipeline_metadata requires complete static metadata "
+                    "across the pipeline: provide input_args and output_args for "
+                    "every stage, plus input_grads and output_grads for DTensors "
+                    "with backward"
                 )
+            determined_mode = (
+                InferenceMode.STATIC if supports_static else InferenceMode.DYNAMIC
+            )
+            for stage in cast(list[PipelineStage], stages):
                 stage._inference_mode = determined_mode
             logger.debug(
                 "Rank determined inference_mode=%s for %d stage(s)",

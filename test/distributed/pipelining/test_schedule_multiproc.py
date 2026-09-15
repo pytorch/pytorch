@@ -35,6 +35,7 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
+from torch.distributed.pipelining._utils import PipeliningMetadataError
 from torch.distributed.pipelining.microbatch import split_args_kwargs_into_chunks
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -338,6 +339,31 @@ class ScheduleTest(MultiProcContinuousTest):
         return PipelineTestConfig(
             world_size=self.world_size, device=self.device, rank=self.rank
         )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_pipeline_metadata_static_requirement_is_rank_symmetric(self):
+        mod, _, x, _, _ = setup_models_and_data(self.config)
+        stage_module = mod.get_submodule(f"layers.{self.rank}")
+        stage = PipelineStage(
+            stage_module,
+            self.rank,
+            self.world_size,
+            self.device,
+            pass_pipeline_metadata=self.rank == 0,
+        )
+        schedule = ScheduleGPipe(stage, n_microbatches=self.world_size)
+
+        with self.assertRaisesRegex(
+            PipeliningMetadataError, "complete static metadata across the pipeline"
+        ):
+            if self.rank == 0:
+                schedule.step(x)
+            else:
+                schedule.step()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
