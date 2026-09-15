@@ -1358,7 +1358,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   // This value must be non-negative int32 and all ranks are.
   ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
-      store, groupRank, ranks.size(), ncclOpts);
+      store->clone(), groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
   // We need to set the desc here so that when eager init the nccl, we can
   // propagate desc to the nccl comm.

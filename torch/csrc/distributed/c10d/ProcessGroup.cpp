@@ -241,9 +241,10 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
       ? name.value()
-      : fmt::format("{}:split:{}", getGroupName(), ranks);
+      : c10::str(getGroupName(), ":split:", fmt::format("{}", ranks));
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
-      c10::make_intrusive<PrefixStore>(fmt::format("{}/", groupName), store_));
+      c10::make_intrusive<PrefixStore>(
+          fmt::format("{}/", groupName), store_->clone()));
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
