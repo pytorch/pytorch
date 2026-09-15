@@ -1164,6 +1164,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif (
+            name == "mro"
+            and len(args) == 0
+            and not kwargs
+            and inspect.getattr_static(self.value, "mro", None) is type.mro
+        ):
+            source = self.source
+            if self.source:
+                source = AttrSource(self.source, "mro")
+                source = CallFunctionNoArgsSource(source)
+            return VariableTracker.build(tx, type.mro(self.value), source)
+        elif (
             self.value in {collections.OrderedDict, collections.defaultdict}
             and name == "fromkeys"
         ):
