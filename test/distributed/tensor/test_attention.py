@@ -57,7 +57,12 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocm,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -109,20 +114,24 @@ class RingAttentionTest(DTensorTestBase):
         return False
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm(
-        msg="efficient-attention fp32 diverges from the full-sequence result by up to 3e-4 through the context-parallel merge, above the 2e-6 fp32 tolerance"
-    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
     )
     @with_comms
     def test_ring_attention_sdpa(self) -> None:
+        # On ROCm, efficient-attention fp32 diverges from the full-sequence result
+        # by up to 3e-4 through the context-parallel merge, above the 2e-6 tolerance.
+        ring_backends = [
+            b
+            for b in backends
+            if not (TEST_WITH_ROCM and b == SDPBackend.EFFICIENT_ATTENTION)
+        ]
         self.run_subtests(
             {
                 "is_causal": [True, False],
                 "compiled": [True, False],
-                "backend": backends,
+                "backend": ring_backends,
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],

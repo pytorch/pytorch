@@ -648,10 +648,9 @@ _efficient_attention_backward(
     at::Tensor q_t = query.permute({0,2,1,3});
     at::Tensor k_t = key.permute({0,2,1,3});
     at::Tensor v_t = value.permute({0,2,1,3});
-    // AOTriton's fused backward reads the forward output through the
-    // (batch, seq, heads, dim)-contiguous strides the forward wrote it with and
-    // memory-faults on any other layout, e.g. the (batch, heads, seq, dim)-
-    // contiguous `out` context parallel hands back. Materialize when needed.
+    // AOTriton's fused backward reads grad_out through out's strides
+    // (ROCm/aotriton#236), so out must share the contiguous layout grad_out
+    // was given above; context parallel hands back a differently laid out out.
     at::Tensor out_t = out.contiguous().permute({0,2,1,3});
     at::Tensor dq_t = grad_q.permute({0,2,1,3});
     at::Tensor dk_t = grad_k.permute({0,2,1,3});
