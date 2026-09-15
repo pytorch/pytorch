@@ -620,6 +620,54 @@ class TestPruningNN(NNTestCase):
 
                     self.assertEqual(pruned_t, final_t)
 
+    def test_remove_pruning_preserves_parameter_order(self):
+        r"""``prune.remove`` must restore the original OrderedDict parameter order.
+
+        See https://github.com/pytorch/pytorch/issues/85397
+        """
+        module = nn.Conv2d(1, 6, 3)
+        original = list(module.state_dict().keys())
+        self.assertEqual(original, ["weight", "bias"])
+        prune.random_unstructured(module, name="weight", amount=0.3)
+        self.assertEqual(list(module._parameters.keys()), ["weight_orig", "bias"])
+        prune.remove(module, name="weight")
+        self.assertEqual(list(module.state_dict().keys()), original)
+
+        module = nn.Linear(4, 3)
+        original = list(module.state_dict().keys())
+        prune.random_unstructured(module, name="bias", amount=0.3)
+        prune.remove(module, name="bias")
+        self.assertEqual(list(module.state_dict().keys()), original)
+
+        module = nn.Linear(4, 3)
+        original = list(module.state_dict().keys())
+        prune.random_unstructured(module, name="weight", amount=0.3)
+        prune.random_unstructured(module, name="bias", amount=0.3)
+        prune.remove(module, name="weight")
+        prune.remove(module, name="bias")
+        self.assertEqual(list(module.state_dict().keys()), original)
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(4, 3)
+                self.bn = nn.BatchNorm1d(3)
+
+        m = M()
+        original = list(dict(m.named_parameters()).keys())
+        prune.random_unstructured(m.fc, name="weight", amount=0.3)
+        prune.remove(m.fc, name="weight")
+        self.assertEqual(list(dict(m.named_parameters()).keys()), original)
+
+        lstm = nn.LSTM(8, 8)
+        original = list(dict(lstm.named_parameters()).keys())
+        prune.l1_unstructured(lstm, "weight_ih_l0", 0.5)
+        prune.remove(lstm, "weight_ih_l0")
+        self.assertEqual(list(dict(lstm.named_parameters()).keys()), original)
+        self.assertEqual(
+            sum(isinstance(p, nn.Parameter) for p in lstm._flat_weights), 4
+        )
+
     def test_remove_pruning_exception(self):
         r"""Removing from an unpruned tensor throws an assertion error"""
         modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
