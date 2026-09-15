@@ -57,6 +57,7 @@ from torch._dynamo.package import (
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.symbolic_convert import _import_source_cache
 from torch._dynamo.utils import CleanupHook
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -8659,6 +8660,59 @@ from user code:
             loaded(mod, x)
         self.assertIn("GuardManager check failed", str(ctx.exception))
         self.assertIn(kept_alias, str(ctx.exception))
+
+    def test_load_seeds_a_rebound_nn_module_alias_through_the_torch_package(self):
+        # With sys.modules["torch.nn.modules.module"] bound to another module,
+        # that name's __import_* alias binds the other module, so the global
+        # hook-dict guards cannot root at it: they root at the torch package's
+        # alias and walk .nn.modules.module, which a rebind does not move. Every
+        # guarded global is then an __import_* alias, which a load seeds like
+        # any other; a name minted by id is one no load seeds, one
+        # _has_global_guards counts as a user global, and one a KeyError would
+        # report as a global the caller should define. The parent's alias
+        # seeds through importlib.import_module, which in a loading process
+        # under the same rebind is the other module, so its guards read the
+        # wrong dicts; the name seeded pins which root the artifact carries.
+        self._hide_leaked_dynamo_globals()
+        name = "torch.nn.modules.module"
+        real = sys.modules[name]
+        shim = types.ModuleType(name)
+        for attr in (
+            "_global_backward_pre_hooks",
+            "_global_backward_hooks",
+            "_global_forward_hooks",
+            "_global_forward_pre_hooks",
+        ):
+            setattr(shim, attr, {})
+
+        def fn(m, x):
+            return m(x)
+
+        mod = ParentWithChildModule()
+        x = torch.randn(4, 4)
+        expected = mod(x)
+        options = {"guard_filter_fn": keep_global_guards}
+        with patch.dict(sys.modules, {name: shim}):
+            compiled = torch.compile(
+                fn, fullgraph=True, backend="eager", options=options
+            ).aot_compile(((mod, x), {}))
+            self.assertIs(torch.nn.modules.module, real)
+            data = AOTCompiledFunction.serialize(compiled).serialized_data
+            guards_state = load_guards_state(compiled._artifacts.guards_state)
+            for guarded in guards_state.output_graph.global_scope:
+                self.assertFalse(
+                    _names_a_missing_global(f"KeyError on G['{guarded}']"), guarded
+                )
+            torch._dynamo.reset()
+            scope = {
+                k: v for k, v in globals().items() if not k.startswith(_MINTED_PREFIXES)
+            }
+            before = set(scope)
+            loaded = AOTCompiledFunction.deserialize(data, guard_globals=scope)
+            self.assertFalse(loaded._has_global_guards)
+            self.assertEqual(set(scope) - before, {"__import_torch"})
+            self.assertEqual(loaded(mod, x), expected)
+        _import_source_cache.pop(name, None)
 
     def test_builtins_key_gate_covers_the_other_serializer_channels(self):
         # The builtins-key gate matches the deserialized guards' own roots, while
