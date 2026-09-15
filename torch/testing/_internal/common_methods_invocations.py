@@ -17492,9 +17492,6 @@ op_db: list[OpInfo] = [
         aten_backward_name='mish_backward',
         ref=lambda x: x * np.tanh(reference_softplus(x)),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        dtypesIfMPS=floating_types_and(
-            torch.bfloat16, torch.float16, torch.int32, torch.uint8, torch.bool, torch.int8, torch.int16
-        ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -21949,9 +21946,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        dtypesIfMPS=floating_types_and(
-            torch.bfloat16, torch.float16, torch.int32, torch.uint8, torch.bool, torch.int8, torch.int16
-        ),
         decorators=(
             DecorateInfo(
                 toleranceOverride
@@ -24825,23 +24819,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softplus",
         torch_opinfo_name="nn.functional.softplus",
-        skips=(
-            # The following dtypes did not work in forward but are listed by the OpInfo: {torch.bool}.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            # AssertionError: Tensor-likes are not equal!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.bool, torch.int8,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                device_type='mps', dtypes=(torch.bool,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.bool, torch.int8,)
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.l1_loss",
