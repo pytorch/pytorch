@@ -352,7 +352,7 @@ template <typename T>
 void listSort(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
-  std::sort(list.begin(), list.end(), [reverse](const T& a, const T& b) {
+  std::ranges::sort(list, [reverse](const T& a, const T& b) {
     // FBCode errors without this check - "strict weak ordering"
     // TODO: remove when possible, since it just slows down
     // sorting and doesn't do anything useful
@@ -371,7 +371,7 @@ template <typename T>
 void listCopyAndSort(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   auto list_copied = list.copy();
-  std::sort(list_copied.begin(), list_copied.end(), [](const T& a, const T& b) {
+  std::ranges::sort(list_copied, [](const T& a, const T& b) {
     // "strict weak ordering" issue - see other sort
     if (a == b) {
       return false;
