@@ -2041,7 +2041,6 @@ class TestIndexingDevice(TestCase):
         return (x, index, src)
 
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_copy_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
@@ -2084,7 +2083,6 @@ class TestIndexingDevice(TestCase):
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
     def test_index_put_non_accumulate_deterministic(self, device) -> None:
         with DeterministicGuard(True):
             for i in range(3):
