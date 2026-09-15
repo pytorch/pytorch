@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 class _TestTransport(Transport):
     is_supported = True
 
-    def __init__(self, device, *, value=None):
+    def __init__(self, device=None, *, value=None):
         super().__init__(device)
         self.value = value
         self.closed = False
@@ -70,6 +70,12 @@ class TestTransportRegistry(TestCase):
         transport = new_transport("TEST", "cpu", value=3)
         self.assertIsInstance(transport, _TestTransport)
         self.assertEqual(transport.device, torch.device("cpu"))
+        self.assertEqual(transport.value, 3)
+
+    def test_factory_without_device(self):
+        register_transport("test", lambda *, value: _TestTransport(value=value))
+        transport = new_transport("test", value=3)
+        self.assertIsNone(transport.device)
         self.assertEqual(transport.value, 3)
 
     def test_duplicate_registration(self):

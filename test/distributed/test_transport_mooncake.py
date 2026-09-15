@@ -85,8 +85,8 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.addCleanup(_Engine.engines.clear)
 
     def make_transport_pair(self):
-        first = new_transport("mooncake", "cpu", host="first")
-        second = new_transport("mooncake", "cpu", host="second")
+        first = new_transport("mooncake", host="first")
+        second = new_transport("mooncake", host="second")
         self.addCleanup(first.close)
         self.addCleanup(second.close)
         self.assertEqual(first.connect(second.bind()), 0)
@@ -168,7 +168,7 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             first.register_memory(torch.zeros(4, 4).t())
         with self.assertRaisesRegex(ValueError, "empty tensor"):
             first.register_memory(torch.empty(0))
-        with self.assertRaisesRegex(ValueError, "expected a tensor"):
+        with self.assertRaisesRegex(ValueError, "CPU or CUDA tensors"):
             first.register_memory(torch.empty(4, device="meta"))
 
     @parametrize("read", [False, True])
@@ -221,10 +221,10 @@ class TestMooncakeTransportDevice(TestCase):
         with (
             patch.dict(os.environ, env),
             _mooncake.MooncakeTransport(
-                device, host="127.0.0.1", protocol="tcp" if is_cpu else "rdma"
+                host="127.0.0.1", protocol="tcp" if is_cpu else "rdma"
             ) as first,
             _mooncake.MooncakeTransport(
-                device, host="127.0.0.1", protocol="tcp" if is_cpu else "rdma"
+                host="127.0.0.1", protocol="tcp" if is_cpu else "rdma"
             ) as second,
         ):
             first.connect(second.bind())
@@ -248,6 +248,12 @@ class TestMooncakeTransportDevice(TestCase):
             else:
                 first.write(source_memory.to_view(), other_memory.to_remote_buffer())
                 self.assertEqual(other, source[8:24])
+
+            cpu = torch.zeros(16, dtype=torch.uint8)
+            cpu_memory = first.register_memory(cpu)
+            first.read(cpu_memory.to_mutable_view(), remote)
+            self.assertEqual(cpu, destination.cpu())
+            self.assertIsNone(first.device)
 
 
 instantiate_parametrized_tests(TestMooncakeTransport)

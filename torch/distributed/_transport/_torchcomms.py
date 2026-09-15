@@ -57,8 +57,10 @@ class _Memory:
 class TorchCommsTransport(Transport):
     """Adapter for torchcomms' RDMA transport."""
 
-    def __init__(self, device: torch.device | str) -> None:
+    def __init__(self, device: torch.device | str | None = None) -> None:
         super().__init__(device)
+        if self.device is None:
+            raise ValueError("torchcomms transport requires an explicit CUDA device")
         backend = _load_backend()
         self._memory_type = backend.RdmaMemory
         self._transport_type = backend.RdmaTransport

@@ -102,7 +102,7 @@ class NIXLTransport(Transport):
 
     def __init__(
         self,
-        device: torch.device | str,
+        device: torch.device | str | None = None,
         *,
         plugin: str = "UCX",
         agent_name: str | None = None,
@@ -111,7 +111,7 @@ class NIXLTransport(Transport):
         timeout: float = 30.0,
     ) -> None:
         super().__init__(device)
-        if self.device.type not in ("cpu", "cuda"):
+        if self.device is not None and self.device.type not in ("cpu", "cuda"):
             raise ValueError("NIXL transport requires a CPU or CUDA device")
         if not plugin:
             raise ValueError("plugin cannot be empty")
@@ -174,10 +174,9 @@ class NIXLTransport(Transport):
             raise ValueError("NIXL transport requires a contiguous tensor")
         if tensor.numel() == 0:
             raise ValueError("cannot register an empty tensor")
-        if tensor.device.type != self.device.type or (
-            self.device.index is not None and tensor.device.index != self.device.index
-        ):
-            raise ValueError(f"expected a tensor on {self.device}, got {tensor.device}")
+        self._check_device(tensor.device)
+        if tensor.device.type not in ("cpu", "cuda"):
+            raise ValueError("NIXL transport requires CPU or CUDA tensors")
         length = tensor.numel() * tensor.element_size()
         key = tensor.data_ptr(), length, str(tensor.device)
         if registration := self._registrations.get(key):

@@ -96,14 +96,14 @@ class MooncakeTransport(Transport):
 
     def __init__(
         self,
-        device: torch.device | str,
+        device: torch.device | str | None = None,
         *,
         host: str | None = None,
         protocol: str = "rdma",
         device_name: str = "",
     ) -> None:
         super().__init__(device)
-        if self.device.type not in ("cpu", "cuda"):
+        if self.device is not None and self.device.type not in ("cpu", "cuda"):
             raise ValueError("Mooncake transport requires a CPU or CUDA device")
         host = socket.gethostname() if host is None else host
         if not host or not protocol:
@@ -161,13 +161,9 @@ class MooncakeTransport(Transport):
                 raise ValueError("Mooncake transport requires a contiguous tensor")
             if tensor.numel() == 0:
                 raise ValueError("cannot register an empty tensor")
-            if tensor.device.type != self.device.type or (
-                self.device.index is not None
-                and tensor.device.index != self.device.index
-            ):
-                raise ValueError(
-                    f"expected a tensor on {self.device}, got {tensor.device}"
-                )
+            self._check_device(tensor.device)
+            if tensor.device.type not in ("cpu", "cuda"):
+                raise ValueError("Mooncake transport requires CPU or CUDA tensors")
             if tensor.is_cuda:
                 torch.cuda.current_stream(tensor.device).synchronize()
             storage = tensor.untyped_storage()
@@ -203,7 +199,7 @@ class MooncakeTransport(Transport):
                 raise ValueError("local view does not fit in the remote buffer")
             if local_buffer.size() == 0:
                 return 0
-            if self.device.type == "cuda":
+            if local_buffer._memory._device.type == "cuda":
                 torch.cuda.current_stream(local_buffer._memory._device).synchronize()
             transfer = engine.transfer_sync_read if read else engine.transfer_sync_write
             _check_status(
