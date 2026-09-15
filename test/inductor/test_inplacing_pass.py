@@ -524,6 +524,72 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
 
+    def test_generalized_scatter_uses_live_inplaceable_ops(self):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.fx_passes.reinplace import (
+            inplaceable_ops,
+            InplaceableOp,
+            reinplace_inplaceable_ops,
+        )
+        from torch._inductor.fx_utils import FakeTensorUpdater
+        from torch._inductor.virtualized import V
+
+        with torch.library._scoped_library(
+            "_test_live_reinplace_registry", "FRAGMENT"
+        ) as lib:
+            lib.define("functional(Tensor x, Tensor y) -> Tensor")
+            lib.define(
+                "mutating(Tensor(a!) x, Tensor y) -> Tensor(a!)",
+                tags=[torch.Tag.inplace],
+            )
+            lib.impl("functional", lambda x, y: x + y, "CompositeExplicitAutograd")
+            lib.impl("mutating", lambda x, y: x.add_(y), "CompositeExplicitAutograd")
+            torch.library.register_fake(
+                "_test_live_reinplace_registry::functional",
+                lambda x, y: x + y,
+                lib=lib,
+            )
+
+            functional = torch.ops._test_live_reinplace_registry.functional.default
+            mutating = torch.ops._test_live_reinplace_registry.mutating.default
+            inplaceable_ops[functional] = InplaceableOp(mutating, 0)
+            try:
+
+                def fn(x, diag, y):
+                    updated = torch.diagonal_scatter(x, diag)
+                    result = functional(updated, y)
+                    x.copy_(result)
+                    return result
+
+                x = torch.arange(16.0, device=device).reshape(4, 4)
+                diag = torch.full((4,), -1.0, device=device)
+                y = torch.ones(4, 4, device=device)
+                expected_x = x.clone()
+                expected = fn(expected_x, diag, y)
+
+                gm = make_fx(fn, tracing_mode="fake")(x, diag, y)
+                fake_mode = detect_fake_mode(
+                    [node.meta.get("val") for node in gm.graph.nodes]
+                )
+                with V.set_fake_mode(fake_mode):
+                    reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+                gm.graph.lint()
+                gm.recompile()
+
+                targets = [node.target for node in gm.graph.nodes]
+                self.assertIn(mutating, targets)
+                self.assertIn(aten.clone, targets)
+
+                actual_x = x.clone()
+                actual = gm(actual_x, diag, y)
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual_x, expected_x)
+                actual_x_after_call = actual_x.clone()
+                actual.add_(100)
+                self.assertEqual(actual_x, actual_x_after_call)
+            finally:
+                inplaceable_ops.pop(functional, None)
+
     @parametrize(
         "factory_op",
         [
