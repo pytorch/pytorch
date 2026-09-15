@@ -53,6 +53,7 @@ from torch.testing._internal.logging_utils import log_settings, logs_to_string
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 from torch.utils._triton import (
+    has_triton_cuda_tma_device,
     has_triton_experimental_host_tma,
     has_triton_package,
     has_triton_tensor_descriptor_host_tma,
@@ -2565,6 +2566,8 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_tma_capture_and_functionalize(self, dynamic, tma_version):
+        if GPU_TYPE == "cuda" and not has_triton_cuda_tma_device():
+            self.skipTest("requires CUDA TMA device support")
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
@@ -2724,6 +2727,8 @@ def forward(self, arg0_1, arg1_1):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_tma_descriptor_1d(self, dynamic, backend, tma_version):
+        if GPU_TYPE == "cuda" and not has_triton_cuda_tma_device():
+            self.skipTest("requires CUDA TMA device support")
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
@@ -2790,6 +2795,8 @@ def forward(self, arg0_1, arg1_1):
     @requires_gpu
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_tma_descriptor_dedup(self, tma_version):
+        if GPU_TYPE == "cuda" and not has_triton_cuda_tma_device():
+            self.skipTest("requires CUDA TMA device support")
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
@@ -5322,6 +5329,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         # Host-side TMA descriptors built inside a triton_op body are captured by
         # the non-Dynamo tracing path, which must turn them into TMA descriptor
         # metadata instead of leaving them as opaque constant args.
+        if GPU_TYPE == "cuda" and not has_triton_cuda_tma_device():
+            self.skipTest("requires CUDA TMA device support")
         if not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
 
@@ -5400,6 +5409,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         # A descriptor whose innermost block spans more than 128 bytes
         # (fp16 x 128 = 256B). The compiler chooses the swizzle and final box
         # shape; AOTI must use that metadata rather than re-derive either value.
+        if GPU_TYPE == "cuda" and not has_triton_cuda_tma_device():
+            self.skipTest("requires CUDA TMA device support")
         if not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
 
