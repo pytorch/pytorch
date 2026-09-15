@@ -1,8 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/cuda/CUDAArchList.h>
 #include <c10/macros/Macros.h>
 
 // Determine if the architecture supports rowwise scaled mm
@@ -86,14 +88,6 @@ struct Schedule</*LargeTile=*/true, /*FastAccum=*/true> {
   using type = cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
   using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
-
-int ceildiv(int a, int b) {
-  return (a + b - 1) / b;
-}
-
-int round_up_to_nearest_multiple(int a, int b) {
-  return ceildiv(a, b) * b;
-}
 
 // Cutlass rowwise kernel for sm90
 template <
@@ -733,9 +727,10 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
   // We prefer to use smaller tiles (less wasted compute in case of padding),
   // but if this causes us to have more CUDA blocks than there are SMs on the
   // GPU then we'll hit wave quantization, hence we'll switch to larger tiles.
-  const bool use_smaller_tiles = ceildiv(M, 64 * cute::get<0>(ClusterShape{})) *
-          ceildiv(N, 128 * cute::get<1>(ClusterShape{})) <=
-      smTarget / cute::size(ClusterShape{});
+  const auto [cluster_m, cluster_n, cluster_k] = ClusterShape{};
+  const bool use_smaller_tiles = at::ceil_div<int>(M, 64 * cluster_m) *
+          at::ceil_div<int>(N, 128 * cluster_n) <=
+      smTarget / (cluster_m * cluster_n * cluster_k);
 
   if (use_smaller_tiles) {
     if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm90>) {
@@ -819,8 +814,8 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
 
   // All the tiles we use have sizes which are multiples of 64, hence any
   // non-multiple of 64 will get padded anyways. Let's round up to simplify.
-  M = round_up_to_nearest_multiple(M, 64);
-  N = round_up_to_nearest_multiple(N, 64);
+  M = at::round_up(M, 64);
+  N = at::round_up(N, 64);
 
   // Small/skinny shapes with odd multiples of 64.
   if (M == 64 && N >= 3072) {
@@ -962,29 +957,48 @@ void dispatch_fp8_rowwise_kernel_on_sm(
   const bool sm10x = properties != nullptr && properties->major == 10;
   const bool sm11x = properties != nullptr && properties->major == 11;
   const bool sm12x = properties != nullptr && properties->major == 12;
+  constexpr bool built_sm89 = c10::cuda::targets_any_arch_in(89, 89);
+  constexpr bool built_sm9x = c10::cuda::targets_any_arch_in(90, 99);
+  constexpr bool built_sm10x_11x = c10::cuda::targets_any_arch_in(100, 119);
+  constexpr bool built_sm12x = c10::cuda::targets_any_arch_in(120, 129);
   if (!(sm89 || sm9x || sm10x || sm11x || sm12x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
+  // Guard inside the branch, not around it: an arch the build skipped must
+  // fail below, not fall through to another arch's kernel.
   if (sm9x) {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
-      /*ArchTag=*/cutlass::arch::Sm90,
-      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    if constexpr (built_sm9x) {
+      return dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+        /*ArchTag=*/cutlass::arch::Sm90,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
   } else if (sm10x || sm11x) {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
-      /*ArchTag=*/cutlass::arch::Sm100,
-      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    if constexpr (built_sm10x_11x) {
+      return dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+        /*ArchTag=*/cutlass::arch::Sm100,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
   } else if (sm12x) {
-    // sm12x doesn't have multicast feature
-    handle_transposition<
-      /*ClusterShape=*/cute::Shape<cute::_1, cute::_1, cute::_1>,
-      /*Transposed=*/std::false_type,
-      /*ArchTag=*/cutlass::arch::Sm120,
-      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
-  } else {
-    dispatch_fp8_rowwise_kernel_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    if constexpr (built_sm12x) {
+      // sm12x doesn't have multicast feature
+      return handle_transposition<
+        /*ClusterShape=*/cute::Shape<cute::_1, cute::_1, cute::_1>,
+        /*Transposed=*/std::false_type,
+        /*ArchTag=*/cutlass::arch::Sm120,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
+  } else if (sm89) {
+    if constexpr (built_sm89) {
+      return dispatch_fp8_rowwise_kernel_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
   }
+  TORCH_CHECK(
+      false,
+      "Rowwise scaling was not built for sm",
+      properties->major,
+      properties->minor);
 }
 
 template <typename... Types>
