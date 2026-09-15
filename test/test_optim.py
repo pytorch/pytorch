@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -100,6 +101,35 @@ def _bf16_state_init_hook(optimizer, args, kwargs):
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
+    @skipIfTorchDynamo("Differentiable optimizers not supported")
+    @skipMPS
+    @dtypes(torch.float64)
+    @parametrize("momentum", [0.0, 0.9])
+    @parametrize("centered", [False, True])
+    @parametrize("lr_shape", [(), (1,)])
+    def test_rmsprop_differentiable_lr(
+        self, device, dtype, momentum, centered, lr_shape
+    ):
+        def run(lr):
+            param = torch.tensor(
+                [1.0, 2.0], device=device, dtype=dtype, requires_grad=True
+            ).clone()
+            optimizer = torch.optim.RMSprop(
+                [param],
+                lr=lr,
+                momentum=momentum,
+                centered=centered,
+                differentiable=True,
+                foreach=False,
+            )
+            for gradient in ([0.1, -0.3], [0.5, 0.2]):
+                param.grad = torch.tensor(gradient, device=device, dtype=dtype)
+                optimizer.step()
+            return param.square().sum()
+
+        lr = torch.full(lr_shape, 0.01, device=device, dtype=dtype, requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(run, (lr,)))
+
     """
     This test class validates the core optimizers and is structured as the correctness of:
     - The update algorithms (forloop implementation)
