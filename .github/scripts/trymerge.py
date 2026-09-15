@@ -3007,7 +3007,8 @@ def merge(
                 ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
             )
             ignore_current_checks |= {(stacked.pr_num, n) for n, _, _ in failing}
-            ignore_current_checks_info += failing
+            tag = f" (#{stacked.pr_num})" if len(stacked_prs) > 1 else ""
+            ignore_current_checks_info += [(f"{n}{tag}", u, j) for n, u, j in failing]
 
     post_starting_merge_comment(
         repo,

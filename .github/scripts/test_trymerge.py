@@ -2544,6 +2544,10 @@ class TestGreenlightGuardWiring(TestCase):
         self.assertEqual(
             mock_check.call_args.kwargs["ignore_current_checks"], {(1, "some-check")}
         )
+        self.assertEqual(
+            pr.merge_changes_locally.call_args.kwargs["ignore_current_checks"],
+            {(1, "some-check")},
+        )
 
 
 @mock.patch("trymerge.get_drci_classifications", return_value={})
