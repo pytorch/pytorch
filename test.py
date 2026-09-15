@@ -4,7 +4,7 @@ torch.manual_seed(42)
 def diff(a, b):
     return (a - b).abs().max()
 
-for n in range(36, 1, -1):
+for n in range(53, 44, -1):
     for nexp in range(750):
         x = torch.randn(n, n, dtype=torch.cdouble)
         q, _ = torch.linalg.qr(x)
