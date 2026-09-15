@@ -1706,7 +1706,7 @@ def feature_alpha_dropout(
 
     Args:
         p: dropout probability of a channel to be zeroed. Default: 0.5
-        training: apply dropout if is ``True``. Default: ``True``
+        training: apply dropout if is ``True``. Default: ``False``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if has_torch_function_unary(input):
@@ -4056,7 +4056,7 @@ def smooth_l1_loss(
                                    'sum': the output will be summed. 'none': no reduction will be applied.
                                    Default: 'mean'.
         beta (float, optional): Specifies the threshold at which to change from the squared
-            term to the L1 term in the loss calculation. This value must be positive.
+            term to the L1 term in the loss calculation. This value must be non-negative.
             Default: 1.0.
 
     Returns:
