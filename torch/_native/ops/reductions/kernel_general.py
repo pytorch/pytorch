@@ -5,6 +5,7 @@
 
 import math
 from collections.abc import Sequence
+from typing import Any, Literal
 
 from cutlass import Float32, Float64, Int32, Int64
 
@@ -19,29 +20,29 @@ from .traits import WARP
 
 
 # (extent, element-stride) pairs from TensorIterator, fastest dim first.
-Pairs = list[tuple[int, int]]
+Pairs = Sequence[tuple[int, int]]
 
 
 class ReduceBlock:
     def __init__(
         self,
-        trait,
+        trait: Any,
         *,
-        count,
-        num_o,
-        red_pairs,
-        kept_pairs,
-        in_base=0,
-        limit=None,
-        project_n=None,
-        nouts=1,
-        final=True,
-        gidx_from="r",
-        flat_tail=False,
-        ragged_chunk=False,
-        from_partials=False,
-        block=128,
-    ):
+        count: int,
+        num_o: int,
+        red_pairs: Sequence[tuple[int, int]],
+        kept_pairs: Sequence[tuple[int, int]],
+        in_base: int = 0,
+        limit: int | None = None,
+        project_n: int | None = None,
+        nouts: int = 1,
+        final: bool = True,
+        gidx_from: Literal["r", "flat", "chunk"] = "r",
+        flat_tail: bool = False,
+        ragged_chunk: bool = False,
+        from_partials: bool = False,
+        block: int = 128,
+    ) -> None:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
         self.num_o = num_o  # number of outputs / blocks (= prod kept exts)
@@ -87,12 +88,12 @@ class ReduceBlock:
         )
 
     @property
-    def cache_sig(self):
+    def cache_sig(self) -> tuple[Any, ...]:
         # Derive the key from every const_expr baked by the shared body.
         return self.tile.cache_sig
 
     @property
-    def geom_sig(self):
+    def geom_sig(self) -> tuple[Any, ...]:
         # Cache boxed runtime geometry (~6us) separately while sharing the structural kernel.
         return (
             self.count,
@@ -114,26 +115,26 @@ _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
 
-def _fakes(ts: list[torch.Tensor]) -> list:
+def _fakes(ts: Sequence[torch.Tensor]) -> list[Any]:
     # Dynamic flat descriptors let one structural kernel serve every length.
     return [_L.fake_compact(torch2cute[t.dtype], (_L.sym(),)) for t in ts]
 
 
-def _operands(ts: list[torch.Tensor], read_only: bool = False) -> list:
+def _operands(ts: Sequence[torch.Tensor], read_only: bool = False) -> list[Any]:
     # Pass real tensors; read_only() prevents COW input materialization during export.
     return [_L.read_only(t) for t in ts] if read_only else list(ts)
 
 
-def _exts(pairs: Pairs) -> list:
+def _exts(pairs: Pairs) -> list[Any]:
     # The launch builds FastDivmod objects for these extents inside its MLIR context.
     return [Int32(ext) for ext, _ in pairs]
 
 
-def _strides(pairs: Pairs) -> list:
+def _strides(pairs: Pairs) -> list[Any]:
     return [Int64(strd) for _, strd in pairs]
 
 
-def _geom_args(op):
+def _geom_args(op: ReduceBlock) -> tuple[Any, ...]:
     # Runtime geometry: both decodes' extents/strides and scalar bounds.
     return (
         Int32(op.count),
@@ -150,7 +151,12 @@ def _geom_args(op):
     )
 
 
-def _launch(op, key, ins, outs):
+def _launch(
+    op: ReduceBlock,
+    key: tuple[Any, ...],
+    ins: Sequence[torch.Tensor],
+    outs: Sequence[torch.Tensor],
+) -> None:
     # _PLAN caches boxed geometry (~6us); _COMPILE_CACHE deduplicates structural kernels.
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
@@ -244,8 +250,12 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
 
 
 def _try_fast_row(
-    trait, trait_key: str, x: torch.Tensor, out_dtypes: list, nouts: int
-) -> tuple | None:
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int,
+) -> tuple[torch.Tensor, ...] | None:
     # Fast contiguous 2D last-dimension path. It needs no index remap, so index traits work.
     if x.dim() != 2 or x.stride(-1) != 1:
         return None
@@ -291,7 +301,14 @@ def _as_shape(out: torch.Tensor, out_shape: Sequence[int]) -> torch.Tensor:
     return out
 
 
-def _two_stage_row(trait, trait_key, x, out_dtypes, nouts, block=_K0_ALL_BLOCK):
+def _two_stage_row(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int,
+    block: int = _K0_ALL_BLOCK,
+) -> tuple[torch.Tensor, ...] | None:
     # Ragged chunks handle N without an in-window divisor; stage 1 clamps row tails and
     # carries global indices, preserving first-wins ties. Prime (8, 131071) measured
     # 0.28x of ATen without this split. Decline C == 1.
@@ -346,7 +363,15 @@ def _two_stage_row(trait, trait_key, x, out_dtypes, nouts, block=_K0_ALL_BLOCK):
     return tuple(outs)
 
 
-def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
+def _reduce(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    dims: int | Sequence[int] | None,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int,
+    block: int = _K0_BLOCK,
+) -> tuple[torch.Tensor, ...]:
     # TI drives all dimensions and layouts through this path; return nouts tensors.
     if not x.is_cuda:
         raise AssertionError(f"need a CUDA input, got {x.device}")
@@ -401,11 +426,25 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     return tuple(outs)
 
 
-def reduce_dim(trait, trait_key, x, dims, out_dtype, block=_K0_BLOCK):
+def reduce_dim(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    dims: int | Sequence[int] | None,
+    out_dtype: torch.dtype,
+    block: int = _K0_BLOCK,
+) -> torch.Tensor:
     return _reduce(trait, trait_key, x, dims, [out_dtype], 1, block=block)[0]
 
 
-def reduce_dim2(trait, trait_key, x, dims, out_dtypes, block=_K0_BLOCK):
+def reduce_dim2(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    dims: int | Sequence[int] | None,
+    out_dtypes: Sequence[torch.dtype],
+    block: int = _K0_BLOCK,
+) -> tuple[torch.Tensor, ...]:
     return _reduce(trait, trait_key, x, dims, list(out_dtypes), 2, block=block)
 
 
@@ -416,12 +455,25 @@ def _grid_size(L: int, block: int, sm_count: int, grid_mult: int = 4) -> int:
 
 
 def reduce_all(
-    trait, trait_key, x, out_dtype, block=_K0_ALL_BLOCK, grid_mult=_K0_ALL_GRID_MULT
-):
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtype: torch.dtype,
+    block: int = _K0_ALL_BLOCK,
+    grid_mult: int = _K0_ALL_GRID_MULT,
+) -> torch.Tensor:
     return _reduce_all(trait, trait_key, x, [out_dtype], 1, block, grid_mult)[0]
 
 
-def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
+def _reduce_all(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int,
+    block: int,
+    grid_mult: int,
+) -> tuple[torch.Tensor, ...]:
     # Try the one-shot row kernel, fused cross-CTA split, then grid-striding fallback.
     # All preserve flat indices because reduce-all is a single row.
     if not (x.is_cuda and x.is_contiguous()):
