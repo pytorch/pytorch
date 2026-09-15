@@ -90,8 +90,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
     has_datacenter_blackwell_tma_device,
+    has_triton_cuda_tma_device,
     has_triton_stable_tma_api,
-    has_triton_tma_device,
 )
 
 
@@ -250,7 +250,7 @@ class TestMaxAutotune(TestCase):
                 )
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -564,7 +564,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     def test_max_autotune_persistent_tma_workspace_reuse(self):
         """
@@ -639,7 +639,7 @@ class TestMaxAutotune(TestCase):
             mm_heuristic.mm_configs = original_mm_configs
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     def test_workspace_size_bytes_accounts_for_dtype(self):
         """workspace_size passed to benchmark request must be in bytes, not elements."""
@@ -708,7 +708,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(size, expected_bytes)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -775,7 +775,7 @@ class TestMaxAutotune(TestCase):
         FileCheck().check("triton_tem_fused_mm").check(check_str).run(code[0])
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @skipIfXpu(msg="Covered by XPU TMA")
     @parametrize("dynamic", (False, True))
@@ -806,7 +806,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("NoValidChoicesError", str(context.exception))
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_persistent_tma_illegal_output_alignment(
@@ -843,7 +843,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("NoValidChoicesError", str(context.exception))
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     def test_max_autotune_regular_mm_tma_dynamic_outer_dim(self):
         def mm(a, b):
@@ -881,7 +881,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -991,7 +991,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual((100,), extern_bias_shape)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -1076,7 +1076,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @skipIfXpu(msg="Covered by XPU TMA")
     @parametrize("dynamic", (False, True))
@@ -1108,7 +1108,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("NoValidChoicesError", str(context.exception))
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     def test_max_autotune_addmm_tma_dynamic_outer_dim(self):
         def addmm(x, a, b):
@@ -1152,7 +1152,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support persistent TMA")
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(), "B200 doesn't support sm carveout"
@@ -3954,7 +3954,7 @@ class TestTemplateConfigPruning(TestCase):
     ):
         """Test shared memory pruning for addmm operation."""
 
-        if use_tma and (dtype == torch.float32 or not has_triton_tma_device()):
+        if use_tma and (dtype == torch.float32 or not has_triton_cuda_tma_device()):
             return
 
         def addmm_op(bias, mat1, mat2):
@@ -4001,7 +4001,7 @@ class TestTemplateConfigPruning(TestCase):
         mat2_transposed: bool,
         use_tma: bool,
     ):
-        if use_tma and (dtype == torch.float32 or not has_triton_tma_device()):
+        if use_tma and (dtype == torch.float32 or not has_triton_cuda_tma_device()):
             return
 
         def mm_op(mat1, mat2):
@@ -5653,7 +5653,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         finally:
             mm_heuristic.mm_configs = original_mm_configs
 
-    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
+    @unittest.skipIf(not has_triton_cuda_tma_device(), "Need TMA support in Triton")
     @skipIfXpu(msg="Bad tma config can be covered by XPU TMA")
     @unittest.skipIf(
         config.cpp_wrapper, "Skip static analysis codegen checks on cpp_wrapper"
