@@ -2200,6 +2200,56 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
 
     @requires_gpu_and_triton
+    @parametrize("per_kernel_alloc", [False, True])
+    def test_concat_autotune_preserves_output_aliasing(self, per_kernel_alloc):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        autotune_calls = []
+        original_generate_and_run = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def capture_autotune_calls(wrapper):
+            autotune_calls.append(wrapper.kernel_autotune_calls.getvalue())
+            return original_generate_and_run(wrapper)
+
+        def fn(*args):
+            return torch.cat(args, dim=1)
+
+        inputs = tuple(torch.randn(8, 4, device=GPU_TYPE) for _ in range(12))
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "aot_inductor.autotune_per_kernel_alloc": per_kernel_alloc,
+                    "force_disable_caches": True,
+                    "triton.autotune_at_compile_time": True,
+                }
+            ),
+            patch.object(
+                PythonWrapperCodegen,
+                "generate_and_run_autotune_block",
+                capture_autotune_calls,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, fn(*inputs))
+        self.assertEqual(len(autotune_calls), 1)
+        call_code = autotune_calls[0]
+        concat_storages = re.findall(
+            r"(_autotune_storage_\d+) = "
+            r"generate_example_value\(\(384,\), \(1,\)",
+            call_code,
+        )
+        self.assertEqual(len(concat_storages), 1)
+        concat_storage = concat_storages[0]
+        self.assertEqual(call_code.count(f"torch.as_strided({concat_storage}"), 12)
+        FileCheck().check(
+            f"torch.as_strided({concat_storage}, (8, 4), (48, 1), 0)"
+        ).check(f"torch.as_strided({concat_storage}, (8, 4), (48, 1), 44)").check_regex(
+            rf"del .*{concat_storage}"
+        ).run(call_code)
+
+    @requires_gpu_and_triton
     def test_compile_time_autotune_caching(self):
         from torch._inductor.codecache import PyCodeCache
 
