@@ -13,7 +13,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch.distributed._transport import new_transport
+from torch.distributed._transport import new_transport, Work
 
 
 if TYPE_CHECKING:
@@ -161,6 +161,13 @@ def _connects(rank: int, one_way: bool) -> bool:
     return not one_way or rank % 2 == 0
 
 
+def _complete(result: int | Work) -> None:
+    if isinstance(result, Work):
+        result.wait()
+    elif result != 0:
+        raise RuntimeError(f"transport operation failed with status {result}")
+
+
 def _measure(
     operation: Callable[[], None],
     args: argparse.Namespace,
@@ -278,12 +285,16 @@ def run(args: argparse.Namespace) -> tuple[list[dict[str, Any]], str | None]:
             read_view = read_memory.to_mutable_view()
 
             def write() -> None:
-                if transport.write(source_view, peer_destination) != 0:
-                    raise RuntimeError("write failed")
+                _complete(
+                    transport.write(
+                        source_view, peer_destination, async_op=args.async_op
+                    )
+                )
 
             def read() -> None:
-                if transport.read(read_view, peer_source) != 0:
-                    raise RuntimeError("read failed")
+                _complete(
+                    transport.read(read_view, peer_source, async_op=args.async_op)
+                )
 
             for _ in range(args.warmup):
                 if rank % 2 == 0:
@@ -377,7 +388,11 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--iterations", type=int, default=100)
-    parser.add_argument("--cuda-graph", action="store_true")
+    execution = parser.add_mutually_exclusive_group()
+    execution.add_argument("--cuda-graph", action="store_true")
+    execution.add_argument(
+        "--async-op", action="store_true", help="submit and wait on a Work per transfer"
+    )
     parser.add_argument(
         "--rdma-counters",
         action="store_true",
@@ -412,6 +427,7 @@ def _output(
         "device": str(_device(args.device)),
         "tensor_device": str(_device(args.tensor_device or args.device)),
         "cuda_graph": args.cuda_graph,
+        "async_op": args.async_op,
         "one_way_connect": args.one_way_connect,
         "counter_source": counter_source,
         "options": json.loads(args.options),
