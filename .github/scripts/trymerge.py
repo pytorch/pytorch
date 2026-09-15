@@ -2970,8 +2970,6 @@ def merge(
         ignore_current,
     )
 
-    # probably a bad name, but this is a list of current checks that should be
-    # ignored and is toggled by the --ignore-current flag
     ignore_current_checks_info = []
     ignore_current_checks: set[tuple[int, str]] = set()
 
