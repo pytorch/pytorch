@@ -38,17 +38,17 @@ class DataPtr;
  * Backends that do not support a flag should ignore the corresponding bit.
  */
 enum class EventFlag : uint8_t {
-  // Legacy sentinels -- BC preserved
-  BACKEND_DEFAULT [[deprecated("Use EventFlag::TIMING instead")]] =
-      0x1, // legacy CUDA default; alias to TIMING
-  INVALID [[deprecated("Not a valid EventFlag value")]] =
-      0xFF, // sentinel for testing; not a valid flag
-
   // Bit flags -- combine with operator|.
   PYTORCH_DEFAULT = 0x0, // no timing, no blocking, no interprocess
   TIMING = 0x1, // enable timing
   BLOCKING = 0x2, // CPU blocks in synchronize()
   INTERPROCESS = 0x4, // event is IPC-shareable
+
+  // Legacy sentinels -- BC preserved
+  BACKEND_DEFAULT [[deprecated("Use EventFlag::TIMING instead")]] =
+      TIMING, // legacy CUDA default; alias to TIMING
+  INVALID [[deprecated("Not a valid EventFlag value")]] =
+      0xFF, // sentinel for testing; not a valid flag
 };
 
 constexpr EventFlag operator|(EventFlag a, EventFlag b) {
