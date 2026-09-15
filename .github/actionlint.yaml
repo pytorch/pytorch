@@ -81,6 +81,7 @@ self-hosted-runner:
     - macos-14-xlarge
     - macos-26
     - macos-26-xlarge
+    - xcode-27-xlarge
     # Organization-wide Intel hosted XPU runners
     - linux.idc.xpu
     # Organization-wide Google Cloud TPU runners
