@@ -22,6 +22,54 @@ ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}
 _NS = [2048, 4096, 8192, 16384]
 _KS = [64, 128, 256]
+_RADIX_KS = (64, 128, 256, 512, 1024)
+_REGISTER_DYNAMIC_NS = (64, 128, 256, 512, 1024)
+_REGISTER_RUNGS = {
+    16: (_REGISTER_DYNAMIC_NS, (2048,)),
+    32: ((256,),),
+}
+_RADIX_MIN_N = {
+    "float32": {
+        9: {64: 2048, 128: 2048, 256: 2048, 512: 4096, 1024: 32768},
+        10: {64: 128, 128: 256, 256: 512, 512: 4096, 1024: 32768},
+    },
+    "bfloat16": {
+        9: {64: 2048, 128: 2048, 256: 2048, 512: 4096, 1024: 32768},
+        10: {64: 2048, 128: 2048, 256: 2048, 512: 4096, 1024: 32768},
+    },
+}
+_MAX_TAIL_ITERS = 4
+
+
+def _radix_min_n(dtype, k, major):
+    if dtype not in _RADIX_MIN_N or k not in _RADIX_KS or major < 9:
+        return None
+    capability = 10 if major >= 10 else 9
+    return _RADIX_MIN_N[dtype][capability][k]
+
+
+def _register_rung(n, k):
+    for rung in _REGISTER_RUNGS.get(k, ()):
+        if n in rung:
+            return "_".join(str(value) for value in rung)
+    return None
+
+
+def _specialization(n, k, deterministic):
+    if k not in _RADIX_KS or n % 4:
+        return None, None
+    num_threads = max(k, 256)
+    tile = num_threads * 4
+    vec_iters = n // tile
+    fixed_vec_iters = None
+    if k <= 256 and vec_iters <= 1:
+        fixed_vec_iters = 1
+    elif deterministic and k == 512 and vec_iters == 2:
+        fixed_vec_iters = vec_iters
+    scalar_tail_iters = (
+        _MAX_TAIL_ITERS if deterministic or fixed_vec_iters is not None else None
+    )
+    return scalar_tail_iters, fixed_vec_iters
 
 
 def kernel_precompile_grid():
