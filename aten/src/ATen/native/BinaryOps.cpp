@@ -15,6 +15,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_add_relu_native.h>
+#include <ATen/ops/_igamma_grad_a_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_test_serialization_subcmul_native.h>
 #include <ATen/ops/_to_copy.h>
@@ -326,6 +327,7 @@ CREATE_BINARY_META_FUNC(logaddexp2)
 CREATE_BINARY_META_FUNC(gcd)
 CREATE_BINARY_META_FUNC(lcm)
 CREATE_BINARY_META_FUNC(hypot)
+CREATE_BINARY_META_FUNC(_igamma_grad_a)
 CREATE_BINARY_META_FUNC(igamma)
 CREATE_BINARY_META_FUNC(igammac)
 CREATE_BINARY_META_FUNC(nextafter)
@@ -409,6 +411,7 @@ DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
 DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
+DEFINE_DISPATCH(igamma_grad_a_stub);
 DEFINE_DISPATCH(igamma_stub);
 DEFINE_DISPATCH(igammac_stub);
 DEFINE_DISPATCH(nextafter_stub);
@@ -546,6 +549,7 @@ CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd_out, gcd_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(lcm_out, lcm_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(hypot_out, hypot_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(_igamma_grad_a_out, igamma_grad_a_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub)

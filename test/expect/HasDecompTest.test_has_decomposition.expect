@@ -404,6 +404,8 @@ aten::_histogramdd_from_bin_cts
 aten::_histogramdd_from_bin_cts.out
 aten::_histogramdd_from_bin_tensors
 aten::_histogramdd_from_bin_tensors.out
+aten::_igamma_grad_a
+aten::_igamma_grad_a.out
 aten::_index_put_impl
 aten::_index_put_impl.out
 aten::_index_put_impl_

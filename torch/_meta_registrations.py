@@ -9235,6 +9235,14 @@ def _register_inplace_meta(fn):
     return _fn
 
 
+@register_meta(aten._igamma_grad_a)
+@out_wrapper()
+def meta_igamma_grad_a(self, other):
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta(aten.lerp)
 @out_wrapper()
 def lerp(start, end, weight):

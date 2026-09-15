@@ -833,13 +833,39 @@
   self: i1e_backward(grad, self, result)
   result: auto_element_wise
 
+- name: _igamma_grad_a(Tensor self, Tensor other) -> Tensor
+  self: 'not_implemented("_igamma_grad_a: input")'
+  other: 'not_implemented("_igamma_grad_a: other")'
+
 - name: igamma(Tensor self, Tensor other) -> Tensor
-  self: 'not_implemented("igamma: input")'
-  other: grad * exp((self - 1) * log(other) - other - lgamma(self))
+  dispatch:
+    Default:
+      self: 'not_implemented("igamma: input")'
+      other: grad * exp((self - 1) * log(other) - other - lgamma(self))
+    AutogradCPU:
+      self: grad * at::_igamma_grad_a(self, other)
+      other: grad * exp((self - 1) * log(other) - other - lgamma(self))
+    AutogradCUDA:
+      self: grad * at::_igamma_grad_a(self, other)
+      other: grad * exp((self - 1) * log(other) - other - lgamma(self))
+    AutogradNestedTensor:
+      self: grad * at::_igamma_grad_a(self, other)
+      other: grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: igammac(Tensor self, Tensor other) -> Tensor
-  self: 'not_implemented("igammac: input")'
-  other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
+  dispatch:
+    Default:
+      self: 'not_implemented("igammac: input")'
+      other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
+    AutogradCPU:
+      self: -grad * at::_igamma_grad_a(self, other)
+      other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
+    AutogradCUDA:
+      self: -grad * at::_igamma_grad_a(self, other)
+      other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
+    AutogradNestedTensor:
+      self: -grad * at::_igamma_grad_a(self, other)
+      other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)

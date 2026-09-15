@@ -561,6 +561,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE2(fill, Scalar);
   VMAP_SUPPORT2(fill, Tensor, fill_Tensor_batch_rule);
   BINARY_POINTWISE(gcd);
+  BINARY_POINTWISE(_igamma_grad_a);
   BINARY_POINTWISE(igamma);
   BINARY_POINTWISE(igammac);
   BINARY_POINTWISE2(ldexp, Tensor);
