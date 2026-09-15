@@ -67,6 +67,7 @@ from torch.testing._internal.common_quantized import (
     _floatx_unpacked_to_f32,
     ceil_div, to_blocked,
     to_mxfp,
+    data_to_nvfp4_scale,
     from_blocked_format,
     generate_jagged_offs,
     pack_uint4,
@@ -516,26 +517,6 @@ def data_to_mx_scale(x, block_size, recipe):
     scale_e8m0_biased = scale_e8m0_biased.to(torch.uint8)
     scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
     return scale_e8m0_biased.reshape(orig_shape[0], -1)
-
-
-def data_to_nvfp4_scale(x, block_size):
-    orig_shape = x.shape
-    x = x.reshape(-1, block_size)
-    max_abs = torch.amax(torch.abs(x), 1) + 1e-12
-
-    # x_orig_max / scale = x_in_fp4_domain_max
-    # x_orig_max / x_in_fp4_domain_max = scale
-    scale = max_abs / FP4_MAX_VAL
-
-    # for the purposes of this function, just clamp to representable range of
-    # `torch.float8_e4m3fn`. In real code, we would expect the modeling code to
-    # handle this before the input data hits this function.
-    scale = scale.clamp(max=F8E4M3_MAX_VAL)
-
-    # cast to target dtype
-    scale = scale.to(torch.float8_e4m3fn)
-    scale = scale.reshape(orig_shape[0], -1)
-    return scale
 
 
 def data_to_nvfp4_with_global_scale(x, block_size):
