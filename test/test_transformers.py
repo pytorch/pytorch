@@ -1102,7 +1102,7 @@ class TestTransformersAccelerator(NNTestCase):
             with cm:
                 _test(batch_first, training, enable_nested_tensor)
 
-
+    @tf32_off()
     def test_transformer_encoder_layer_fwd_fake(self, device):
         model = torch.nn.TransformerEncoder(
             torch.nn.TransformerEncoderLayer(
@@ -3295,6 +3295,7 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @tf32_off()
     @skipIfRocm
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
@@ -3329,6 +3330,7 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
 
+    @tf32_off()
     @skipIfRocm
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
@@ -3489,6 +3491,7 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=4e-4, rtol=3e-4)
 
+    @tf32_off()
     @skipIfRocm
     @skipIfXpu(msg="aten::_efficient_attention_forward not supported on XPU")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
@@ -3634,6 +3637,7 @@ class TestSDPAAccelerator(NNTestCase):
             torch.zeros_like(actual_grads[0][:, :, :fully_masked]),
         )
 
+    @tf32_off()
     @skipIfRocm
     @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(
@@ -4558,6 +4562,7 @@ class TestSDPAAccelerator(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
+    @tf32_off()
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_eff_attention_mask_only_requires_grad(self, device):
         torch.manual_seed(0)
