@@ -136,6 +136,18 @@ def expectedFailurePropagateRealTensors(fn):
 
 
 class FakeTensorTest(TestCase):
+    def test_fake_mode_dispatch_api(self):
+        mode = FakeTensorMode()
+        mode_key = torch._C._TorchDispatchModeKey.FAKE
+        with mode:
+            self.assertIs(torch._C._get_dispatch_mode(mode_key), mode)
+            unset_mode = torch._C._unset_dispatch_mode(mode_key)
+            self.assertIs(unset_mode, mode)
+            self.assertIsNone(torch._C._get_dispatch_mode(mode_key))
+            torch._C._set_dispatch_mode(unset_mode)
+            self.assertIs(torch._C._get_dispatch_mode(mode_key), mode)
+        self.assertIsNone(torch._C._get_dispatch_mode(mode_key))
+
     def fake_with_unbacked_batch(self, *tensors):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
@@ -1078,6 +1090,16 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(y_unwrapped.layout, torch.strided)
                 self.assertEqual(y_unwrapped.stride(), (3, 1))
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    def test_mkldnn_unsafe_fallback(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        with FakeTensorMode() as fake_mode:
+            x = fake_mode.from_tensor(torch.randn(1, 2, 8, 8).to_mkldnn())
+            y = torch.nn.functional.max_pool2d(x, 3, 2, 1)
+            self.assertTrue(is_fake_tensor(y))
+            self.assertEqual(y.shape, (1, 2, 4, 4))
+
     def test_compare_tensor_meta_unbacked_numel(self):
         from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
@@ -1672,6 +1694,13 @@ class FakeTensorTest(TestCase):
             x = torch.rand([10, 10])
 
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
+
+    def test_symbolic_number_tensor_argument_not_constant(self):
+        shape_env = ShapeEnv()
+        symint = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env):
+            result = torch.div(symint, 4, rounding_mode="trunc")
+        self.assertIsNone(maybe_get_fake_constant(result))
 
     def test_parameter_view(self):
         x = torch.nn.Parameter(torch.randn(4))
@@ -2395,22 +2424,30 @@ for t in threads:
 
     @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
     def test_cuda_fake_tensor_new_methods_no_device_init(self):
-        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so run
-        # the repro in a subprocess.
+        # Device visibility must be set before torch is imported, so run the
+        # repro in a subprocess.
 
         script = """\
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["HIP_VISIBLE_DEVICES"] = ""
 
 # Import numpy before torch to avoid an MKL threading-layer conflict in this
 # subprocess environment.
 import numpy
 import torch
-from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_fake_constant,
+)
 
 fake_mode = FakeTensorMode()
 with fake_mode:
     x = torch.randn(3, device="cuda")
+    constant = torch.tensor([1.0])
+    moved = constant.to(device="cuda")
+    placed = torch.ops.prims.device_put.default(constant, torch.device("cuda"))
 
 assert not torch.cuda.is_initialized()
 
@@ -2420,12 +2457,18 @@ new_tensors = [
     x.new_full([2, 1], 1.0, device="cuda:0", dtype=torch.float32),
     x.new_ones([2, 1], device="cuda:0", dtype=torch.float32),
     x.new_zeros([2, 1], device="cuda:0", dtype=torch.float32),
+    moved,
+    placed,
 ]
 
 for y in new_tensors:
     assert is_fake_tensor(y)
     assert y.device == torch.device("cuda:0")
     assert y.dtype is torch.float32
+
+assert maybe_get_fake_constant(constant) is not None
+assert maybe_get_fake_constant(moved) is None
+assert maybe_get_fake_constant(placed) is None
 
 assert not torch.cuda.is_initialized()
 """
