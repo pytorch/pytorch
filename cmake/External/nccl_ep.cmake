@@ -1,6 +1,22 @@
 if(NOT __NCCL_EP_INCLUDED)
   set(__NCCL_EP_INCLUDED TRUE)
 
+  if(USE_SYSTEM_NCCL_EP)
+    find_package(NCCLEP REQUIRED)
+
+    get_filename_component(NCCL_EP_JIT_HOME "${NCCL_EP_JIT_INCLUDE_DIR}" DIRECTORY)
+    list(GET NCCL_INCLUDE_DIRS 0 __nccl_ep_nccl_include)
+    get_filename_component(NCCL_EP_JIT_NCCL_HOME "${__nccl_ep_nccl_include}" DIRECTORY)
+
+    add_library(__caffe2_nccl_ep INTERFACE)
+    target_link_libraries(__caffe2_nccl_ep INTERFACE ${NCCL_EP_LIBRARIES})
+    target_include_directories(__caffe2_nccl_ep INTERFACE ${NCCL_EP_INCLUDE_DIRS})
+    if(TARGET CUDA::cuda_driver)
+      target_link_libraries(__caffe2_nccl_ep INTERFACE CUDA::cuda_driver)
+    endif()
+    return()
+  endif()
+
   # NCCL is built (Makefile) into this tree by cmake/External/nccl.cmake.
   set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
 

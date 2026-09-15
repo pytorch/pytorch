@@ -488,9 +488,10 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
   #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
   #    headers baked from the submodule build dir; no nccl4py).
-  #  - USE_SYSTEM_NCCL=ON: __caffe2_nccl_ep is libnccl_ep.so, NEEDED-linked here
-  #    and resolved from the nccl4py wheel at runtime (RPATH to nccl/ep/lib; JIT
-  #    headers also from nccl4py, so nothing is baked).
+  #  - USE_SYSTEM_NCCL_EP=ON: __caffe2_nccl_ep is a system libnccl_ep.so;
+  #    its EP and NCCL JIT header roots are baked in as defaults.
+  #  - USE_SYSTEM_NCCL=ON and USE_SYSTEM_NCCL_EP=OFF: libnccl_ep.so is built
+  #    from the NCCL submodule and resolved with its JIT headers from nccl4py.
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
@@ -503,7 +504,13 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
     set_target_properties(_nccl_ep PROPERTIES
       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
-    if(USE_SYSTEM_NCCL)
+    if(USE_SYSTEM_NCCL_EP)
+      target_compile_definitions(_nccl_ep PRIVATE
+        "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\""
+        "NCCL_EP_JIT_NCCL_HOME=\"${NCCL_EP_JIT_NCCL_HOME}\"")
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib")
+    elseif(USE_SYSTEM_NCCL)
       # Dynamic: resolve nccl4py's libnccl_ep.so (site-packages/nccl/ep/lib, one
       # dir up from torch/ via $ORIGIN/..) at import.
       set_target_properties(_nccl_ep PROPERTIES
