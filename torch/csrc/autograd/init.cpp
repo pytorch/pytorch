@@ -641,6 +641,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         meta->set_creation_meta(new_creation_meta);
       });
 
+  m.def(
+      "_set_view_rebase_warning",
+      &torch::autograd::impl::set_view_rebase_warning,
+      py::arg("tensor"),
+      py::arg("message"));
+
   m.def("_get_current_graph_task_keep_graph", []() {
     return torch::autograd::get_current_graph_task_keep_graph();
   });
