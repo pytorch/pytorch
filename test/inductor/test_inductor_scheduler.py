@@ -1365,7 +1365,7 @@ class TestScheduler(TestCase):
         context = Mock(grouped_axis=NestedReduction.GroupedAxis.R)
 
         self.assertFalse(
-            NestedReduction._r_grouped_stage_accesses_match(outer, grouped, context, ())
+            NestedReduction._grouped_stage_accesses_match(outer, grouped, context, ())
         )
 
     @parametrize("writer_role", ["parent_stage", "local_input", "reduction"])
