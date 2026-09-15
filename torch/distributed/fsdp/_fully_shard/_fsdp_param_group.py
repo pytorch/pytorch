@@ -126,13 +126,21 @@ class FSDPCommContext:
         current_stream = self.device_handle.current_stream()
         return current_stream, current_stream
 
-    def release_all_gather_state(self, *wait_streams: torch.Stream) -> None:
-        """Release the deferred all-gather result after ordering its consumers."""
+    def wait_all_gather_streams_on_event(self, event: torch.Event | None) -> None:
+        """Order both all-gather streams after a copy-out event."""
+        if event is None:
+            return
+        # Calling ``unshard`` before lazy init means streams are not initialized.
+        if hasattr(self, "all_gather_copy_in_stream"):
+            self.all_gather_copy_in_stream.wait_event(event)
+        if hasattr(self, "all_gather_stream"):
+            self.all_gather_stream.wait_event(event)
+
+    def release_all_gather_state(self) -> None:
+        """Release deferred state after ordering streams that reuse its buffers."""
         if (all_gather_state := self.all_gather_state) is None:
             return
-        if all_gather_state.event is not None:
-            for stream in wait_streams:
-                stream.wait_event(all_gather_state.event)
+        self.wait_all_gather_streams_on_event(all_gather_state.event)
         self.all_gather_state = None
 
 
@@ -401,7 +409,9 @@ class FSDPParamGroup:
         if self._reshard_after_forward_event is not None:
             # Resharded parameter data is allocated in the default stream and
             # used in the all-gather streams
-            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(
+                self._reshard_after_forward_event
+            )
             self._reshard_after_forward_event = None
 
         if isinstance(self.mesh_info, FSDPMeshInfo):
@@ -446,10 +456,7 @@ class FSDPParamGroup:
             return  # no preceding unshard
         async_op = self._all_gather_result.all_gather_work is not None
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
-            self.comm_ctx.release_all_gather_state(
-                self.comm_ctx.all_gather_copy_in_stream,
-                self.comm_ctx.all_gather_stream,
-            )
+            self.comm_ctx.release_all_gather_state()
         if isinstance(self.mesh_info, FSDPMeshInfo):
             world_size = self._all_gather_process_group.size()
         else:
@@ -504,16 +511,9 @@ class FSDPParamGroup:
                 self._all_gather_result, all_gather_copy_out_event
             )
         else:
-            self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(all_gather_copy_out_event)
 
         self._all_gather_result = None  # free unless saved in `all_gather_state`
-
-    def _wait_all_gather_streams_on_event(self, event: torch.Event | None):
-        # Calling `unshard` before lazy init means streams are not initialized
-        if hasattr(self.comm_ctx, "all_gather_copy_in_stream") and event is not None:
-            self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
-            self.comm_ctx.all_gather_stream.wait_event(event)
 
     @_disable_functorch_if_active
     def reshard(self):
@@ -550,7 +550,9 @@ class FSDPParamGroup:
             current_stream.wait_event(self._all_reduce_state.event)
         self._all_reduce_state = None
         if self._reshard_after_forward_event is not None:
-            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(
+                self._reshard_after_forward_event
+            )
             self._reshard_after_forward_event = None
         self._partial_reduce_output = None
         self._post_forward_indices.clear()
