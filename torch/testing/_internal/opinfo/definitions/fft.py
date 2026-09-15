@@ -802,6 +802,16 @@ python_ref_db: list[OpInfo] = [
                 dtypes=(torch.float16,),
                 device_type="cuda",
             ),
+            # AssertionError: Reference result was farther from the precise
+            # computation than the torch result was.
+            # See https://github.com/intel/torch-xpu-ops/issues/5271 for more details.
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
             # AssertionError: Reference result was farther (0.10395266714717796) from the precise
             # computation than the torch result was (0.10251794906889385)
             # See https://github.com/pytorch/pytorch/pull/170856 for more details.
@@ -811,6 +821,16 @@ python_ref_db: list[OpInfo] = [
                 "test_python_ref",
                 dtypes=(torch.float16,),
                 device_type="cuda",
+            ),
+            # AssertionError: Reference result was farther from the precise
+            # computation than the torch result was.
+            # See https://github.com/intel/torch-xpu-ops/issues/5271 for more details.
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="xpu",
             ),
             # AssertionError: Reference result was farther (0.0953431016138116) from the precise
             # computation than the torch result was (0.09305490684430734)
@@ -891,6 +911,16 @@ python_ref_db: list[OpInfo] = [
                 "test_python_ref",
                 dtypes=(torch.float16,),
                 device_type="cuda",
+            ),
+            # AssertionError: Reference result was farther from the precise
+            # computation than the torch result was.
+            # See https://github.com/intel/torch-xpu-ops/issues/5271 for more details.
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="xpu",
             ),
         ],
     ),
