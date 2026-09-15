@@ -1467,8 +1467,22 @@ def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
 
 @dataclass
 class AOTCompiledModel:
-    # Represents a single forward function of a model along with dispatch
-    # compiled_results is serializable. We require the model to deserialize again.
+    """A module's forward compiled for several calls, with dispatch over them.
+
+    Private and experimental, like ``_aot_compile`` which builds one. Only
+    ``compiled_results`` serializes; ``deserialize`` needs the model again.
+
+    Dispatch walks ``compiled_results`` in order and serves the first result
+    whose guard check accepts the call. A first ``check()`` can refuse
+    without evaluating the tree (the recursive dict-tag fast path), so if no
+    check accepted, every refused tree is checked once more before dispatch
+    gives up on it; a result whose guards would pass can therefore be outranked
+    by a later result whose first check accepted. Opting a result out through
+    ``disable_guard_check()`` does not skip its guard evaluation: it is served
+    in index order when its check accepts, and on the strength of its opt-out
+    alone only when no check accepted the call.
+    """
+
     model: torch.nn.Module
     compiled_results: list[AOTCompiledFunction]
     # The list contents last judged and whether one bind of a call serves every
@@ -1522,7 +1536,8 @@ class AOTCompiledModel:
                 # not re-run the guard eval on this hot dispatch path.
                 return result.fn(self.model, *args, **kwargs)
         # A check() can reject from the dict-tag fast path without running the
-        # tree; a second check() then evaluates it in full, opted-out results too.
+        # tree; a second check() then runs the tree the fast path skipped,
+        # opted-out results too.
         for i, result in enumerate(results):
             f_locals = shared if shared is not None else bound[i]
             if result._live_guard_manager().check(f_locals):
