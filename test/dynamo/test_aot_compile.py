@@ -568,6 +568,50 @@ def _set_pooling(mode):
         GLOBAL_POOLING_CONFIG["pooling"] = old
 
 
+class CountedKey:
+    # Hashes into `name`'s slot and answers False to the first `misses`
+    # comparisons a lookup of `name` makes against it, so a guard on `name`
+    # misses the global that many times and finds it after: one way a live guard
+    # tree can reject a call in the dispatch scan and accept it on the re-check.
+    # Which operand the dict puts on the left does not matter: str.__eq__
+    # returns NotImplemented for a non-str, so this __eq__ runs either way. A
+    # lookup that misses fails the tree wherever it sits, so each check() the
+    # tree makes consumes exactly one miss however many guards read `name`.
+    def __init__(self, name, misses):
+        self.name = name
+        self.compares, self.misses = 0, misses
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        if other is self:
+            return True
+        self.compares += 1
+        return self.compares > self.misses
+
+
+AOT_BRANCH_SCALE = 3.0
+
+
+class ModeBranchGlobalModule(torch.nn.Module):
+    # Only the mode == 1 branch reads a global, so one ModelInput's guards name
+    # it and the other's do not.
+    def forward(self, x, mode):
+        if mode == 1:
+            return x * AOT_BRANCH_SCALE
+        return x * 2
+
+
+def aot_compile_forward(mod, forward, *args):
+    # Compiles `mod` for `forward` bound in place of its class's, so one module
+    # can be compiled for several forwards; a class forward rebinds to itself.
+    mod.forward = types.MethodType(forward, mod)
+    model = torch.compile(mod, fullgraph=True, backend="eager")
+    model._aot_compile([ModelInput(args=args, kwargs={}, contexts=[])])
+    return model.forward.compiled_results[0]
+
+
 AOT_POOL_MODE = "sum"
 
 # A dynamic dim on a global is what makes a SHAPE_ENV guard name it -- as a
@@ -1943,6 +1987,134 @@ from user code:
             "the bytecode kept the recording on the module load path",
         )
         self.assertEqual(reloaded(x), ReturnsBuiltinModule()(x))
+
+    def _install_global_probe(self, name, misses):
+        # Re-keys this module's global `name` under a CountedKey. Both cleanups
+        # are registered before the dict is touched, so an interrupt anywhere
+        # leaves the name restored. addCleanup is LIFO, so the probe is popped
+        # first and the name re-inserted second; reversed, the re-insert would
+        # find the probe by __eq__ and store under it, and the pop would then
+        # drop the name for good. Call _hide_leaked_dynamo_globals before this,
+        # never after: its sweep calls str methods on every key of this dict.
+        g = globals()
+        probe, saved = CountedKey(name, misses), g[name]
+        self.addCleanup(g.__setitem__, name, saved)
+        self.addCleanup(g.pop, probe, None)
+        del g[name]
+        g[probe] = saved
+        return saved
+
+    def test_module_dispatch_evaluates_a_matching_tree_once(self):
+        # The scan calls the matching result's declared `fn` field rather than the
+        # result, whose __call__ would evaluate the guards that just passed a
+        # second time.
+        mod = ScaleModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        x = torch.randn(4, 8)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        manager = model.forward.compiled_results[0]._artifacts.guard_manager
+        with patch.object(manager, "check", wraps=manager.check) as check:
+            out = model(x)
+        self.assertEqual(out, mod(x))
+        self.assertEqual(check.call_count, 1)
+
+    def test_module_dispatch_judges_only_the_results_a_call_began_with(self):
+        # [0]'s check() appends [1], which matches the call. Both passes iterate
+        # the results the call began with, so the re-check pairs each result with
+        # the binding the scan made for it and never reaches a result the scan
+        # did not bind; the appended result is judged by the next call.
+        mod, x = ScaleModule(), torch.randn(3, 3)
+        first = aot_compile_forward(mod, ScaleModule.forward, x)
+        later = aot_compile_forward(mod, ScaleModule.forward, x.double())
+        combined = AOTCompiledModel(mod, [first])
+        manager = first._artifacts.guard_manager
+        check = manager.check
+
+        def appending_check(f_locals):
+            combined.compiled_results[1:] = [later]
+            return check(f_locals)
+
+        with patch.object(manager, "check", appending_check):
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                combined(x.double())
+        self.assertIs(combined.compiled_results[1], later)
+        self.assertEqual(combined(x.double()), x.double() * 2)
+
+    def _aot_compile_mode_branches(self):
+        self._hide_leaked_dynamo_globals()
+        mod = ModeBranchGlobalModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(3, 3)
+        model._aot_compile(
+            [
+                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
+                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
+            ]
+        )
+        return model, x
+
+    def _rescued_by_the_recheck(self, model, x):
+        # [1]'s guard on AOT_BRANCH_SCALE misses the global once and finds it on
+        # the next lookup, so the scan rejects [1] and the re-check accepts it:
+        # the call is served [1]'s graph at the cost of one more check() of its
+        # tree.
+        saved = self._install_global_probe("AOT_BRANCH_SCALE", misses=1)
+        manager = model.forward.compiled_results[1]._artifacts.guard_manager
+        with patch.object(manager, "check", wraps=manager.check) as check:
+            out = model(x, 1)
+        self.assertEqual(out, x * saved)
+        self.assertEqual(check.call_count, 2)
+
+    def test_module_dispatch_serves_a_call_the_guard_tree_accepts(self):
+        # A first check() can reject a call the same tree accepts on its next
+        # evaluation, which is what it does for real when the dict-tag fast path
+        # answers false without running the tree. That rejection is not an
+        # answer about the call, so a second pass has to rescue it. The
+        # rescuable result is [1], which the parent's fall-through never reached:
+        # it re-checked compiled_results[0] and raised [0]'s L['mode'] == 0.
+        model, x = self._aot_compile_mode_branches()
+        self._rescued_by_the_recheck(model, x)
+
+    def test_module_dispatch_rechecks_an_opted_out_result_whose_tree_accepts(self):
+        # The same false rejection of [1], with both results opted out. A
+        # re-check that skipped opted-out results would leave the call to the
+        # fall-through, which serves the FIRST opted-out result: [0], whose
+        # L['mode'] == 0 guard genuinely fails this call.
+        model, x = self._aot_compile_mode_branches()
+        for result in model.forward.compiled_results:
+            result.disable_guard_check()
+        self._rescued_by_the_recheck(model, x)
+
+    def test_module_dispatch_rechecks_before_honouring_an_opt_out(self):
+        # [0] opted out, [1] checked and falsely rejected once: the re-check
+        # finds [1]'s real match before the fall-through can hand the call to [0].
+        model, x = self._aot_compile_mode_branches()
+        model.forward.compiled_results[0].disable_guard_check()
+        self._rescued_by_the_recheck(model, x)
+
+    @parametrize("leading_opt_outs", [0, 1, 2])
+    def test_module_dispatch_no_match_falls_through_to_the_first_result(
+        self, leading_opt_outs
+    ):
+        # Nothing mocked: a call neither result guards is handed to
+        # compiled_results[0], which raises unless it opted out, in which case
+        # its graph runs; opting [1] out as well changes nothing. The graphs
+        # differ (x * 2 and x * 3), so the number says which result answered.
+        # The fourth row, [1] opted out alone, raises here like the first and
+        # is pinned by the commit that changes it.
+        model, x = self._aot_compile_mode_branches()
+        for result in model.forward.compiled_results[:leading_opt_outs]:
+            result.disable_guard_check()
+        if leading_opt_outs:
+            self.assertEqual(model(x, 2), x * 2)
+        else:
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                model(x, 2)
 
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
