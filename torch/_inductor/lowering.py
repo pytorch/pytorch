@@ -3156,6 +3156,129 @@ def inductor_force_stride_order(input_tensor, stride):
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
+@register_lowering(
+    inductor_prims.padded_xdl_scale_scatter_._opoverload,
+    type_promotion_kind=None,
+)
+def padded_xdl_scale_scatter_(
+    output,
+    values,
+    padded_rows,
+    padded_cols,
+    logical_row_chunk,
+    physical_row_chunk,
+    xdl,
+    col_chunk,
+    col_inner,
+):
+    """Scatter blocked scales into a caller-provided output buffer."""
+    values_size = list(values.get_size())
+    if len(values_size) != 2:
+        raise AssertionError("values must be two-dimensional")
+    if output.get_dtype() != values.get_dtype():
+        raise AssertionError("output and values must have the same dtype")
+
+    device = values.get_device_or_error()
+    if output.get_device_or_error() != device:
+        raise AssertionError("output and values must be on the same device")
+    if (
+        min(
+            logical_row_chunk,
+            physical_row_chunk,
+            xdl,
+            col_chunk,
+            col_inner,
+        )
+        <= 0
+        or physical_row_chunk < logical_row_chunk
+        or physical_row_chunk % (2 * xdl)
+        or col_chunk != 2 * col_inner
+    ):
+        raise AssertionError("invalid blocked layout parameters")
+
+    rows, cols = values_size
+    output_numel = padded_rows * padded_cols
+    required_physical_rows = (
+        FloorDiv(rows + logical_row_chunk - 1, logical_row_chunk) * physical_row_chunk
+    )
+    sizevars = V.graph.sizevars
+    sizevars.check_equals_and_simplify(
+        sympy_product(output.get_size()),
+        output_numel,
+    )
+    sizevars.check_leq(required_physical_rows, padded_rows)
+    sizevars.check_leq(cols, padded_cols)
+    sizevars.check(sympy.Eq(Mod(padded_rows, physical_row_chunk), sympy.S.Zero))
+    sizevars.check(sympy.Eq(Mod(padded_cols, col_chunk), sympy.S.Zero))
+
+    output.realize()
+
+    def shuffled_offset(physical_row, col):
+        row_outer = FloorDiv(physical_row, 2 * xdl)
+        row_inner = Mod(physical_row, 2 * xdl)
+        col_outer = FloorDiv(col, col_chunk)
+        col_inner_index = Mod(col, col_chunk)
+        return (
+            (
+                (
+                    (row_outer * FloorDiv(padded_cols, col_chunk) + col_outer)
+                    * col_inner
+                    + Mod(col_inner_index, col_inner)
+                )
+                * xdl
+                + Mod(row_inner, xdl)
+            )
+            * 2
+            + FloorDiv(col_inner_index, col_inner)
+        ) * 2 + FloorDiv(row_inner, xdl)
+
+    def output_indexer(index):
+        row, col = index
+        physical_row = FloorDiv(row, logical_row_chunk) * physical_row_chunk + Mod(
+            row, logical_row_chunk
+        )
+        return [shuffled_offset(physical_row, col)]
+
+    padding_index = sympy.Symbol(
+        "padded_scatter_index",
+        integer=True,
+        nonnegative=True,
+    )
+    padding_row = FloorDiv(padding_index, padded_cols)
+    padding_col = Mod(padding_index, padded_cols)
+    padding_row_in_chunk = Mod(padding_row, physical_row_chunk)
+    padding_logical_row = (
+        FloorDiv(padding_row, physical_row_chunk) * logical_row_chunk
+        + padding_row_in_chunk
+    )
+
+    scatter = ir.PaddedScatter(
+        device=device,
+        dtype=values.get_dtype(),
+        inner_fn=values.make_loader(),
+        ranges=values_size,
+        output_indexer=output_indexer,
+        padding=ir.PaddedScatterPadding(
+            numel=output_numel,
+            index_var=padding_index,
+            output_index=shuffled_offset(padding_row, padding_col),
+            predicate=sympy.Or(
+                padding_row_in_chunk >= logical_row_chunk,
+                padding_logical_row >= rows,
+                padding_col >= cols,
+            ),
+            value=127,
+        ),
+    )
+    buffer = ir.PaddedScatterBuffer(
+        name=None,
+        layout=ir.MutationLayoutSHOULDREMOVE(output),
+        data=scatter,
+    )
+    buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
+
+
 @register_lowering(inductor_prims.seed, type_promotion_kind=None)
 def inductor_seed(device: torch.device):
     raise AssertionError("should be handled in fuse_seed_creation_pass()")

@@ -514,6 +514,10 @@ class DtypePropagationOpsHandler:
     def device_assert_async(cond, msg: str) -> None:
         return None
 
+    @staticmethod
+    def padded_scatter_padding(name: str) -> None:
+        return None
+
 
 if TYPE_CHECKING:
     # pyrefly: ignore [inconsistent-inheritance]

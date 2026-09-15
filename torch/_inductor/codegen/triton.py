@@ -3331,6 +3331,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         TensorDescriptorOptions
     )
     transpose_discontiguous_tensor_descriptors_override: bool | None = None
+    _independent_store_index: itertools.count[int]
 
     def __init__(
         self,
@@ -3357,6 +3358,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Derived families share constants emitted in the function prologue.
         self._named_constants: dict[str, str] = {}
         self._named_constant_defs: IndentedBuffer = IndentedBuffer()
+        self.independent_store_body: IndentedBuffer | None = None
         self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
@@ -5291,6 +5293,86 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.outside_loop_vars.add(value)
 
         exit_stack.close()
+
+    def _padded_scatter_predicate_to_str(self, predicate: sympy.Expr) -> str:
+        if isinstance(predicate, (sympy.And, sympy.Or, sympy.Xor)):
+            operator = {
+                sympy.And: " & ",
+                sympy.Or: " | ",
+                sympy.Xor: " ^ ",
+            }[type(predicate)]
+            return operator.join(
+                f"({self._padded_scatter_predicate_to_str(arg)})"
+                for arg in predicate.args
+            )
+        if isinstance(predicate, sympy.Not):
+            return f"~({self._padded_scatter_predicate_to_str(predicate.args[0])})"
+        return self.kexpr(predicate)
+
+    def codegen_padded_scatter_padding(
+        self,
+        name: str,
+        numel: sympy.Expr,
+        index_var: sympy.Symbol,
+        output_index: sympy.Expr,
+        predicate: sympy.Expr,
+        value: bool | float | int,
+    ) -> None:
+        if self.independent_store_body is None:
+            self.independent_store_body = IndentedBuffer()
+            self._independent_store_index = itertools.count()
+
+        output = self.args.output(name)
+        suffix = next(self._independent_store_index)
+        loop_var = sympy.Symbol(
+            f"padded_scatter_index_{suffix}", integer=True, nonnegative=True
+        )
+        loop_offset = f"padded_scatter_offset_{suffix}"
+        block_size = 256
+        replacements = {index_var: loop_var}
+        numel_str = self.index_to_str(self.rename_indexing(numel))
+        output_index_str = self.index_to_str(
+            self.rename_indexing(sympy_subs(output_index, replacements))
+        )
+        predicate = sympy_subs(predicate, replacements)
+        predicate = sympy_subs(
+            predicate,
+            {
+                symbol: self.args.size(symbol)
+                for symbol in sorted(predicate.free_symbols, key=lambda s: s.name)
+                if symbol_is_type(
+                    symbol,
+                    (
+                        SymT.UNBACKED_INT,
+                        SymT.SIZE,
+                        SymT.PRECOMPUTED_SIZE,
+                        SymT.UNBACKED_FLOAT,
+                    ),
+                )
+            },
+        )
+        predicate_str = self._padded_scatter_predicate_to_str(predicate)
+        code = IndentedBuffer()
+        code.writeline("if tl.program_id(1) == 0 and tl.program_id(2) == 0:")
+        with code.indent():
+            code.writeline(
+                f"for {loop_offset} in tl.range("
+                f"tl.program_id(0) * {block_size}, {numel_str}, "
+                f"tl.num_programs(0) * {block_size}):"
+            )
+            with code.indent():
+                code.writeline(
+                    f"{loop_var} = {loop_offset} + tl.arange(0, {block_size})"
+                )
+                code.writeline(
+                    DeferredLine(
+                        name,
+                        f"tl.store({output} + {output_index_str}, "
+                        f"{constant_repr(value)}, "
+                        f"({loop_var} < {numel_str}) & ({predicate_str}))",
+                    )
+                )
+        self.independent_store_body.splice(code)
 
     def device_assert_async(self, cond, msg) -> None:
         self.compute.writeline(f"tl.device_assert({cond}, {repr(msg)})")
@@ -7813,6 +7895,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.codegen_prologue(self.body)
         self._prescan_host_tma_materializability()
         self.codegen_body()
+        if independent_store_body := self.independent_store_body:
+            self.body.splice(independent_store_body)
+            independent_store_body.clear()
+            self.independent_store_body = None
 
         tma_fields = (
             "tma_min_block_sizes",
