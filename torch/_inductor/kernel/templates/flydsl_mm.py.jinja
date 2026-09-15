@@ -1,4 +1,3 @@
-import os
 import threading
 
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
@@ -10,8 +9,9 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import
 )
 from torch._inductor.runtime.flydsl_cache import (
     configure_flydsl_cache_dir,
+    flydsl_tensor_arg,
+    precompile_flydsl,
     run_cached_flydsl,
-    temporary_env,
 )
 
 {{gen_defines()}}
@@ -21,12 +21,7 @@ _gemm_param = None
 _gemm_param_lock = threading.Lock()
 
 
-def _inductor_tensor_arg(tensor):
-    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
-
-
-{{def_kernel("mat1", "mat2")}}
-    output = {{get_output()}}
+def _flydsl_mm(output, mat1, mat2, stream, compile_only=False):
     global _gemm_param
     param = _gemm_param
     if param is None:
@@ -63,33 +58,32 @@ def _inductor_tensor_arg(tensor):
                     )
                 _gemm_param = param
     configure_flydsl_cache_dir()
-    compile_args = (
-        _inductor_tensor_arg(output),
-        _inductor_tensor_arg(mat1),
-        _inductor_tensor_arg(mat2),
-        param,
-        stream,
-    )
-    flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
-    compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
-        "1", "true", "yes", "on"
-    )
-    if compile_only != flydsl_compile_only:
-        raise RuntimeError(
-            "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
-            "by the FlyDSL precompile path"
+
+    def compile_args():
+        return (
+            flydsl_tensor_arg(output),
+            flydsl_tensor_arg(mat1),
+            flydsl_tensor_arg(mat2),
+            param,
+            stream,
         )
-    if flydsl_compile_only:
-        flyc.compile(gemm_gfx950, *compile_args)
+
+    if compile_only:
+        flyc.compile(gemm_gfx950, *compile_args())
     else:
         run_cached_flydsl(
             gemm_gfx950,
-            *compile_args,
+            compile_args_factory=compile_args,
             constexpr_param=param,
             compiler=flyc.compile,
             dispatch_args=(output, mat1, mat2, param, stream),
         )
     return output
+
+
+{{def_kernel("mat1", "mat2")}}
+    output = {{get_output()}}
+    return _flydsl_mm(output, mat1, mat2, stream)
 
 
 def {{kernel_name}}_precompile(
@@ -100,32 +94,7 @@ def {{kernel_name}}_precompile(
     device_capability=None,
     flydsl_gpu_arch=None,
 ):
-    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
-    dtype_mat1 = getattr(torch, precompile_dtypes["mat1"])
-    dtype_mat2 = getattr(torch, precompile_dtypes["mat2"])
-    dtype_output = getattr(torch, precompile_dtypes["output"])
-
-    shape_mat1 = tuple(precompile_shapes["mat1"])
-    shape_mat2 = tuple(precompile_shapes["mat2"])
-    shape_output = tuple(precompile_shapes["output"])
-
-    stride_mat1 = tuple(precompile_strides["mat1"])
-    stride_mat2 = tuple(precompile_strides["mat2"])
-    stride_output = tuple(precompile_strides["output"])
-
-    env_updates = {"COMPILE_ONLY": "1", "FLYDSL_COMPILE_ONLY": "1"}
-    if flydsl_gpu_arch is not None:
-        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
-
-    with temporary_env(env_updates):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        with FakeTensorMode():
-
-            def _fake_proxy(shape, stride, dtype):
-                return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
-
-            mat1 = _fake_proxy(shape_mat1, stride_mat1, dtype_mat1)
-            mat2 = _fake_proxy(shape_mat2, stride_mat2, dtype_mat2)
-            output = _fake_proxy(shape_output, stride_output, dtype_output)
-            {{kernel_name}}_main(mat1, mat2, output, stream=0)
+    precompile_flydsl(
+        _flydsl_mm, precompile_shapes, precompile_strides,
+        precompile_dtypes, flydsl_gpu_arch,
+    )

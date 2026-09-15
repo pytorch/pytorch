@@ -1,0 +1,80 @@
+import threading
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    launch_mxfp8_grouped_gemm_gfx950,
+    make_mxfp8_grouped_gemm_param,
+)
+from torch._inductor.runtime.flydsl_cache import (
+    configure_flydsl_cache_dir,
+    flydsl_tensor_arg,
+    precompile_flydsl,
+)
+
+{{gen_defines()}}
+
+
+_mxfp8_grouped_param = None
+_mxfp8_grouped_param_lock = threading.Lock()
+
+
+def _flydsl_mxfp8_grouped_mm(
+    output, mat1, mat2, scale_a, scale_b, offs, stream, compile_only=False
+):
+    global _mxfp8_grouped_param
+    if output.shape[0] == 0:
+        return output
+
+    param = _mxfp8_grouped_param
+    if param is None:
+        with _mxfp8_grouped_param_lock:
+            param = _mxfp8_grouped_param
+            if param is None:
+                param = make_mxfp8_grouped_gemm_param(
+                    GEMM_K,
+                    GEMM_N,
+                    GEMM_G,
+                    block_r=BLOCK_R,
+                    block_c=BLOCK_C,
+                )
+                _mxfp8_grouped_param = param
+
+    # The kernel reads B as a stack of [N, K] row-major weight planes. The
+    # lowering already required mat2's K dim to be the contiguous one, so this
+    # permute is a free relabelling of a contiguous buffer, not a copy.
+    weight = mat2.permute(0, 2, 1)
+    # scale_b arrives as the op's flat per-group scale stack, (G, N * K // 32).
+    configure_flydsl_cache_dir()
+    launch_mxfp8_grouped_gemm_gfx950(
+        output,
+        mat1,
+        weight,
+        scale_a,
+        scale_b,
+        offs,
+        param,
+        stream,
+        tensor_arg=flydsl_tensor_arg,
+        compile_only=compile_only,
+    )
+    return output
+
+
+{{def_kernel("mat1", "mat2", "scale_a", "scale_b", "offs")}}
+    output = {{get_output()}}
+    return _flydsl_mxfp8_grouped_mm(
+        output, mat1, mat2, scale_a, scale_b, offs, stream
+    )
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    precompile_flydsl(
+        _flydsl_mxfp8_grouped_mm, precompile_shapes, precompile_strides,
+        precompile_dtypes, flydsl_gpu_arch,
+    )
