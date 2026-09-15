@@ -986,15 +986,21 @@
   self: grad / (self.conj() * M_LN2)
   result: auto_element_wise
 
+# The gradient of logaddexp is the logistic weight sigmoid(self - other).
+# Written as 1 / (1 + exp(other - self)) that weight overflows to inf for large
+# operand gaps: the gradient itself survives (grad / inf == 0), but the
+# expression autograd differentiates for a double backward evaluates to
+# inf / inf == nan. sigmoid() is bounded and its backward is defined in terms
+# of its (bounded) output, so every higher-order derivative stays finite.
 - name: logaddexp(Tensor self, Tensor other) -> Tensor
-  self: grad / (1 + exp(other - self)).conj()
-  other: grad / (1 + exp(self - other)).conj()
-  result: self_t / (1 + exp(other_p - self_p)) + other_t / (1 + exp(self_p - other_p))
+  self: grad * sigmoid((self - other).conj())
+  other: grad * sigmoid((other - self).conj())
+  result: self_t * sigmoid(self_p - other_p) + other_t * sigmoid(other_p - self_p)
 
 - name: logaddexp2(Tensor self, Tensor other) -> Tensor
-  self: grad / (1 + pow(2, other - self))
-  other: grad / (1 + pow(2, self - other))
-  result: self_t / (1 + pow(2, other_p - self_p)) + other_t / (1 + pow(2, self_p - other_p))
+  self: grad * sigmoid((self - other) * M_LN2)
+  other: grad * sigmoid((other - self) * M_LN2)
+  result: self_t * sigmoid((self_p - other_p) * M_LN2) + other_t * sigmoid((other_p - self_p) * M_LN2)
 
 # Note [Gradient formula for xlogy at x = 0, y <= 0]
 # x * log(y) is not defined at y <= 0, so we cannot even talk about differentiability
