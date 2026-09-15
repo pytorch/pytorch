@@ -115,6 +115,26 @@ inline CaptureInfo captureInfoMayInitCtx(
   return {CaptureStatus(status), capture_id, graph};
 }
 
+inline void setCaptureDependencies(
+    cudaStream_t stream,
+    cudaGraphNode_t* dependencies,
+    size_t num_dependencies) {
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+  C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+      stream,
+      dependencies,
+      nullptr,
+      num_dependencies,
+      cudaStreamSetCaptureDependencies));
+#else
+  C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+      stream,
+      dependencies,
+      num_dependencies,
+      cudaStreamSetCaptureDependencies));
+#endif
+}
+
 template <typename T>
 void retainGraphUserObject(
     cudaGraph_t graph,

@@ -870,13 +870,7 @@ void ProcessGroupNCCL::WorkNCCL::recordEndEvent(
     // Replacing the captured frontier with a directly added node exempts it
     // from capture's join requirement, without delaying the NCCL launch or
     // making independent work on the origin stream wait for NCCL to finish.
-#if CUDA_VERSION >= 13000
-    C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
-        stream, &node, nullptr, 1, cudaStreamSetCaptureDependencies));
-#else
-    C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
-        stream, &node, 1, cudaStreamSetCaptureDependencies));
-#endif
+    c10::cuda::setCaptureDependencies(stream, &node, 1);
   }
 #endif
 }
