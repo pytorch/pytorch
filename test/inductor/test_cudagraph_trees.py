@@ -739,6 +739,32 @@ if HAS_CUDA_AND_TRITON:
                     "skipping cudagraphs due to graph with symbolic shapes inputs"
                 ).run(utils_log_stream.getvalue())
 
+        @torch._inductor.config.patch(
+            {
+                "graph_partition": True,
+                "triton.cudagraph_skip_dynamic_graphs": True,
+            }
+        )
+        def test_skip_symbolic_static_shapes(self):
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            scheduler_log_stream, scheduler_ctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            with scheduler_ctx():
+                actual = self.run_twc(
+                    foo,
+                    torch.rand([10], device="cuda"),
+                    torch.rand([10], device="cuda"),
+                )
+
+            self.assertEqual(actual.shape, (10,))
+            FileCheck().check_not("reason=dynamic shape ops").check(
+                "Created 1 graph partitions: 1 cudagraphable"
+            ).run(scheduler_log_stream.getvalue())
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)

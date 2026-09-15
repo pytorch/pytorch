@@ -5531,6 +5531,25 @@ def get_scheduler_node_symbol_uses(
     return free_symbol_uses
 
 
+def filter_graph_level_symbols(
+    symbols: OrderedSet[sympy.Symbol],
+) -> OrderedSet[sympy.Symbol]:
+    """Remove symbols that are always internal to generated kernels."""
+    return OrderedSet(
+        s
+        for s in symbols
+        if symbol_is_type(
+            s,
+            (
+                SymT.SIZE,
+                SymT.FLOAT,
+                SymT.UNBACKED_INT,
+                SymT.UNBACKED_FLOAT,
+            ),
+        )
+    )
+
+
 def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     """Check per-template flag, fall back to global config."""
     tb = template_node.get_template_node()
@@ -11223,7 +11242,7 @@ class Scheduler:
 
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
-            if get_scheduler_node_symbol_uses(node):
+            if filter_graph_level_symbols(get_scheduler_node_symbol_uses(node)):
                 return "dynamic shape ops"
 
         return None
@@ -11369,28 +11388,6 @@ class Scheduler:
                 # read_writes does not contain sympy.Expr
                 raise NotImplementedError(f"Unsupported input node type: {type(node)}")
 
-        def filter_symbols(
-            symbols: OrderedSet[sympy.Symbol],
-        ) -> OrderedSet[sympy.Symbol]:
-            """
-            Filters a set of symbols that are required for codegen. Skip symbols
-            that are always internal to kernels, such as SymT.TMP, SymT.INDEX,
-            and SymT.R0_INDEX.
-            """
-            return OrderedSet(
-                s
-                for s in symbols
-                if symbol_is_type(
-                    s,
-                    (
-                        SymT.SIZE,
-                        SymT.FLOAT,
-                        SymT.UNBACKED_INT,
-                        SymT.UNBACKED_FLOAT,
-                    ),
-                )
-            )
-
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
@@ -11398,7 +11395,7 @@ class Scheduler:
             *(get_input_node_symbols(node) for node in input_nodes.values())
         )
 
-        candidate_symbols = filter_symbols(candidate_symbols)
+        candidate_symbols = filter_graph_level_symbols(candidate_symbols)
 
         res: OrderedSet[sympy.Symbol] = OrderedSet()
         for s in candidate_symbols:
