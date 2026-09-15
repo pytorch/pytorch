@@ -1075,5 +1075,277 @@ class TestTheHookLogCannotForgeAWorkflowCommand(unittest.TestCase):
         )
 
 
+class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
+    """The file-count gate is decided in `prepare`, off the API's own count.
+
+    It used to be evaluated five steps into `review`, after a runner, two
+    checkouts, two symlink walks and two diffs — all discarded to publish a
+    100-byte `skipped_too_large` verdict. `prepare` already holds the PR
+    representation that carries `changed_files`.
+    """
+
+    def setUp(self):
+        self.text = STAGE2.read_text()
+        self.stripped = strip_comments(self.text)
+        self.prepare = strip_comments(job_block(self.text, "prepare"))
+
+    def test_prepare_reads_changed_files_and_publishes_the_decision(self):
+        self.assertIn("changed_files", self.prepare)
+        self.assertRegex(self.prepare, r"too_large=true")
+        self.assertRegex(self.prepare, r"too_large=false")
+        # Exported, or no downstream job can see it.
+        self.assertRegex(
+            self.prepare, r"too_large:\s*\$\{\{\s*steps\.freshness\.outputs\.too_large"
+        )
+
+    def test_the_gate_compares_against_the_same_constant_the_review_uses(self):
+        """One constant. Two gates that could disagree are worse than one gate."""
+        self.assertIn("MAX_CHANGED_FILES", self.prepare)
+        review = strip_comments(job_block(self.text, "review"))
+        self.assertIn("MAX_CHANGED_FILES", review)
+        # It is a workflow-level env, so both jobs resolve the same value.
+        header = self.stripped.split("jobs:", 1)[0]
+        self.assertTrue(
+            re.search(r"^\s*MAX_CHANGED_FILES:\s*\d+\s*$", header, re.M),
+            "MAX_CHANGED_FILES is not a workflow-level env; the two gates could drift",
+        )
+
+    def test_both_downstream_jobs_stand_down_when_prepare_says_too_large(self):
+        """`publish` too: it is `always()`, so skipping `review` is not enough."""
+        for job in ("review", "publish"):
+            block = strip_comments(job_block(self.text, job))
+            cond = block.split("runs-on:", 1)[0]
+            self.assertIn(
+                "needs.prepare.outputs.too_large != 'true'",
+                " ".join(cond.split()),
+                f"{job} would still run on the oversized path",
+            )
+
+    def test_prepare_writes_the_terminal_row_on_that_path(self):
+        """Otherwise the attempt is a `started` with no terminal — a runner death.
+
+        Scoped to the oversized step's own block. Asserting `--phase terminal`
+        against the whole job passed by borrowing it from the stale close-out,
+        which is the "test cannot fail" shape this suite exists to refuse.
+        """
+        # Bounded by the next STEP or the next JOB — this is the last step in
+        # `prepare`, so stopping only at `- name:` ran on into `review:`.
+        block = job_block(self.text, "prepare")
+        i = block.index("Close out an oversized request")
+        rest = block[i:]
+        nxt = rest.find("\n      - name:", 1)
+        block = rest if nxt == -1 else rest[:nxt]
+        body = textwrap.dedent(block.split("run: |", 1)[1])
+        # The runner expands `${{ ... }}` before bash ever sees it; bash reads
+        # it as a bad substitution. Render them the way Actions would.
+        body = re.sub(r"\$\{\{[^}]*\}\}", "CTX", body)
+        with tempfile.TemporaryDirectory() as td:
+            bin_dir = Path(td) / "bin"
+            bin_dir.mkdir()
+            log = Path(td) / "argv.log"
+            # Record what the emitter and the uploader were actually asked for.
+            # An assertion on the TEXT passes when the flag is moved into a
+            # trailing `#` comment, because `strip_comments` drops whole-line
+            # comments only. Running it does not.
+            (bin_dir / "python3").write_text(
+                f'#!/bin/bash\nprintf "%s\\n" "$*" >> {log}\n'
+                'for a in "$@"; do case "$a" in --out) n=1 ;; '
+                'esac; done\necho "{}" > terminal.json\nexit 0\n'
+            )
+            (bin_dir / "aws").write_text(
+                f'#!/bin/bash\nprintf "aws %s\\n" "$*" >> {log}\nexit 0\n'
+            )
+            for f in ("python3", "aws"):
+                (bin_dir / f).chmod(0o755)
+            proc = subprocess.run(
+                ["bash", "-c", body],
+                capture_output=True,
+                text=True,
+                cwd=td,
+                env={
+                    "PATH": f"{bin_dir}:/usr/bin:/bin",
+                    "S3_BUCKET": "b",
+                    "S3_PREFIX": "p",
+                },
+            )
+            recorded = log.read_text() if log.exists() else ""
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--phase terminal", recorded)
+        self.assertIn("--status skipped_too_large", recorded)
+        self.assertNotIn("--status skipped_stale", recorded)
+        self.assertRegex(recorded, r"aws s3 cp terminal\.json")
+
+
+class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
+    """`fetch-depth: 0` on pytorch/pytorch is several GB, fetched every review.
+
+    What the review needs from history is one commit — the fork point. It is
+    resolved by the API in `prepare`, on complete history, and fetched here at
+    depth 1. The review job must never compute it itself: `git merge-base` in a
+    shallow clone can return an older ancestor with exit status 0, and a
+    wrong-but-successful fork point yields a wrong diff rather than an error.
+    """
+
+    def setUp(self):
+        self.text = STAGE2.read_text()
+        self.review = job_block(self.text, "review")
+        self.stripped = strip_comments(self.review)
+        self.prepare = strip_comments(job_block(self.text, "prepare"))
+
+    def _step(self, marker: str, hay: str | None = None) -> str:
+        hay = self.stripped if hay is None else hay
+        i = hay.index(marker)
+        rest = hay[i:]
+        nxt = rest.find("\n      - name:", 1)
+        return rest if nxt == -1 else rest[:nxt]
+
+    def test_the_untrusted_checkout_is_shallow(self):
+        block = self._step("Untrusted checkout")
+        self.assertRegex(block, r"fetch-depth:\s*1\b")
+        self.assertNotRegex(block, r"fetch-depth:\s*0\b")
+
+    def test_no_checkout_in_the_review_job_asks_for_full_history(self):
+        self.assertNotRegex(self.stripped, r"fetch-depth:\s*0\b")
+
+    def test_the_review_job_never_computes_the_merge_base_itself(self):
+        """The whole point of resolving it upstream; a shallow one can be wrong."""
+        self.assertNotIn("merge-base", self.stripped)
+        self.assertNotIn("--deepen", self.stripped)
+        self.assertNotIn("--unshallow", self.stripped)
+
+    def test_prepare_resolves_it_from_the_compare_endpoint_and_validates_it(self):
+        self.assertIn("merge_base_commit.sha", self.prepare)
+        self.assertRegex(self.prepare, r"/compare/")
+        self.assertRegex(
+            self.prepare, r'"merge_base_sha=\$MERGE_BASE"\s*>>\s*"\$GITHUB_OUTPUT"'
+        )
+
+    def _run_corroboration(self, merge_base: str, td: str):
+        """Execute the corroboration step against a stubbed `gh`."""
+        i = self.text.index("Corroborate the claimed PR against the trusted API")
+        rest = self.text[i:]
+        nxt = rest.find("\n      - name:", 1)
+        body = textwrap.dedent(
+            (rest if nxt == -1 else rest[:nxt]).split("run: |", 1)[1]
+        )
+        sha = "a" * 40
+        pr_json = json.dumps(
+            {
+                "head": {"sha": sha, "repo": {"full_name": "o/r"}, "ref": "b"},
+                "base": {"sha": "b" * 40},
+                "draft": False,
+                "labels": [{"name": "in progress"}],
+                "changed_files": 3,
+            }
+        )
+        bin_dir = Path(td) / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "gh").write_text(
+            "#!/bin/bash\n"
+            f"case \"$2\" in\n  *compare*) printf '%s' {json.dumps(merge_base)} ;;\n"
+            f"  *) printf '%s' {json.dumps(pr_json)} ;;\nesac\n"
+        )
+        (bin_dir / "gh").chmod(0o755)
+        out = Path(td) / "gh_out"
+        out.write_text("")
+        return subprocess.run(
+            ["bash", "-c", body],
+            capture_output=True,
+            text=True,
+            cwd=td,
+            env={
+                "PATH": f"{bin_dir}:/usr/bin:/bin",
+                "GITHUB_OUTPUT": str(out),
+                "PR_NUMBER": "1",
+                "HEAD_SHA": sha,
+                "TRIGGER_EVENT": "labeled",
+                "REPO": "o/r",
+                "EVENT_HEAD_REPO": "o/r",
+                "EVENT_HEAD_BRANCH": "b",
+                "REVIEW_LABEL": "in progress",
+                "DONE_LABEL": "ready for review",
+                "MAX_CHANGED_FILES": "100",
+            },
+        ), out
+
+    def test_a_malformed_merge_base_aborts_the_run(self):
+        """Executed, not matched: a `#`-commented-out guard passes a text test."""
+        for bad in ("", "null", "not-a-sha", "a" * 39):
+            with tempfile.TemporaryDirectory() as td:
+                proc, out = self._run_corroboration(bad, td)
+            self.assertNotEqual(proc.returncode, 0, f"merge base {bad!r} was accepted")
+            self.assertIn("no usable merge base", proc.stdout + proc.stderr)
+
+    def test_a_well_formed_merge_base_is_exported(self):
+        with tempfile.TemporaryDirectory() as td:
+            proc, out = self._run_corroboration("c" * 40, td)
+            written = out.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"merge_base_sha={'c' * 40}", written)
+
+    def test_the_merge_base_reaches_the_review_job_as_an_output(self):
+        self.assertRegex(
+            self.stripped,
+            r"MERGE_BASE_SHA:\s*\$\{\{\s*needs\.prepare\.outputs\.merge_base_sha\s*\}\}",
+        )
+
+    def test_the_diff_is_taken_against_the_resolved_merge_base(self):
+        """Two-dot against the fork point — three-dot would recompute it here."""
+        diff = self._step("Build the diff and apply the size gate")
+        self.assertIn('git diff "${MERGE_BASE_SHA}" HEAD', diff)
+        self.assertIn('git diff --name-only -z "${MERGE_BASE_SHA}" HEAD', diff)
+        self.assertNotIn("...HEAD", diff)
+
+    def test_the_fetch_step_runs_before_the_diff_and_before_any_credential(self):
+        fetch = self.stripped.find("Fetch the merge base")
+        diff = self.stripped.find("Build the diff and apply the size gate")
+        creds = self.stripped.find("Configure AWS credentials via OIDC")
+        self.assertNotEqual(fetch, -1, "the merge-base fetch step is gone")
+        self.assertLess(fetch, diff)
+        self.assertLess(fetch, creds)
+
+    def test_the_fetch_proves_the_object_arrived(self):
+        """A partial fetch would otherwise surface as a confusing diff error."""
+        block = self._step("Fetch the merge base")
+        self.assertIn("--depth=1", block)
+        self.assertIn("git cat-file -e", block)
+
+    def test_the_merge_base_guard_is_executable_not_a_comment(self):
+        """`strip_comments` drops whole-line comments only, so assert by running.
+
+        Round 1 of the cross-model review defeated the earlier version of this
+        by appending `# no merge base between` to a `|| true`. The fix is to
+        execute the extracted shell rather than to match its text.
+        """
+        block = self._step("Fetch the merge base", hay=self.review)
+        body = textwrap.dedent(block.split("run: |", 1)[1])
+        with tempfile.TemporaryDirectory() as td:
+            bin_dir = Path(td) / "bin"
+            bin_dir.mkdir()
+            # `git fetch` succeeds, `git cat-file -e` fails: the object did not
+            # arrive. The step must exit non-zero.
+            (bin_dir / "git").write_text(
+                '#!/bin/bash\ncase "$1" in\n'
+                "  fetch) exit 0 ;;\n"
+                "  cat-file) exit 1 ;;\n"
+                "  *) exit 0 ;;\nesac\n"
+            )
+            (bin_dir / "git").chmod(0o755)
+            proc = subprocess.run(
+                ["bash", "-c", body],
+                capture_output=True,
+                text=True,
+                cwd=td,
+                env={
+                    "PATH": f"{bin_dir}:/usr/bin:/bin",
+                    "MERGE_BASE_SHA": "0" * 40,
+                },
+            )
+        self.assertNotEqual(
+            proc.returncode, 0, "a merge base that never arrived was accepted"
+        )
+        self.assertIn("did not arrive", proc.stdout + proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

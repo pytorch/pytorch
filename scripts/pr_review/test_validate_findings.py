@@ -195,5 +195,96 @@ class TestUnusableInputIsBlamedOnTheRightThing(ValidatorHarness):
         self.assertIn("path_not_in_diff", err)
 
 
+class TestTheAdvisoryChannelIsBounded(ValidatorHarness):
+    """The stderr here reaches the model as a SYSTEM message.
+
+    `validate-post-write.sh` folds it into `hookSpecificOutput.additionalContext`,
+    so every byte is PR-authored text arriving with trusted framing. The model
+    already reads the PR tree by design; what these tests pin is that the
+    quantity is bounded and the names are escaped, so the channel cannot be used
+    to deliver bulk attacker prose or a live markdown hazard.
+    """
+
+    def _diff_touching(self, names: list[str]) -> str:
+        return "".join(
+            f"diff --git a/{n} b/{n}\n--- a/{n}\n+++ b/{n}\n@@ -1,0 +1,1 @@\n+x\n"
+            for n in names
+        )
+
+    def test_the_changed_file_list_is_bounded_in_count(self):
+        names = [f"pkg/f{i:03d}.py" for i in range(60)]
+        code, err = self.run_validator(
+            _verdict([_finding(1, path="pkg/absent.py")]),
+            diff=self._diff_touching(names),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("60 files total", err)
+        # The bound is the point: the last name must NOT have been printed.
+        self.assertNotIn("f059.py", err)
+        self.assertIn("f000.py", err)
+
+    def test_a_markdown_active_filename_is_escaped_not_passed_through(self):
+        """`_is_repo_path` admits these; they are live markdown all the same."""
+        hostile = "pkg/@pytorchbot/[click]/see_#1_.py"
+        code, err = self.run_validator(
+            _verdict([_finding(1, path="pkg/absent.py")]),
+            diff=self._diff_touching([hostile]),
+        )
+        self.assertEqual(code, 1)
+        # Escaped, and still exactly recoverable as the file it names.
+        self.assertIn("pkg/\\@pytorchbot/\\[click\\]/see\\_\\#1\\_.py", err)
+        self.assertNotIn("pkg/@pytorchbot/[click]", err)
+
+    def test_the_drop_report_itself_is_bounded(self):
+        """The other direction: what the MODEL wrote comes back through here too.
+
+        `sanitize_findings` neutralizes each dropped `path` but tracks up to 200
+        records, so without a cap an injected model could push its own bulk text
+        back into its own system message.
+        """
+        findings = [_finding(1, path=f"pkg/absent{i:03d}.py") for i in range(40)]
+        code, err = self.run_validator(
+            _verdict(findings), diff=self._diff_touching(["pkg/sample.py"])
+        )
+        self.assertEqual(code, 1)
+        # MAX_FINDINGS caps the input at 25; MAX_REPORTED_DROPS caps the report
+        # at 20. The count is still stated in full, so nothing is hidden.
+        self.assertIn("25 finding(s) would be DISCARDED", err)
+        self.assertIn("showing the first 20", err)
+        self.assertIn("absent000.py", err)
+        self.assertNotIn("absent024.py", err)
+
+    def test_the_changed_file_list_is_printed_once_per_report(self):
+        """Per-item caps do not bound a list repeated once per dropped finding.
+
+        Measured before the fix: 100 names near `MAX_PATH` with 20 anchor
+        misses produced 161,113 bytes of advisory output, 20 copies of the
+        same capped list.
+        """
+        names = [f"pkg/f{i:03d}.py" for i in range(40)]
+        findings = [_finding(1, path=f"pkg/absent{i:03d}.py") for i in range(10)]
+        code, err = self.run_validator(
+            _verdict(findings), diff=self._diff_touching(names)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(err.count("Files this PR changed:"), 1, err[:400])
+        self.assertIn("40 files total", err)
+
+    def test_a_dropped_path_is_reported_as_the_publisher_escaped_it(self):
+        """Not re-escaped: it has already been through `sanitize_findings`.
+
+        Running the already-escaped value through `_is_repo_path` again would
+        report `pkg/[click].py` — a name the publisher accepts — as unusable,
+        and tell the model to fix a file name that was never the problem.
+        """
+        code, err = self.run_validator(
+            _verdict([_finding(1, path="pkg/[click].py")]),
+            diff=self._diff_touching(["pkg/sample.py"]),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("pkg/\\[click\\].py", err)
+        self.assertNotIn("not a usable repo path", err)
+
+
 if __name__ == "__main__":
     unittest.main()

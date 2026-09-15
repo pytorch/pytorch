@@ -66,6 +66,11 @@ jobs:
       head_sha: ${{ steps.coords.outputs.head_sha }}
       # From the trusted API, not the artifact — see the corroboration step.
       base_sha: ${{ steps.freshness.outputs.base_sha }}
+      # Resolved by the API's compare endpoint, on COMPLETE history. The review
+      # job then needs one commit rather than the whole graph, and never runs
+      # `git merge-base` itself — which in a shallow clone can return a wrong
+      # ancestor with exit status 0, silently producing the wrong diff.
+      merge_base_sha: ${{ steps.freshness.outputs.merge_base_sha }}
       # From the trusted API, not the artifact — see the corroboration step.
       is_fork: ${{ steps.freshness.outputs.is_fork }}
       trigger_event: ${{ steps.coords.outputs.trigger_event }}
@@ -74,6 +79,11 @@ jobs:
       # so nothing is recorded; stale means a real request was superseded.
       eligible: ${{ steps.freshness.outputs.eligible }}
       fresh: ${{ steps.freshness.outputs.fresh }}
+      # The file-count half of the size gate, decided here from the API's own
+      # `changed_files` so an oversized PR never allocates the review runner.
+      # The `review` job re-checks both halves against the real diff; this is
+      # an early exit, not the authority.
+      too_large: ${{ steps.freshness.outputs.too_large }}
       prompt_hash: ${{ steps.prompt.outputs.hash }}
     steps:
       - name: Trusted checkout
@@ -190,6 +200,24 @@ jobs:
           echo "base_sha=$API_BASE" >> "$GITHUB_OUTPUT"
           echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
 
+          # THE MERGE BASE IS RESOLVED HERE, BY THE API, AND NOWHERE ELSE.
+          # The review wants the three-dot diff, so it needs the fork point of
+          # the PR and its base. Computing that in the review job would mean
+          # either a full clone of pytorch/pytorch — several GB on every review
+          # — or `git merge-base` in a shallow one, which can return an older
+          # ancestor with exit status 0 when the true fork point is still behind
+          # a shallow boundary. A wrong-but-successful answer is the dangerous
+          # shape: the diff comes out wrong rather than erroring, and a reverted
+          # line can disappear from it entirely. `compare` computes it on
+          # complete history, in the trusted job, off the same token that
+          # corroborated everything else on this row.
+          MERGE_BASE=$(gh api "repos/${REPO}/compare/${API_BASE}...${API_HEAD}?per_page=1" \
+                         --jq '.merge_base_commit.sha')
+          [[ "$MERGE_BASE" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::no usable merge base for ${API_BASE}...${API_HEAD}"; exit 1;
+          }
+          echo "merge_base_sha=$MERGE_BASE" >> "$GITHUB_OUTPUT"
+
           IS_DRAFT=$(jq -r '.draft'                       <<<"$PR_JSON")
           # BOTH sides downcased, on BOTH checks: this repo spells the marker
           # `Ready for Review`, so the exact `==` made IS_DONE false for every
@@ -208,6 +236,22 @@ jobs:
             exit 0
           fi
           echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+          # Size, as early as it can possibly be known. `changed_files` is on
+          # the single-PR representation already in $PR_JSON, so deciding here
+          # costs nothing and saves everything the `review` job would otherwise
+          # spend before reaching its own gate: a runner, harden-runner, two
+          # checkouts, two symlink walks and two diffs, all discarded to emit a
+          # 100-byte verdict. Only the file count is knowable here — diff BYTES
+          # are not on this endpoint — so `review` still applies both.
+          CHANGED_FILES=$(jq -r '.changed_files // 0' <<<"$PR_JSON")
+          [[ "$CHANGED_FILES" =~ ^[0-9]+$ ]] || CHANGED_FILES=0
+          if [ "$CHANGED_FILES" -gt "${MAX_CHANGED_FILES}" ]; then
+            echo "::notice::PR #${PR_NUMBER} changes ${CHANGED_FILES} files, over the ${MAX_CHANGED_FILES} gate; skipping the review"
+            echo "too_large=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "too_large=false" >> "$GITHUB_OUTPUT"
+          fi
 
           # Freshness. Stage-1 concurrency collapses most rapid pushes, but one
           # landing while Stage 1 uploads still gets through; reviewing a
@@ -286,14 +330,46 @@ jobs:
           aws s3 cp terminal.json \
             "s3://${S3_BUCKET}/${S3_PREFIX}/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}_terminal.json"
 
+      # Mirrors the stale close-out above, for the same reason: `review` and
+      # `publish` are both skipped on this path, so the terminal row has to be
+      # written from here or the attempt records a `started` with no terminal
+      # and reads as a runner death.
+      - name: Close out an oversized request
+        if: |
+          steps.freshness.outputs.eligible == 'true' &&
+          steps.freshness.outputs.fresh == 'true' &&
+          steps.freshness.outputs.too_large == 'true'
+        env:
+          HARNESS: gha-interim
+          HARNESS_VERSION: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.coords.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.coords.outputs.head_sha }}
+          BASE_SHA: ${{ steps.freshness.outputs.base_sha }}
+          IS_FORK: ${{ steps.freshness.outputs.is_fork }}
+          TRIGGER_EVENT: ${{ steps.coords.outputs.trigger_event }}
+          TRIGGER_LABEL: ${{ env.REVIEW_LABEL }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          PROMPT_HASH: ${{ steps.prompt.outputs.hash }}
+          TRUSTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ROW_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%S.000) \
+            python3 scripts/pr_review/emit_row.py \
+              --phase terminal --status skipped_too_large --out terminal.json
+          aws s3 cp terminal.json \
+            "s3://${S3_BUCKET}/${S3_PREFIX}/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}_terminal.json"
+
   review:
     needs: prepare
-    if: needs.prepare.outputs.fresh == 'true'
+    if: needs.prepare.outputs.fresh == 'true' && needs.prepare.outputs.too_large != 'true'
     runs-on: ubuntu-latest
-    # 20 was calibrated on ciforge. Here `fetch-depth: 0` is a multi-GB clone of
-    # pytorch/pytorch and the model step alone may take 12, and a job-level
-    # timeout lands AFTER the model call is paid for and is then recorded as
-    # `model_error` - the infra/model conflation `downgrade()` exists to avoid.
+    # 20 was calibrated on ciforge. Here the model step alone may take 12, and a
+    # job-level timeout lands AFTER the model call is paid for and is then
+    # recorded as `model_error` - the infra/model conflation `downgrade()`
+    # exists to avoid. The headroom above that is for the checkout: the PR tree
+    # is fetched shallow and then deepened only to the merge base, which is
+    # ordinarily one round but is not bounded by anything we control.
     timeout-minutes: 30
     # A second, narrower guard than Stage 1's. Stage-1 concurrency cannot cancel
     # a Stage 2 that has already started, so without this a burst of pushes can
@@ -339,7 +415,11 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.prepare.outputs.head_sha }}
-          fetch-depth: 0
+          # Shallow, then deepened to the merge base by the step below. The
+          # diff is three-dot, so what the review actually needs is one commit
+          # — the merge base — not the whole history; `fetch-depth: 0` bought
+          # it with a multi-GB clone of pytorch/pytorch on every review.
+          fetch-depth: 1
           path: pr
           # The default writes the job's token into pr/.git/config as a base64
           # http.extraheader — a file the model's Read tool is allowed to open.
@@ -434,23 +514,46 @@ jobs:
           fi
           emit_util_errors
 
+      # Runs BEFORE any credential is configured and reads nothing out of the
+      # tree, so nothing a PR author controls reaches it: the only inputs are
+      # the API-resolved MERGE_BASE_SHA and git's own protocol replies.
+      - name: Fetch the merge base
+        working-directory: pr
+        env:
+          MERGE_BASE_SHA: ${{ needs.prepare.outputs.merge_base_sha }}
+        run: |
+          set -euo pipefail
+          # One commit, depth 1. `git diff A B` compares two TREES and needs no
+          # ancestry between them, so this is everything the diff below wants —
+          # no deepening, no `merge-base` in a shallow graph, no full clone.
+          # `git fetch <sha>` works because GitHub serves any reachable object
+          # by name; `--no-tags` keeps pytorch's thousands of tags out of it.
+          git fetch --no-tags --depth=1 origin "$MERGE_BASE_SHA"
+          git cat-file -e "${MERGE_BASE_SHA}^{commit}" || {
+            echo "::error::merge base ${MERGE_BASE_SHA} did not arrive"; exit 1;
+          }
+
       - name: Build the diff and apply the size gate
         id: diff
         working-directory: pr
         env:
-          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          MERGE_BASE_SHA: ${{ needs.prepare.outputs.merge_base_sha }}
         run: |
           set -euo pipefail
-          git cat-file -e "${BASE_SHA}^{commit}" || {
-            echo "::error::base commit ${BASE_SHA} is not present in this checkout"; exit 1;
+          git cat-file -e "${MERGE_BASE_SHA}^{commit}" || {
+            echo "::error::merge base ${MERGE_BASE_SHA} is not present in this checkout"; exit 1;
           }
-          # Three-dot: diff against the MERGE BASE, not the base tip. BASE_SHA is
-          # the base branch's current head, so a two-dot diff would render every
-          # commit the base gained since the PR diverged as a deletion by the PR.
-          git diff "${BASE_SHA}...HEAD" > /tmp/pr-diff.txt
+          # TWO-dot, against the MERGE BASE rather than the base tip — which is
+          # exactly what `base_tip...HEAD` means. Spelling it this way keeps the
+          # fork point a value the trusted job resolved on complete history,
+          # instead of something this shallow checkout has to work out. A
+          # two-dot diff against the base TIP would be the bug: every commit the
+          # base gained since the PR diverged would render as a deletion by the
+          # PR.
+          git diff "${MERGE_BASE_SHA}" HEAD > /tmp/pr-diff.txt
           # -z gives NUL-separated names, so a filename containing a newline
           # cannot inflate the count and slip past the size gate.
-          git diff --name-only -z "${BASE_SHA}...HEAD" > /tmp/pr-files.z
+          git diff --name-only -z "${MERGE_BASE_SHA}" HEAD > /tmp/pr-files.z
 
           FILES=$(tr -cd '\0' < /tmp/pr-files.z | wc -c)
           BYTES=$(stat -c%s /tmp/pr-diff.txt)
@@ -765,7 +868,13 @@ jobs:
 
   publish:
     needs: [prepare, review]
-    if: always() && needs.prepare.result == 'success' && needs.prepare.outputs.fresh == 'true'
+    # `too_large` excluded for the same reason `review` is: prepare already
+    # wrote the terminal row on that path, and `always()` would otherwise run
+    # this job against an artifact the skipped review never uploaded.
+    if: |
+      always() && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.fresh == 'true' &&
+      needs.prepare.outputs.too_large != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Same reason as `prepare`: this is how the publisher role stays out of
