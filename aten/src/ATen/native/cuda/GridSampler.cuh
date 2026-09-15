@@ -321,10 +321,10 @@ void get_cubic_coefficients_grad(
 }
 
 
-// A non-finite pixel coordinate behaves as a very far finite one, identically
-// on both devices and in every mode: a NaN far to the left, an infinity far on
-// its own side. min/max and fmod order non-finites differently per device, so
-// the mapping happens before any padding arithmetic.
+// A non-finite pixel coordinate samples as a far finite one, on both devices
+// and in every mode: a NaN far to the left, an infinity far on its own side.
+// It is mapped before the padding: min/max and fmod order non-finites
+// differently per device.
 template <typename scalar_t>
 __forceinline__ __device__
 scalar_t nonfinite_to_far(scalar_t coordinate) {
@@ -338,11 +338,10 @@ scalar_t nonfinite_to_far(scalar_t coordinate) {
   return coordinate;
 }
 
-// The pixel route's source index: the padding applied directly in pixel
-// units, defined for any coordinate. Border reaches its near edge from any
-// magnitude, reflection keeps its phase through fmod with no integer
-// conversion in the way, and zeros padding, which bounds nothing, guards the
-// later integer casts with an out-of-volume sentinel.
+// The pixel route's source index: the padding applied in pixel units, for any
+// coordinate. Border clips from any magnitude, reflection takes its parity with
+// fmod, and zeros sends a coordinate the later integer casts cannot hold to an
+// out-of-volume sentinel.
 template <typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t pixel_source_index(scalar_t x, index_t size,
@@ -353,8 +352,7 @@ scalar_t pixel_source_index(scalar_t x, index_t size,
     x = ::min(static_cast<scalar_t>(size - 1),
               ::max(x, static_cast<scalar_t>(0)));
   } else if (padding_mode == GridSamplerPadding::Reflection) {
-    // the bounds reflect_coordinates halves, reached without doubling an extent
-    // the type may not represent
+    // the bounds reflect_coordinates halves, formed without doubling the extent
     const scalar_t low =
         align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
     const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
@@ -370,8 +368,7 @@ scalar_t pixel_source_index(scalar_t x, index_t size,
               ::max(x, static_cast<scalar_t>(0)));
   } else if (!(x > static_cast<scalar_t>(INT_MIN) &&
                x < static_cast<scalar_t>(INT_MAX - 1))) {
-    // the kernels index in int on the 32-bit path, so the zeros arm, which
-    // bounds nothing, guards that conversion
+    // zeros bounds nothing: this guards the int conversion of the 32-bit path
     x = static_cast<scalar_t>(-100.0);
   }
   return x;
@@ -395,8 +392,7 @@ scalar_t pixel_source_index_set_grad(scalar_t x, index_t size,
     x = ::min(static_cast<scalar_t>(size - 1),
               ::max(x, static_cast<scalar_t>(0)));
   } else if (padding_mode == GridSamplerPadding::Reflection) {
-    // the bounds reflect_coordinates halves, reached without doubling an extent
-    // the type may not represent
+    // the bounds reflect_coordinates halves, formed without doubling the extent
     const scalar_t low =
         align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
     const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
@@ -421,20 +417,14 @@ scalar_t pixel_source_index_set_grad(scalar_t x, index_t size,
               ::max(x, static_cast<scalar_t>(0)));
   } else if (!(x > static_cast<scalar_t>(INT_MIN) &&
                x < static_cast<scalar_t>(INT_MAX - 1))) {
-    // the kernels index in int on the 32-bit path, so the zeros arm, which
-    // bounds nothing, guards that conversion
+    // zeros bounds nothing: this guards the int conversion of the 32-bit path
     x = static_cast<scalar_t>(-100.0);
   }
   return x;
 }
 
-// grid_sampler_unnormalize with the extent kept in index_t, for the kernels
-// that index with int64_t. Each integer quantity is formed in index_t and
-// converted where the int-taking helper converts it, so the two agree wherever
-// that helper is defined, including for an extent a scalar_t cannot represent
-// exactly. The copies
-// exist so the kernels that share grid_sampler_unnormalize keep the code they
-// generate today.
+// grid_sampler_unnormalize with the extent in index_t, for the kernels that
+// index with int64_t. It converts where the int-taking helper converts.
 template <typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t grid_sampler_unnormalize_sized(scalar_t coord, index_t size,
@@ -460,14 +450,9 @@ scalar_t grid_sampler_unnormalize_set_grad_sized(scalar_t coord, index_t size,
   }
 }
 
-// compute_coordinates with the extent kept in index_t: the tricubic kernels
-// index with index_t, and narrowing the extent to int before the padding would
-// fold a dimension past INT_MAX onto the wrong voxel. The reflection parity is
-// taken with fmod so no float ever converts to an integer type, and no
-// downgrade clips a valid position past INT_MAX: the caller's comparison gate
-// decides before any cast. The bounds it forms are the ones compute_coordinates
-// forms, for every extent; the parity and the missing downgrade are the two
-// deliberate departures named above.
+// compute_coordinates with the extent in index_t, the reflection parity
+// taken with fmod and no downgrade: no float converts to an integer, and a
+// position past INT_MAX keeps its voxel.
 template <typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
@@ -477,10 +462,7 @@ scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
     coord = ::min(static_cast<scalar_t>(size - 1),
                   ::max(coord, static_cast<scalar_t>(0)));
   } else if (padding_mode == GridSamplerPadding::Reflection) {
-    // reflect_coordinates takes twice_low and twice_high as integers and halves
-    // their difference. Halving what it doubles reaches the same two bounds with
-    // one conversion of an extent, which is exact where doubling in scalar_t is
-    // not, and leaves nothing that could overflow the index type.
+    // the bounds reflect_coordinates halves, formed without doubling the extent
     const scalar_t low =
         align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
     const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
@@ -498,10 +480,8 @@ scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
   return coord;
 }
 
-// The Keys coefficients with the coefficient as an argument, in the same
-// expression order as get_cubic_upsampling_coefficients, so a = -0.75
-// reproduces it bit for bit. The pixel route's helpers; the normalized route
-// keeps the historical fixed-coefficient ones.
+// The Keys coefficients with a as an argument, for the pixel route. a = -0.75
+// gives the bits of get_cubic_upsampling_coefficients.
 template<typename opmath_t>
 __forceinline__ __device__
 void get_cubic_coefficients_poly(opmath_t coeffs[4], opmath_t t, opmath_t a) {
@@ -516,9 +496,8 @@ void get_cubic_coefficients_poly(opmath_t coeffs[4], opmath_t t, opmath_t a) {
 template<typename opmath_t>
 __forceinline__ __device__
 void get_cubic_coefficients_a(opmath_t coeffs[4], opmath_t t, opmath_t a) {
-  // At an integer location the weights are exactly [0, 1, 0, 0] for every a;
-  // the polynomial evaluation only lands there when a's small multiples are
-  // exactly representable, so the identity is taken outright.
+  // At an integer location the weights are [0, 1, 0, 0] for every a, which the
+  // polynomial only reproduces exactly for some a.
   if (t == static_cast<opmath_t>(0)) {
     coeffs[0] = 0;
     coeffs[1] = 1;
@@ -543,9 +522,8 @@ void get_cubic_coefficients_grad_a(opmath_t coeffs[4], opmath_t t, opmath_t a) {
   coeffs[3] = (3 * a * x - 10 * a) * x + 8 * a;
 }
 
-// The device twin of resolve_cubic_taps in ATen/native/GridSampler.cpp. The
-// normalized route's taps: the historical fixed-coefficient helpers, exactly
-// the arithmetic it always ran.
+// The device twin of resolve_cubic_taps in ATen/native/GridSampler.cpp, with
+// the fixed a = -0.75 helpers of the normalized route.
 template <typename coord_t, typename opmath_t, typename index_t>
 __forceinline__ __device__
 void resolve_cubic_taps(
@@ -568,8 +546,7 @@ void resolve_cubic_taps(
   for (int i = 0; i < 4; ++i) {
     const coord_t tap = compute_coordinates_sized(
         base - 1 + i, size, padding_mode, align_corners);
-    // the comparison guards the cast: a coordinate that is not finite, or
-    // past the index type, fails it. The extent is exact only as an integer
+    // a tap that is not finite, or past the index type, fails before the cast
     const index_t index = (tap >= 0 && tap < index_limit)
         ? static_cast<index_t>(tap)
         : static_cast<index_t>(-1);
@@ -602,8 +579,7 @@ void resolve_cubic_taps(
   for (int i = 0; i < 4; ++i) {
     const coord_t tap = compute_coordinates_sized(
         base - 1 + i, size, padding_mode, align_corners);
-    // the comparison guards the cast: a coordinate that is not finite, or
-    // past the index type, fails it. The extent is exact only as an integer
+    // a tap that is not finite, or past the index type, fails before the cast
     const index_t index = (tap >= 0 && tap < index_limit)
         ? static_cast<index_t>(tap)
         : static_cast<index_t>(-1);

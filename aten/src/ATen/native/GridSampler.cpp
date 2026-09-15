@@ -44,11 +44,8 @@ using at::native::detail::GridSamplerPadding;
 
 namespace {
 
-  // compute_coordinates with the reflection parity taken by fmod rather than
-  // through an int, which is undefined once the fold count passes INT_MAX. It
-  // forms the same bounds as compute_coordinates and clips the same way, so the
-  // two answer alike wherever the merged helper is defined, and the CUDA twin
-  // reaches the same voxel where it is not.
+  // compute_coordinates with the reflection parity taken by fmod: an int fold count
+  // is undefined past INT_MAX. The bounds and the clipping are compute_coordinates'.
   template <typename scalar_t>
   static inline scalar_t compute_coordinates_sized(scalar_t coord, int64_t size,
                                                    GridSamplerPadding padding_mode,
@@ -56,8 +53,7 @@ namespace {
     if (padding_mode == GridSamplerPadding::Border) {
       coord = clip_coordinates(coord, size);
     } else if (padding_mode == GridSamplerPadding::Reflection) {
-      // the bounds reflect_coordinates halves, reached without doubling an extent
-      // the type may not represent
+      // the bounds reflect_coordinates halves, formed without doubling the extent
       const scalar_t low =
           align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
       const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
@@ -75,10 +71,10 @@ namespace {
     return coord;
   }
 
-  // A non-finite pixel coordinate behaves as a very far finite one, identically
-  // on both devices and in every mode: a NaN far to the left, an infinity far
-  // on its own side. std::min/max and fmod order non-finites differently per
-  // device, so the mapping happens before any padding arithmetic.
+  // A non-finite pixel coordinate samples as a far finite one, on both devices
+  // and in every mode: a NaN far to the left, an infinity far on its own side.
+  // It is mapped before the padding: min/max and fmod order non-finites
+  // differently per device.
   template <typename coord_t>
   static inline coord_t nonfinite_to_far(coord_t coordinate) {
     if (std::isnan(coordinate)) {
@@ -91,11 +87,10 @@ namespace {
     return coordinate;
   }
 
-  // The pixel route's source index: the padding applied directly in pixel
-  // units, defined for any coordinate. Border reaches its near edge from any
-  // magnitude, reflection keeps its phase through fmod with no integer
-  // conversion in the way, and zeros padding, which bounds nothing, guards
-  // the later integer casts with an out-of-volume sentinel.
+  // The pixel route's source index: the padding applied in pixel units, for any
+  // coordinate. Border clips from any magnitude, reflection takes its parity with
+  // fmod, and zeros sends a coordinate the later integer casts cannot hold to an
+  // out-of-volume sentinel.
   template <typename coord_t>
   static inline coord_t pixel_source_index(coord_t x, int64_t size,
                                            GridSamplerPadding padding_mode,
@@ -105,8 +100,7 @@ namespace {
       x = std::min(static_cast<coord_t>(size - 1),
                    std::max(x, static_cast<coord_t>(0)));
     } else if (padding_mode == GridSamplerPadding::Reflection) {
-      // the bounds reflect_coordinates halves, reached without doubling an extent
-      // the type may not represent
+      // the bounds reflect_coordinates halves, formed without doubling the extent
       const coord_t low =
           align_corners ? static_cast<coord_t>(0) : static_cast<coord_t>(-0.5);
       const coord_t span = static_cast<coord_t>(align_corners ? size - 1 : size);
@@ -145,8 +139,7 @@ namespace {
       x = std::min(static_cast<coord_t>(size - 1),
                    std::max(x, static_cast<coord_t>(0)));
     } else if (padding_mode == GridSamplerPadding::Reflection) {
-      // the bounds reflect_coordinates halves, reached without doubling an extent
-      // the type may not represent
+      // the bounds reflect_coordinates halves, formed without doubling the extent
       const coord_t low =
           align_corners ? static_cast<coord_t>(0) : static_cast<coord_t>(-0.5);
       const coord_t span = static_cast<coord_t>(align_corners ? size - 1 : size);
@@ -177,10 +170,8 @@ namespace {
     return x;
   }
 
-  // The four Keys taps around the unclipped coordinate: padding applies per
-  // tap, and a tap zero padding drops takes index -1 while keeping its
-  // coefficient. The a-parametric helpers reproduce the historical ones bit
-  // for bit at a = -0.75; the normalized route keeps the historical ones.
+  // The Keys coefficients with a as an argument, for the pixel route. a = -0.75 gives
+  // the bits of get_cubic_upsample_coefficients.
   template <typename opmath_t>
   static inline void get_cubic_coefficients_poly(opmath_t coeffs[4], opmath_t t, opmath_t a) {
     opmath_t x1 = t;
@@ -193,9 +184,8 @@ namespace {
 
   template <typename opmath_t>
   static inline void get_cubic_coefficients_a(opmath_t coeffs[4], opmath_t t, opmath_t a) {
-    // At an integer location the weights are exactly [0, 1, 0, 0] for every a;
-    // the polynomial evaluation only lands there when a's small multiples are
-    // exactly representable, so the identity is taken outright.
+    // At an integer location the weights are [0, 1, 0, 0] for every a, which the
+    // polynomial only reproduces exactly for some a.
     if (t == static_cast<opmath_t>(0)) {
       coeffs[0] = 0;
       coeffs[1] = 1;
@@ -219,9 +209,8 @@ namespace {
     coeffs[3] = (3 * a * x - 10 * a) * x + 8 * a;
   }
 
-  // The historical taps of the normalized route: the polynomial at a = -0.75
-  // with no integer-location branch, exactly the arithmetic it always ran. The
-  // a-parametric overload below belongs to the pixel route.
+  // The normalized route's taps: the polynomial at a = -0.75, with no integer-location
+  // branch. The overload below, which takes a, is the pixel route's.
   template <typename coord_t, typename opmath_t, typename index_t>
   static inline void resolve_cubic_taps(
       coord_t coord,
@@ -242,8 +231,7 @@ namespace {
     for (const auto i : c10::irange(4)) {
       const coord_t tap =
           compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
-      // the comparison guards the cast: a coordinate that is not finite, or past the
-      // index type, fails it. The extent is exact only as an integer
+      // a tap that is not finite, or past the index type, fails before the cast
       const index_t index = (tap >= 0 && tap < index_limit)
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
@@ -274,8 +262,7 @@ namespace {
     for (const auto i : c10::irange(4)) {
       const coord_t tap =
           compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
-      // the comparison guards the cast: a coordinate that is not finite, or past the
-      // index type, fails it. The extent is exact only as an integer
+      // a tap that is not finite, or past the index type, fails before the cast
       const index_t index = (tap >= 0 && tap < index_limit)
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
@@ -291,9 +278,8 @@ namespace {
                                   double cubic_coeff_a) {
     // See NOTE [ grid_sampler Native Functions ].
     // Add checks here in case this is called instead of grid_sampler.
-    // coord_t places a sample. A pixel coordinate is an index, which a half grid
-    // cannot hold past 2048, so it goes in the accumulate type; the normalized
-    // instantiations keep grid_t. opmath_t blends the taps.
+    // coord_t places a sample: the accumulate type for a pixel coordinate, an index a half
+    // grid cannot hold past 2048, and grid_t for a normalized one. opmath_t blends the taps.
     using opmath_t = at::opmath_type<scalar_t>;
     using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
     check_grid_sampler_common(input, grid);
@@ -343,8 +329,8 @@ namespace {
               coord_t y = grid_ptr_NDHW[grid_sCoor];
               coord_t z = grid_ptr_NDHW[2 * grid_sCoor];
 
-              // in pixel units the grid already is the source index, so only the
-              // padding mapping is applied; bicubic reads the raw coordinates instead
+              // in pixel units the source index is the padded grid value; bicubic reads the raw
+              // coordinates
               coord_t ix{}, iy{}, iz{};
               if (interpolation_mode != GridSamplerInterpolation::Bicubic) {
                 ix = pixel_coords ? pixel_source_index(x, inp_W, padding_mode, align_corners)
@@ -451,10 +437,9 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-                // The taps are placed around the unclipped index, so this branch samples at
-                // the raw x, y, z and never forms a clipped source index. It works in the
-                // accumulate type: the coefficients and the reflection arithmetic need more
-                // precision than a half carries, and CUDA computes every mode in it.
+                // The taps sit around the unclipped index, at the raw x, y, z, and are placed in
+                // the accumulate type: the coefficients and the reflection arithmetic need more
+                // precision than a half carries.
                 using tap_t = at::opmath_type<grid_t>;
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
                 int64_t x_taps[4], y_taps[4], z_taps[4];
@@ -475,9 +460,9 @@ namespace {
                                      inp_D, padding_mode, align_corners, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
                 }
 
-                // Only zero padding drops a tap, and only near the rim, so the sum splits: the
-                // common case reads all 64 taps and the test would only stop the vectoriser. A
-                // negative index marks a dropped tap; the OR is negative when any of them is.
+                // Only zero padding drops a tap, near the rim. With none dropped, all 64 are read
+                // without a per-tap test, for the vectoriser; the OR of the indices is negative
+                // when one is dropped.
                 const bool every_tap_reads =
                     (x_taps[0] | x_taps[1] | x_taps[2] | x_taps[3] |
                      y_taps[0] | y_taps[1] | y_taps[2] | y_taps[3] |
@@ -563,8 +548,7 @@ namespace {
             coord_t x = nonfinite_to_far(*grid_ptr_NHW);
             coord_t y = nonfinite_to_far(grid_ptr_NHW[grid_sCoor]);
 
-            // the grid already is the source index, so only the padding mapping
-            // is applied; the bicubic taps pad per tap from the raw value
+            // the source index is the padded grid value; the bicubic taps pad one by one
             coord_t ix = pixel_source_index(x, inp_W, padding_mode, align_corners);
             coord_t iy = pixel_source_index(y, inp_H, padding_mode, align_corners);
 
@@ -586,8 +570,8 @@ namespace {
               scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
               const scalar_t *inp_ptr_NC = inp_ptr_N;
               for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
-                // coord_t places the sample; the taps blend in the payload's
-                // accumulate type, as every CUDA route does
+                // coord_t places the sample; the taps blend in the payload's accumulate type,
+                // as on CUDA
                 auto res = static_cast<opmath_t>(0);
                 if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
                   res += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * static_cast<opmath_t>(nw);
@@ -722,9 +706,8 @@ namespace {
             coord_t x = nonfinite_to_far(*grid_ptr_NHW);
             coord_t y = nonfinite_to_far(grid_ptr_NHW[grid_sCoor]);
 
-            // multipliers for gradients on ix and iy; only the padding mapping
-            // contributes to them. The bicubic taps pad per tap from the raw
-            // value, so that branch uses x and y with no multiplier.
+            // multipliers for gradients on ix and iy, from the padding mapping alone; the
+            // bicubic branch reads x and y with no multiplier
             coord_t gix_mult, giy_mult;
             coord_t ix = pixel_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
             coord_t iy = pixel_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
@@ -936,8 +919,8 @@ namespace {
               coord_t y = grid_ptr_NDHW[grid_sCoor];
               coord_t z = grid_ptr_NDHW[2 * grid_sCoor];
 
-              // multipliers for gradients on ix, iy, and iz; in pixel units only
-              // the padding mapping contributes to them; bicubic reads the raw coordinates
+              // multipliers for gradients on ix, iy, and iz, from the padding mapping alone in
+              // pixel units; bicubic reads the raw coordinates
               coord_t gix_mult{}, giy_mult{}, giz_mult{};
               coord_t ix{}, iy{}, iz{};
               if (interpolation_mode != GridSamplerInterpolation::Bicubic) {
@@ -1088,9 +1071,8 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-                // The taps are placed around the unclipped index, so this branch forms no
-                // clipped source index; the grid multipliers are the unnormalize ones, and
-                // the identity in pixel units.
+                // The taps sit around the unclipped index; the grid multipliers are the
+                // unnormalize ones, and the identity in pixel units.
                 using tap_t = at::opmath_type<grid_t>;
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
                 opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];
@@ -1121,7 +1103,7 @@ namespace {
 
                 const scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
                 const scalar_t *inp_ptr_NC = inp_ptr_N;
-                // an offset rather than a pointer, since grad_input is undefined when it is not asked for
+                // an offset, not a pointer: grad_input is undefined when it is not asked for
                 int64_t gInp_offset_NC = n * gInp_sN;
                 for (int64_t c = 0; c < C;
                      ++c, gOut_ptr_NCDHW += gOut_sC, gInp_offset_NC += gInp_sC, inp_ptr_NC += inp_sC) {

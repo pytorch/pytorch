@@ -12082,9 +12082,8 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # pixel ops are CPU/CUDA only
     @onlyNativeDeviceTypes
     def test_grid_sample_pixel_parity(self, device, mode, padding_mode):
-        # In pixel units the grid addresses input pixel centers directly, so the
-        # pixel route must match the normalized route wherever both describe the
-        # same location, including out of range where the padding engages.
+        # The pixel route matches the normalized route at the same location, including
+        # out of range where the padding engages.
         def to_normalized(grid, sizes, align_corners):
             out = grid.clone()
             for i, size in enumerate(sizes):
@@ -12148,9 +12147,8 @@ class TestNNDeviceType(NNTestCase):
                             align_corners=False, pixel_coords=True, cubic_coeff_a=-0.3)
         self.assertEqual(out, input3, atol=0, rtol=0)
 
-        # the double backward takes the same identity: with y exactly integer the
-        # value weights select one row, so the second-order mass on the other
-        # rows is exactly zero, for a non-binary coefficient too
+        # the double backward takes the same identity: at an integer y the other rows get
+        # exactly zero second-order mass, for a non-binary coefficient too
         input = torch.randn(1, 1, 7, 8, device=device, requires_grad=True)
         grid = torch.tensor([[[[2.3, 3.0], [4.7, 3.0]]]], device=device, requires_grad=True)
         out = F.grid_sample(input, grid, mode='bicubic', padding_mode='border',
@@ -12188,9 +12186,8 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # pixel ops are CPU/CUDA only
     @onlyNativeDeviceTypes
     def test_grid_sample_pixel_tiling_invariance(self, device):
-        # cropping a window and shifting the grid by the offset is bitwise
-        # invariant: the property that makes the mode usable by tiled and
-        # out-of-core pipelines. Odd sizes and offsets on purpose.
+        # cropping a window and shifting the grid by the offset gives the same bits, which
+        # tiled and out-of-core pipelines rely on; odd sizes and offsets
         for mode in ('bilinear', 'nearest', 'bicubic'):
             volume = torch.randn(1, 2, 37, 53, device=device)
             grid = torch.rand(1, 5, 7, 2, device=device)
@@ -12299,10 +12296,8 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # pixel ops are CPU/CUDA only
     @onlyNativeDeviceTypes
     def test_grid_sample_pixel_double_grid_precision(self, device):
-        # and the double grid actually buys the precision it exists for: at
-        # x = 32767.1 the float32 cast alone moves the coordinate by ~3.9e-4
-        # of a voxel (the ULP at 32767 is 2^-9), far above the double route's
-        # own error
+        # at x = 32767.1 a float32 cast moves the coordinate by ~3.9e-4 of a voxel (the
+        # ULP at 32767 is 2^-9), far above the double route's error
         wide = torch.zeros(1, 1, 1, 1, 32769, device=device)
         wide[0, 0, 0, 0, 32768] = 1.0
         grid = torch.tensor([[[[[32767.1, 0.0, 0.0]]]]], dtype=torch.double, device=device)
@@ -12316,9 +12311,8 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # pixel ops are CPU/CUDA only
     @onlyNativeDeviceTypes
     def test_grid_sample_pixel_autocast(self, device):
-        # under autocast the route promotes exactly like grid_sample, with one
-        # exception: a double grid is a precision contract and is preserved,
-        # without dragging the payload up to double
+        # under autocast the route promotes like grid_sample, except that a double grid
+        # stays double and the payload is not promoted to it
         if device != 'cpu':
             with torch.autocast(device):
                 half = torch.randn(1, 1, 5, 6, device=device, dtype=torch.half)
@@ -12335,8 +12329,7 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # pixel ops are CPU/CUDA only
     @onlyNativeDeviceTypes
     def test_grid_sample_pixel_non_contiguous(self, device):
-        # the private ops sit outside the OpInfo battery, so the stride
-        # handling gets its own pin: transposed input, flipped grid
+        # the private ops have no OpInfo: transposed input, flipped grid
         for mode in ('bilinear', 'nearest', 'bicubic'):
             v = torch.randn(2, 3, 6, 7, dtype=torch.double, device=device).transpose(2, 3)
             g = (torch.rand(2, 4, 6, 2, dtype=torch.double, device=device) * 5)[:, :, ::2]
@@ -12379,9 +12372,8 @@ class TestNNDeviceType(NNTestCase):
                     gi, gg = torch.autograd.grad(out.sum(), (v3, g3), allow_unused=True)
                     self.assertTrue(bool(gi.isfinite().all()))
 
-        # the padding semantics hold at any magnitude, not just finiteness: a
-        # huge coordinate under border reaches its NEAR edge, and reflection
-        # keeps its phase, matching the reference computed directly
+        # at any magnitude border reaches the near edge and reflection keeps its parity,
+        # against a reference computed directly
         row = torch.arange(1., 7., device=device).repeat(4, 1)[None, None]
         for x, expected in ((1e30, 6.0), (1e10, 6.0), (-1e30, 1.0), (-1e10, 1.0),
                             (float('inf'), 6.0), (-float('inf'), 1.0)):
@@ -12428,9 +12420,8 @@ class TestNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
     def test_grid_sample_pixel_bicubic_double_backward_low_precision(self, device, dtype):
-        # The kernels place a sample in the accumulate type, so the double backward has to
-        # take the same one. The reference runs the same quantised values in double.
-        # 5-D in normalized units is covered by test_grid_sample_3d_bicubic_double_backward_low_precision.
+        # Half and bfloat16 grids against the same quantized data in double. 5-D in normalized
+        # units is in test_grid_sample_3d_bicubic_double_backward_low_precision.
         for dim, pixel_coords in ((2, False), (2, True), (3, True)):
             shape = (1, 1, 5, 512) if dim == 2 else (1, 1, 4, 5, 512)
             volume = (torch.randn(*shape, device=device) * 0.01).to(dtype)
@@ -12454,9 +12445,8 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # pixel ops are CPU/CUDA only
     @onlyNativeDeviceTypes
     def test_grid_sample_pixel_bicubic_last_voxel_of_a_wide_axis(self, device, size):
-        # Neither size is a float32, and the second is not a double: converted, the extent
-        # equals the last valid index, which a bound taken in that type drops. The views
-        # store a single element.
+        # Neither extent is exact in float32, and the second is not exact in double.
+        # The views store a single element.
         for dim in (2, 3):
             volume = torch.ones((1,) * (dim + 2), device=device).expand((1,) * (dim + 1) + (size,))
             grid = torch.tensor([float(size - 1)] + [0.0] * (dim - 1), device=device)

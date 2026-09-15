@@ -62,8 +62,7 @@ namespace {
       coord_t x = grid.data[grid_offset];
       coord_t y = grid.data[grid_offset + grid_sCoor];
 
-      // in pixel units the grid already is the source index, so only the
-      // padding mapping is applied
+      // in pixel units the source index is the padded grid value
       coord_t ix = pixel_coords ? pixel_source_index(x, inp_W, padding_mode, align_corners)
                                 : grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
       coord_t iy = pixel_coords ? pixel_source_index(y, inp_H, padding_mode, align_corners)
@@ -120,8 +119,7 @@ namespace {
           }
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-        // the pixel launcher routes bicubic to grid_sampler_2d_bicubic_pixel_kernel,
-        // so this branch only exists in the normalized instantiations
+        // the pixel launcher routes bicubic to grid_sampler_2d_bicubic_pixel_kernel
         if constexpr (pixel_coords) {
           // the launchers route pixel bicubic to the dedicated kernels
           CUDA_KERNEL_ASSERT(false);
@@ -300,7 +298,7 @@ namespace {
 
       const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
       const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
-      // an offset rather than a pointer, since grad_input is undefined when it is not asked for
+      // an offset, not a pointer: grad_input is undefined when it is not asked for
       index_t gInp_offset_NC = n * gInp_sN;
       for (index_t c = 0; c < C;
            ++c, gOut_ptr_NCHW += gOut_sC, gInp_offset_NC += gInp_sC, inp_ptr_NC += inp_sC) {
@@ -345,8 +343,7 @@ namespace {
       const GridSamplerPadding padding_mode,
       bool align_corners) {
 
-    // pixel_coords is a template parameter so the historic instantiation carries
-    // no branch for it: its dead half folds away at compile time.
+    // pixel_coords is a template parameter: the normalized instantiation has no branch on it
     using opmath_t = at::opmath_type<scalar_t>;
     using coord_t = at::opmath_type<grid_t>;
     index_t C = input.sizes[1];
@@ -384,8 +381,7 @@ namespace {
       coord_t y = grid.data[grid_offset + grid_sCoor];
       coord_t z = grid.data[grid_offset + 2 * grid_sCoor];
 
-      // in pixel units the grid already is the source index, so only the
-      // padding mapping is applied
+      // in pixel units the source index is the padded grid value
       coord_t ix = pixel_coords ? pixel_source_index(x, inp_W, padding_mode, align_corners)
                                 : grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
       coord_t iy = pixel_coords ? pixel_source_index(y, inp_H, padding_mode, align_corners)
@@ -492,9 +488,8 @@ namespace {
     }
   }
 
-  // Bicubic gets its own kernel rather than a branch in the one above: the 64 taps need twice
-  // the registers of a trilinear sample, and a shared kernel is allocated for its worst branch,
-  // which would cost bilinear and nearest the occupancy of a mode they never take.
+  // Bicubic has a kernel of its own: a kernel is allocated for its worst branch, and the 64
+  // taps need twice the registers of a trilinear sample.
   template <typename scalar_t, typename grid_t, bool pixel_coords, typename index_t>
   C10_LAUNCH_BOUNDS_1(512)
   __global__ void grid_sampler_3d_bicubic_kernel(
@@ -542,8 +537,7 @@ namespace {
       coord_t y = grid.data[grid_offset + grid_sCoor];
       coord_t z = grid.data[grid_offset + 2 * grid_sCoor];
 
-      // The taps are placed around the unclipped index, so this branch samples at the raw
-      // x, y, z rather than at the clipped ix, iy, iz above.
+      // The taps sit around the unclipped index, at the raw x, y, z.
       opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
       index_t x_taps[4], y_taps[4], z_taps[4];
       if constexpr (pixel_coords) {
@@ -601,8 +595,7 @@ namespace {
 // lies relative to the entire tensor, so we pass the base grad_input.data and full offset information,
 // including batch * channel offset (NC_offset).
 
-  // Bicubic's own backward kernel, for the reason its forward has one: 64 taps hold twice the
-  // registers of the trilinear sample the shared kernel is otherwise allocated for.
+  // Bicubic's own backward kernel, for the reason given on its forward kernel.
   template <typename scalar_t, typename grid_t, bool pixel_coords, typename index_t>
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_3d_bicubic_backward_kernel(
@@ -668,9 +661,8 @@ namespace {
 
       using opmath_t = at::opmath_type<scalar_t>;
       using tap_t = at::opmath_type<grid_t>;
-      // The taps are placed around the unclipped index, so the clipping ix, iy, iz went through
-      // above is undone here; their multipliers are the unnormalize ones, and the identity in
-      // pixel units.
+      // The taps sit around the unclipped index; the grid multipliers are the unnormalize ones,
+      // and the identity in pixel units.
       const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
       opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
       opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];
@@ -710,8 +702,7 @@ namespace {
             const bool plane_reads = z_taps[k] >= 0 && y_taps[j] >= 0;
             auto row = plane_reads ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
                                    : inp_ptr_NC;
-            // the grad_input strides are int64_t whatever index_t is, so the offset is narrowed
-            // back to index_t, which is what fastAtomicAdd measures its span in
+            // the grad_input strides are int64_t; fastAtomicAdd takes the offset in index_t
             const index_t grad_row = plane_reads
                 ? NC_offset + static_cast<index_t>(z_taps[k] * gInp_sD + y_taps[j] * gInp_sH)
                 : NC_offset;
@@ -792,15 +783,13 @@ namespace {
       const index_t n = index / (out_H * out_W);
       const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y coordinates from grid. A pixel coordinate
-      // is an index, so it goes in the accumulate type; the normalized instantiation
-      // keeps grid_t.
+      // get the corresponding input x, y coordinates from grid: in the accumulate type for
+      // a pixel coordinate, an index, and in grid_t for a normalized one
       using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
       coord_t x = grid.data[grid_offset];
       coord_t y = grid.data[grid_offset + grid_sCoor];
 
-      // multipliers for gradients on ix and iy; in pixel units only the
-      // padding mapping contributes to them
+      // multipliers for gradients on ix and iy, from the padding mapping alone in pixel units
       coord_t gix_mult, giy_mult;
       coord_t ix, iy;
       if (pixel_coords) {
@@ -895,8 +884,7 @@ namespace {
         gGrid_ptr_NHW[0] = static_cast<grid_t>(0);
         gGrid_ptr_NHW[1] = static_cast<grid_t>(0);
       } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-        // the pixel launcher routes bicubic to grid_sampler_2d_bicubic_pixel_backward_kernel,
-        // so this branch only exists in the normalized instantiations
+        // the pixel launcher routes bicubic to grid_sampler_2d_bicubic_pixel_backward_kernel
         if constexpr (pixel_coords) {
           // the launchers route pixel bicubic to the dedicated kernels
           CUDA_KERNEL_ASSERT(false);
@@ -1023,16 +1011,14 @@ namespace {
       const index_t n = index / (out_D * out_H * out_W);
       const auto grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y, z coordinates from grid. A pixel
-      // coordinate is an index, so it goes in the accumulate type; the normalized
-      // instantiation keeps grid_t.
+      // get the corresponding input x, y, z coordinates from grid: in the accumulate type for
+      // a pixel coordinate, an index, and in grid_t for a normalized one
       using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
       coord_t ix = grid.data[grid_offset];
       coord_t iy = grid.data[grid_offset + grid_sCoor];
       coord_t iz = grid.data[grid_offset + 2 * grid_sCoor];
 
-      // multipliers for gradients on ix, iy, and iz; in pixel units only the
-      // padding mapping contributes to them
+      // multipliers for gradients on ix, iy, and iz, from the padding mapping alone in pixel units
       coord_t gix_mult, giy_mult, giz_mult;
       if (pixel_coords) {
         ix = pixel_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);

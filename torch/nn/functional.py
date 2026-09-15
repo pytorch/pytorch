@@ -5695,8 +5695,7 @@ def grid_sample(
             )
 
     if align_corners is None:
-        # In pixel units align_corners only shapes the reflection padding, so the
-        # normalized route's 1.3.0 behavior-change warning does not apply there.
+        # align_corners only shapes the reflection padding in pixel units: no warning
         if not pixel_coords:
             warnings.warn(
                 "Default grid_sample and affine_grid behavior has changed "

@@ -59,7 +59,7 @@ inline void check_grid_sampler_common(
 }
 
 // The _pixel ops read the grid in pixel units and accept it in the input's own
-// dtype or in double, so full precision coordinates can drive a low precision
+// dtype or in double, for full precision coordinates over a low precision
 // payload. See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_pixel(
   const TensorBase& input,

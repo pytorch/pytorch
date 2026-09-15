@@ -175,9 +175,8 @@ static Tensor binary_cross_entropy_banned(const Tensor & /*unused*/, const Tenso
            "safe to autocast.");
 }
 
-// The pixel grid_sampler ops promote like grid_sampler, with one exception: a
-// double grid is a deliberate precision contract, so it is never cast and the
-// payload is not dragged up to double with it.
+// The pixel grid_sampler ops promote like grid_sampler, except that a double
+// grid stays double and the payload is not promoted to it.
 template <c10::DeviceType device_type>
 static Tensor grid_sampler_2d_pixel_autocast(
     const Tensor& input, const Tensor& grid, int64_t interpolation_mode,
