@@ -19737,6 +19737,98 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(got, expected)
 
 
+class IdentityComparisonTests(torch._inductor.test_case.TestCase):
+    def test_is_on_mutable_attr_toggles_branch_correctly(self):
+        # https://github.com/pytorch/pytorch/issues/196173
+        # Control flow based on the identity of mutable object attributes
+        # must not reuse a stale graph after an attribute is rebound to a
+        # different (same-typed) object.
+        class Holder:
+            def __init__(self):
+                self.left = object()
+                self.right = object()
+                self.current = self.left
+
+        def fn(x, holder):
+            is_left = holder.current is holder.left
+            holder.current = holder.right if is_left else holder.left
+            if is_left:
+                return x.square()
+            return -x
+
+        def run(callable_fn):
+            holder = Holder()
+            x = torch.tensor([2.0, 3.0])
+            outputs = []
+            for _ in range(6):
+                outputs.append(callable_fn(x, holder).clone())
+            return outputs, holder.current is holder.left
+
+        eager_outputs, eager_final = run(fn)
+        torch._dynamo.reset()
+        compiled_outputs, compiled_final = run(torch.compile(fn, backend="eager"))
+        self.assertEqual(eager_final, compiled_final)
+        for eager, compiled in zip(eager_outputs, compiled_outputs):
+            self.assertEqual(eager, compiled)
+
+    def test_is_on_local_args_recompiles_when_identity_changes(self):
+        # Passing two distinct objects to a compiled function that compares
+        # them with `is` must not reuse a graph compiled for identical args.
+        def fn(x, a, b):
+            if a is b:
+                return x.square()
+            return -x
+
+        o1, o2 = object(), object()
+        x = torch.tensor([2.0, 3.0])
+        opt = torch.compile(fn, backend="eager")
+        torch.testing.assert_close(opt(x, o1, o1), x.square())
+        torch.testing.assert_close(opt(x, o1, o2), -x)
+        torch.testing.assert_close(opt(x, o2, o1), -x)
+
+    def test_eq_identity_fallback_is_guarded(self):
+        # object.__eq__ defaults to identity, so == between objects without a
+        # custom __eq__ is an identity comparison and must be guarded the same
+        # way as `is`.
+        class Holder:
+            def __init__(self):
+                self.left = object()
+                self.right = object()
+                self.current = self.left
+
+        def fn(x, holder):
+            if holder.current == holder.left:
+                return x.square()
+            return -x
+
+        holder = Holder()
+        x = torch.tensor([2.0, 3.0])
+        opt = torch.compile(fn, backend="eager")
+        torch.testing.assert_close(opt(x, holder), x.square())
+        holder.current = holder.right
+        torch.testing.assert_close(opt(x, holder), -x)
+
+    def test_is_installs_identity_guards_on_sources(self):
+        class Holder:
+            def __init__(self):
+                self.a = object()
+                self.b = object()
+
+        def fn(x, holder):
+            return x.square() if holder.a is holder.b else -x
+
+        x = torch.tensor([2.0, 3.0])
+        holder = Holder()
+        opt = torch.compile(fn, backend="eager")
+        opt(x, holder)
+
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+        guard_str = str(cache_entries[0].guard_manager)
+        self.assertIn("ID_MATCH: ___check_obj_id(L['holder'].a", guard_str)
+        self.assertIn("ID_MATCH: ___check_obj_id(L['holder'].b", guard_str)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
