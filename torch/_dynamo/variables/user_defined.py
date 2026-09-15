@@ -3034,9 +3034,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 hints=["Ensure that the name is a string."],
             )
         if not tx.output.side_effects.is_attribute_mutation(self):
-            raise AssertionError(
-                "Attempted setattr on a user-defined object that does not have "
-                "an AttributeMutation mutation_type"
+            if (
+                self.source is not None
+                and tx.output.side_effects.cls_supports_mutation_side_effects(
+                    type(self.value)
+                )
+            ):
+                unimplemented(
+                    gb_type="Attribute mutation on a sourced but untracked user-defined object",
+                    context=f"object={self}, name={name_str}, value={value}",
+                    explanation="Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
+            unimplemented(
+                gb_type="Attribute mutation on an untracked user-defined object",
+                context=f"object={self}, name={name_str}, value={value}",
+                explanation=(
+                    "Dynamo cannot safely apply this attribute mutation because "
+                    "the object is not tracked for mutation."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
 
         if (
