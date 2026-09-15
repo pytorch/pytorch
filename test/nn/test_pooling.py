@@ -1585,6 +1585,58 @@ torch.{device_type}.synchronize()
         helper(4, 8, 7, 7, 7, 3, padding=1, stride=1)
         helper(2, 16, 10, 10, 10, 3, stride=2)
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    def test_avg_pool3d_backward_uniform_divisor(self, device, dtype):
+        # The general CUDA avg_pool3d backward kernels hoist the divisor and skip
+        # the per-thread pool_size / clamp-volume math when it is uniform across
+        # every window (!ceil_mode and count_include_pad, no padding, or an
+        # explicit divisor_override). Validate every path -- atomic (overlapping)
+        # and direct-write (non-overlapping), uniform and non-uniform -- against a
+        # CPU float64 oracle, over the dtypes that dispatch through acc_type.
+        tol = {
+            torch.half: dict(atol=2e-3, rtol=1e-2),
+            torch.bfloat16: dict(atol=2e-2, rtol=5e-2),
+            torch.float: dict(atol=1e-5, rtol=1e-4),
+            torch.double: dict(atol=1e-9, rtol=1e-9),
+        }[dtype]
+
+        def check(shape, **kw):
+            base = torch.randn(*shape)
+            xg = base.to(device=device, dtype=dtype).requires_grad_(True)
+            xref = base.double().requires_grad_(True)  # CPU float64 oracle
+            grad = torch.randn_like(F.avg_pool3d(xg, **kw))
+            F.avg_pool3d(xg, **kw).backward(grad)
+            F.avg_pool3d(xref, **kw).backward(grad.double().cpu())
+            self.assertEqual(xg.grad.double().cpu(), xref.grad, **tol)
+
+        s = (2, 3, 9, 11, 10)  # non-divisible on purpose (exercises dropped windows)
+        no_cip = dict(count_include_pad=False)
+        ceil_no_cip = dict(
+            count_include_pad=False, ceil_mode=True
+        )  # both clamp dirs bite
+        # atomic (overlapping windows, fastAtomicAdd)
+        check(s, kernel_size=3, stride=1, padding=1)  # uniform
+        check(s, kernel_size=3, stride=2)  # uniform, no pad
+        check(s, kernel_size=3, stride=1, padding=1, **no_cip)  # non-uniform, floor
+        check(
+            s, kernel_size=3, stride=2, padding=1, ceil_mode=True
+        )  # non-uniform, ceil
+        check(
+            s, kernel_size=3, stride=2, padding=1, **ceil_no_cip
+        )  # non-uniform, ceil+no-cip
+        # direct-write (non-overlapping windows)
+        check(s, kernel_size=2, stride=2)  # uniform, no pad
+        check(s, kernel_size=2, stride=2, padding=1)  # uniform
+        check(s, kernel_size=2, stride=2, padding=1, **no_cip)  # non-uniform, floor
+        check(s, kernel_size=2, stride=2, ceil_mode=True)  # non-uniform, ceil
+        check(
+            s, kernel_size=2, stride=2, padding=1, **ceil_no_cip
+        )  # non-uniform, ceil+no-cip
+        # divisor_override takes the hoisted path + stride-1 fast path (control)
+        check(s, kernel_size=2, stride=2, divisor_override=7)
+        check(s, kernel_size=3, stride=1)
+
     @onlyAccelerator
     @gcIfJetson
     def test_max_pool2d(self, device):

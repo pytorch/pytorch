@@ -135,6 +135,15 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
 
         threads = Int32(threads_per_block)
         target = Int32(mTarget[row])
+        # An out-of-range target is a caller error that eager reports through
+        # `gather`/`index_select`'s device-side index assert. Nothing here goes
+        # through those, and leaving it unchecked reads outside the row while
+        # the one-hot column below simply never matches -- a silently wrong
+        # gradient. Clamp the read so it stays in bounds, and poison the row
+        # below so the failure surfaces as NaN rather than as a result.
+        target_read = target
+        if target < Int32(0) or target >= V:
+            target_read = Int32(0)
 
         m = Float32(-Float32.inf)
         l = Float32(0.0)
@@ -146,7 +155,14 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
                 # nothing yet has m = -inf and l = 0, so this yields l = 1.
                 l = l * cute.math.exp(m - z, fastmath=True) + Float32(1.0)
                 m = z
-            else:
+            elif z != Float32(-Float32.inf):
+                # A -inf logit contributes exp(z - m) = 0, except when this
+                # thread has seen nothing yet: m is -inf too, the difference is
+                # nan, and the row would be poisoned by a legitimate input.
+                # Skipping leaves l = 0, which the rescale below turns into the
+                # same 0 contribution. The test is `!= -inf` rather than
+                # `> -inf` so that a NaN logit still takes this branch and
+                # still poisons the row, which is what eager does with it.
                 l = l + cute.math.exp(z - m, fastmath=True)
             col = col + threads
 
@@ -165,10 +181,18 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
         )
 
         s = mS[row]
+        target_logit = Float32(mZ[row, target_read])
+        if target_read != target:
+            # Out-of-range target (see above): poison the row rather than
+            # return plausible numbers. `factor` carries it to every element of
+            # the gradient row and the target logit carries it to the loss, so
+            # the failure cannot be read as a result.
+            s = Float32(Float32.nan)
+            target_logit = Float32(Float32.nan)
         factor = s / row_sum
         if tidx == 0:
             mLse[row] = row_max + cute.math.log(row_sum, fastmath=True)
-            mTargetLogit[row] = Float32(mZ[row, target])
+            mTargetLogit[row] = target_logit
 
         # This read of the target logit has to be ordered against the writes
         # below, which may occupy its bytes.
