@@ -150,7 +150,9 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         received = out_tokens[:NUM_TOKENS].float()
         self.assertTrue(
             received.eq(expected_val).all(),
-            lambda msg: f"{msg}\nrank {self.rank}: expected {expected_val}, got {received[0, 0].item()}",
+            lambda msg: (
+                f"{msg}\nrank {self.rank}: expected {expected_val}, got {received[0, 0].item()}"
+            ),
         )
 
     @skip_if_lt_x_gpu(2)
@@ -225,6 +227,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         )
         out_tokens.sum().backward()
         torch.cuda.synchronize()
+        self.assertEqual(_out_idx.dtype, torch.int64)
 
         # grad_out_tokens is all-ones; combine routes them back: each token gets 1.0 per top-k slot
         self.assertIsNotNone(tokens.grad)
