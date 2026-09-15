@@ -1512,10 +1512,10 @@ class AOTCompiledModel:
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, at most one
-    ``For [i]:`` hint, for the first entry whose guards failed on a global the
-    process does not define, and the advice to add a ``ModelInput`` or check
-    which guards ``guard_filter_fn`` kept.
+    per compiled result quoting the guards that refused it, one ``For [i, j]:``
+    line per distinct missing-global hint naming the entries whose guards failed
+    on a global the process does not define, and the advice to add a
+    ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
     """
 
     model: torch.nn.Module
@@ -1593,16 +1593,18 @@ class AOTCompiledModel:
             "No AOT compiled graph matched this call. Tried "
             f"{len(results)} compiled input(s):"
         ]
-        missing_at: int | None = None
+        # Hint text -> the entries it is for, in first-seen order: entries that
+        # share a scope share a sentence, and one whose scope differs keeps its
+        # own rather than being read the first entry's advice.
+        hinted: dict[str, list[int]] = {}
         for i, result in enumerate(results):
             reason = result._live_guard_manager().check_verbose(bound[i])
             parts = reason.verbose_code_parts
-            if missing_at is None and any(map(_names_a_missing_global, parts)):
-                missing_at = i
+            if any(map(_names_a_missing_global, parts)):
+                hinted.setdefault(result._missing_global_hint(), []).append(i)
             lines.append(f"  [{i}] {'; '.join(parts)}")
-        if missing_at is not None:
-            hint = results[missing_at]._missing_global_hint()
-            lines.append(f"For [{missing_at}]: {hint}")
+        for hint, at in hinted.items():
+            lines.append(f"For [{', '.join(map(str, at))}]: {hint}")
         lines.append(
             "Add a ModelInput covering this call, or check whether "
             "guard_filter_fn kept a guard this call cannot satisfy -- both "
