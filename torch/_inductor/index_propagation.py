@@ -108,6 +108,10 @@ class SymPyOps:
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = False,
     ) -> TypedExpr:
+        if dtype == value.dtype:
+            return value
+        if not value.is_constant():
+            return NotImplemented
         return TypedExpr(value.expr, dtype)
 
     @staticmethod
@@ -189,7 +193,7 @@ class SymPyOps:
 
 @dataclass
 class IndexPropVar:
-    value: Any  # Either an IR value, or TypedExpr if is_symbolic is true
+    value: Any  # Either an IR value, or TypedExpr if is_symbolic true
     is_symbolic: bool = False
 
     @staticmethod

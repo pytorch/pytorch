@@ -19,6 +19,7 @@ from . import (
     functional_export,
     resume_execution,
 )
+from . import _bytecode_debugger_fix as _bytecode_debugger_fix
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
@@ -229,7 +230,7 @@ def get_recursion_limit() -> int:
 
 def set_recursion_limit(limit: int) -> None:
     """
-    Sets an internal dynamo recursion limit. The limit must be >= 1, or -1 to reset
+    Sets an internal Dynamo recursion limit. The limit must be >= 1, or -1 to reset
     to the default (unset) state.
 
     This is possibly needed in Python 3.12-3.13 since there is a separate C recursion limit
