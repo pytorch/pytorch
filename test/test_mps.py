@@ -86,7 +86,7 @@ if not torch.backends.mps.is_available():
     NNTestCase = NoTest
 
 MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
+MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES] + [torch.float8_e4m3fn]
 
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
@@ -4862,7 +4862,7 @@ class TestMPS(TestCaseMPS):
             self.assertFalse(x2.is_contiguous())
             return torch.concat((x1, x2), dim=dim)
         for dtype in MPS_DTYPES:
-            if dtype == torch.bool:
+            if dtype in (torch.bool, torch.float8_e4m3fn):
                 continue
             data = torch.arange(48).to(dtype=dtype).reshape(1, 2, 4, 6)
             data = data.to(memory_format=torch.channels_last)
@@ -4875,7 +4875,7 @@ class TestMPS(TestCaseMPS):
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", [dtype for dtype in MPS_DTYPES if dtype != torch.float8_e4m3fn])
     @largeTensorTest(
         lambda self, dtype: 1.01 * 2 * (11 + (1 << 31)) * dtype.itemsize,
         device="mps",
@@ -5635,10 +5635,11 @@ class TestMPS(TestCaseMPS):
         for dtype in MPS_DTYPES:
             a_mps = torch.tensor([0, 1, 2], dtype=dtype, device='mps')
             a_cpu = torch.tensor([0, 1, 2], dtype=dtype, device='cpu')
-            if dtype.is_floating_point:
+            if dtype.is_floating_point and dtype != torch.float8_e4m3fn:
                 self.assertEqual(loss(a_mps, a_mps), loss(a_cpu, a_cpu))
                 continue
-            self.assertRaises(RuntimeError, lambda: loss(a_mps, a_mps))
+            error_type = TypeError if dtype == torch.float8_e4m3fn else RuntimeError
+            self.assertRaises(error_type, lambda: loss(a_mps, a_mps))
             self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
 
     # Binary Cross Enropy
@@ -12268,8 +12269,8 @@ class TestLinalgMPS(TestCaseMPS):
             # Test different types of rcond tensor
             for rcond_type in MPS_DTYPES:
                 # TODO: Figure out why it's not supported for complex
-                # Skip test for bfloat16 as numpy does not support the type
-                if rcond_type.is_complex or rcond_type == torch.bfloat16:
+                # NumPy does not support bfloat16 or float8.
+                if rcond_type.is_complex or rcond_type in (torch.bfloat16, torch.float8_e4m3fn):
                     continue
                 rconds.append(torch.rand(A.shape[:-2], dtype=torch.float32, device=device).to(rcond_type))
             # Test broadcasting of rcond
@@ -16396,14 +16397,20 @@ class TestConsistency(TestCaseMPS):
                 # TODO: Handle list inputs later
                 if not isinstance(mps_out, torch.Tensor):
                     raise
-                if mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
+                if mps_sample.input.dtype in [torch.float16, torch.bfloat16, torch.float8_e4m3fn]:
                     dtype = torch.float32
                 elif mps_sample.input.dtype == torch.bool:
                     dtype = torch.uint8
 
                 # Often CPU ops are not implemented for low precision dtypes
                 # In that case, upcast to higher precision and try again
-                cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                if mps_sample.input.dtype == torch.float8_e4m3fn:
+                    # Promote unsupported FP8 inputs to float32; preserve integer indices.
+                    cpu_sample = cpu_sample.transform(
+                        lambda x: x.float() if isinstance(x, torch.Tensor) and x.dtype == torch.float8_e4m3fn else x
+                    )
+                else:
+                    cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
                 cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
 
         if dtype is not None:
