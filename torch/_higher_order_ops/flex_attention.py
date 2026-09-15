@@ -7,6 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
+from torch._C._functorch import _unwrap_for_grad, _wrap_for_grad, TransformType
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
@@ -973,6 +974,126 @@ def flex_attention_autograd(
             *score_mod_other_buffers,
         )
     return out, logsumexp, max_scores
+
+
+# flex_attention is a HigherOrderOperator, so torch.func.grad doesn't support
+# it out of the box: nothing was ever registered for TransformType.Grad in its
+# functorch table (#144810).
+#
+# Same shape as custom_function_call_grad in
+# torch/_functorch/autograd_function.py. The autograd graph grad() differentiates
+# lives on the *wrapper* tensors, so the node has to be created by applying a
+# _SingleLevelFunction to the wrappers themselves; unwrapping first and computing
+# on the inner values leaves the outputs disconnected and silently yields zero
+# gradients. Unwrapping therefore happens inside forward(), below the interpreter.
+#
+# Note that _unwrap_for_grad returns a value that does not require grad (grad()
+# marks the wrapper, not the value), so the inner redispatch needs it re-attached
+# or no graph is built at all.
+@flex_attention.py_impl(TransformType.Grad)
+def flex_attention_grad_rule(
+    interpreter,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple[Tensor, ...] = (),
+    mask_mod_other_buffers: tuple[Tensor, ...] = (),
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    from torch._functorch.eager_transforms import enable_inplace_requires_grad
+    from torch._functorch.utils import enable_single_level_autograd_function
+
+    level = interpreter.level()
+    if level > 1:
+        # flex_attention_backward is not itself differentiable, so a nested
+        # transform would otherwise silently produce zeros.
+        raise NotImplementedError(
+            "flex_attention does not support nested torch.func transforms "
+            "(e.g. grad(grad(...))): its backward is not differentiable."
+        )
+
+    def unwrap(t: Any) -> Any:
+        return _unwrap_for_grad(t, level) if isinstance(t, torch.Tensor) else t
+
+    def reattach(t: Any) -> Any:
+        if not isinstance(t, torch.Tensor) or not t.is_floating_point():
+            return t
+        if t.requires_grad:
+            return t
+        with enable_inplace_requires_grad(True):
+            return t.detach().requires_grad_(True)
+
+    saved: dict[str, tuple[torch.Tensor, ...]] = {}
+
+    def forward(
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        *score_mod_other_buffers: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        with torch.enable_grad(), interpreter.lower():
+            inner_inputs = tuple(
+                reattach(unwrap(t))
+                for t in (query, key, value) + score_mod_other_buffers
+            )
+            out, logsumexp, max_scores = flex_attention(
+                inner_inputs[0],
+                inner_inputs[1],
+                inner_inputs[2],
+                score_mod,
+                pytree.tree_map(unwrap, block_mask),
+                scale,
+                kernel_options,
+                inner_inputs[3:],
+                pytree.tree_map(unwrap, mask_mod_other_buffers),
+            )
+        saved["inputs"] = inner_inputs
+        saved["outputs"] = (out, logsumexp, max_scores)
+        return (
+            _wrap_for_grad(out, level),
+            _wrap_for_grad(logsumexp, level),
+            _wrap_for_grad(max_scores, level),
+        )
+
+    def setup_context(ctx: Any, inputs: Any, output: Any) -> None:
+        ctx.inner_inputs = saved["inputs"]
+        ctx.inner_outputs = saved["outputs"]
+
+    def backward(ctx: Any, *grads: torch.Tensor) -> tuple[torch.Tensor | None, ...]:
+        outputs, grad_outputs = [], []
+        for out, grad in zip(ctx.inner_outputs, grads):
+            if grad is None or not out.requires_grad:
+                continue
+            outputs.append(out)
+            grad_outputs.append(unwrap(grad))
+        if not outputs:
+            return tuple(None for _ in ctx.inner_inputs)
+        # Lowered as well: flex_attention_backward is a HOP and would otherwise
+        # be intercepted by this same transform.
+        with interpreter.lower():
+            grad_inputs = torch.autograd.grad(
+                outputs, ctx.inner_inputs, grad_outputs, allow_unused=True
+            )
+        return tuple(
+            _wrap_for_grad(g, level) if isinstance(g, torch.Tensor) else None
+            for g in grad_inputs
+        )
+
+    Generated = type(
+        "FlexAttentionGenerated",
+        (torch.autograd.function._SingleLevelFunction,),
+        {
+            "forward": staticmethod(forward),
+            "setup_context": staticmethod(setup_context),
+            "backward": staticmethod(backward),
+        },
+    )
+    with enable_single_level_autograd_function():
+        # pyrefly: ignore [missing-attribute]
+        return Generated.apply(query, key, value, *score_mod_other_buffers)
 
 
 # ---------------------------- Backward HOP Implementation ----------------------------
