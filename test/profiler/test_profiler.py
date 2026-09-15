@@ -4073,7 +4073,7 @@ class TestProfilerDeviceStopped(TestCase):
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-class TestProfilerEventsParityGeneric(TestCase):
+class TestProfilerEventsParity(TestCase):
     """Tests validating parity between events() and export_chrome_trace() JSON (CPU-only)."""
 
     hw_classification = HardwareClassification.GENERIC
@@ -4247,15 +4247,15 @@ class TestProfilerEventsParityGeneric(TestCase):
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-class TestProfilerEventsParity(TestCase):
+class TestProfilerEventsParityDevice(TestCase):
     """Tests validating parity between events() and export_chrome_trace() JSON."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_profiler_flow_events_parity(self):
+    def test_profiler_flow_events_parity(self, device):
         """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
-        with profile(activities=get_profiler_activities(self.device_type)) as prof:
-            x = torch.randn(32, 32, device=self.device_type)
+        with profile(activities=get_profiler_activities(device)) as prof:
+            x = torch.randn(32, 32, device=device)
             torch.mm(x, x)
 
         # Collect async CPU->GPU flow info from events()
@@ -4301,10 +4301,10 @@ class TestProfilerEventsParity(TestCase):
                 "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
             )
 
-    def test_profiler_timestamp_consistency(self):
+    def test_profiler_timestamp_consistency(self, device):
         """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
-        with profile(activities=get_profiler_activities(self.device_type)) as prof:
-            x = torch.randn(32, 32, device=self.device_type)
+        with profile(activities=get_profiler_activities(device)) as prof:
+            x = torch.randn(32, 32, device=device)
             torch.mm(x, x)
 
         trace_start_ns = prof.profiler.kineto_results.trace_start_ns()
@@ -4341,18 +4341,17 @@ class TestProfilerEventsParity(TestCase):
                 msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
             )
 
-    def test_profiler_external_id_parity(self):
+    def test_profiler_external_id_parity(self, device):
         """Verify that FunctionEvent.external_id matches External id in Chrome trace JSON."""
         from collections import Counter
 
-        with profile(activities=get_profiler_activities(self.device_type)) as prof:
+        with profile(activities=get_profiler_activities(device)) as prof:
             with torch.profiler.record_function("test_region"):
-                x = torch.randn(32, 32, device=self.device_type)
+                x = torch.randn(32, 32, device=device)
                 y = torch.mm(x, x)
                 z = y + x
                 z.cpu()
-                if self.device_type != "cpu":
-                    getattr(torch, self.device_type).synchronize()
+                torch.accelerator.synchronize()
 
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
@@ -4374,10 +4373,10 @@ class TestProfilerEventsParity(TestCase):
                 "(name, external_id) pairs differ between events() and Chrome trace JSON",
             )
 
-    def test_profiler_activity_type_parity(self):
+    def test_profiler_activity_type_parity(self, device):
         """Verify activity_type on events() matches Chrome trace cat field."""
-        with profile(activities=get_profiler_activities(self.device_type)) as prof:
-            x = torch.randn(32, 32, device=self.device_type)
+        with profile(activities=get_profiler_activities(device)) as prof:
+            x = torch.randn(32, 32, device=device)
             torch.mm(x, x)
 
         events = prof.events()
@@ -4405,6 +4404,7 @@ class TestProfilerEventsParity(TestCase):
                     json_name_cats,
                     lambda msg: f"{msg}\nactivity_type mismatch for {e.name}",
                 )
+
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
@@ -4625,24 +4625,23 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-class TestPythonChromeTraceExport(TestCase):
+class TestPythonChromeTraceExportDevice(TestCase):
     """Verify that the Python streaming exporter produces traces equivalent
     to the C++ Kineto save() path."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def _profile_workload(self):
-        x = torch.randn(64, 64, device=self.device_type)
-        with profile(activities=get_profiler_activities(self.device_type)) as prof:
+    def _profile_workload(self, device):
+        x = torch.randn(64, 64, device=device)
+        with profile(activities=get_profiler_activities(device)) as prof:
             for _ in range(20):
                 torch.mm(x, x)
                 torch.add(x, x)
-            if self.device_type != "cpu":
-                getattr(torch, self.device_type).synchronize()
+            torch.accelerator.synchronize()
         return prof
 
-    def test_python_export_matches_kineto(self):
-        prof = self._profile_workload()
+    def test_python_export_matches_kineto(self, device):
+        prof = self._profile_workload(device)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             kineto_path = os.path.join(tmpdir, "kineto.json")
@@ -4727,10 +4726,10 @@ class TestPythonChromeTraceExport(TestCase):
         )
         self.assertEqual(kineto_flow, py_flow, "Flow events differ")
 
-    def test_python_export_gzip(self):
+    def test_python_export_gzip(self, device):
         import gzip as gzip_mod
 
-        prof = self._profile_workload()
+        prof = self._profile_workload(device)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             gz_path = os.path.join(tmpdir, "trace.json.gz")
@@ -4743,8 +4742,8 @@ class TestPythonChromeTraceExport(TestCase):
         x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
         self.assertGreater(len(x_events), 0)
 
-    def test_python_export_plain_json(self):
-        prof = self._profile_workload()
+    def test_python_export_plain_json(self, device):
+        prof = self._profile_workload(device)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             json_path = os.path.join(tmpdir, "trace.json")
@@ -5096,7 +5095,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestMetadataJsonFormat(TestCase):
+class TestMetadataJsonFormatCUDA(TestCase):
     """Guard the format of ITraceActivity.metadataJson() for kernel events.
 
     The Python-side chrome trace exporter splices metadataJson() verbatim
@@ -5194,11 +5193,13 @@ class TestMetadataJsonFormat(TestCase):
         self.assertIn('"stream": ', md)
 
 
+instantiate_device_type_tests(TestProfilerDeviceStopped, globals(), except_for=("cpu",))
 instantiate_device_type_tests(
-    TestProfilerDeviceStopped, globals(), except_for=("cpu",)
+    TestProfilerEventsParityDevice, globals(), except_for=("cpu",)
 )
-instantiate_device_type_tests(TestProfilerEventsParity, globals(), except_for=("cpu",))
-instantiate_device_type_tests(TestPythonChromeTraceExport, globals(), except_for=("cpu",))
+instantiate_device_type_tests(
+    TestPythonChromeTraceExportDevice, globals(), except_for=("cpu",)
+)
 
 
 if __name__ == "__main__":
