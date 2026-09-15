@@ -105,8 +105,6 @@ def normalize_as_list(x: object) -> list[object]:
 def _get_autocast_states() -> list[Any]:
     states: list[Any] = []
     for device_type in torch._C._autocast_supported_devices():
-        if not hasattr(torch, device_type):
-            continue
         states.append(torch.is_autocast_enabled(device_type))
         states.append(torch.get_autocast_dtype(device_type))
     states.append(torch.is_autocast_cache_enabled())

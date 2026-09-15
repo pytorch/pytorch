@@ -18,7 +18,6 @@ class TestAOTAutocastStates(TestCase):
                 "_autocast_supported_devices",
                 return_value=["cpu", "privateuseone"],
             ),
-            patch.object(torch, "privateuseone", create=True),
             patch.object(aot_utils.torch, "is_autocast_enabled") as enabled,
             patch.object(aot_utils.torch, "get_autocast_dtype") as dtype,
             patch.object(
@@ -44,31 +43,35 @@ class TestAOTAutocastStates(TestCase):
                 ],
             )
 
-    def test_get_autocast_states_skips_missing_torch_module(self) -> None:
+    def test_get_autocast_states_reads_without_top_level_torch_module(self) -> None:
+        device_type = "autocast_only_device"
+        if hasattr(torch, device_type):
+            self.skipTest(f"torch.{device_type} unexpectedly exists")
         with (
             patch.object(
                 aot_utils.torch._C,
                 "_autocast_supported_devices",
-                return_value=["cpu", "missing_device", "cuda"],
+                return_value=["cpu", device_type],
             ),
-            patch.object(aot_utils.torch, "is_autocast_enabled", return_value=False),
+            patch.object(aot_utils.torch, "is_autocast_enabled") as enabled,
+            patch.object(aot_utils.torch, "get_autocast_dtype") as dtype,
             patch.object(
-                aot_utils.torch, "get_autocast_dtype", return_value=torch.float32
-            ),
-            patch.object(
-                aot_utils.torch, "is_autocast_cache_enabled", return_value=True
+                aot_utils.torch, "is_autocast_cache_enabled", return_value=False
             ),
         ):
+            enabled.side_effect = lambda device: device == device_type
+            dtype.side_effect = lambda device: {
+                "cpu": torch.float32,
+                device_type: torch.float16,
+            }[device]
+
             states = _get_autocast_states()
+
+            enabled.assert_any_call(device_type)
+            dtype.assert_any_call(device_type)
             self.assertEqual(
                 states,
-                [
-                    False,
-                    torch.float32,
-                    False,
-                    torch.float32,
-                    True,
-                ],
+                [False, torch.float32, True, torch.float16, False],
             )
 
     def test_get_autocast_states_appends_cache_enabled_once(self) -> None:
@@ -97,7 +100,6 @@ class TestAOTAutocastStates(TestCase):
                 "_autocast_supported_devices",
                 return_value=["cpu", "cuda", "xpu"],
             ),
-            patch.object(torch, "xpu", create=True),
             patch.object(aot_utils.torch, "is_autocast_enabled") as enabled,
             patch.object(aot_utils.torch, "get_autocast_dtype") as dtype,
             patch.object(
@@ -136,7 +138,6 @@ class TestAOTAutocastStates(TestCase):
                 "_get_privateuse1_backend_name",
                 return_value="npu",
             ),
-            patch.object(torch, "npu", create=True),
             patch.object(aot_utils.torch, "is_autocast_enabled") as enabled,
             patch.object(aot_utils.torch, "get_autocast_dtype") as dtype,
             patch.object(
@@ -154,12 +155,9 @@ class TestAOTAutocastStates(TestCase):
                 [False, torch.float32, True, torch.float16, True],
             )
 
-    def test_get_autocast_states_reflects_live_cpu_and_cuda_defaults(self) -> None:
-        supported = torch._C._autocast_supported_devices()
+    def test_get_autocast_states_reflects_live_supported_devices(self) -> None:
         expected: list[object] = []
-        for device_type in supported:
-            if not hasattr(torch, device_type):
-                continue
+        for device_type in torch._C._autocast_supported_devices():
             expected.append(torch.is_autocast_enabled(device_type))
             expected.append(torch.get_autocast_dtype(device_type))
         expected.append(torch.is_autocast_cache_enabled())
@@ -172,7 +170,6 @@ class TestAOTAutocastStates(TestCase):
                 "_autocast_supported_devices",
                 return_value=["cpu", "privateuseone"],
             ),
-            patch.object(torch, "privateuseone", create=True),
             patch.object(aot_utils.torch, "is_autocast_enabled") as enabled,
             patch.object(aot_utils.torch, "get_autocast_dtype") as dtype,
             patch.object(
@@ -191,6 +188,60 @@ class TestAOTAutocastStates(TestCase):
             self.assertEqual(
                 new_states, [False, torch.float32, True, torch.float16, False]
             )
+
+    def test_collect_metadata_preserves_stable_autocast_state(self) -> None:
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            return [x + 1]
+
+        collect = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+        )
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(2))
+        before = _get_autocast_states()
+        collect(x)
+        self.assertEqual(before, _get_autocast_states())
+
+    def test_collect_metadata_detects_autocast_state_mutation(self) -> None:
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            return [x + 1]
+
+        collect = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+        )
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(2))
+        call_count = 0
+
+        def fake_get_autocast_states() -> list[object]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return [False, torch.float32, False]
+            return [True, torch.float32, False]
+
+        with patch(
+            "torch._functorch._aot_autograd.collect_metadata_analysis._get_autocast_states",
+            side_effect=fake_get_autocast_states,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
 
     def test_get_autocast_states_changes_when_npu_autocast_toggles(self) -> None:
         try:
