@@ -3496,9 +3496,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     @property
     def uses_device_tma(self) -> bool:
-        return any(
-            not is_buffer_removed(name) for name in self._device_tma_buffers
-        )
+        return any(not is_buffer_removed(name) for name in self._device_tma_buffers)
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
