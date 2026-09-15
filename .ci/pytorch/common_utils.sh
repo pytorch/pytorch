@@ -380,9 +380,16 @@ function install_cutlass_dsl() {
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
+function install_flydsl() {
+  echo "Installing FlyDSL from PyPI..."
+  # Require the published platform wheel instead of attempting an unsupported source build.
+  pip_install --only-binary=:all: flydsl==0.3.0
+  echo "FlyDSL installation complete."
+}
+
 function install_nvmath() {
   echo "Installing nvmath-python from PyPI..."
-  pip_install nvmath-python
+  pip_install nvmath-python==0.9.0
   # nvmath-python upgrades numpy to 2.x; realign scipy to a matching build. See #189034.
   pip_install "scipy==1.13.1"
   echo "nvmath-python installation complete."
