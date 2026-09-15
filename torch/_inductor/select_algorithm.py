@@ -907,11 +907,10 @@ class TritonTemplateKernel(TritonKernel):
                 node.restore_loop_state(loop_state)
         template_tile_buffers.difference_update(node.get_buffer_names())
 
-    @property
-    def index_dtype(self) -> str:
+    def get_index_dtype_as_torch_dtype(self) -> torch.dtype:
         if self._index_dtype_override is not None:
-            return self._index_dtype_override
-        return super().index_dtype
+            return triton_type_to_torch(self._index_dtype_override)
+        return super().get_index_dtype_as_torch_dtype()
 
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"

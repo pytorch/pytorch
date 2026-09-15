@@ -178,7 +178,7 @@ class FailChoiceCaller(ChoiceCaller):
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -222,7 +222,7 @@ class TestMaxAutotune(TestCase):
         ).run(code[0])
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -258,7 +258,7 @@ class TestMaxAutotune(TestCase):
         FileCheck().check("block_local_").check("tl.sum").run(code[0])
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -287,7 +287,7 @@ class TestMaxAutotune(TestCase):
         FileCheck().check("block_local_").run(code[0])
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -318,7 +318,7 @@ class TestMaxAutotune(TestCase):
         )
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -352,7 +352,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(block_local_kernels[0].count("tl.store("), 4)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -381,7 +381,7 @@ class TestMaxAutotune(TestCase):
         FileCheck().check("block_local_").run(code[0])
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -5921,7 +5921,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         )
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -5947,7 +5947,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         FileCheck().check_not("block_local_").run(code[0])
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -5995,7 +5995,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         FileCheck().check("block_local_").run(code[0])
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -6029,48 +6029,37 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         )
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
         "Hopper persistent TMA template is shadowed on Blackwell",
     )
+    @largeTensorTest("3GB", device=GPU_TYPE, inductor=True)
     def test_template_local_reduction_epilogue_index_dtype(self):
-        from torch._inductor.codegen.simd import SIMDScheduling
-
         def f(a, b, scale):
-            return ((a @ b) * scale).view(2, 128, 2, 128).sum((1, 3))
-
-        original_can_use_32bit = SIMDScheduling.can_use_32bit_indexing
-
-        def can_use_32bit_indexing(numel, buffers):
-            buffers = tuple(buffers)
-            if any(buf.get_dtype() == torch.uint8 for buf in buffers):
-                return False
-            return original_can_use_32bit(numel, buffers)
+            offsets = (
+                torch.arange(a.shape[0], device=a.device, dtype=torch.int64) + 2**31
+            )
+            source = (a @ b) * scale + offsets[:, None]
+            return source.view(2, 128, 2, 128).sum((1, 3))
 
         a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
-        scale = torch.ones(256, 256, device=GPU_TYPE, dtype=torch.uint8)
-        with (
-            self.get_common_patches(
-                False,
-                True,
-                aten_time=10.0,
-                triton_time=1.0,
-            ),
-            mock.patch.object(
-                SIMDScheduling,
-                "can_use_32bit_indexing",
-                can_use_32bit_indexing,
-            ),
+        scale_storage = torch.ones(2**31 + 256, device=GPU_TYPE, dtype=torch.uint8)
+        scale = scale_storage[2**31 :].view(1, 256).expand(256, 256)
+        with self.get_common_patches(
+            False,
+            True,
+            aten_time=10.0,
+            triton_time=1.0,
         ):
             actual, code = run_and_get_code(torch.compile(f), a, b, scale)
 
         self.assertEqual(actual, f(a, b, scale))
         FileCheck().check("INDEX_DTYPE : tl.constexpr = tl.int64").check(
-            "block_local_"
-        ).run(code[0])
+            "2147483648"
+        ).check("block_local_").run(code[0])
 
     @contextlib.contextmanager
     def get_common_patches(
