@@ -1596,6 +1596,13 @@ class AOTCompiledModel:
         missing_at: int | None = None
         for i, result in enumerate(results):
             reason = result._live_guard_manager().check_verbose(bound[i])
+            if reason.result:
+                lines.append(
+                    f"  [{i}] <guards rejected this call twice and then accepted "
+                    "it here: a guard that does not answer consistently, or a "
+                    "tag-safe fast path that refused without running the tree>"
+                )
+                continue
             parts = reason.verbose_code_parts
             if missing_at is None and any(map(_names_a_missing_global, parts)):
                 missing_at = i
