@@ -16,7 +16,7 @@ from ..codecache import code_hash, CodeCacheFuture, get_path, write_atomic
 from ..runtime.benchmarking import benchmarker, gpu_benchmark_lock
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
-from .common import TensorArg, WorkspaceArg, WorkspaceZeroMode
+from .common import TensorArg, WorkspaceArg
 
 
 log = logging.getLogger(__name__)
@@ -364,10 +364,6 @@ class MultiKernelPlan:
         ):
             raise NotImplementedError(
                 "multi-kernel plans with different internal workspaces are not supported"
-            )
-        if any(ws.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL for ws in workspace_args):
-            raise NotImplementedError(
-                "multi-kernel plans with per-call-zeroed workspaces are not supported"
             )
         if any(
             kernel.mutations or kernel.inplace_update_buffers for kernel in all_kernels
