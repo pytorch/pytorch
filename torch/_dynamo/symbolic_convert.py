@@ -2377,9 +2377,15 @@ class InstructionTranslatorBase(
     @functools.cached_property
     def nn_modules_globals_vt(self) -> VariableTracker:
         # The defining module, whose dicts nn.Module._call_impl reads through
-        # its own __globals__; a sys.modules rebind does not move them.
+        # its own __globals__; a sys.modules rebind moves neither. The alias
+        # binds the live entry, so it roots the guards only while that entry
+        # is this module, and the module itself is installed otherwise.
         module = torch.nn.modules.module
-        return VariableTracker.build(self, module, self.import_source(module.__name__))
+        source = self.import_source(module.__name__)
+        if self.output.global_scope[source.global_name] is not module:
+            name = self.output.install_global_by_id("___nn_modules_module", module)
+            source = GlobalSource(name)
+        return VariableTracker.build(self, module, source)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.arg is None:

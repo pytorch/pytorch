@@ -1243,6 +1243,65 @@ def add(x, y):
             _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
+    def test_import_alias_rebind_keeps_the_global_nn_hooks_visible(self):
+        # nn_modules_globals_vt decides whether a module call may bypass
+        # _call_impl by reading the four global hook dicts, and it has to read
+        # the ones _call_impl reads through its own __globals__: the defining
+        # module's, which a sys.modules rebind does not move. The alias binds
+        # the live entry, so under a rebind it names a different module than
+        # the value, and the guards on the dicts' contents have to root at the
+        # defining module as well, or they read the shim and fail on a key it
+        # lacks. A hook registered on the defining module while the shim's
+        # dicts are empty is the case where the two disagree: read off the
+        # shim, the call is bypassed and the compiled function skips the hook.
+        name = "torch.nn.modules.module"
+        alias = "__import_torch_dot_nn_dot_modules_dot_module"
+        real = sys.modules[name]
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        mod = M()
+
+        def fn(x):
+            return mod(x)
+
+        fired = []
+
+        def hook(module, inputs, output):
+            fired.append(module)
+            return output * 2
+
+        args = (torch.randn(3, 2),)
+        # Compiled once first, so the process has resolved the name already.
+        torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        torch._dynamo.reset()
+        shim = types.ModuleType(name)
+        for attr in (
+            "_global_backward_pre_hooks",
+            "_global_backward_hooks",
+            "_global_forward_hooks",
+            "_global_forward_pre_hooks",
+        ):
+            setattr(shim, attr, {})
+        handle = real.register_module_forward_hook(hook)
+        try:
+            sys.modules[name] = shim
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            expected = fn(*args)
+            self.assertEqual(fired, [mod])
+            self.assertEqual(expected, compiled_fn(*args))
+            self.assertEqual(fired, [mod, mod])
+            self.assertIs(torch.nn.modules.module, real)
+            self.assertIs(fn.__globals__[alias], shim)
+        finally:
+            handle.remove()
+            sys.modules[name] = real
+            fn.__globals__.pop(alias, None)
+            _import_source_cache.pop(name, None)
+            torch._dynamo.reset()
+
     def test_import_alias_accepts_a_stale_module_under_an_aliased_key(self):
         # A sys.modules key need not equal the module's own __name__: os.path is
         # named posixpath, and torch's own BC shims (torch.distributed._shard.
