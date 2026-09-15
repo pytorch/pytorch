@@ -419,6 +419,20 @@ class FSDPModule:
         both reduce-scatter and all-reduce together. This is the equivalence of
         `no_sync` in FSDP1.
 
+        After a backward without synchronization, ``model.parameters()`` exposes
+        the accumulated gradients as DTensors with ``Partial("avg")`` placements
+        on the data-parallel mesh dimensions. Their local tensors contain the
+        unsharded gradients in the effective ``MixedPrecisionPolicy.reduce_dtype``.
+        The visible parameter's ``grad_dtype`` temporarily matches this dtype;
+        synchronization restores the sharded gradient dtype specified before
+        :func:`fully_shard`. Clearing these gradients with ``zero_grad()`` clears
+        the accumulation. With a custom gradient divide factor, the placements
+        are ``Partial("sum")`` and the factor is applied during synchronization.
+        Before starting unsynchronized fp16 accumulation, clear any previously
+        reduced gradients with ``zero_grad(set_to_none=True)``.
+        This is also required for ``spmd_types`` gradients whose non-DP
+        placements differ from the parameter's placements.
+
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
                 module's parameters.
@@ -495,6 +509,9 @@ class FSDPModule:
         be used during gradient accumulation to trade off higher memory for
         reduced communication since the unsharded parameters do not need to be
         re-all-gathered before the next forward.
+
+        When retaining unsharded parameters, call :meth:`reshard` on each FSDP
+        module on every rank before updating its sharded parameters.
 
         Args:
             reshard_after_backward (bool): Whether to reshard parameters after
@@ -886,8 +903,14 @@ class FSDPModule:
     def _apply(self, *args: Any, **kwargs: Any) -> Any:
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
-        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         state = self._get_fsdp_state()
+        with torch.no_grad():
+            for group in state._fsdp_param_groups:
+                for param in group.fsdp_params:
+                    if not param._sharded_grad_dtype_initialized:
+                        # Conversion may replace the parameter's policy metadata.
+                        param.reset_sharded_param()
+        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         if not state._fsdp_param_groups:
             return ret
         # TODO: Remove this padding logic once DTensor pads the local tensor:
