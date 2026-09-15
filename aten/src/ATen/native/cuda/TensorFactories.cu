@@ -8,7 +8,6 @@
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/native/TensorFactories.h>
-#include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -148,7 +147,7 @@ inline int64_t resolve_root_int(
     // binary search for the correct answer
     x <<= 1; // the loop always compares with 2x, so do it once here
     while (l + 1 < r) {
-      auto m = c10::cuda::compat::midpoint(l, r);
+      auto m = (l + r) >> 1;
       // for tril:
       //    b = 2f - 1, sign = 1, hence (2f + m - 1) * m / 2
       // for triu:

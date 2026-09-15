@@ -6,11 +6,12 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "Hopper+ required")
 @skipIfNoCuteDSL
 class TestKernelRowTile(TestCase):
     def test_reduce_row_tile(self):
@@ -320,11 +321,12 @@ class TestKernelRowTile(TestCase):
                     )
 
     def test_tma_second_call_rebinds_the_descriptor(self):
-        # A cached plan excludes M, but each call must bind TMA to its new pointer and row count.
+        # A cached plan must bind TMA to each call's pointer, row count, and row stride.
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         n = 32
-        self.assertTrue(rt.tma_ok(n, 4, 1 << 20), "shape no longer takes the TMA path")
+        if not rt.tma_ok(n, 4, 1 << 20, torch.device("cuda")):
+            self.skipTest("TMA path not applicable on this device")
         first = torch.randn(4096, n, device="cuda")
         (a,) = rt.reduce_row_tile(
             self._sum_trait(),
@@ -335,7 +337,9 @@ class TestKernelRowTile(TestCase):
             use_tma=True,
         )
         self.assertEqual(a, first.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
-        second = torch.randn(4097, n, device="cuda")  # new pointer AND a new M
+        storage = torch.full((4097, n + 4), 1000.0, device="cuda")
+        second = storage[:, :n]
+        second.normal_()
         (b,) = rt.reduce_row_tile(
             self._sum_trait(),
             "tma_rebind",
@@ -345,6 +349,36 @@ class TestKernelRowTile(TestCase):
             use_tma=True,
         )
         self.assertEqual(b, second.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
+
+    def test_forced_tma_rejects_misaligned_input(self):
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        n = 32
+        x = torch.randn(256 * n + 1, device="cuda")[1:].view(256, n)
+        with self.assertRaisesRegex(ValueError, "16-byte aligned input"):
+            rt.reduce_row_tile(
+                self._sum_trait(),
+                "tma_misaligned",
+                x,
+                [torch.float32],
+                threads_per_row=1,
+                use_tma=True,
+            )
+
+    def test_forced_tma_rejects_misaligned_row_stride(self):
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        n = 32
+        x = torch.randn(256, n + 1, device="cuda")[:, :n]
+        with self.assertRaisesRegex(ValueError, "16-byte aligned row stride"):
+            rt.reduce_row_tile(
+                self._sum_trait(),
+                "tma_misaligned_stride",
+                x,
+                [torch.float32],
+                threads_per_row=1,
+                use_tma=True,
+            )
 
     def test_one_thread_per_row_is_trait_agnostic(self):
         # No lane merge lets one thread serve three-field and two-output traits.
