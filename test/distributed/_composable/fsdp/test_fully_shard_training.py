@@ -947,6 +947,24 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             ac=False,
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_partial_group_releases_deferred_all_gather_after_backward(self):
+        dim, vocab_size = 32, 128
+        model = ChunkedHeadModel(dim, vocab_size, tie=False).to(device_type)
+        fully_shard([model.norm, model.head])
+        fully_shard(model)
+        tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+
+        hidden = model(tokens, skip_head=True)
+        chunk = hidden.detach().requires_grad_()
+        model.head(chunk).sum().backward()
+        comm_ctx = model.head._get_fsdp_state()._comm_ctx
+        self.assertIsNotNone(comm_ctx.all_gather_state)
+
+        hidden.backward(chunk.grad)
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
     def _test_partial_group_forward_then_standalone(
         self,
         reshard_after_forward: bool | int,
