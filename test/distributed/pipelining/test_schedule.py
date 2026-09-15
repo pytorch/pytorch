@@ -31,6 +31,7 @@ from torch.distributed.pipelining.schedules import (
     _add_send_recv,
     _add_unshard_reshard,
     _analyze_pipeline_resource_liveness,
+    _assign_pipeline_recv_buffer_slots,
     _batch_p2p,
     _defer_recv_ops,
     _format_pipeline_order,
@@ -55,6 +56,7 @@ from torch.distributed.pipelining.schedules import (
 )
 from torch.distributed.pipelining.stage import (
     _PipelineStageBase,
+    _RecvBufferPool,
     _RecvInfo,
     PipelineStage,
 )
@@ -154,15 +156,18 @@ class ScheduleTest(TestCase):
         stage.stage_index = 1
         stage.device = torch.device("cpu")
         stage._downstream_group = None
+        stage._fwd_recv_slots = {}
+        stage._fwd_recv_pool = _RecvBufferPool("forward")
         info = _RecvInfo(
             "activation", source=0, tensor_meta=_TensorMeta.from_tensor(torch.ones(2))
         )
+        stage.args_recv_info = {0: (info,)}
 
         with (
             patch.object(stage, "_resolve_peer_global_rank", return_value=0),
             patch("torch.distributed.pipelining.stage.dist.P2POp") as p2p,
         ):
-            ops = stage._get_recv_ops((info,), stage._downstream_group)
+            ops = stage.get_fwd_recv_ops(0)
 
         self.assertEqual(len(ops), 1)
         self.assertIsNotNone(info.buffer)
@@ -183,6 +188,69 @@ class ScheduleTest(TestCase):
             PipeliningMetadataError, "incomplete pipeline step"
         ):
             info.set_buffer(torch.ones(2))
+
+    def test_recv_buffer_pool_reuses_slots_and_detects_aliases(self):
+        meta = _TensorMeta.from_tensor(torch.ones(2))
+        info = _RecvInfo("activation", source=0, tensor_meta=meta)
+        pool = _RecvBufferPool("forward")
+        pool.prepare(2, (info,), torch.device("cpu"))
+
+        pool.acquire(0, 0, (info,))
+        first = info.take_buffer()
+        self.assertIsNotNone(first)
+        self.assertTrue(pool.aliases(first.view(-1)))
+        with self.assertRaisesRegex(RuntimeError, "owned by microbatch 0"):
+            pool.acquire(0, 1, (info,))
+        pool.release(0, 0)
+
+        pool.acquire(0, 2, (info,))
+        self.assertEqual(info.take_buffer().data_ptr(), first.data_ptr())
+        pool.release(0, 2)
+
+        stage = MockPipelineStage(num_stages=1)
+        stage._fwd_recv_pool = pool
+        stage._bwd_recv_pool = _RecvBufferPool("backward")
+        owned = stage._ensure_owned_send(first.view(-1))
+        self.assertFalse(torch._C._is_alias_of(owned, first))
+
+        backward_info = _RecvInfo("gradient", source=0, tensor_meta=meta)
+        stage._bwd_recv_pool.prepare(1, (backward_info,), torch.device("cpu"))
+        stage._bwd_recv_pool.acquire(0, 0, (backward_info,))
+        backward_buffer = backward_info.take_buffer()
+        self.assertFalse(
+            torch._C._is_alias_of(
+                stage._ensure_owned_send(backward_buffer.view(-1)), backward_buffer
+            )
+        )
+        stage._bwd_recv_pool.release(0, 0)
+
+        independent = torch.ones(2)
+        self.assertIs(stage._ensure_owned_send(independent), independent)
+
+    def test_recv_buffer_slots_follow_schedule_lifetimes(self):
+        actions = [
+            _Action(1, RECV_F, 0),
+            _Action(1, F, 0),
+            _Action(1, RECV_F, 1),
+            _Action(1, F, 1),
+            _Action(1, RECV_B, 1),
+            _Action(1, RECV_B, 0),
+            _Action(1, W, 1),
+            _Action(1, RECV_F, 2),
+            _Action(1, F, 2),
+            _Action(1, RECV_F, 3),
+            _Action(1, B, 0),
+            _Action(1, RECV_B, 2),
+            _Action(1, B, 2),
+            _Action(1, RECV_B, 3),
+            _Action(1, B, 3),
+        ]
+        slots = _assign_pipeline_recv_buffer_slots(actions, has_backward=True)[1]
+
+        self.assertEqual(slots.forward, {0: 0, 1: 1, 2: 1, 3: 2})
+        self.assertEqual(slots.num_forward_slots, 3)
+        self.assertEqual(slots.backward, {1: 0, 0: 1, 2: 0, 3: 0})
+        self.assertEqual(slots.num_backward_slots, 2)
 
     def test_pipeline_resource_liveness_reuses_completed_slots(self):
         stage = MockPipelineStage(group_size=1, num_stages=1)
