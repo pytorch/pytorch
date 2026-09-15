@@ -2532,6 +2532,7 @@ class TestRefsOpsInfo(TestCase):
         "_refs.alias",
         "_refs.bitwise_right_shift",
         "_refs.copy_to",
+        "_refs.divmod",
         "_refs.empty_permuted",
         "_refs.empty_strided",
         "_refs.equal",
