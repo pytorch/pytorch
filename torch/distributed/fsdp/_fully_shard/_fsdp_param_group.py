@@ -194,6 +194,7 @@ class FSDPParamGroup:
         # Only consider resetting sharded parameters once in lazy init since it
         # can incur nontrivial overhead to reset them
         self._reset_sharded_params: bool = False
+        self._mp_dtypes_initialized: bool = False
 
         # - Hook state
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
@@ -302,6 +303,7 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
+        self._mp_dtypes_initialized = True
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -380,6 +382,8 @@ class FSDPParamGroup:
     # Runtime #
     @_disable_functorch_if_active
     def unshard(self, async_op: bool = False):
+        if not self._mp_dtypes_initialized:
+            self._init_mp_dtypes()
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
@@ -638,6 +642,8 @@ class FSDPParamGroup:
     @_dynamo_disable
     def post_backward(self, *unused: Any):
         with _spmd_no_typecheck():
+            if not self._mp_dtypes_initialized:
+                self._init_mp_dtypes()
             # This method should be idempotent and safe to call even when this
             # FSDP parameter group was not used in backward (should be a no-op)
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))

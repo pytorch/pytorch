@@ -11312,6 +11312,51 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(unpacked.is_cuda)
             self.assertEqual(unpacked.dtype, torch.float)
 
+    @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    @parametrize_test("declared", ["unset", torch.float32, None])
+    @parametrize_test("mode", ["set_data", "swap", "overwrite"])
+    @parametrize_test("existing_grad", [False, True])
+    def test_module_apply_grad_dtype(self, device, declared, mode, existing_grad):
+        module = nn.Module()
+        module.weight = nn.Parameter(torch.arange(1, 4, device=device, dtype=torch.float32))
+        if declared != "unset":
+            module.weight.grad_dtype = declared
+        if existing_grad:
+            module.weight.square().sum().backward()
+        old_param, old_grad = module.weight, module.weight.grad
+        with (
+            mock.patch("torch.__future__._swap_module_params_on_conversion", mode == "swap"),
+            mock.patch("torch.__future__._overwrite_module_params_on_conversion", mode == "overwrite"),
+        ):
+            module.to(torch.bfloat16)
+            self.assertEqual(module.weight.dtype, torch.bfloat16)
+            self.assertEqual(module.weight.grad_dtype, torch.bfloat16 if declared == "unset" else declared)
+            self.assertEqual(module.weight._has_grad_dtype_override, declared != "unset")
+            self.assertEqual(module.weight is old_param, mode != "overwrite")
+            if existing_grad:
+                self.assertEqual(module.weight.grad.dtype, torch.bfloat16)
+                self.assertEqual(module.weight.grad, 2 * module.weight.detach())
+                self.assertEqual(module.weight.grad is old_grad, mode != "overwrite")
+                if declared is torch.float32:
+                    with self.assertRaisesRegex(RuntimeError, "because there is already a gradient"):
+                        module.weight.grad_dtype = torch.float32
+                    with self.assertRaisesRegex(RuntimeError, "must match the tensor's grad_dtype"):
+                        module.weight.grad = torch.ones_like(module.weight)
+            else:
+                self.assertIsNone(module.weight.grad)
+            module.weight.square().sum().backward()
+            expected_dtype = torch.float32 if declared is torch.float32 else torch.bfloat16
+            self.assertEqual(module.weight.grad.dtype, torch.bfloat16 if existing_grad else expected_dtype)
+            self.assertEqual(module.weight.grad, module.weight.detach().to(module.weight.grad.dtype) * (4 if existing_grad else 2))
+            module.zero_grad(set_to_none=True)
+            module.weight.square().sum().backward()
+            self.assertEqual(module.weight.grad.dtype, expected_dtype)
+            module.to(torch.float32)
+            self.assertEqual(module.weight.grad_dtype, torch.float32 if declared == "unset" else declared)
+            self.assertEqual(module.weight._has_grad_dtype_override, declared != "unset")
+            self.assertEqual(module.weight.grad.dtype, torch.float32)
+
     @onlyCUDA
     def test_overwrite_module_params_on_conversion_cpu_device(self, device):
         # Test that under the current default settings

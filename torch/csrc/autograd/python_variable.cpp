@@ -3924,6 +3924,43 @@ static void initTensorImplConversion(PyObject* module) {
     // code to keep the original tensor alive
     return t->getIntrusivePtr().get();
   });
+  m.def(
+      "_set_grad_after_module_conversion",
+      [](const at::Tensor& param,
+         const std::optional<at::Tensor>& grad,
+         bool has_grad_dtype_override,
+         std::optional<at::ScalarType> grad_dtype) {
+        TORCH_CHECK(
+            param.is_leaf(), "Module conversion expects a leaf parameter");
+        if (grad.has_value()) {
+          TORCH_CHECK(
+              !param.is_same(*grad), "can't assign Variable as its own grad");
+          TORCH_CHECK(
+              param.device() == grad->device(),
+              "Converted gradient must match the parameter's device");
+          TORCH_CHECK(
+              param.sym_sizes().equals(grad->sym_sizes()),
+              "Converted gradient must match the parameter's size");
+          if (grad->layout() != kSparse) {
+            TORCH_CHECK(
+                grad->options().type_equal(
+                    param.options().dtype(grad->scalar_type())),
+                "Converted gradient must match the parameter's tensor type");
+          }
+        }
+        // Unlike assigning .grad or grad_dtype, Module._apply transforms an
+        // existing gradient independently of its policy, as .data conversion
+        // does.
+        auto* meta = impl::materialize_autograd_meta(param);
+        meta->grad_dtype_ = has_grad_dtype_override ? grad_dtype : std::nullopt;
+        meta->allow_grad_dtype_mismatch_ =
+            has_grad_dtype_override && !grad_dtype.has_value();
+        if (auto accumulator = impl::try_get_grad_accumulator(param)) {
+          accumulator->mutable_input_metadata(0).set_grad_dtype(
+              meta->grad_dtype(param));
+        }
+        param.mutable_grad() = grad.value_or(at::Tensor());
+      });
 }
 } // namespace torch::autograd
 
