@@ -21,9 +21,8 @@ c10::LeftRight<FakeDispatchTables>& fakeDispatchTables() {
   return tables;
 }
 
-std::unordered_set<c10::OperatorName>& setForCategory(
-    FakeDispatchTables& t,
-    FakeDispatchCategory category) {
+template <typename Tables>
+auto& setForCategory(Tables& t, FakeDispatchCategory category) {
   switch (category) {
     case FakeDispatchCategory::Decomp:
       return t.decomp;
@@ -37,12 +36,6 @@ std::unordered_set<c10::OperatorName>& setForCategory(
       return t.custom_op_impl;
   }
   TORCH_INTERNAL_ASSERT(false, "unknown FakeDispatchCategory");
-}
-
-const std::unordered_set<c10::OperatorName>& setForCategory(
-    const FakeDispatchTables& t,
-    FakeDispatchCategory category) {
-  return setForCategory(const_cast<FakeDispatchTables&>(t), category);
 }
 
 } // namespace
