@@ -1,12 +1,16 @@
 #pragma once
 
 #include <functional>
-#include <map>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-literal-operator")
+#include <httplib.h>
+C10_DIAGNOSTIC_POP()
 
 namespace c10d::control_plane {
 
@@ -18,7 +22,9 @@ class TORCH_API Request {
 
   virtual const std::string& body() const = 0;
 
-  virtual const std::multimap<std::string, std::string>& params() const = 0;
+  // Returned as httplib's own container (its concrete type has varied across
+  // releases) rather than copied into a std::multimap.
+  virtual const httplib::Params& params() const = 0;
 
   std::string getParam(const std::string& key) const {
     auto it = params().find(key);
