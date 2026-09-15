@@ -2723,6 +2723,17 @@ class DeviceCachingAllocator {
     }
   }
 
+  size_t getMainPoolCachedMemory() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    size_t cached = 0;
+    for (const auto* pool : {&large_blocks, &small_blocks}) {
+      for (const auto* block : pool->blocks) {
+        cached += block->size;
+      }
+    }
+    return cached;
+  }
+
   /** Returns a copy of the memory allocator stats **/
   DeviceStats getStats() const {
     std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -5161,6 +5172,11 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Invalid device argument ",
         device,
         ": did you call init?");
+  }
+
+  size_t getMainPoolCachedMemory(c10::DeviceIndex device) override {
+    assertValidDevice(device);
+    return device_allocator[device]->getMainPoolCachedMemory();
   }
 
   DeviceStats getDeviceStats(c10::DeviceIndex device) override {

@@ -1587,22 +1587,31 @@ class CachingAutotuner(KernelInterface):
         """
         To support benchmarking in the presence of mutated args, we need to avoid
         autotuning contaminating them. We try to pass cloned args to the kernel.
-        If those clones would increase the peak memory usage, however, we instead
-        copy to cpu and restore them after each iteration. Figure out the args
-        to be copied and do the copying.
+        If there is insufficient device memory for those clones, we instead copy
+        to CPU and restore them after each iteration.
         """
         if not self.optimize_mem:
             return {}
 
         copies = {}
         try:
-            if torch.accelerator.current_accelerator() is None:
-                # No initialized accelerator; skip memory-optimized path
+            if self.device_props.type not in ("cuda", "xpu"):
                 return {}
-            budget = (
-                torch.accelerator.max_memory_allocated()
-                - torch.accelerator.memory_allocated()
-            )
+            device = self.device_props.index
+            device_module = torch.get_device_module(self.device_props.type)
+            free, total = device_module.mem_get_info(device)
+            fraction = device_module.get_per_process_memory_fraction(device)
+            if fraction < 1:
+                free = min(
+                    free,
+                    int(total * fraction) - device_module.memory_reserved(device),
+                )
+            cached = 0
+            if self.device_props.type == "cuda":
+                cached = torch._C._cuda_getMainPoolCachedMemory(
+                    device if device is not None else device_module.current_device()
+                )
+            budget = max(0, free) + cached
         except RuntimeError:
             # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
             return {}
