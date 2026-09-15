@@ -389,6 +389,14 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
         self.config: FlexGemmEpilogueConfig = template_kwargs["config"]
 
     @override
+    def benchmark(self, *args, out) -> float:
+        # In-process autotuning deduplicates inputs by buffer name, while the
+        # FlexGEMM kernel signature preserves every operand position.
+        input_names = [node.get_name() for node in self.input_nodes]
+        inputs = dict(zip(dict.fromkeys(input_names), args, strict=True))
+        return self.bmreq.benchmark(*(inputs[name] for name in input_names), out=out)
+
+    @override
     def output_node(self) -> "TensorBox":
         """Guard the problem-size rules QuACK applied to the selected config.
 
