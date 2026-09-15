@@ -29,6 +29,9 @@
 #include <c10/util/irange.h>
 #include <optional>
 
+#include <cctype>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using at::Device;
@@ -263,7 +266,14 @@ Tensor internal_new_from_data(
     bool copy_variables,
     bool copy_numpy,
     bool type_inference,
-    bool pin_memory = false) {
+    bool pin_memory = false,
+    // When false, skip the __dlpack__ conversion attempt so that the caller
+    // uses only the sequence-conversion path. asarray sets this after catching
+    // a DLPack failure of its own -- a fallback introduced for backwards
+    // compatibility -- since it has already attempted __dlpack__ and must not
+    // re-attempt it here. All other callers keep the default (always try
+    // __dlpack__).
+    bool try_dlpack = true) {
   TORCH_CHECK_TYPE(
       !THPUtils_checkString(data),
       "new(): invalid data type '",
@@ -337,7 +347,7 @@ Tensor internal_new_from_data(
   }
 #endif
 
-  if (PyObject_HasAttrString(data, "__dlpack__")) {
+  if (try_dlpack && PyObject_HasAttrString(data, "__dlpack__")) {
     py::object tensor_o =
         py::module::import("torch").attr("utils").attr("dlpack").attr(
             "from_dlpack")(py::handle(data));
@@ -1560,7 +1570,8 @@ Tensor tensor_frombuffer(
   if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
     TORCH_CHECK(
         PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
-        "could not retrieve buffer from object");
+        "could not retrieve a contiguous buffer from the given object "
+        "(non-contiguous buffers are not supported)");
     TORCH_WARN_ONCE(
         "The given buffer is not writable, and PyTorch does "
         "not support non-writable tensors. This means you can write to the "
@@ -1687,6 +1698,171 @@ bool isValidDLPackCapsule(PyObject* data) {
       PyCapsule_IsValid(data, at::DLPackTraits<DLManagedTensor>::capsule);
 }
 
+// Infers a ScalarType from a buffer-protocol object's declared format.
+// Only native byte order is supported because tensor_frombuffer reinterprets
+// bytes without byte-swapping; unsupported/ambiguous formats raise, asking for
+// an explicit dtype rather than silently producing wrong results.
+ScalarType scalar_type_from_buffer_format(PyObject* obj) {
+  Py_buffer view;
+  if (PyObject_GetBuffer(obj, &view, PyBUF_FORMAT | PyBUF_STRIDES) < 0) {
+    PyErr_Clear();
+    TORCH_CHECK_VALUE(
+        false,
+        "could not infer a dtype from the buffer's format. "
+        "Please pass an explicit dtype= to torch.asarray.");
+  }
+  std::string format = view.format != nullptr ? view.format : "B";
+  auto itemsize = view.itemsize;
+  PyBuffer_Release(&view);
+
+  // PEP-3118 format for a single homogeneous scalar:
+  //   [whitespace] [byteorder] [whitespace] [count] [whitespace] typecode
+  // Whitespace is permitted anywhere; a leading count is only meaningful here
+  // when it is 1 (a larger count is a packed multi-element record with no
+  // single-scalar dtype).
+  size_t i = 0;
+  auto skip_ws = [&]() {
+    while (i < format.size() &&
+           std::isspace(static_cast<unsigned char>(format[i]))) {
+      ++i;
+    }
+  };
+
+  skip_ws();
+
+  constexpr uint16_t kEndianProbe = 1;
+  const bool little_endian = *reinterpret_cast<const char*>(&kEndianProbe) == 1;
+  bool native_order = true;
+  if (i < format.size()) {
+    switch (format[i]) {
+      case '@':
+      case '=':
+        ++i;
+        break;
+      case '<':
+        native_order = little_endian;
+        ++i;
+        break;
+      case '>':
+      case '!':
+        native_order = !little_endian;
+        ++i;
+        break;
+      default:
+        break;
+    }
+  }
+  TORCH_CHECK_VALUE(
+      native_order,
+      "buffer has non-native byte order (format '",
+      format,
+      "'), which torch.asarray cannot reinterpret without copying. "
+      "Convert the buffer to native byte order first (e.g. with numpy's "
+      "arr.byteswap().view(arr.dtype.newbyteorder())).");
+
+  skip_ws();
+
+  size_t count_start = i;
+  while (i < format.size() && format[i] >= '0' && format[i] <= '9') {
+    ++i;
+  }
+  if (i > count_start) {
+    TORCH_CHECK_VALUE(
+        format.compare(count_start, i - count_start, "1") == 0,
+        "could not infer a dtype from buffer format '",
+        format,
+        "' (multi-element formats are not supported). "
+        "Please pass an explicit dtype= to torch.asarray.");
+  }
+
+  skip_ws();
+
+  const char code = i < format.size() ? format[i] : '\0';
+  const char sub = (i + 1) < format.size() ? format[i + 1] : '\0';
+  std::optional<ScalarType> scalar_type;
+  if (code == 'Z') {
+    switch (sub) {
+      case 'e':
+        scalar_type = ScalarType::ComplexHalf;
+        break;
+      case 'f':
+        scalar_type = ScalarType::ComplexFloat;
+        break;
+      case 'd':
+        scalar_type = ScalarType::ComplexDouble;
+        break;
+      default:
+        break;
+    }
+  } else {
+    switch (code) {
+      case '?':
+        scalar_type = ScalarType::Bool;
+        break;
+      case 'b':
+        scalar_type = ScalarType::Char;
+        break;
+      case 'c':
+      case 'B':
+        scalar_type = ScalarType::Byte;
+        break;
+      case 'h':
+        scalar_type = ScalarType::Short;
+        break;
+      case 'H':
+        scalar_type = ScalarType::UInt16;
+        break;
+      case 'i':
+        scalar_type = ScalarType::Int;
+        break;
+      case 'I':
+        scalar_type = ScalarType::UInt32;
+        break;
+      // 'l'/'n'/'q' (and unsigned) map to 32- or 64-bit ints depending on the
+      // platform's itemsize; the cross-check below guards the choice.
+      case 'l':
+      case 'n':
+      case 'q':
+        scalar_type = itemsize == 8 ? ScalarType::Long : ScalarType::Int;
+        break;
+      case 'L':
+      case 'N':
+      case 'Q':
+        scalar_type = itemsize == 8 ? ScalarType::UInt64 : ScalarType::UInt32;
+        break;
+      case 'e':
+        scalar_type = ScalarType::Half;
+        break;
+      case 'f':
+        scalar_type = ScalarType::Float;
+        break;
+      case 'd':
+        scalar_type = ScalarType::Double;
+        break;
+      default:
+        break;
+    }
+  }
+
+  TORCH_CHECK_VALUE(
+      scalar_type.has_value(),
+      "could not infer a dtype from buffer format '",
+      format,
+      "'. Please pass an explicit dtype= to torch.asarray.");
+
+  TORCH_CHECK_VALUE(
+      at::elementSize(*scalar_type) == static_cast<size_t>(itemsize),
+      "buffer format '",
+      format,
+      "' has itemsize ",
+      itemsize,
+      " which does not match the inferred dtype ",
+      *scalar_type,
+      ". Please pass an explicit dtype= to torch.asarray.");
+
+  return *scalar_type;
+}
+
 } // namespace
 
 Tensor tensor_fromDLPack(PyObject* data) {
@@ -1729,9 +1905,8 @@ Tensor asarray(
   bool force_alias = !copy.value_or(true);
   bool should_warn_numpy_not_writable = false;
 
-  // Used when:
-  // 1. 'obj' implements the buffer protocol and no type is given.
-  // 2. creating a new tensor from a Python sequence.
+  // Used when creating a new tensor from a Python sequence, in which case the
+  // element type is inferred (or forced to the given dtype).
   auto dtype_unwrapped =
       dtype.value_or(torch::tensors::get_default_scalar_type());
 
@@ -1793,10 +1968,29 @@ Tensor asarray(
     tensor = tensor_fromDLPack(obj);
   }
 
+  // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
+  // buffer protocol so dtype, device, and shape come from the producer. If the
+  // producer's DLPack export fails (e.g. an unsupported dtype/device, or data
+  // that only works via the buffer/sequence paths), fall back to those instead
+  // of propagating the error.
+  if (!tensor.defined() && PyObject_HasAttrString(obj, "__dlpack__")) {
+    try {
+      py::object tensor_o =
+          py::module::import("torch").attr("utils").attr("dlpack").attr(
+              "from_dlpack")(py::handle(obj));
+      tensor = py::cast<Tensor>(tensor_o);
+    } catch (py::error_already_set& e) {
+      e.restore();
+      PyErr_Clear();
+    }
+  }
+
   // Check whether 'obj' implements the buffer protocol
   if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
-    tensor =
-        tensor_frombuffer(obj, dtype_unwrapped, -1, 0, return_requires_grad);
+    // When no dtype is given, infer it from the buffer's declared format
+    ScalarType buffer_dtype =
+        dtype.has_value() ? *dtype : scalar_type_from_buffer_format(obj);
+    tensor = tensor_frombuffer(obj, buffer_dtype, -1, 0, return_requires_grad);
   }
 
   if (tensor.defined()) {
@@ -1867,7 +2061,9 @@ Tensor asarray(
         obj,
         /* copy_variables = */ false,
         /* copy_numpy = */ false,
-        /* type_inference = */ !dtype.has_value());
+        /* type_inference = */ !dtype.has_value(),
+        /* pin_memory = */ false,
+        /* try_dlpack = */ false);
     tensor.set_requires_grad(return_requires_grad);
   }
 
