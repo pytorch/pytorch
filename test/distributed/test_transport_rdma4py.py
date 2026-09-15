@@ -196,8 +196,8 @@ class TestIBVerbsTransport(TransportTestMixin, TestCase):
         return transport
 
     def make_transport_pair(self):
-        first = _rdma4py.IBVerbsTransport("cpu", num_qps=2)
-        second = _rdma4py.IBVerbsTransport("cpu", num_qps=2)
+        first = _rdma4py.IBVerbsTransport(num_qps=2)
+        second = _rdma4py.IBVerbsTransport(num_qps=2)
         first_url = first.bind()
         second_url = second.bind()
         self.assertEqual(first.connect(second_url), 0)
@@ -206,6 +206,14 @@ class TestIBVerbsTransport(TransportTestMixin, TestCase):
 
     def test_supported(self) -> None:
         self.assertTrue(_rdma4py.IBVerbsTransport.supported())
+
+    def test_graph_mode_requires_device(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires a CUDA device"):
+            _rdma4py.IBVerbsTransport(cuda_graph=True)
+
+    def test_default_hca_without_device(self) -> None:
+        devices = [SimpleNamespace(name="first"), SimpleNamespace(name="second")]
+        self.assertIs(_rdma4py._select_rdma_device(devices, None), devices[0])
 
     def test_selects_topology_local_hca(self) -> None:
         with TemporaryDirectory() as directory:
