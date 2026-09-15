@@ -576,8 +576,8 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
     const char transb = mat2.strides()[1] == 1 ? 'N' : 'T';
     const char offsetc = 'F';
 
-    const int lda = transa == 'T' ? self.stride(1) : self.stride(0);
-    const int ldb = transb == 'T' ? mat2.stride(1) : mat2.stride(0);
+    const int lda = transa == 'T' ? (k > 1 ? self.stride(1) : m) : (m > 1 ? self.stride(0) : k);
+    const int ldb = transb == 'T' ? (n > 1 ? mat2.stride(1) : k) : (k > 1 ? mat2.stride(0) : n);
     const int ldc = n;
 
     const float alpha = 1;
@@ -596,11 +596,21 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
         beta,                                                 \
         static_cast<int32_t*>(result.data_ptr()), ldc, &co)
 
+    dnnl::status status;
     if (self.scalar_type() == at::kByte) { //uint8
-      CALL_DNNL_GEMM(dnnl::gemm_u8s8s32, uint8_t*, self.data_ptr());
+      status = CALL_DNNL_GEMM(dnnl::gemm_u8s8s32, uint8_t*, self.data_ptr());
     } else { //int8
-      CALL_DNNL_GEMM(dnnl::gemm_s8s8s32, int8_t*, self.data_ptr());
+      status = CALL_DNNL_GEMM(dnnl::gemm_s8s8s32, int8_t*, self.data_ptr());
     }
+
+    TORCH_CHECK(
+      status == dnnl::status::success,
+      "oneDNN i8i8i32 gemm failed, dnnl_status_t=", static_cast<int>(status),
+      ", transa=", transa, ", transb=", transb,
+      ", m=", m, ", n=", n, ", k=", k,
+      ", lda=", lda, ", ldb=", ldb, ", ldc=", ldc,
+      ", self sizes=", self.sizes(), " strides=", self.strides(),
+      ", mat2 sizes=", mat2.sizes(), " strides=", mat2.strides());
   }
 
 void mkldnn_matmul_i8i8i32(
