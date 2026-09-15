@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import importlib
 import logging
 import os
 import queue
@@ -29,6 +30,7 @@ from torch._subclasses import FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
+from .codegen.common import custom_backend_codegen_configs
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
 from .graph import GraphLowering
@@ -216,6 +218,10 @@ class _WireProtocolInput:
     graph_kwargs: _CompileFxKwargs
     tracing_context: torch._guards.TracingContext | None
     config: dict[str, object]
+    # backend configs from the parent process ({module: {key: value}}),
+    # applied in the child instead of reading the worker's own backend
+    # config state
+    backend_configs: dict[str, dict[str, object]]
     virtualized: _VirtualizedSerializer
     deterministic_guard_for_testing: (  # type: ignore[name-defined]  # mypy bug
         torch.testing._internal.common_utils.DeterministicGuard | None
@@ -521,6 +527,11 @@ class _SerializedFxCompile(FxCompile):
                 graph_kwargs,
                 context,
                 config.save_config_portable(),
+                {
+                    m.__name__: m.get_serializable_config_copy()
+                    for m in custom_backend_codegen_configs.values()
+                    if m is not None
+                },
                 _VirtualizedSerializer.serialize(),
                 deterministic_guard_for_testing,
                 logger_state,
@@ -571,6 +582,8 @@ class _SerializedFxCompile(FxCompile):
             stack.enter_context(input.virtualized.patch())
             stack.enter_context(input.lowering.patch())
             stack.enter_context(config.patch(input.config))
+            for name, values in input.backend_configs.items():
+                stack.enter_context(importlib.import_module(name).patch(values))
             captured_logs = stack.enter_context(input.logger_state)
             if input.deterministic_guard_for_testing:
                 stack.enter_context(input.deterministic_guard_for_testing)
