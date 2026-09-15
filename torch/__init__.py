@@ -44,6 +44,16 @@ from typing_extensions import (
 )
 
 
+# Re-executing this file (retrying a failed import, or `reload`) would corrupt the C++ global state the first run set up.
+if getattr(sys, "_torch_import_started", False):
+    raise ImportError(
+        "`torch` can only be initialized once per process, so this module cannot "
+        "be imported again: neither via `importlib.reload(torch)`, nor by "
+        "re-importing after a failed `import torch`."
+    )
+sys._torch_import_started = True  # type: ignore[attr-defined]
+
+
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -362,7 +372,6 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
         ("cuda_runtime", "libcudart.so.*[0-9]"),
         ("cuda_cupti", "libcupti.so.*[0-9]"),
         ("cufft", "libcufft.so.*[0-9]"),
-        ("curand", "libcurand.so.*[0-9]"),
         ("nvjitlink", "libnvJitLink.so.*[0-9]"),
         ("cusparse", "libcusparse.so.*[0-9]"),
         ("cusparselt", "libcusparseLt.so.*[0-9]"),
@@ -1837,7 +1846,19 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
+        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
+          an MPS tensor with floating or complex dtype
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.kthvalue` when called on an MPS tensor
+        * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
+        * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, and :func:`torch.nn.AvgPool3d`
+          when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -2708,6 +2729,7 @@ from torch import (  # usort: skip
     distributed as distributed,
     distributions as distributions,
     fft as fft,
+    foreach as foreach,
     futures as futures,
     hub as hub,
     jit as jit,
@@ -3006,6 +3028,13 @@ class _TorchCompileWrapper:
     def reset(self) -> None:
         if hasattr(self.compiler_fn, "reset"):
             self.compiler_fn.reset()
+
+    # Forwarded so the backend's _dynamo_backend_init can be read off the
+    # wrapper (what get_compiler_fn receives); read at fire time so the hook
+    # can be set on the backend even after torch.compile() wraps it.
+    @property
+    def _dynamo_backend_init(self) -> _Any | None:
+        return getattr(self.compiler_fn, "_dynamo_backend_init", None)
 
 
 _InputT = _ParamSpec("_InputT")
