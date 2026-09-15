@@ -1029,6 +1029,15 @@ loop_index_inversion_in_fusion: bool = True
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
 
+# Memory-timeline fusion gating.
+#   None: disable that threshold dimension
+#   0: allow no graph-peak increase
+#   value: allow total graph-peak delta up to that limit
+# The accepted delta is measured against the original graph peak before fusion.
+# When both thresholds are set, the tighter limit wins.
+fusion_memory_timeline_peak_memory_increase_gb: float | None = None
+fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
+
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
     os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
