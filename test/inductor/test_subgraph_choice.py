@@ -14,6 +14,9 @@ from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     decomposeK as blackwell_decomposeK,
+    get_blackwell_decompose_k_candidates,
+    get_blackwell_decompose_k_config_indices,
+    get_blackwell_decompose_k_splits,
     lower_blackwell_decompose_k_partial,
 )
 from torch._inductor.lowering import lowerings, register_lowering
@@ -23,6 +26,10 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM100OrLater
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -509,7 +516,66 @@ class TestSubgraphChoice(TestCase):
     HAS_GPU and SM100OrLater,
     "requires NVIDIA SM100+",
 )
+@instantiate_parametrized_tests
 class TestBlackwellDecomposeKSubgraphChoice(TestCase):
+    def test_small_output_uses_bounded_generic_config_set(self):
+        self.assertEqual(
+            get_blackwell_decompose_k_config_indices(128, 128), (6, 0, 3)
+        )
+        self.assertEqual(
+            get_blackwell_decompose_k_config_indices(64, 128), (6, 0, 3)
+        )
+        self.assertEqual(
+            get_blackwell_decompose_k_config_indices(256, 128), (0, 3, 1, 4)
+        )
+
+    @parametrize("max_choices", (0, 1, 2, 4))
+    def test_fused_candidate_budget_is_global(self, max_choices):
+        candidates = get_blackwell_decompose_k_candidates(
+            128,
+            128,
+            11_091_857,
+            148,
+            max_choices=max_choices,
+        )
+        self.assertLessEqual(len(candidates), max_choices)
+        self.assertEqual(len(candidates), len(set(candidates)))
+        self.assertTrue(
+            all(config_index in (6, 0, 3) for config_index, _ in candidates)
+        )
+
+    @parametrize(
+        "max_choices,expected",
+        (
+            (0, ()),
+            (1, (148,)),
+            (2, (148, 296)),
+            (4, (148, 296, 444, 592)),
+        ),
+    )
+    def test_fused_split_choice_count_and_bounds(self, max_choices, expected):
+        m, n, k = 128, 128, 11_091_857
+        partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[6]
+        splits = get_blackwell_decompose_k_splits(
+            m,
+            n,
+            k,
+            148,
+            partial_config,
+            max_choices=max_choices,
+        )
+
+        self.assertEqual(tuple(splits), expected)
+        self.assertLessEqual(len(splits), max_choices)
+        self.assertEqual(len(splits), len(set(splits)))
+        for k_split in splits:
+            k_part = math.ceil(math.ceil(k / k_split) / partial_config.block_k)
+            k_part *= partial_config.block_k
+            workspace_bytes = k_split * m * n * torch.float32.itemsize
+            self.assertLessEqual(workspace_bytes, 128 * 1024**2)
+            self.assertGreaterEqual(k_part, 8 * partial_config.block_k)
+            self.assertLess((k_split - 1) * k_part, k)
+
     def _run_forced_triton_plan(
         self, two_ctas: bool, *, use_meta_ws: bool = True, m: int = 256
     ) -> None:
@@ -578,6 +644,169 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
 
     def test_forced_triton_2cta(self):
         self._run_forced_triton_plan(True)
+
+    def test_1cta_cat_cast_materializes_shared_output(self):
+        m, k, half_n = 128, 262_144, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            b = torch.cat((left, right), dim=1).to(torch.bfloat16)
+            return a @ b, b
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="TRITON",
+            benchmark_epilogue_fusion=True,
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.enable_blackwell_decompose_k_cat2_selection": True,
+                "triton.num_decompose_k_splits": 2,
+                "triton.decompose_k_bmm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": "_triton_",
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        expected = fn(a, left, right)
+        torch.testing.assert_close(actual[0], expected[0], atol=16.0, rtol=1e-1)
+        torch.testing.assert_close(actual[1], expected[1])
+        source = codes[-1]
+        self.assertNotIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertEqual(source.count(f"empty_strided_cuda(({k}, 128)"), 1)
+        self.assertIn("arg_B", source)
+
+    def test_1cta_cat_cast_contract_rejects_intermediate_pointwise(self):
+        m, k, half_n = 128, 262_144, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+
+        def fn(a, left, right):
+            b = (torch.cat((left, right), dim=1) + 1).to(torch.bfloat16)
+            return a @ b
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="TRITON",
+            benchmark_epilogue_fusion=True,
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.num_decompose_k_splits": 2,
+                "triton.decompose_k_bmm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": "_triton_",
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right), atol=16.0, rtol=1e-1)
+        source = codes[-1]
+        self.assertNotIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertIn(f"empty_strided_cuda(({k}, 128)", source)
+
+    def _run_cat_cast_whole_plan_selection(
+        self, winner: str, *, max_choices: int = 2
+    ) -> tuple[str, list[str], list[str], list[bool]]:
+        m, k, half_n = 128, 262_145, 64
+        a = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16).T
+        left = torch.randn(k, half_n, device=GPU_TYPE, dtype=torch.float32)
+        right = torch.randn_like(left)
+        benchmarked: list[str] = []
+        benchmarked_hashes: list[str] = []
+        benchmarked_during_scheduling: list[bool] = []
+
+        def fn(a, left, right):
+            return a @ torch.cat((left, right), dim=1).to(torch.bfloat16)
+
+        def benchmark(choice, *args, **kwargs):
+            del args, kwargs
+            benchmarked.append(choice.name)
+            benchmarked_hashes.append(choice.hash_key())
+            benchmarked_during_scheduling.append(V.graph.scheduler is not None)
+            return 0.1 if winner in choice.name else 1.0
+
+        with (
+            mock.patch.object(SubgraphChoiceCaller, "benchmark", benchmark),
+            mock.patch.object(MultiKernelFusionPlanChoice, "benchmark", benchmark),
+            config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="ATEN,TRITON",
+                compile_threads=1,
+                assume_aligned_inputs=True,
+                **{
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_blackwell_decompose_k": True,
+                    "triton.enable_blackwell_decompose_k_cat2_selection": True,
+                    "triton.max_triton_decompose_k_fusion_choices": max_choices,
+                    "triton.decompose_k_bmm_backends": "ATEN,TRITON",
+                },
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, left, right
+            )
+
+        torch.testing.assert_close(actual, fn(a, left, right), atol=16.0, rtol=1e-1)
+        return (
+            codes[-1],
+            benchmarked,
+            benchmarked_hashes,
+            benchmarked_during_scheduling,
+        )
+
+    def test_zero_cat_cast_whole_plan_choices_retains_aten(self):
+        source, benchmarked, hashes, deferred = self._run_cat_cast_whole_plan_selection(
+            "direct_aten", max_choices=0
+        )
+        self.assertFalse(any("cat2" in name for name in benchmarked))
+        self.assertEqual(len(benchmarked), len(hashes))
+        self.assertIn("empty_strided_cuda((262145, 128)", source)
+        self.assertIn("extern_kernels.mm", source)
+
+    def test_cat_cast_whole_plan_selects_fused_triton(self):
+        source, benchmarked, hashes, deferred = self._run_cat_cast_whole_plan_selection(
+            "fused"
+        )
+        self.assertEqual(len(benchmarked), 3)
+        self.assertEqual(len(set(benchmarked)), len(benchmarked))
+        self.assertEqual(len(set(hashes)), len(hashes))
+        self.assertEqual(sum("direct_aten" in name for name in benchmarked), 1)
+        self.assertEqual(sum("_triton_" in name for name in benchmarked), 2)
+        self.assertTrue(all(deferred))
+        self.assertEqual(source.count("shape=[262145, 64], strides=[64, 1]"), 2)
+        self.assertIn("prologue_descriptor0.load([offs_k, 0])", source)
+        self.assertIn("prologue_descriptor1.load([offs_k, 0])", source)
+        self.assertIn("b = tl.cat(b_left, b_right, dim=1).to(tl.bfloat16)", source)
+        self.assertIn("BLOCK_K : tl.constexpr = 64", source)
+        self.assertIn("EPILOGUE_SUBTILE : tl.constexpr = 1", source)
+        self.assertIn("TWO_CTAS : tl.constexpr = False", source)
+        self.assertIn("num_stages=3", source)
+        self.assertNotIn("arg_B", source)
+        self.assertNotIn("empty_strided_cuda((262145, 128)", source)
+
+    def test_cat_cast_whole_plan_retains_direct_aten(self):
+        source, benchmarked, hashes, deferred = self._run_cat_cast_whole_plan_selection(
+            "direct_aten"
+        )
+        self.assertEqual(len(benchmarked), 3)
+        self.assertEqual(len(set(hashes)), len(hashes))
+        self.assertTrue(all(deferred))
+        self.assertIn("empty_strided_cuda((262145, 128)", source)
+        self.assertIn("extern_kernels.mm", source)
 
     def test_forced_triton_2cta_config_without_meta_ws(self):
         # One M tile distinguishes the effective 1CTA geometry (M_PAD=128)

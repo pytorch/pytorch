@@ -12,7 +12,12 @@ from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import can_use_tma, get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
 
-from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
+from ..codegen.subgraph import (
+    InlinedSubgraphPlan,
+    MultiKernelFusionPlanChoice,
+    SubgraphChoiceCaller,
+    SubgraphTemplate,
+)
 from ..ir import Buffer, Layout
 from ..virtualized import V
 from .bmm import (
@@ -33,7 +38,17 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 128, 3, 4, 2, 1, True, False),
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
+    BlackwellBMMConfig(128, 128, 64, 3, 8, 1, 1, True, False),
 )
+
+
+def get_blackwell_decompose_k_config_indices(m: int, n: int) -> tuple[int, ...]:
+    """Return a bounded shape-appropriate set of partial-BMM configurations."""
+    if m <= 128 and n <= 128:
+        return (6, 0, 3)
+    if m > 128:
+        return (0, 3, 1, 4) if n <= 128 else (0, 3, 2, 5)
+    return (0, 3)
 
 
 def get_cat2_fp32_prologue_sources(input_node) -> tuple[str, str] | None:
@@ -154,6 +169,190 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
 decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
 
+def _aligned_k_part(k: int, k_split: int, block_k: int) -> int:
+    return math.ceil(math.ceil(k / k_split) / block_k) * block_k
+
+
+def get_blackwell_decompose_k_splits(
+    m: int,
+    n: int,
+    k: int,
+    num_sms: int,
+    config: BlackwellBMMConfig,
+    max_workspace_bytes: int = 128 * 1024**2,
+    max_choices: int = 2,
+) -> list[int]:
+    """Return at most one valid split for each requested CTA occupancy wave."""
+    if min(m, n, k, num_sms, max_choices) <= 0:
+        return []
+
+    m_tiles = math.ceil(m / config.block_m)
+    if config.two_ctas:
+        if m_tiles < 2:
+            return []
+        m_tiles = math.ceil(m_tiles / 2) * 2
+
+    output_ctas_per_split = m_tiles * math.ceil(n / config.block_n)
+    if config.two_ctas:
+        wave_numerator = num_sms // 2
+        wave_denominator = output_ctas_per_split // 2
+    else:
+        wave_numerator = num_sms
+        wave_denominator = output_ctas_per_split
+
+    m_pad = m_tiles * config.block_m
+    workspace_bytes_per_split = m_pad * n * torch.float32.itemsize
+    max_workspace_split = max_workspace_bytes // workspace_bytes_per_split
+    max_nonempty_split = math.ceil(k / config.block_k)
+    max_split = min(max_workspace_split, max_nonempty_split)
+
+    candidates: list[int] = []
+    for waves in range(1, max_choices + 1):
+        target = max(2, math.ceil(waves * wave_numerator / wave_denominator))
+        if target > max_split:
+            break
+        search_span = math.ceil(wave_numerator / wave_denominator)
+        search_end = min(max_split, target + search_span)
+        for k_split in range(target, search_end + 1):
+            k_part = _aligned_k_part(k, k_split, config.block_k)
+            if k_part < 8 * config.block_k:
+                return candidates
+            if (k_split - 1) * k_part < k:
+                candidates.append(k_split)
+                break
+    return list(dict.fromkeys(candidates))
+
+
+def get_blackwell_decompose_k_candidates(
+    m: int,
+    n: int,
+    k: int,
+    num_sms: int,
+    *,
+    max_choices: int,
+) -> list[tuple[int, int]]:
+    """Return a bounded list of ``(config_index, k_split)`` candidates."""
+    candidates: list[tuple[int, int]] = []
+    for config_index in get_blackwell_decompose_k_config_indices(m, n):
+        remaining = max_choices - len(candidates)
+        if remaining <= 0:
+            break
+        config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+        candidates.extend(
+            (config_index, k_split)
+            for k_split in get_blackwell_decompose_k_splits(
+                m,
+                n,
+                k,
+                num_sms,
+                config,
+                max_choices=remaining,
+            )
+        )
+    return candidates
+
+
+def _cat2_mm(a, left, right):
+    return a @ torch.cat((left, right), dim=1).to(torch.bfloat16)
+
+
+def _cat2_decompose_k(
+    a,
+    left,
+    right,
+    *,
+    k_split: int,
+    bmm_config_index: int,
+):
+    b = torch.cat((left, right), dim=1).to(torch.bfloat16)
+    return decomposeK(a, b, k_split, "triton", bmm_config_index)
+
+
+def _cat2_fusion_plan_groups(
+    plan: InlinedSubgraphPlan,
+) -> tuple[tuple[ir.Operation, ...], ...]:
+    """Fuse the cat/cast producer into the partial BMM, then reduce."""
+    template_indices = [
+        index
+        for index, operation in enumerate(plan.operations)
+        if isinstance(operation, ir.TemplateBuffer)
+    ]
+    if len(template_indices) != 1:
+        raise AssertionError(
+            f"expected one partial-BMM template, found {len(template_indices)}"
+        )
+    template_index = template_indices[0]
+    return (
+        plan.operations[: template_index + 1],
+        plan.operations[template_index + 1 :],
+    )
+
+
+class Cat2DecomposeKWholePlanTemplate(SubgraphTemplate):
+    """Complete producer-plus-MM choices for bounded fusion-aware selection."""
+
+    def __init__(self):
+        super().__init__(name="decompose_k_cat2_whole_plan")
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        *,
+        k_split: int | None = None,
+        bmm_config_index: int = -1,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        if k_split is None:
+            name = "decompose_k_cat2_materialized_direct_aten"
+            function = _cat2_mm
+            description = "materialized cat/cast + direct ATen MM"
+        else:
+            name = f"decompose_k_cat2_triton_{k_split}_config_{bmm_config_index}_fused"
+            function = functools.partial(
+                _cat2_decompose_k,
+                k_split=k_split,
+                bmm_config_index=bmm_config_index,
+            )
+            description = (
+                f"fused cat/cast + Triton decompose-K, {k_split=}, {bmm_config_index=}"
+            )
+
+        with enable_python_dispatcher():
+            graph = make_fx(function, select_decomp_table())
+            if k_split is None:
+                choice = SubgraphChoiceCaller(
+                    name=name,
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    make_fx_graph=graph,
+                    description=description,
+                )
+            else:
+                choice = MultiKernelFusionPlanChoice(
+                    name=name,
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    make_fx_graph=graph,
+                    description=description,
+                    group_builder=_cat2_fusion_plan_groups,
+                    fusion_plan_key=(
+                        f"cat2-partial-reduction-split-{k_split}-"
+                        f"config-{bmm_config_index}"
+                    ),
+                )
+            choice.config_patches = {
+                "triton.enable_blackwell_decompose_k_cat2_selection": False
+            }
+            return choice
+
+
+cat2_decompose_k_whole_plan_template = Cat2DecomposeKWholePlanTemplate()
+
+
 def _blackwell_decompose_k_partial_kwargs(
     mat1,
     mat2,
@@ -239,6 +438,11 @@ def lower_blackwell_decompose_k_partial(
     m_pad: int,
     k_part: int,
 ):
+    is_cat2_fp32_prologue = get_cat2_fp32_prologue_sources(mat2) is not None
+    # TMA admission requires a named, strided input boundary. This is a no-op
+    # for an existing buffer and gives a schedulable producer a boundary that
+    # can subsequently be fused away.
+    mat2 = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(mat2))
     try:
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[int(config_index)]
     except IndexError as error:
@@ -295,7 +499,14 @@ def lower_blackwell_decompose_k_partial(
     )
     if choice is None:
         raise NotImplementedError("Blackwell decompose-K partial choice is unavailable")
-    return choice.output_node()
+    result = choice.output_node()
+    if is_cat2_fp32_prologue:
+        # Final winner emission currently recompiles the selected subgraph, so
+        # preserve this proven producer fusion through ordinary scheduling.
+        result.data.data.annotations[
+            "prologue_fusion_max_input_bytes_to_output_ratio"
+        ] = 4.0
+    return result
 
 
 def blackwell_decompose_k_partial(a, b, k_split, config_index):
