@@ -1155,8 +1155,8 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
     auto* dinfo = static_cast<int*>(info.data_ptr());
 
     auto panel_step_holder = at::empty({1}, LD.options().dtype(at::kInt));
-    auto* dcurr_step = static_cast<int*>(panel_step_holder.data_ptr());
-    int curr_step = 0;
+    auto* dstep = static_cast<int*>(panel_step_holder.data_ptr());
+    int step = 0;
 
     // Right-Down-Diagonal-looking blocked LDLT/LDLH:
     // step through columns/rows in blocks of NB or NB-1 (pivots are 1x1 or 2x2)
@@ -1164,18 +1164,21 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
     //
     // Max possible (diagonal) panel for the LDL kernel
     constexpr int MAX_LDL_NB = 32;
-    while (curr_step < n - 1) {
+    while (step < n - 1) {
       // 1. Panel factorization
       ldl_diagonal_panel(
         dLD, n, lda,
-        std::min(n - curr_step, MAX_LDL_NB), curr_step, dcurr_step,
+        std::min(n - step, MAX_LDL_NB), step, dstep,
         dipiv, dinfo
       );
 
       // 2. Trailing matrix update
 
-      // D2H to update the curr_step on the host
-      curr_step = panel_step_holder.item().toInt();
+      // D2H to update the step on the host
+      auto curr_step = panel_step_holder.item().toInt();
+
+      // Finish iteration
+      step = curr_step;
     }
   });
 }
