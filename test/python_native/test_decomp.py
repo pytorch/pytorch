@@ -166,7 +166,7 @@ class TestNativeDecompTable(TestCase):
         targets = self._graph_targets(ep)
         self.assertTrue(
             any("_native" in t for t in targets),
-            f"Expected a _native call in graph; got targets={targets}\n"
+            lambda msg: f"{msg}\nExpected a _native call in graph; got targets={targets}\n"
             f"{ep.graph_module.code}",
         )
 
@@ -176,7 +176,7 @@ class TestNativeDecompTable(TestCase):
             self.assertNotIn(
                 "_native",
                 t,
-                f"Unexpected _native call; targets={targets}\n{ep.graph_module.code}",
+                lambda msg: f"{msg}\nUnexpected _native call; targets={targets}\n{ep.graph_module.code}",
             )
 
     # ------------------------------------------------------------------

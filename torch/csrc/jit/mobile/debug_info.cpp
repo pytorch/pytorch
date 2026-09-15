@@ -105,7 +105,7 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
   std::ostringstream ss;
   ss << "Module hierarchy:" << module_info << '\n';
   format_stack_trace(ss, stack_entries);
-  return {ss.str(), std::move(module_info)};
+  return {std::move(ss).str(), std::move(module_info)};
 }
 
 } // namespace
@@ -220,9 +220,11 @@ std::pair<std::string, std::string> MobileDebugTable::
     for (const auto debug_handle : debug_handles) {
       debug_handles_string += std::to_string(debug_handle);
     }
-    debug_handles_string += "}";
+    debug_handles_string += '}';
     debug_handles_string = debugHandlesNotFoundMessage(debug_handles_string);
-    return {debug_handles_string, debug_handles_string};
+    auto debug_handles_string_copy = debug_handles_string;
+    return {
+        std::move(debug_handles_string), std::move(debug_handles_string_copy)};
   }
   return (getStackTraceWithModuleHierarchy(
       debug_infos, "top", top_module_type_name));

@@ -539,7 +539,7 @@ def _sharded_post_state_dict_hook(
 ) -> dict[str, Any]:
     """
     The hook replaces the unflattened, unsharded parameter in the state_dict
-    with a unflattened, sharded parameter (a ShardedTensor).
+    with an unflattened, sharded parameter (a ShardedTensor).
     """
 
     def param_hook(state_dict: dict[str, Any], prefix: str, fqn: str):
@@ -655,7 +655,7 @@ def _sharded_pre_load_state_dict_hook(
                 device=fsdp_state.compute_device,
             )
             with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-                dist.all_gather_into_tensor(
+                dist.all_gather_single(
                     tensor, local_tensor, group=fsdp_state.process_group
                 )
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())

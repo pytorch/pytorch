@@ -9,6 +9,7 @@
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
+#include <utility>
 
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -424,7 +425,7 @@ native_dropout_cuda(const Tensor& self, double p, std::optional<bool> train){
     // dependency from output to input for autograd
     auto ret = at::zeros_like(self);
     auto mask = at::zeros_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value));
-    return std::tuple<Tensor,Tensor>(ret, mask);
+    return std::tuple<Tensor,Tensor>(std::move(ret), std::move(mask));
   }
 
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(std::nullopt, cuda::detail::getDefaultCUDAGenerator());

@@ -42,7 +42,7 @@ def _is_set_grad_enabled_sub_mod(
             and first_non_ph.target is torch._C._set_grad_enabled
         ):
             return (
-                first_non_ph.args[0] != torch.is_grad_enabled()
+                first_non_ph.args[0] != torch.is_grad_enabled()  # type: ignore[bad-return]
                 if omit_if_same_with_ambient
                 else True
             )

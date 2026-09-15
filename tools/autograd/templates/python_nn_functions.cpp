@@ -52,7 +52,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto non_blocking = std::get<2>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
   auto tuple = THPObjectPtr{PyTuple_New(4)};
-  if (!tuple) throw python_error();
+  TORCH_CHECK_PYTHON(tuple);
   if (device) {
     PyTuple_SET_ITEM(tuple.get(), 0, THPDevice_New(*device));
   } else {
@@ -97,13 +97,9 @@ void initNNFunctions(PyObject* module) {
   };
   PyObject* nn = PyModule_Create(&def);
   THPNNVariableFunctionsModule = nn;
-  if (!nn) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(nn);
   // steals a reference to nn
-  if (PyModule_AddObject(module, "_nn", nn) != 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddObject(module, "_nn", nn) == 0);
 }
 
 // generated methods start here

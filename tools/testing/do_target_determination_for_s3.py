@@ -1,3 +1,6 @@
+# /// script
+# dependencies = ["boto3==1.35.42"]
+# ///
 import json
 import os
 import sys

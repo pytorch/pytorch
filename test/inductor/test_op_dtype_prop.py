@@ -8,6 +8,7 @@ import torch
 from torch._dynamo.utils import disable_cache_limit
 from torch._inductor import config
 from torch._inductor.codegen.triton import OpDtypeSupport
+from torch._inductor.codegen.triton_utils import use_block_ptr_enabled
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code, triton_type
 from torch.fx.operator_schemas import get_signature_for_torch_op
@@ -222,7 +223,16 @@ class TestCase(InductorTestCase):
                     re.search(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)", code) is not None
                 )
                 self.assertNotEqual(separate_upcast, load_upcast_to_fp32)
-                if convert_output:
+                # The atan output downcast shows up as an explicit
+                # `.to(<low prec>)` on the block-pointer path (always) and on the
+                # default masked path whenever the op-local upcast is used
+                # (codegen_upcast_to_fp32=False). With a global load upcast on the
+                # default path the store narrows implicitly, so no explicit cast
+                # is emitted -- mirroring the assertNotEqual(..., load_upcast...)
+                # check on the general path below.
+                if convert_output and (
+                    use_block_ptr_enabled() or not load_upcast_to_fp32
+                ):
                     self.assertIn(f".to({tl_dtype_str})", code)
                 return
 
@@ -429,6 +439,29 @@ class TestCase(InductorTestCase):
         self.assertEqual(result.dtype, torch.int64)
         self.assertGreaterEqual(result.min().item(), 2**32)
         self.assertLess(result.max().item(), 2**40)
+        self.assertIn("triton_helpers.randint64", code)
+        self.assertIn(".to(tl.int64)", code)
+
+    @requires_gpu()
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_int64_symint_not_downcast_to_int32_index_expr(self, dynamic):
+        def fn(x, hi):
+            h = hi.item()
+            torch._check_is_size(h)
+            torch._check(h > 2**31)
+            return torch.randint(
+                0, h, (x.shape[0],), device=x.device, dtype=torch.int64
+            )
+
+        x = torch.zeros(4, device=GPU_TYPE)
+        hi = torch.tensor(2**31 + 1234, device=GPU_TYPE, dtype=torch.int64)
+        cfn = torch.compile(fn, dynamic=dynamic, fullgraph=True)
+        got, codes = run_and_get_code(cfn, x, hi)
+        code = "\n".join(codes)
+        self.assertTrue(bool((got >= 0).all()))
+        self.assertTrue(bool((got < hi.item()).all()))
+        self.assertIn("'ks1': 'i64'", code)
         self.assertIn("triton_helpers.randint64", code)
         self.assertIn(".to(tl.int64)", code)
 

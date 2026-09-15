@@ -37,7 +37,7 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 DIM = 2000
 
@@ -253,6 +253,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device_type)
 
     def test_ddp_optimizer_splits_graph(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
@@ -320,6 +322,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         pattern_matcher=False,
     )
     def test_bucketing_coalesced_op(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -362,6 +366,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         pattern_matcher=False,
     )
     def test_bucketing_concat_op(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)

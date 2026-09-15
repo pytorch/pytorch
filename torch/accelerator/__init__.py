@@ -8,6 +8,7 @@ from typing_extensions import deprecated
 
 import torch
 
+from . import random
 from ._utils import _device_t, _get_device_index
 from .graphs import Graph
 from .memory import (
@@ -56,7 +57,7 @@ def device_count() -> int:
 
     Returns:
         int: the number of the current :ref:`accelerator<accelerators>` available.
-            If there is no available accelerators, return 0.
+            If there are no available accelerators, return 0.
 
     .. note:: This API delegates to the device-specific version of `device_count`.
         On CUDA, this API will NOT poison fork if NVML discovery succeeds.
@@ -71,7 +72,7 @@ def device_count() -> int:
 
 
 def is_available() -> bool:
-    r"""Check if the current accelerator is available at runtime: it was build, all the
+    r"""Check if the current accelerator is available at runtime: it was built, all the
     required drivers are available and at least one device is visible.
     See :ref:`accelerator<accelerators>` for details.
 
@@ -120,7 +121,7 @@ def current_accelerator(check_available: bool = False) -> torch.device | None:
     Example::
 
         >>> # xdoctest:
-        >>> # If an accelerator is available, sent the model to it
+        >>> # If an accelerator is available, send the model to it
         >>> model = torch.nn.Linear(2, 2)
         >>> if (current_device := current_accelerator(check_available=True)) is not None:
         >>>     model.to(current_device)

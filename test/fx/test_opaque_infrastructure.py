@@ -1,13 +1,17 @@
 # Owner(s): ["module: fx"]
 
 import torch
-from torch._library.opaque_object import register_opaque_type
+from torch._library.opaque_object import register_custom_class
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 # Define a simple opaque type for testing
-class OpaqueCounter(torch._opaque_base.OpaqueBase):
+class OpaqueCounter(torch._custom_class_base.CustomClassBase):
     """A simple opaque object that holds a counter."""
 
     def __init__(self, value: int):
@@ -19,7 +23,7 @@ class OpaqueCounter(torch._opaque_base.OpaqueBase):
 
 
 # Register it as an opaque type (reference semantics for identity/mutation tracking)
-register_opaque_type(OpaqueCounter, typ="reference")
+register_custom_class(OpaqueCounter, typ="symbolic")
 
 
 # Define a wrapper class that holds an opaque object as an attribute
@@ -38,6 +42,8 @@ class TestOpaqueInfrastructure(TestCase):
     This test validates infrastructure for tracking and passing opaque objects
     (like ProcessGroups) through AOTAutograd compilation without unwrapping/wrapping them.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_opaque_object_in_traced_graph(self):
         """Test that opaque objects can be traced into FX graphs."""

@@ -6,6 +6,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/vol2col.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -100,6 +101,12 @@ inline void slow_conv_transpose3d_shape_check(
         " x kernel_height x kernel_width) tensor ",
         "expected for weight, but got: ",
         weight.sizes());
+    TORCH_CHECK(
+        weight.size(2) == kernel_depth && weight.size(3) == kernel_height &&
+            weight.size(4) == kernel_width,
+        "kernel_size (", kernel_depth, ", ", kernel_height, ", ", kernel_width,
+        ") must match weight spatial dimensions (",
+        weight.size(2), ", ", weight.size(3), ", ", weight.size(4), ")");
     if (bias.defined()) {
       check_dim_size(bias, 1, 0, weight.size(1));
     }
@@ -936,7 +943,8 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
         1);
   }
 
-  return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
+  return std::tuple<Tensor, Tensor, Tensor>(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose3d_backward_stub, &slow_conv_transpose3d_backward_cpu)

@@ -463,9 +463,11 @@
     "matrix_norm",
     "matrix_power",
     "matrix_rank",
+    "matrix_sqrth",
     "multi_dot",
     "norm",
     "pinv",
+    "polar",
     "qr",
     "slogdet",
     "solve",
@@ -552,7 +554,6 @@
   "torch.multiprocessing.reductions": [
     "ForkingPickler",
     "Union",
-    "check_serializing_named_tensor",
     "register_after_fork"
   ],
   "torch.multiprocessing.spawn": [

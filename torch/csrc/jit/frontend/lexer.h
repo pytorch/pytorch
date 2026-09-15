@@ -265,7 +265,7 @@ struct TORCH_API SharedParserData {
         *kind = TK_IDENT;
       }
       // check for token second, so that e.g. 'max' matches the token TK_MAX
-      // rather the
+      // rather than the
       // identifier 'max'
       if (cur) {
         const auto begin_it = cur->child_chars.begin();
@@ -443,14 +443,14 @@ struct Lexer {
     std::stringstream ss;
     ss << what << ":\n";
     t.range.highlight(ss);
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(std::move(ss).str());
   }
   [[noreturn]] void expected(const std::string& what, const Token& t) {
     std::stringstream ss;
     ss << "expected " << what << " but found '" << t.kindString()
        << "' here:\n";
     t.range.highlight(ss);
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(std::move(ss).str());
   }
   [[noreturn]] void expected(const std::string& what) {
     expected(what, cur());
