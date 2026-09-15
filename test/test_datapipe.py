@@ -58,6 +58,7 @@ from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 from torch.utils.data.datapipes.utils.common import StreamWrapper
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
+    ImageHandler,
 )
 from torch.utils.data.datapipes.utils.snapshot import _simple_graph_snapshot_restoration
 from torch.utils.data.graph import traverse_dps
@@ -365,6 +366,39 @@ class TestIterableDataPipeBasic(TestCase):
         # __len__ Test
         with self.assertRaises(TypeError):
             len(datapipe3)
+
+    def test_imagehandler_accepts_tiff_extensions(self):
+        # ImageHandler should decode .tif / .tiff the same way as other PIL formats.
+        try:
+            from PIL import Image
+        except ModuleNotFoundError:
+            self.skipTest("Pillow is required for ImageHandler TIFF decoding")
+
+        import io
+
+        color = (10, 20, 30)
+        img = Image.new("RGB", (8, 6), color=color)
+        buf = io.BytesIO()
+        img.save(buf, format="TIFF")
+        data = buf.getvalue()
+
+        for ext in ("tif", "tiff", "TIF", "TIFF"):
+            out = ImageHandler("rgb8")(ext, data)
+            self.assertIsNotNone(out, msg=f"expected decode for extension {ext!r}")
+            arr = np.asarray(out)
+            self.assertEqual(arr.dtype, np.uint8)
+            self.assertEqual(arr.shape, (6, 8, 3))
+            self.assertEqual(tuple(arr[0, 0]), color)
+
+        pil_out = ImageHandler("pil")("tiff", data)
+        self.assertIsInstance(pil_out, Image.Image)
+        self.assertEqual(pil_out.mode, "RGB")
+
+        torch_out = ImageHandler("torchrgb8")("tif", data)
+        self.assertEqual(tuple(torch_out.shape), (3, 6, 8))
+
+        # Unrelated extensions must still be ignored by this handler.
+        self.assertIsNone(ImageHandler("rgb8")("gif", data))
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
