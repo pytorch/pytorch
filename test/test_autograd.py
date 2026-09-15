@@ -16281,6 +16281,7 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(err_count[0], 1)
         self.assertEqual(res, "foo")
 
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_dataparallel_saved_tensors_hooks(self):
         def pack(x):
             warnings.warn("pack")
