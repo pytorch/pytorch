@@ -126,6 +126,15 @@ class FSDPCommContext:
         current_stream = self.device_handle.current_stream()
         return current_stream, current_stream
 
+    def release_all_gather_state(self, *wait_streams: torch.Stream) -> None:
+        """Release the deferred all-gather result after ordering its consumers."""
+        if (all_gather_state := self.all_gather_state) is None:
+            return
+        if all_gather_state.event is not None:
+            for stream in wait_streams:
+                stream.wait_event(all_gather_state.event)
+        self.all_gather_state = None
+
 
 # See [Note: Overlapping all-gather copy-in and all-gather]
 class AllGatherState(NamedTuple):
@@ -437,9 +446,10 @@ class FSDPParamGroup:
             return  # no preceding unshard
         async_op = self._all_gather_result.all_gather_work is not None
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
-            if prev_all_gather_state := self.comm_ctx.all_gather_state:
-                self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
-                self.comm_ctx.all_gather_state = None  # free the all-gather result
+            self.comm_ctx.release_all_gather_state(
+                self.comm_ctx.all_gather_copy_in_stream,
+                self.comm_ctx.all_gather_stream,
+            )
         if isinstance(self.mesh_info, FSDPMeshInfo):
             world_size = self._all_gather_process_group.size()
         else:
