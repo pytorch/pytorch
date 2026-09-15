@@ -2110,6 +2110,11 @@ by :attr:`indices_or_sections`. This function is based on NumPy's
    :attr:`indices` can be a list or tuple of ints, or a one-dimensional long
    tensor on the CPU.
 
+.. seealso::
+
+    :func:`torch.unbind` removes a dimension and returns a tuple of all slices
+    along that dimension.
+
 Args:
     input (Tensor): the tensor to split
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
@@ -13421,6 +13426,11 @@ unbind(input, dim=0) -> seq
 Removes a tensor dimension.
 
 Returns a tuple of all slices along a given dimension, already without it.
+
+.. seealso::
+
+    :func:`torch.tensor_split` splits a tensor into multiple views along a
+    dimension by a section count or split indices.
 
 Arguments:
     input (Tensor): the tensor to unbind
