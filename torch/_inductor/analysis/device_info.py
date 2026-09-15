@@ -268,6 +268,10 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=48,
     ),
 }
+# The SXM part reports itself as "NVIDIA H100 80GB HBM3", which does not match
+# the key above; the entry already carries that part's datasheet numbers
+# (80 GB, 3350 GB/s), so alias it rather than duplicating them.
+_device_mapping["NVIDIA H100 80GB HBM3"] = _device_mapping["NVIDIA H100"]
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
