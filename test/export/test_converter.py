@@ -9,15 +9,19 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    xfailIfS390X,
+)
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
 
-
-requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 # prepacked linear requires XNNPACK support.
 requires_prepacked_linear = unittest.skipIf(
@@ -108,6 +112,8 @@ class _ConverterTestMixin:
 
 
 class TestConverter(_ConverterTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -374,25 +380,6 @@ class TestConverter(_ConverterTestMixin, TestCase):
                 return d_int[0], d_str["0"], d_bool[True], d_float[0.1]
 
         inp = (torch.rand((3, 2)),)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
-    def test_prim_device(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                device = x.device
-                return torch.ones(2, 3, device=device)
-
-        inp = (torch.rand(3, 4),)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
-    @requires_cuda
-    def test_prim_device_cuda(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                device = x.device
-                return torch.ones(2, 3, device=device)
-
-        inp = (torch.rand((3, 4), device="cuda:0"),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_prim_dtype(self):
@@ -1507,6 +1494,24 @@ class TestConverter(_ConverterTestMixin, TestCase):
         m = M(linear_op)
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])
+
+
+class TestConverterDevice(_ConverterTestMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_prim_device(self, device):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                device = x.device
+                return torch.ones(2, 3, device=device)
+
+        inp = (torch.rand((3, 4), device=device),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+
+instantiate_device_type_tests(
+    TestConverterDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
