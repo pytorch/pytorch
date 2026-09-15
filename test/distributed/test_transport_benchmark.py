@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -82,6 +83,65 @@ class TestTransportBenchmark(TestCase):
         self.assertTrue(benchmark._connects(0, True))
         self.assertFalse(benchmark._connects(1, True))
         self.assertTrue(benchmark._connects(1, False))
+        self.assertTrue(benchmark._connects(2, True))
+        self.assertFalse(benchmark._connects(3, True))
+
+    @parametrize("world_size", [2, 4, 8])
+    def test_rank_options(self, world_size):
+        options = [{"device_name": f"mlx5_{rank}"} for rank in range(world_size)]
+        self.assertEqual(
+            benchmark._rank_options(json.dumps(options), world_size), options
+        )
+        self.assertEqual(
+            benchmark._rank_options('{"plugin":"UCX"}', world_size),
+            [{"plugin": "UCX"}] * world_size,
+        )
+        with self.assertRaisesRegex(ValueError, "one object per rank"):
+            benchmark._rank_options(json.dumps(options[:-1]), world_size)
+
+    def test_pair_exchange(self):
+        def gather(values, value):
+            values[:] = ["rank0", "rank1", value, "rank3"]
+
+        with (
+            patch.object(benchmark.dist, "get_world_size", return_value=4),
+            patch.object(benchmark.dist, "get_rank", return_value=2),
+            patch.object(benchmark.dist, "all_gather_object", side_effect=gather),
+        ):
+            self.assertEqual(benchmark._exchange("rank2"), "rank3")
+
+    def test_aggregate_uses_elapsed_time(self):
+        ranks = [
+            {
+                "seconds": seconds,
+                "latency_us": 1 if rank % 2 == 0 else None,
+                "before": (0, 0),
+                "after": (1_000_000_000, 500_000_000),
+            }
+            for rank, seconds in enumerate([1.0, 1.1, 1.8, 2.0])
+        ]
+        result = benchmark._summarize(1_000_000, 1000, ranks)
+        self.assertEqual(result["seconds"], 2)
+        self.assertEqual(result["aggregate_bandwidth_gbps"], 8)
+        self.assertEqual(result["pairs"][1]["ranks"], [2, 3])
+        self.assertEqual(result["pairs"][1]["local_wire"], {"tx_gbps": 4, "rx_gbps": 2})
+
+    def test_line_rate_checks_every_pair(self):
+        pair = {
+            "bandwidth_gbps": 390,
+            "local_wire": {"tx_gbps": 390, "rx_gbps": 390},
+            "peer_wire": {"tx_gbps": 390, "rx_gbps": 390},
+        }
+        measurement = {
+            "devices": [{"line_rate_gbps": 400}] * 4,
+            "write": {"aggregate_bandwidth_gbps": 780, "pairs": [pair, pair]},
+            "read": {"aggregate_bandwidth_gbps": 780, "pairs": [pair, pair]},
+        }
+        benchmark._check_line_rate([measurement], 0.8)
+        slow = dict(pair, peer_wire={"tx_gbps": 10, "rx_gbps": 10})
+        measurement["write"]["pairs"] = [pair, slow]
+        with self.assertRaisesRegex(RuntimeError, "below 80%"):
+            benchmark._check_line_rate([measurement], 0.8)
 
     def test_parse_args(self):
         args = benchmark.parse_args(

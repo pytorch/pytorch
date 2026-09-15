@@ -1,10 +1,11 @@
-"""Measure a transport between two torchrun ranks."""
+"""Measure concurrent transport pairs between adjacent torchrun ranks."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import socket
 import statistics
 import time
 from pathlib import Path
@@ -53,7 +54,7 @@ def _interface(args: argparse.Namespace) -> str | None:
     if args.interfaces is None:
         return None
     interfaces = args.interfaces.split(",")
-    if len(interfaces) not in (1, 2):
+    if len(interfaces) not in (1, int(os.environ.get("WORLD_SIZE", "2"))):
         raise ValueError("interfaces must name one interface or one per rank")
     rank = int(os.environ["RANK"])
     return interfaces[min(rank, len(interfaces) - 1)]
@@ -131,9 +132,22 @@ def _wire_rate(
 
 
 def _exchange(value: Any) -> Any:
-    values = [None, None]
+    values = [None] * dist.get_world_size()
     dist.all_gather_object(values, value)
-    return values[1 - dist.get_rank()]
+    return values[dist.get_rank() ^ 1]
+
+
+def _rank_options(value: str, world_size: int) -> list[dict[str, Any]]:
+    options = json.loads(value)
+    if isinstance(options, dict):
+        return [options] * world_size
+    if (
+        not isinstance(options, list)
+        or len(options) != world_size
+        or not all(isinstance(option, dict) for option in options)
+    ):
+        raise ValueError("options must be an object or one object per rank")
+    return options
 
 
 def _buffers(
@@ -144,35 +158,107 @@ def _buffers(
 
 
 def _connects(rank: int, one_way: bool) -> bool:
-    return not one_way or rank == 0
+    return not one_way or rank % 2 == 0
+
+
+def _measure(
+    operation: Callable[[], None],
+    args: argparse.Namespace,
+    device: torch.device,
+    interface: str | None,
+    counter_source: str | None,
+) -> list[dict[str, Any]]:
+    samples = []
+    before = _wire_bytes(interface, counter_source)
+    dist.barrier()
+    phase_start = time.perf_counter_ns()
+    if dist.get_rank() % 2 == 0:
+        for _ in range(args.iterations):
+            start = time.perf_counter_ns()
+            operation()
+            _sync(device)
+            samples.append(time.perf_counter_ns() - start)
+    dist.barrier()
+    seconds = (time.perf_counter_ns() - phase_start) / 1e9
+    after = _wire_bytes(interface, counter_source)
+    local = {
+        "seconds": seconds,
+        "latency_us": statistics.median(samples) / 1e3 if samples else None,
+        "before": before,
+        "after": after,
+    }
+    values: list[Any] = [None] * dist.get_world_size()
+    dist.all_gather_object(values, local)
+    return values
+
+
+def _summarize(
+    size: int, iterations: int, ranks: list[dict[str, Any]]
+) -> dict[str, Any]:
+    seconds = max(rank["seconds"] for rank in ranks)
+    pairs = []
+    for rank in range(0, len(ranks), 2):
+        local, peer = ranks[rank : rank + 2]
+        latency = local["latency_us"]
+        pairs.append(
+            {
+                "ranks": [rank, rank + 1],
+                "latency_us": latency,
+                "bandwidth_gbps": size * 8 / latency / 1e3,
+                "local_wire": _wire_rate(local["before"], local["after"], seconds),
+                "peer_wire": _wire_rate(peer["before"], peer["after"], seconds),
+            }
+        )
+    return {
+        "seconds": seconds,
+        "aggregate_bandwidth_gbps": size * 8 * iterations * len(pairs) / seconds / 1e9,
+        "pairs": pairs,
+    }
 
 
 def run(args: argparse.Namespace) -> tuple[list[dict[str, Any]], str | None]:
+    world_size = int(os.environ["WORLD_SIZE"])
+    if world_size < 2 or world_size % 2:
+        raise ValueError("transport benchmark requires an even number of ranks")
+    rank = int(os.environ["RANK"])
+    options = _rank_options(args.options, world_size)[rank]
+    environments = _rank_options(args.rank_env, world_size)
+    if any(
+        not isinstance(value, str)
+        for environment in environments
+        for value in environment.values()
+    ):
+        raise ValueError("rank-env values must be strings")
+    os.environ.update(environments[rank])
     dist.init_process_group(
         "gloo",
         init_method=args.init_method,
-        rank=int(os.environ["RANK"]),
-        world_size=int(os.environ["WORLD_SIZE"]),
+        rank=rank,
+        world_size=world_size,
     )
-    if dist.get_world_size() != 2:
-        raise RuntimeError("transport benchmark requires exactly two ranks")
-    rank = dist.get_rank()
     device = _device(args.device)
     tensor_device = _device(args.tensor_device or args.device)
     if args.cuda_graph and (device.type != "cuda" or tensor_device.type != "cuda"):
         raise ValueError("--cuda-graph requires CUDA transport and tensor devices")
     if device.type == "cuda":
         torch.cuda.set_device(device)
-    options = json.loads(args.options)
-    if isinstance(options, list):
-        if len(options) != 2:
-            raise ValueError("rank-specific options must contain two objects")
-        options = options[rank]
-    if not isinstance(options, dict):
-        raise ValueError("options must be an object or a two-element list")
     interface = _interface(args)
     counter_source = _counter_source(interface, args.backend, args.rdma_counters)
     _validate_counter_sources(counter_source, _exchange(counter_source))
+    devices: list[Any] = [None] * world_size
+    dist.all_gather_object(
+        devices,
+        {
+            "host": socket.gethostname(),
+            "device": str(tensor_device),
+            "interface": interface,
+            "line_rate_gbps": _line_rate_gbps(interface),
+        },
+    )
+    if world_size > 2 and interface is not None:
+        nics = [(entry["host"], entry["interface"]) for entry in devices]
+        if len(set(nics)) != world_size:
+            raise ValueError("concurrent pairs require a distinct NIC per rank")
     transport = new_transport(args.backend, device, **options)
     results = []
     try:
@@ -185,9 +271,9 @@ def run(args: argparse.Namespace) -> tuple[list[dict[str, Any]], str | None]:
             source_memory = transport.register_memory(source)
             destination_memory = transport.register_memory(destination)
             read_memory = transport.register_memory(read_target)
+            _sync(tensor_device)
             peer_source = _exchange(source_memory.to_remote_buffer())
             peer_destination = _exchange(destination_memory.to_remote_buffer())
-            _sync(tensor_device)
             source_view = source_memory.to_view()
             read_view = read_memory.to_mutable_view()
 
@@ -200,13 +286,13 @@ def run(args: argparse.Namespace) -> tuple[list[dict[str, Any]], str | None]:
                     raise RuntimeError("read failed")
 
             for _ in range(args.warmup):
-                if rank == 0:
+                if rank % 2 == 0:
                     write()
                     read()
             _sync(tensor_device)
             write_op: Callable[[], None] = write
             read_op: Callable[[], None] = read
-            if rank == 0 and args.cuda_graph:
+            if rank % 2 == 0 and args.cuda_graph:
                 write_graph = torch.cuda.CUDAGraph()
                 read_graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(write_graph):
@@ -216,66 +302,44 @@ def run(args: argparse.Namespace) -> tuple[list[dict[str, Any]], str | None]:
                 write_op = write_graph.replay
                 read_op = read_graph.replay
                 _sync(tensor_device)
+            dist.barrier()
             source.fill_(rank + 3)
             destination.zero_()
             read_target.zero_()
             _sync(tensor_device)
-            dist.barrier()
-            write_wire_before = _wire_bytes(interface, counter_source)
-            write_start = time.perf_counter_ns()
-            write_samples = []
-            read_samples = []
-            if rank == 0:
-                for _ in range(args.iterations):
-                    start = time.perf_counter_ns()
-                    write_op()
-                    _sync(tensor_device)
-                    write_samples.append(time.perf_counter_ns() - start)
-            dist.barrier()
-            write_seconds = (time.perf_counter_ns() - write_start) / 1e9
-            write_wire = _wire_rate(
-                write_wire_before,
-                _wire_bytes(interface, counter_source),
-                write_seconds,
-            )
-            peer_write_wire = _exchange(write_wire)
-
-            read_wire_before = _wire_bytes(interface, counter_source)
-            read_start = time.perf_counter_ns()
-            if rank == 0:
-                for _ in range(args.iterations):
-                    start = time.perf_counter_ns()
-                    read_op()
-                    _sync(tensor_device)
-                    read_samples.append(time.perf_counter_ns() - start)
-            dist.barrier()
-            read_seconds = (time.perf_counter_ns() - read_start) / 1e9
-            read_wire = _wire_rate(
-                read_wire_before,
-                _wire_bytes(interface, counter_source),
-                read_seconds,
-            )
-            peer_read_wire = _exchange(read_wire)
+            writes = _measure(write_op, args, tensor_device, interface, counter_source)
+            reads = _measure(read_op, args, tensor_device, interface, counter_source)
             _sync(tensor_device)
-            if rank == 1:
-                torch.testing.assert_close(destination, torch.full_like(destination, 3))
+            if rank % 2:
+                torch.testing.assert_close(
+                    destination, torch.full_like(destination, (rank ^ 1) + 3)
+                )
+            else:
+                torch.testing.assert_close(
+                    read_target, torch.full_like(read_target, (rank ^ 1) + 3)
+                )
             if rank == 0:
-                torch.testing.assert_close(read_target, torch.full_like(read_target, 4))
-                write_seconds = statistics.median(write_samples) / 1e9
-                read_seconds = statistics.median(read_samples) / 1e9
+                write_result = _summarize(size, args.iterations, writes)
+                read_result = _summarize(size, args.iterations, reads)
+                write_pair = write_result["pairs"][0]
+                read_pair = read_result["pairs"][0]
                 results.append(
                     {
                         "size_bytes": size,
-                        "write_latency_us": write_seconds * 1e6,
-                        "write_bandwidth_gbps": size * 8 / write_seconds / 1e9,
-                        "read_latency_us": read_seconds * 1e6,
-                        "read_bandwidth_gbps": size * 8 / read_seconds / 1e9,
-                        "write_local_wire": write_wire,
-                        "write_peer_wire": peer_write_wire,
-                        "read_local_wire": read_wire,
-                        "read_peer_wire": peer_read_wire,
+                        "write_latency_us": write_pair["latency_us"],
+                        "write_bandwidth_gbps": write_pair["bandwidth_gbps"],
+                        "read_latency_us": read_pair["latency_us"],
+                        "read_bandwidth_gbps": read_pair["bandwidth_gbps"],
+                        "write_local_wire": write_pair["local_wire"],
+                        "write_peer_wire": write_pair["peer_wire"],
+                        "read_local_wire": read_pair["local_wire"],
+                        "read_peer_wire": read_pair["peer_wire"],
+                        "write": write_result,
+                        "read": read_result,
+                        "devices": devices,
                     }
                 )
+            dist.barrier()
     finally:
         transport.close()
         dist.destroy_process_group()
@@ -291,8 +355,14 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--init-method", default="env://")
     parser.add_argument(
-        "--interfaces", help="network interface, or a comma-separated pair"
+        "--interfaces", help="network interface, or a comma-separated list per rank"
     )
+    parser.add_argument(
+        "--rank-env",
+        default="{}",
+        help="environment variables as JSON, optionally one object per rank",
+    )
+    parser.add_argument("--output", type=Path, help="also write results to a JSON file")
     parser.add_argument(
         "--options",
         default="{}",
@@ -316,7 +386,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--one-way-connect",
         action="store_true",
-        help="connect rank 0 only for one-sided validation",
+        help="connect only even ranks for one-sided validation",
     )
     parser.add_argument("--minimum-line-rate", type=float, default=0.8)
     parsed = parser.parse_args(args)
@@ -346,6 +416,8 @@ def _output(
         "one_way_connect": args.one_way_connect,
         "counter_source": counter_source,
         "options": json.loads(args.options),
+        "rank_env": json.loads(args.rank_env),
+        "world_size": int(os.environ.get("WORLD_SIZE", "2")),
         "warmup": args.warmup,
         "iterations": args.iterations,
         "interfaces": args.interfaces,
@@ -355,33 +427,50 @@ def _output(
     }
 
 
+def _check_line_rate(measurements: list[dict[str, Any]], minimum: float) -> None:
+    if not minimum:
+        return
+    fractions = []
+    for result in measurements:
+        rates = [device["line_rate_gbps"] for device in result["devices"]]
+        if any(rate is None or rate <= 0 for rate in rates):
+            return
+        capacities = [
+            min(rates[rank], rates[rank + 1]) for rank in range(0, len(rates), 2)
+        ]
+        fractions_per_size = []
+        for operation, local_direction, peer_direction in (
+            ("write", "tx_gbps", "rx_gbps"),
+            ("read", "rx_gbps", "tx_gbps"),
+        ):
+            measured = result[operation]
+            fractions_per_size.append(
+                measured["aggregate_bandwidth_gbps"] / sum(capacities)
+            )
+            for pair, capacity in zip(measured["pairs"], capacities):
+                local, peer = pair["local_wire"], pair["peer_wire"]
+                if local is None or peer is None:
+                    raise RuntimeError("physical NIC counters are unavailable")
+                fractions_per_size.append(
+                    min(
+                        pair["bandwidth_gbps"],
+                        local[local_direction],
+                        peer[peer_direction],
+                    )
+                    / capacity
+                )
+        fractions.append(min(fractions_per_size))
+    achieved = max(fractions)
+    if achieved < minimum:
+        raise RuntimeError(f"{achieved:.1%} is below {minimum:.0%} of line rate")
+
+
 if __name__ == "__main__":
     parsed = parse_args()
     measurements, selected_counter_source = run(parsed)
     if int(os.environ["RANK"]) == 0:
         output = _output(parsed, measurements, selected_counter_source)
         print(json.dumps(output, indent=2))
-        if output["line_rate_gbps"] is not None and parsed.minimum_line_rate:
-            rates = []
-            for result in measurements:
-                write_local = result["write_local_wire"]
-                write_peer = result["write_peer_wire"]
-                read_local = result["read_local_wire"]
-                read_peer = result["read_peer_wire"]
-                if None in (write_local, write_peer, read_local, read_peer):
-                    raise RuntimeError("physical NIC counters are unavailable")
-                rates.append(
-                    min(
-                        result["write_bandwidth_gbps"],
-                        result["read_bandwidth_gbps"],
-                        write_local["tx_gbps"],
-                        write_peer["rx_gbps"],
-                        read_local["rx_gbps"],
-                        read_peer["tx_gbps"],
-                    )
-                )
-            achieved = max(rates)
-            if achieved < parsed.minimum_line_rate * output["line_rate_gbps"]:
-                raise RuntimeError(
-                    f"{achieved:.1f} Gb/s is below {parsed.minimum_line_rate:.0%} of line rate"
-                )
+        if parsed.output is not None:
+            parsed.output.write_text(json.dumps(output, indent=2) + "\n")
+        _check_line_rate(measurements, parsed.minimum_line_rate)
