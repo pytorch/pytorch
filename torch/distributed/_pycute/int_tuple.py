@@ -36,14 +36,14 @@ Functions for manipulating IntTuples
 
 from functools import reduce
 from itertools import chain
-from typing import TypeAlias
-from typing_extensions import TypeIs
+from typing_extensions import TypeAliasType, TypeIs
 
 from .typing import Integer
 
 
-# Type aliases for better readability
-IntTuple: TypeAlias = int | tuple["IntTuple", ...]
+# Use TypeAliasType so that __module__ is set correctly for public API reexports
+# See: https://github.com/pytorch/pytorch/issues/171905
+IntTuple = TypeAliasType("IntTuple", int | tuple["IntTuple", ...])
 
 
 def is_int(x: object) -> TypeIs[int]:

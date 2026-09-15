@@ -36,8 +36,7 @@ of lexicographic instead of co-lexicographic as implemented in the original layo
 """
 
 from itertools import chain
-from typing import TypeAlias
-from typing_extensions import Self, TypeIs
+from typing_extensions import Self, TypeAliasType, TypeIs
 
 from .int_tuple import (
     crd2idx,
@@ -52,9 +51,11 @@ from .int_tuple import (
 )
 
 
-# Type aliases
-CoordinateType: TypeAlias = (
-    int | IntTuple | tuple[object, ...] | None
+# Use TypeAliasType so that __module__ is set correctly for public API reexports
+# See: https://github.com/pytorch/pytorch/issues/171905
+CoordinateType = TypeAliasType(
+    "CoordinateType",
+    int | IntTuple | tuple[object, ...] | None,
 )  # Input for slice_ and crd2idx functions
 
 
@@ -134,9 +135,11 @@ class Layout(LayoutBase):
 
 
 # Type aliases
-LayoutOrIntTuple: TypeAlias = Layout | IntTuple
-LayoutProfile: TypeAlias = tuple[object, ...] | Layout | None
-LayoutInput: TypeAlias = Layout | IntTuple | tuple[object, ...] | None
+LayoutOrIntTuple = TypeAliasType("LayoutOrIntTuple", Layout | IntTuple)
+LayoutProfile = TypeAliasType("LayoutProfile", tuple[object, ...] | Layout | None)
+LayoutInput = TypeAliasType(
+    "LayoutInput", Layout | IntTuple | tuple[object, ...] | None
+)
 
 
 # Make Layout from a list of layouts (each layout its own mode in the result)
