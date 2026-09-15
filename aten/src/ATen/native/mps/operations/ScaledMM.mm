@@ -42,12 +42,10 @@ Tensor& _scaled_mm_out_mps(const Tensor& self,
   const auto m = self.size(0);
   const auto n = mat2.size(1);
   const auto k = self.size(1);
-  // Same TensorWise and RowWise rules as get_joint_scaling in ScaledBlas.cpp; MPS supports no other scheme.
   const bool tensorwise = scale_a.numel() == 1 && scale_b.numel() == 1;
   const bool rowwise = scale_a.sizes() == IntArrayRef({m, 1}) && scale_b.sizes() == IntArrayRef({1, n}) &&
       scale_a.is_contiguous() && scale_b.is_contiguous();
   if (!(scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat && (tensorwise || rowwise))) {
-    // Diagnose with the per-tensor messages of the CPU and CUDA kernels, inferring the recipe from scale_a.
     if (scale_a.numel() == 1) {
       TORCH_CHECK_VALUE(scale_a.scalar_type() == kFloat, "scale_a must have 1 Float element");
       TORCH_CHECK_VALUE(scale_b.numel() == 1 && scale_b.scalar_type() == kFloat, "scale_b must have 1 Float element");
@@ -107,7 +105,6 @@ Tensor& _scaled_mm_out_mps(const Tensor& self,
   TORCH_CHECK_NOT_IMPLEMENTED(m <= INT32_MAX && n <= INT32_MAX && k <= INT32_MAX,
                               "MPS _scaled_mm requires m, n and k to fit in int32");
   resize_output(out, {m, n});
-  // The CPU implementation rejects this through out.copy_(); Metal threadgroups would race instead.
   assert_no_internal_overlap(out);
   if (out.numel() == 0) {
     return out;
@@ -115,7 +112,6 @@ Tensor& _scaled_mm_out_mps(const Tensor& self,
   if (k == 0) {
     return out.zero_();
   }
-  // Like CUDA, bias is any n-element tensor read as contiguous memory.
   const auto bias_vec = bias ? std::make_optional(bias->contiguous().view({n})) : std::nullopt;
   const ScaledMMParams<> params{
       .m = c10::checked_convert<uint32_t>(m, "m"),

@@ -1855,7 +1855,7 @@ class TestFP8Matmul(TestCase):
 
         if "mps" in device:
             # MPS has no float8_e5m2 dtype
-            with self.assertRaisesRegex(TypeError, "Float8_e5m2"):
+            with self.assertRaisesRegex(RuntimeError, "Undefined type Float8_e5m2"):
                 e5m2()
         elif is_xpu_device or not is_cuda_device:
             out = e5m2()
