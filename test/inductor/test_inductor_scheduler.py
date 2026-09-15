@@ -33,7 +33,6 @@ from torch._inductor.scheduler import (
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedNestedReductions,
-    FusionMemoryState,
     MemoryDepMatch,
     NestedReduction,
     OrderedParentNodes,
@@ -481,40 +480,6 @@ class TestScheduler(TestCase):
         self.assertEqual(compile_and_measure(1000.0, None)[0], 1)
         self.assertEqual(compile_and_measure(None, 1000.0)[0], 1)
         self.assertEqual(compile_and_measure(1000.0, 0.0)[0], 2)
-
-    @xfailIfNoAcceleratorTriton
-    @onlyCUDA
-    def test_fusion_memory_guard_fails_open(self, device):
-        def fn(x, weight):
-            early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
-            late = torch.cos(x).sum(dim=0)
-            return early, late
-
-        x = torch.testing.make_tensor((1, 4096), device=device, dtype=torch.bool)
-        weight = torch.testing.make_tensor(
-            (4096, 1), device=device, dtype=torch.float32
-        )
-        counter = "fusion_memory_timeline_fail_open"
-        initial_count = counters["inductor"][counter]
-        torch._dynamo.reset()
-        metrics.reset()
-
-        with (
-            patch.object(
-                FusionMemoryState, "update_boundaries_match", return_value=False
-            ),
-            inductor_config.patch(
-                fx_graph_cache=False,
-                reorder_for_peak_memory=False,
-                fusion_memory_timeline_peak_memory_increase_gb=1000.0,
-                fusion_memory_timeline_full_correctness=True,
-            ),
-        ):
-            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-            self.assertEqual(compiled(x, weight), fn(x, weight))
-
-        self.assertEqual(metrics.generated_kernel_count, 1)
-        self.assertEqual(counters["inductor"][counter], initial_count + 1)
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
         snode = Mock()

@@ -187,6 +187,7 @@ class FusionMemoryUpdate:
     local_nodes: list[BaseSchedulerNode]
     live_before: list[int]
     live_after: list[int]
+    peak: int
 
 
 @dataclasses.dataclass(slots=True)
@@ -227,6 +228,7 @@ class FusionMemoryState:
     baseline_live_before: list[int]
     baseline_live_after: list[int]
     peak_limit: int
+    pending_update: FusionMemoryUpdate | None = None
     status: FusionMemoryStateStatus = FusionMemoryStateStatus.ACTIVE
     peak_prefix: list[int] = dataclasses.field(default_factory=list)
 
@@ -7887,37 +7889,54 @@ class Scheduler:
         memory_update: FusionMemoryUpdate | None,
     ) -> None:
         state = self._fusion_memory_state
-        if state is not None and memory_update is not None:
-            state.apply_accepted_fusion(memory_update, fused)
-            fused.mpi_node = memory_update.candidate.mpi_node
-        elif state is not None:
+        if state is None:
+            return
+        if memory_update is None:
+            if config.fusion_memory_timeline_full_correctness:
+                raise AssertionError("expected a fusion memory update")
             state.status = FusionMemoryStateStatus.INVALIDATED
+            return
+        state.apply_accepted_fusion(memory_update, fused)
+        fused.mpi_node = memory_update.candidate.mpi_node
 
-    def _can_fuse_for_attempt(
+    def _can_fuse_peak_memory_check(
         self,
+        state: FusionMemoryState,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        *,
-        can_reorder: bool = False,
     ) -> tuple[bool, FusionMemoryUpdate | None]:
-        memory_update = None
+        if not config.fusion_memory_timeline_full_correctness:
+            if state.status is FusionMemoryStateStatus.INVALIDATED:
+                return True, None
+            for node in (node1, node2):
+                if node in state.tracked_nodes and node not in state.node_to_idx:
+                    raise AssertionError(
+                        f"expected {node.get_name()} in the fusion memory timeline"
+                    )
+            if (
+                node1 not in state.tracked_nodes
+                or node2 not in state.tracked_nodes
+                or not state.region_contains_peak(
+                    min(state.node_to_idx[node1], state.node_to_idx[node2]),
+                    max(state.node_to_idx[node1], state.node_to_idx[node2]),
+                )
+            ):
+                return True, None
 
-        def final_check() -> bool:
-            nonlocal memory_update
-            if self.will_fusion_create_cycle(node1, node2):
-                return False
-            rejected, memory_update = self._check_fusion_memory(
-                self._fusion_memory_state, node1, node2
+        update = self._fusion_memory_update(state, node1, node2)
+        if not state.update_boundaries_match(update):
+            raise AssertionError(
+                "fusion memory update must preserve the timeline boundary"
             )
-            return not rejected
-
-        can_fuse = self.can_fuse(
-            node1,
-            node2,
-            can_reorder=can_reorder,
-            final_check=final_check,
-        )
-        return can_fuse, memory_update
+        if update.peak > state.peak_limit:
+            fusion_log.debug(
+                "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
+                node1.get_name(),
+                node2.get_name(),
+                update.peak - state.baseline_peak,
+            )
+            return False, None
+        return True, update
 
     def fuse_if_speedup(
         self,
@@ -7928,9 +7947,9 @@ class Scheduler:
         *,
         can_reorder: bool = False,
     ):
-        can_fuse, memory_update = self._can_fuse_for_attempt(
-            node1, node2, can_reorder=can_reorder
-        )
+        can_fuse = self.can_fuse(node1, node2, can_reorder=can_reorder)
+        state = self._fusion_memory_state
+        memory_update = state.pending_update if state is not None else None
         if can_fuse and speedup_fn():
             fused = self.fuse_two_nodes(node1, node2, fused_nodes)
             self._apply_fusion_memory_update(fused, memory_update)
@@ -8080,9 +8099,9 @@ class Scheduler:
             ):
                 continue
 
-            can_fuse, memory_update = self._can_fuse_for_attempt(
-                node1, node2, can_reorder=is_reorder_round
-            )
+            can_fuse = self.can_fuse(node1, node2, can_reorder=is_reorder_round)
+            state = self._fusion_memory_state
+            memory_update = state.pending_update if state is not None else None
             if can_fuse:
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
@@ -9067,66 +9086,9 @@ class Scheduler:
             input_buffers.update(node.mpi_node.pred_buffers)
         candidate.mpi_node = MemoryPlanningInfoForNode(
             size=sum(buffer.mpi_buffer.size_alloc for buffer in candidate.outputs),
-            pred_buffers=OrderedSet(
-                buf for buf in input_buffers if buf.get_name() not in buffer_names
-            ),
+            pred_buffers=input_buffers,
         )
         return candidate
-
-    def _check_fusion_memory(
-        self,
-        state: FusionMemoryState | None,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-    ) -> tuple[bool, FusionMemoryUpdate | None]:
-        if state is None:
-            return False, None
-        if state.status is FusionMemoryStateStatus.INVALIDATED:
-            return False, None
-
-        for node in (node1, node2):
-            if node in state.tracked_nodes and node not in state.node_to_idx:
-                raise AssertionError(
-                    f"expected {node.get_name()} in the fusion memory timeline"
-                )
-
-        if not config.fusion_memory_timeline_full_correctness:
-            if (
-                node1 not in state.tracked_nodes
-                or node2 not in state.tracked_nodes
-                or not state.region_contains_peak(
-                    min(state.node_to_idx[node1], state.node_to_idx[node2]),
-                    max(state.node_to_idx[node1], state.node_to_idx[node2]),
-                )
-            ):
-                return False, None
-
-        rejected, update = self._fusion_memory_update(
-            state,
-            node1,
-            node2,
-            peak_limit=state.peak_limit,
-        )
-        if rejected:
-            return True, None
-        if update is None:
-            raise AssertionError("expected a fusion memory update")
-        if not state.update_boundaries_match(update):
-            fusion_log.debug(
-                "memory-timeline fusion check skipped for %s with %s: "
-                "unable to preserve the timeline boundary",
-                node1.get_name(),
-                node2.get_name(),
-            )
-            counters["inductor"]["fusion_memory_timeline_fail_open"] += 1
-            torch._logging.warning_once(
-                log,
-                "Disabling fusion memory checks for this fusion round because "
-                "the modeled timeline boundary could not be preserved.",
-            )
-            state.status = FusionMemoryStateStatus.INVALIDATED
-            return False, None
-        return False, update
 
     def _fusion_dep_producer(self, dep: Dep) -> BaseSchedulerNode | None:
         buf = self.name_to_buf.get(dep.name)
@@ -9141,9 +9103,7 @@ class Scheduler:
         state: FusionMemoryState,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        *,
-        peak_limit: int | None,
-    ) -> tuple[bool, FusionMemoryUpdate | None]:
+    ) -> FusionMemoryUpdate:
         from .memory import estimate_region_memory
 
         step1 = self._fusion_node_step(state, node1)
@@ -9231,15 +9191,7 @@ class Scheduler:
             graph_outputs=state.graph_outputs,
             cur_memory=state.baseline_live_before[region_start],
         )
-        if peak_limit is not None and region_peak > peak_limit:
-            fusion_log.debug(
-                "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
-                node1.get_name(),
-                node2.get_name(),
-                region_peak - state.baseline_peak,
-            )
-            return True, None
-        update = FusionMemoryUpdate(
+        return FusionMemoryUpdate(
             node1=node1,
             node2=node2,
             candidate=candidate,
@@ -9249,8 +9201,8 @@ class Scheduler:
             local_nodes=local_nodes,
             live_before=live_before,
             live_after=live_after,
+            peak=region_peak,
         )
-        return False, update
 
     def fusion_prevent_too_many_reads_and_writes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
@@ -10315,8 +10267,6 @@ class Scheduler:
         node2: BaseSchedulerNode,
         can_reorder: bool = False,
         allow_mix_order_reduction: bool = True,
-        *,
-        final_check: Callable[[], bool] | None = None,
     ) -> bool:
         """Determine if node1 and node2 can be combined into a single fused node.
 
@@ -10324,14 +10274,22 @@ class Scheduler:
         rolled back if the fusion decision ultimately fails.
         """
         tracker = _LoopMutationTracker.create((node1, node2))
+        memory_update = None
         can_fuse = self._can_fuse_impl(
             node1,
             node2,
             can_reorder=can_reorder,
             allow_mix_order_reduction=allow_mix_order_reduction,
         )
-        if can_fuse and final_check is not None:
-            can_fuse = final_check()
+        if can_fuse and self.will_fusion_create_cycle(node1, node2):
+            can_fuse = False
+        state = self._fusion_memory_state
+        if can_fuse and state is not None:
+            can_fuse, memory_update = self._can_fuse_peak_memory_check(
+                state, node1, node2
+            )
+        if state is not None:
+            state.pending_update = memory_update
         tracker.finish(rollback=not can_fuse)
         return can_fuse
 
