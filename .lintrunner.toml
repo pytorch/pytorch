@@ -266,7 +266,6 @@ exclude_patterns = [
     'c10/util/llvmMathExtras.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
-    'c10/util/overflows.h',
     'c10/util/safe_numerics.h',
     'c10/util/signal_handler.cpp',
     'c10/util/StringUtil.cpp',
@@ -278,6 +277,7 @@ exclude_patterns = [
     'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/irange.h',
     'torch/headeronly/util/MathConstants.h',
+    'torch/headeronly/util/overflows.h',
 ]
 init_command = [
     'python3',
@@ -329,6 +329,7 @@ include_patterns = [
     'torch/headeronly/util/complex.h',
     'torch/headeronly/util/floating_point_utils.h',
     'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/overflows.h',
 ]
 exclude_patterns = [
     '**/fb/**',
