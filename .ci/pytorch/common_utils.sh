@@ -398,11 +398,11 @@ function install_nvmath() {
 }
 
 function install_cutlass_operators() {
-  # cutlass-operators requires Python >= 3.12
+  # cutlass-operators requires Python >= 3.10
   local py_version
   py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
-    echo "Skipping CUTLASS Operators install: requires Python >= 3.12, have $py_version"
+  if [[ "$(echo -e "3.10\n$py_version" | sort -V | head -n1)" != "3.10" ]]; then
+    echo "Skipping CUTLASS Operators install: requires Python >= 3.10, have $py_version"
     return 0
   fi
 
