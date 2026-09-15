@@ -7860,10 +7860,14 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
         (_tensor(()), (0, zero.detach().clone(), 2.5)),
     )
 
+    is_float8 = dtype in float8_types()
     for tensor, args in test_cases:
+        # Only MPS supports float8 scalar scatter.
+        if is_float8 and torch.device(device).type != 'mps' and not isinstance(args[2], torch.Tensor):
+            continue
         yield SampleInput(tensor, *args)
 
-        if not requires_grad:
+        if not requires_grad and not is_float8:
             yield SampleInput(tensor.detach().clone(), *args, reduce='add')
 
             if dtype.is_floating_point:
@@ -19634,6 +19638,8 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.float8_e4m3fn),
+           dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.float8_e4m3fn),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_scatter,
