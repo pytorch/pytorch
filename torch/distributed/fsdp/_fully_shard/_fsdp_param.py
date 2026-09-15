@@ -234,7 +234,6 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        self._sharded_param_version: tuple[int, int] | None = None
         self._sharded_grad_dtype_initialized = False
         self._grad_is_partial = False
         self._pending_grad_reduce_op = "avg"
@@ -1027,12 +1026,6 @@ class FSDPParam:
         # Assume that the data has been allocated and all-gathered
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
         self._setattr_on_modules(self._unsharded_param)
-        # Foreach updates may only increment the local tensor's version.
-        self._sharded_param_version = (
-            None
-            if self.sharded_param.is_inference()
-            else (self.sharded_param._version, self._sharded_local_tensor._version)
-        )
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
             # reshard and must be kept alive for the next all-gather copy-in.

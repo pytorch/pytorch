@@ -510,9 +510,8 @@ class FSDPModule:
         reduced communication since the unsharded parameters do not need to be
         re-all-gathered before the next forward.
 
-        Updates to the exposed sharded parameters must run consistently across
-        ranks while retaining unsharded parameters. Before rank-specific local
-        shard updates, call :meth:`reshard` on every rank.
+        When retaining unsharded parameters, call :meth:`reshard` on each FSDP
+        module on every rank before updating its sharded parameters.
 
         Args:
             reshard_after_backward (bool): Whether to reshard parameters after

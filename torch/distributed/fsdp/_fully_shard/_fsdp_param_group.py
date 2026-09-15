@@ -384,21 +384,9 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
-            if all(
-                fsdp_param._sharded_param_version is None
-                or (
-                    fsdp_param.sharded_param._version,
-                    fsdp_param._sharded_local_tensor._version,
-                )
-                == fsdp_param._sharded_param_version
-                for fsdp_param in self.fsdp_params
-            ):
-                for fsdp_param in self.fsdp_params:
-                    fsdp_param.to_unsharded()
-                return
-            # An optimizer may update the published sharded parameter while
-            # its unsharded allocation is retained across backwards.
-            self._to_sharded()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.to_unsharded()
+            return
         if (
             not self.unshard_in_backward
             and self._training_state == TrainingState.PRE_BACKWARD
@@ -751,6 +739,7 @@ class FSDPParamGroup:
                     ),
                     self.comm_ctx.reduce_scatter_stream,
                     self._reduce_scatter_comm,
+                    self._orig_dtype,
                     self._reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,

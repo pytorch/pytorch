@@ -691,7 +691,12 @@ class TestFullyShardPendingGrad(FSDPTest):
                     param.grad.placements, (Shard(0) if sync else Partial("avg"),)
                 )
                 self.assertEqual(ref_param.grad, param.grad.full_tensor())
+            if step == 0 and not reshard_after_backward and self.rank == 0:
+                # A rank-local no-op must not trigger an implicit all-gather.
+                with torch.no_grad():
+                    params[0].add_(0)
             if step in (1, 2):
+                model.reshard()
                 ref_optim.step()
                 optim.step()
                 for ref_param, param in zip(ref_model.parameters(), params):
