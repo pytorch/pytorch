@@ -80,7 +80,25 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
           return std::pow(base, static_cast<cast_scalar_t>(exp));
         },
         [=](Vec base) -> Vec {
-          return base.pow(static_cast<cast_scalar_t>(exp));
+          if constexpr (std::is_same_v<scalar_t, float> &&
+            std::is_same_v<cast_scalar_t, double>) {
+            // The scalar lambda keeps the exponent in double (see the
+            // cast_scalar_t note above). Vectorized<float>::pow narrows it,
+            // which turns an odd integer exponent such as INT_MAX even and
+            // flips the sign for negative bases, so widen instead.
+            using Vd = Vectorized<double>;
+            constexpr int kN = Vec::size() / Vd::size();
+            static_assert(kN == 2);
+            const Vd exp_vec(static_cast<double>(exp));
+            auto wide = convert<double, kN, float, 1>(VectorizedN<float, 1>(base));
+            VectorizedN<double, kN> result;
+            // Compile-time indices; a runtime index spills the VectorizedN.
+            result[0] = wide[0].pow(exp_vec);
+            result[1] = wide[1].pow(exp_vec);
+            return convert<float, 1, double, kN>(result);
+          } else {
+            return base.pow(static_cast<cast_scalar_t>(exp));
+          }
         }
     );
   }
