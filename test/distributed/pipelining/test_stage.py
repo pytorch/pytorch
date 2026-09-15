@@ -3,6 +3,7 @@
 
 import os
 import tempfile
+from contextlib import contextmanager
 from unittest import mock
 
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
@@ -16,7 +17,7 @@ from torch.distributed.pipelining import (
     PipelineStage,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._utils import PipeliningMetadataError
+from torch.distributed.pipelining._utils import InferenceMode, PipeliningMetadataError
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
@@ -42,6 +43,25 @@ backend = dist.get_default_backend_for_device(device_type)
 torch.manual_seed(0)
 
 
+@contextmanager
+def single_rank_process_group():
+    """Provide a temporary local process group when a test has not created one."""
+    init_pg = not dist.is_initialized()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if init_pg:
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{os.path.join(tmpdir, 'pg')}",
+                rank=0,
+                world_size=1,
+            )
+        try:
+            yield
+        finally:
+            if init_pg:
+                dist.destroy_process_group()
+
+
 class PipelineStageBackendWarningTest(TestCase):
     @parametrize(
         "backend,should_warn",
@@ -64,6 +84,116 @@ instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
+    def test_pipeline_metadata_forward_kwargs(self):
+        class MetadataModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.received: list[tuple[int, int]] = []
+
+            def forward(
+                self,
+                x,
+                *,
+                pipeline_stage_index: int = -1,
+                pipeline_microbatch_index: int = -1,
+            ):
+                self.received.append((pipeline_stage_index, pipeline_microbatch_index))
+                return x
+
+        with single_rank_process_group():
+            module = MetadataModule()
+            stage = PipelineStage(
+                module,
+                stage_index=0,
+                num_stages=1,
+                device=torch.device("cpu"),
+                input_args=torch.ones(1),
+                output_args=torch.ones(1),
+                pass_pipeline_metadata=True,
+            )
+            schedule = ScheduleGPipe(stage, n_microbatches=2)
+            x = torch.ones(2)
+
+            self.assertEqual(schedule.step(x), x)
+            self.assertEqual(module.received, [(0, 0), (0, 1)])
+
+            with self.assertRaisesRegex(ValueError, "reserved name"):
+                stage.forward_one_chunk(
+                    4,
+                    (x,),
+                    {"pipeline_microbatch_index": 4},
+                )
+
+    def test_pipeline_metadata_pre_hook_and_static_contract(self):
+        class StrictModule(torch.nn.Module):
+            def forward(self, x):
+                return x.square()
+
+        received = []
+
+        def consume_metadata(module, args, kwargs):
+            received.append(
+                (
+                    kwargs.pop("pipeline_stage_index"),
+                    kwargs.pop("pipeline_microbatch_index"),
+                )
+            )
+            return args, kwargs
+
+        with single_rank_process_group():
+            module = StrictModule()
+            module.register_forward_pre_hook(consume_metadata, with_kwargs=True)
+            x = torch.ones(1, requires_grad=True)
+            stage = PipelineStage(
+                module,
+                stage_index=1,
+                num_stages=2,
+                device=torch.device("cpu"),
+                input_args=x,
+                output_args=x.square(),
+                pass_pipeline_metadata=True,
+            )
+            stage._inference_mode = InferenceMode.STATIC
+            stage._prepare_forward_infra(3, None, has_backward=True)
+            stage.set_local_fwd_input(x, 2)
+
+            output = stage.forward_one_chunk(2, ())
+            self.assertEqual(output, x.square())
+            self.assertEqual(received[-1], (1, 2))
+            self.assertEqual(stage.fwd_cache[2][1], [x])
+
+            with self.assertRaisesRegex(
+                PipeliningMetadataError, "requires static input_args and output_args"
+            ):
+                PipelineStage(
+                    module,
+                    stage_index=0,
+                    num_stages=1,
+                    device=torch.device("cpu"),
+                    pass_pipeline_metadata=True,
+                )
+
+    def test_pipeline_metadata_disabled(self):
+        class KwargsModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.kwargs = None
+
+            def forward(self, x, **kwargs):
+                self.kwargs = kwargs
+                return x
+
+        with single_rank_process_group():
+            module = KwargsModule()
+            stage = PipelineStage(
+                module,
+                stage_index=0,
+                num_stages=1,
+                device=torch.device("cpu"),
+            )
+            stage.forward_one_chunk(0, (torch.ones(1),))
+            self.assertEqual(module.kwargs, {})
+
     def test_dynamic_metadata_inference_restores_module_buffers(self):
         class BufferMutatingModule(torch.nn.Module):
             def __init__(self) -> None:
