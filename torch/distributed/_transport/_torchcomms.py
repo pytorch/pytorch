@@ -3,7 +3,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any, TYPE_CHECKING
 
-from ._api import Memory, MemoryView, MutableMemoryView, RemoteBuffer, Transport
+from ._api import Memory, MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
 
 
 if TYPE_CHECKING:
@@ -95,17 +95,38 @@ class TorchCommsTransport(Transport):
             raise RuntimeError("transport is closed")
         return _Memory(tensor, self._memory_type(tensor))
 
-    def write(self, local_buffer: MemoryView, remote_buffer: RemoteBuffer) -> int:
+    def write(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
         if not isinstance(local_buffer, _View):
             raise TypeError("local_buffer was not registered by this transport")
-        return self._native().write(local_buffer.native, remote_buffer)
+        return self._run_transfer(
+            lambda: self._native().write(local_buffer.native, remote_buffer),
+            local_buffer._memory._tensor.device,
+            async_op=async_op,
+        )
 
-    def read(self, local_buffer: MutableMemoryView, remote_buffer: RemoteBuffer) -> int:
+    def read(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
         if not isinstance(local_buffer, _MutableView):
             raise TypeError("local_buffer was not registered by this transport")
-        return self._native().read(local_buffer.native, remote_buffer)
+        return self._run_transfer(
+            lambda: self._native().read(local_buffer.native, remote_buffer),
+            local_buffer._memory._tensor.device,
+            async_op=async_op,
+        )
 
     def close(self) -> None:
+        self._close_work()
         self._closed = True
         self._transport = None
 
