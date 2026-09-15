@@ -477,7 +477,13 @@ class _RemoteModule(nn.Module):
         # If ``enable_moving_cpu_tensors_to_cuda`` is true, but the device map is not set,
         # then any CPU tensors can still be moved to a cuda device to run forward,
         # but the output must be moved back to CPU before being sent over the wire.
-        enable_moving_cpu_tensors_to_cuda = torch.device(self.device).type == "cuda"
+        # Instead of hardcoding ``"cuda"``, enable this for any non-CPU device type
+        # that is registered in torch (e.g., cuda, xpu, npu, ...), so that
+        # third-party backends do not need to fork this module.
+        device_type = torch.device(self.device).type
+        enable_moving_cpu_tensors_to_cuda = (
+            device_type != "cpu" and getattr(torch, device_type, None) is not None
+        )
         return enable_moving_cpu_tensors_to_cuda
 
     def _init_template(self, module_interface_cls, enable_moving_cpu_tensors_to_cuda):
