@@ -253,6 +253,7 @@ struct C10_API FakeTensorMode {
   void set_constant(
       c10::TensorImpl* fake_impl,
       c10::intrusive_ptr<c10::TensorImpl> constant);
+  void clear_constant(c10::TensorImpl* fake_impl) noexcept;
 
   // return the real constant a fake tensor was created from, or nullptr
   const c10::intrusive_ptr<c10::TensorImpl>& get_constant(
@@ -1475,13 +1476,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * to DispatchKeySet
    */
 
-  // this is the fast path: caller guarantees fake_device already has a valid
-  // index
+  // Caller guarantees fake_device is normalized.
   void set_fake_device(c10::Device fake_device);
-
-  // Normalizes the device index then calls set_fake_device.
-  // use when the device might lack an index ("cuda" vs "cuda:0").
-  void set_and_normalize_fake_device(c10::Device fake_device);
 
   // the fake device recorded for this tensor, or nullopt if none
   std::optional<c10::Device> fake_device() const {

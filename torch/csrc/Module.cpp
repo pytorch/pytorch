@@ -15,6 +15,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FakeTensor.h>
 #include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
@@ -2811,7 +2812,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_set_fake_device",
       [](const at::Tensor& t, c10::Device device) {
-        t.unsafeGetTensorImpl()->set_and_normalize_fake_device(device);
+        at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), device);
       },
       py::arg("t"),
       py::arg("device"));
@@ -2833,6 +2834,12 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& fake, const std::optional<at::Tensor>& constant) {
         TORCH_CHECK(fake.defined(), "Expected a defined tensor");
         TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
+        if (constant) {
+          TORCH_CHECK(
+              constant->defined(), "Expected a defined constant tensor");
+          TORCH_CHECK(
+              !constant->is_fake(), "Expected a non-fake constant tensor");
+        }
         auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
         TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
         mode->set_constant(
