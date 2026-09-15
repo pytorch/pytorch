@@ -129,7 +129,7 @@ class FSDPState(_State):
                 self._pre_forward,
                 self._post_forward,
                 self._modules_to_run_forward,
-                self._cast_output_dtype,
+                self._post_partial_forward,
             )
             self._pre_forward_hook_handle = hook_handle
             self._post_forward_hook_handle = hook_handle
@@ -348,6 +348,12 @@ class FSDPState(_State):
                 self._state_ctx.iter_forward_root = None
             return self._cast_output_dtype(output)
 
+    def _post_partial_forward(self, output: Any) -> Any:
+        with _spmd_no_typecheck():
+            for fsdp_param_group in self._fsdp_param_groups:
+                fsdp_param_group._register_cpu_grad_owners()
+        return self._cast_output_dtype(output)
+
     def _cast_forward_inputs(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -550,16 +556,15 @@ def _register_group_forward_hooks(
     pre_hook: Callable,
     post_hook: Callable,
     modules_to_run: set[nn.Module],
-    cast_output_dtype: Callable[[Any], Any],
+    post_partial_forward: Callable[[Any], Any],
 ) -> _MultiHandle:
     """
     Registers group forward pre and post-hooks. The pre-hook runs on every
     module pre-forward; downstream state gating ensures one-shot work
     (root setup, post_backward hook registration) fires once per group
     pass. The post-hook runs on every module's post-forward: on the
-    partial path (group not yet complete) it applies only the
-    ``mp_policy.output_dtype`` cast so standalone per-module callers
-    observe the same output dtype semantics as the non-grouped case; on
+    partial path (group not yet complete) it exposes CPU gradient owners and
+    applies the ``mp_policy.output_dtype`` cast for standalone callers; on
     the last module it runs the full ``post_hook`` (which reshards,
     registers the pre-backward hook, and itself casts output_dtype). If
     a module never runs forward, the post-hook does not fire for it and
@@ -580,15 +585,13 @@ def _register_group_forward_hooks(
         @functools.wraps(post_hook)
         def wrapped_post_hook(hook_module: nn.Module, input: Any, output: Any) -> Any:
             # Full path fires once, when this invocation completes the
-            # group. Otherwise apply only the output_dtype cast so every
-            # module in the group (including repeat invocations such as
-            # per-chunk standalone head calls) produces output in the
-            # mp_policy's output_dtype.
+            # group. Otherwise expose pending CPU gradients and cast outputs
+            # without resharding or completing the group's forward state.
             if module in modules_to_run:
                 modules_to_run.remove(module)
                 if len(modules_to_run) == 0:
                     return post_hook(hook_module, input, output)
-            return cast_output_dtype(output)
+            return post_partial_forward(output)
 
         return wrapped_post_hook
 
