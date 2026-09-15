@@ -71,8 +71,10 @@ from ..utils import (
     get_constexpr_repr_children,
     get_dtype_size,
     get_importable_constexpr_types,
+    GPU_ALIGN_BYTES,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
+    is_gpu,
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
@@ -1656,6 +1658,7 @@ class PythonWrapperCodegen(CodeGen):
         super().__init__()
         self._last_default_stream_device: int | None = None
         self._pending_input_asserts: dict[str, tuple[str, str]] = {}
+        self._pending_input_alignment_asserts: OrderedSet[str] = OrderedSet()
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
         # Inputs read on more than one stream get a copy_if_misaligned per
         # consuming stream (each cloning a preserved copy of the original), so
@@ -2123,8 +2126,37 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
             self.codegen_input_size_asserts()
+        if config.alignment_asserts_inputs:
+            self.codegen_input_alignment_asserts()
         if config.nan_asserts:
             self.codegen_input_nan_asserts()
+
+    def codegen_input_alignment_asserts(self) -> None:
+        for name, buf in self.get_graph_inputs().items():
+            if isinstance(
+                buf,
+                (
+                    sympy.Basic,
+                    ir.TorchBindObject,
+                    ir.GeneratorState,
+                    ir.OpaqueObjectState,
+                ),
+            ):
+                continue
+
+            # a graph partition may take an IRNode output from a previous partition
+            if name not in V.graph.graph_input_names:
+                continue
+
+            # only assert on inputs codegenned under the aligned assumption
+            if name in V.graph.unaligned_buffers:
+                continue
+
+            device = buf.get_device()
+            if device is None or not is_gpu(device.type):
+                continue
+
+            self._pending_input_alignment_asserts.add(name)
 
     # Input size/stride assertions are deferred from the top of call() to just
     # before the first kernel that uses each input. This avoids a block of N
@@ -2132,15 +2164,21 @@ class PythonWrapperCodegen(CodeGen):
     # GPU kernel launch. Called from the scheduler codegen loop.
     def codegen_deferred_input_asserts(self, input_names: Iterable[str]) -> None:
         grouped_asserts: list[tuple[str, str, str]] = []
+        alignment_asserts: list[str] = []
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
                 grouped_asserts.append((name, size, stride))
+            if name in self._pending_input_alignment_asserts:
+                self._pending_input_alignment_asserts.discard(name)
+                alignment_asserts.append(name)
         if len(grouped_asserts) == 1:
             name, size, stride = grouped_asserts[0]
             self.write_assert_size_stride(name, size, stride, "input")
         elif len(grouped_asserts) > 1:
             self.write_assert_size_stride_grouped(grouped_asserts, "input")
+        for name in alignment_asserts:
+            self.write_assert_alignment(name, GPU_ALIGN_BYTES, "input")
 
     def write_assert_size_stride(
         self,

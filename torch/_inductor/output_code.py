@@ -51,11 +51,14 @@ from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
     CUDAGraphWrapperMetadata,
+    GPU_ALIGN_BYTES,
     GraphPartitionMap,
     InputType,
     is_gpu,
+    maybe_get_suppress_shape_guards_ctx,
     output_node,
     set_tracing_context_output_strides,
+    should_assume_input_aligned,
 )
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
@@ -949,6 +952,29 @@ class CompiledFxGraph(OutputCode):
             inputs_to_check,
             self.mutated_input_idxs,
         )
+
+        if config.alignment_asserts_inputs and cudagraphs:
+            from torch._C._dynamo.guards import assert_alignment
+
+            with maybe_get_suppress_shape_guards_ctx():
+                aligned_input_idxs = [
+                    i
+                    for i, inp in enumerate(example_inputs)
+                    if isinstance(inp, torch.Tensor)
+                    and should_assume_input_aligned(inp)
+                ]
+            cudagraph_callable = self.current_callable
+            if cudagraph_callable is None:
+                raise AssertionError("current_callable must not be None")
+
+            # Replay bypasses generated assertions and copies inputs into graph buffers.
+            def checked_call(inputs: Sequence[InputType]) -> object:
+                for i in aligned_input_idxs:
+                    tensor = cast(torch.Tensor, inputs[i])
+                    assert_alignment(tensor, GPU_ALIGN_BYTES, "input")
+                return cudagraph_callable(inputs)
+
+            self.current_callable = checked_call
 
         if self._original_gm is None and self._serialized_original_gm is not None:
             from torch._subclasses import FakeTensorMode

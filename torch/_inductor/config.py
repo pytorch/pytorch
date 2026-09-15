@@ -265,6 +265,13 @@ alignment_asserts = (
     == "1"
 )
 
+# Strict mode for input alignment: assert alignment of graph inputs which
+# were codegenned under the assumption that they are aligned, instead of the
+# runtime silently realigning misaligned inputs with a clone.
+alignment_asserts_inputs = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS_INPUTS") == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
@@ -2023,6 +2030,18 @@ class triton:
     # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
+
+    # Cudagraph-managed input pointer-change count at which the configured
+    # action is applied for a parent/function edge. "copy" copies eligible
+    # inputs into stable replay buffers; "skip" runs that edge eagerly.
+    cudagraph_managed_input_rerecord_limit = 5
+    cudagraph_managed_input_rerecord_action: Literal["copy", "skip"] = "copy"
+
+    # If set, allocate this many GiB in the cudagraph memory pool when the
+    # pool is created (once per device). The upfront allocation reserves one
+    # large contiguous segment for later recordings to carve up, rather than
+    # growing the pool a segment at a time, which reduces fragmentation.
+    cudagraph_initial_mempool_allocation_gb: float | None = None
 
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit

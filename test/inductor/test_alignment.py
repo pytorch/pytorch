@@ -6,6 +6,8 @@ import unittest
 import torch
 import torch._functorch.config as functorch_config
 from torch._inductor import config
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MACOS_VERSION,
@@ -159,6 +161,70 @@ class CommonTemplate:
 
         x = torch.randn(1025, device=self.device)
         self.common(f, (x,))
+
+    @config.patch(alignment_asserts_inputs=True)
+    def test_input_alignment_asserts(self):
+        if not torch._inductor.utils.is_gpu(self.device):
+            raise unittest.SkipTest("alignment asserts are GPU-only")
+
+        def fn(x, y):
+            return x * y
+
+        x = torch.randn(1024, device=self.device)
+        torch._dynamo.mark_static_address(x)
+        y = torch.randn(1024, device=self.device)
+        out, (code,) = run_and_get_code(torch.compile(fn), x, y)
+        self.assertEqual(out, fn(x, y))
+
+        # both inputs are codegenned as aligned, and in strict mode neither
+        # gets a runtime realignment copy, so both get an assert
+        FileCheck().check_count(", 16, 'input')", 2, exactly=True).run(code)
+
+    @config.patch(alignment_asserts_inputs=True)
+    def test_no_input_alignment_assert_for_misaligned_input(self):
+        if not torch._inductor.utils.is_gpu(self.device):
+            raise unittest.SkipTest("alignment asserts are GPU-only")
+
+        def fn(x):
+            return x + 1
+
+        # compiled with a misaligned example input, the graph does not assume
+        # alignment, so no assert is emitted for it
+        x = torch.randn(1024 + 16, device=self.device)[1:-15]
+        torch._dynamo.mark_static_address(x)
+        out, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(out, fn(x))
+        FileCheck().check_not(", 16, 'input')").run(code)
+
+    @parametrize("wrapper", ("python", "fx", "cudagraphs", "cudagraph_partition"))
+    def test_input_alignment_assert_fires_instead_of_clone(self, wrapper):
+        if not torch._inductor.utils.is_gpu(self.device):
+            raise unittest.SkipTest("alignment asserts are GPU-only")
+
+        def fn(x):
+            return x + 1
+
+        fn_c = torch.compile(
+            fn,
+            options={
+                "alignment_asserts_inputs": True,
+                "fx_wrapper": wrapper == "fx",
+                "triton.cudagraphs": wrapper in ("cudagraphs", "cudagraph_partition"),
+                "graph_partition": wrapper == "cudagraph_partition",
+            },
+        )
+        # compile with an aligned input so the graph assumes aligned inputs
+        x = torch.randn(1024, device=self.device)
+        for _ in range(3):
+            torch.compiler.cudagraph_mark_step_begin()
+            self.assertEqual(fn_c(x), fn(x))
+
+        # storage_offset is not guarded on, so a misaligned input hits the
+        # same graph; in strict mode it errors instead of being cloned
+        y = torch.randn(1025, device=self.device)[1:]
+        torch.compiler.cudagraph_mark_step_begin()
+        with self.assertRaisesRegex(AssertionError, "bytes aligned"):
+            fn_c(y)
 
     def test_alias_of_misaligned_input(self):
         # chunk on a dynamic dim gives the aliased output a symbolic
