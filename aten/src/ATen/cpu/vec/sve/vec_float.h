@@ -440,7 +440,7 @@ class Vectorized<float> {
   Vectorized<float> frac() const;
   Vectorized<float> sin() const {
     return USE_SLEEF(
-        Vectorized<float>(Sleef_sinfx_u10sve(values)), map(std::sin));
+        Vectorized<float>(Sleef_sinfx_u35sve(values)), map(std::sin));
   }
   // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
   // return finite results, because Sleef uses float-range intermediates
@@ -450,7 +450,7 @@ class Vectorized<float> {
   }
   Vectorized<float> cos() const {
     return USE_SLEEF(
-        Vectorized<float>(Sleef_cosfx_u10sve(values)), map(std::cos));
+        Vectorized<float>(Sleef_cosfx_u35sve(values)), map(std::cos));
   }
   Vectorized<float> cosh() const {
     return map(std::cosh);

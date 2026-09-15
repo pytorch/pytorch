@@ -27,8 +27,18 @@ _OP_SYMBOLS = [op_symbol for op_symbol, _, _ in cutedsl_impl._OVERRIDES]
 class TestLinearCrossEntropyOverride(TestCase):
     def setUp(self):
         super().setUp()
-        if not cu.runtime_available() or cu.check_native_jit_disabled():
-            self.skipTest("CuTeDSL runtime unavailable or native DSL disabled")
+        # The version check belongs here too: `cu.register_op_override` drops
+        # every registration when the installed CuTeDSL is not known-good, so
+        # these tests would look for overrides that were never installed and
+        # fail where they should skip.
+        if (
+            not cu.runtime_available()
+            or cu.check_native_jit_disabled()
+            or not cu._version_is_ok()
+        ):
+            self.skipTest(
+                "CuTeDSL runtime unavailable, disabled, or at an unsupported version"
+            )
 
     def _cutedsl_nodes(self, op_symbol):
         key = ("torch_nn", op_symbol, "CUDA")
