@@ -175,7 +175,7 @@ at::cuda::setCurrentCUDAStream(streams1[0]);
 
 // Pattern 2: CUDAStreamGuard changes both current device and current stream
 {
-  at::cuda::CUDAStreamGuard stream_guard(streams1[1]);
+  at::cuda::CUDAStreamGuard std::optional<cudaStream_t>guard(streams1[1]);
   // current device is 1, current stream is streams1[1]
 }
 // restored to device 0, stream streams0[0]
