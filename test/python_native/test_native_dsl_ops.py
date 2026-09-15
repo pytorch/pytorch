@@ -1,13 +1,21 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import base64
+import contextlib
+import hashlib
 import importlib.util
 import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 import uuid
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 from unittest.mock import patch
 
+from torch._native import common_utils as native_common_utils, triton_utils
+from torch._vendor.packaging.version import Version
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -25,6 +33,74 @@ def _subprocess_lastline(script, env=None):
         text=True,
     ).strip()
     return result.rsplit("\n", 1)[-1]
+
+
+_WHEEL_DISTRIBUTIONS = tuple(
+    name for name in triton_utils._TRITON_DISTRIBUTIONS if name != "triton"
+)
+_MODULE_ORIGIN = "/site-packages/triton/__init__.py"
+
+
+def _triton_installed(versions):
+    return patch.object(
+        triton_utils,
+        "_available_version",
+        side_effect=lambda distribution: (
+            Version(versions[distribution]) if distribution in versions else None
+        ),
+    )
+
+
+def _triton_provided_by(*distributions, raises=False):
+    kwargs = (
+        {"side_effect": RuntimeError("unreadable metadata")}
+        if raises
+        else {"return_value": {"triton": list(distributions)} if distributions else {}}
+    )
+    return patch.object(triton_utils, "_packages_distributions", **kwargs)
+
+
+class _FileHash:
+    def __init__(self, mode, value):
+        self.mode = mode
+        self.value = value
+
+
+class _InstalledFile:
+    def __init__(self, path, contents=None):
+        self._path = path
+        self.hash = None
+        if contents is not None:
+            digest = hashlib.sha256(contents).digest()
+            value = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+            self.hash = _FileHash("sha256", value)
+
+    def locate(self):
+        return self._path
+
+
+class _InstalledDistribution:
+    def __init__(self, paths):
+        self.files = (
+            None
+            if paths is None
+            else [
+                p if isinstance(p, _InstalledFile) else _InstalledFile(p) for p in paths
+            ]
+        )
+
+
+def _triton_module_at(origin):
+    return patch.object(triton_utils, "_module_origin", return_value=origin)
+
+
+def _triton_records(files_by_distribution):
+    def lookup(name):
+        if name not in files_by_distribution:
+            raise PackageNotFoundError(name)
+        return _InstalledDistribution(files_by_distribution[name])
+
+    return patch.object(triton_utils, "_distribution", side_effect=lookup)
 
 
 def _import_module_directly(module_name, file_name):
@@ -54,6 +130,7 @@ class TestNativeDSLOps(TestCase):
             (
                 "torch._native.triton_utils",
                 [
+                    "_check_runtime_available",
                     "_version_is_sufficient",
                     "check_native_jit_disabled",
                     "check_native_version_skip",
@@ -618,7 +695,331 @@ class TestNativeDSLOps(TestCase):
         self.assertNotIn("incomplete_dsl", registry.list_all_dsls())
 
 
+class TestTritonDistributionDiscovery(TestCase):
+    def setUp(self):
+        super().setUp()
+        for default in (_triton_module_at(_MODULE_ORIGIN), _triton_records({})):
+            default.start()
+            self.addCleanup(default.stop)
+
+    def test_named_distribution_uses_fast_path(self):
+        with (
+            _triton_installed({"triton": "3.7.1"}),
+            _triton_provided_by() as scan,
+            _triton_module_at(_MODULE_ORIGIN) as origin,
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+        scan.assert_not_called()
+        origin.assert_not_called()
+
+    @parametrize("distribution", _WHEEL_DISTRIBUTIONS)
+    def test_known_distribution_names(self, distribution):
+        with (
+            _triton_installed({distribution: "3.7.1"}),
+            _triton_provided_by(distribution),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+    def test_missing_version_falls_through(self):
+        with (
+            _triton_installed({"pytorch-triton-rocm": "3.7.1"}),
+            _triton_provided_by("fbtriton", "pytorch-triton-rocm"),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+    def test_source_checkout_reports_no_version(self):
+        with (
+            _triton_installed({}),
+            _triton_provided_by(),
+            self.assertLogs("torch._native.triton_utils", level="INFO") as logs,
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        self.assertIn("no installed distribution", "\n".join(logs.output))
+
+    def test_scanned_provider_without_version(self):
+        with (
+            _triton_installed({}),
+            _triton_provided_by("pytorch-triton-rocm"),
+            self.assertLogs("torch._native.triton_utils", level="INFO") as logs,
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        self.assertIn("no installed distribution", "\n".join(logs.output))
+
+    def test_unreadable_scan_is_caught(self):
+        with (
+            _triton_installed({}),
+            _triton_provided_by(raises=True) as scan,
+            self.assertLogs("torch._native.triton_utils", level="WARNING") as logs,
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        scan.assert_called_once()
+        self.assertIn("will not register", "\n".join(logs.output))
+
+    def test_record_hash_selects_live_distribution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
+
+            with (
+                _triton_installed({"triton": "3.2.0", "pytorch-triton-rocm": "3.7.1"}),
+                _triton_records(
+                    {
+                        "triton": [_InstalledFile(origin, b'__version__ = "3.2.0"\n')],
+                        "pytorch-triton-rocm": [_InstalledFile(origin, contents)],
+                    }
+                ),
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "pytorch-triton-rocm") as scan,
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+            scan.assert_not_called()
+
+    def test_unresolved_known_collision_scans_unlisted_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
+
+            with (
+                _triton_installed(
+                    {
+                        "triton": "3.2.0",
+                        "triton-rocm": "3.3.0",
+                        "triton-nightly": "3.7.1",
+                    }
+                ),
+                _triton_records(
+                    {
+                        "triton": [_InstalledFile(origin)],
+                        "triton-rocm": [
+                            _InstalledFile(origin, b'__version__ = "3.3.0"\n')
+                        ],
+                        "triton-nightly": [_InstalledFile(origin, contents)],
+                    }
+                ),
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "triton-rocm", "triton-nightly") as scan,
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+            scan.assert_called_once()
+
+    def test_unlisted_distribution_is_scanned(self):
+        with (
+            _triton_installed({"triton-nightly": "3.7.1"}),
+            _triton_records({"triton-nightly": [_MODULE_ORIGIN]}),
+            _triton_provided_by("triton-nightly") as scan,
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+        scan.assert_called_once()
+
+    def test_single_editable_install_skips_ownership(self):
+        with (
+            _triton_installed({"triton": "3.7.1"}),
+            _triton_records(
+                {
+                    "triton": [
+                        "/site-packages/__editable__.triton-3.7.1.pth",
+                        "/site-packages/__editable___triton_3_7_1_finder.py",
+                        "/site-packages/triton-3.7.1.dist-info/METADATA",
+                        "/site-packages/triton-3.7.1.dist-info/RECORD",
+                        "/site-packages/triton-3.7.1.dist-info/top_level.txt",
+                    ]
+                }
+            ) as distribution,
+            _triton_module_at("/src/triton/__init__.py") as origin,
+            _triton_provided_by("triton"),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+        distribution.assert_not_called()
+        origin.assert_not_called()
+
+    def test_unreadable_provider_is_skipped(self):
+        def version_of(distribution):
+            if distribution == "broken-triton":
+                raise ValueError("broken metadata")
+            return Version("3.7.1") if distribution == "triton-nightly" else None
+
+        with (
+            patch.object(triton_utils, "_available_version", side_effect=version_of),
+            _triton_records({"triton-nightly": [_MODULE_ORIGIN]}),
+            _triton_provided_by("broken-triton", "triton-nightly"),
+            self.assertLogs("torch._native.triton_utils", level="WARNING"),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+    def test_normalized_provider_is_not_retried(self):
+        with (
+            _triton_installed({}) as version_lookup,
+            _triton_provided_by("triton_rocm"),
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        self.assertNotIn(
+            "triton_rocm",
+            [call.args[0] for call in version_lookup.call_args_list],
+        )
+
+    def test_missing_record_is_undecidable(self):
+        with _triton_records({"triton": None}):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
+            )
+
+    def test_missing_record_hash_is_undecidable(self):
+        with _triton_records({"triton": [_MODULE_ORIGIN]}):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
+            )
+
+    def test_unsupported_record_hash_is_undecidable(self):
+        record = _InstalledFile(_MODULE_ORIGIN)
+        record.hash = _FileHash("unsupported", "")
+        with _triton_records({"triton": [record]}):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
+            )
+
+    def test_empty_record_does_not_match(self):
+        with _triton_records({"triton": []}):
+            self.assertIs(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN),
+                False,
+            )
+
+    def test_editable_record_is_undecidable(self):
+        with _triton_records(
+            {
+                "triton": [
+                    "/site-packages/__editable__.triton-3.7.1.pth",
+                    "/site-packages/__editable___triton_3_7_1_finder.py",
+                    "/site-packages/triton-3.7.1.dist-info/RECORD",
+                ]
+            }
+        ):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", "/src/triton/__init__.py")
+            )
+
+    def test_hash_tie_uses_fast_path_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
+            record = _InstalledFile(origin, contents)
+
+            with (
+                _triton_installed(
+                    {"triton": "3.7.1", "pytorch-triton-rocm": "3.7.1+rocm"}
+                ),
+                _triton_records({"triton": [record], "pytorch-triton-rocm": [record]}),
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "pytorch-triton-rocm"),
+                self.assertLogs("torch._native.triton_utils", level="WARNING"),
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+    def test_nameless_provider_is_skipped(self):
+        with (
+            _triton_installed({}),
+            _triton_provided_by(None),
+            self.assertLogs("torch._native.triton_utils", level="WARNING"),
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+
+class TestTritonModuleOrigin(TestCase):
+    def test_absent_module_has_no_origin(self):
+        self.assertIsNone(triton_utils._module_origin("_no_such_native_dsl_module"))
+
+    def test_broken_parent_package_declines_instead_of_raising(self):
+        with patch.object(triton_utils, "_find_spec", side_effect=ImportError("boom")):
+            self.assertIsNone(triton_utils._module_origin("triton"))
+
+
+class TestTritonVersionGate(TestCase):
+    def setUp(self):
+        super().setUp()
+        for verdict in (
+            triton_utils._check_runtime_available,
+            triton_utils._version_is_sufficient,
+            native_common_utils.check_native_version_skip,
+            native_common_utils.check_native_jit_disabled,
+        ):
+            verdict.cache_clear()
+            self.addCleanup(verdict.cache_clear)
+
+    @contextlib.contextmanager
+    def _installed_triton(self, versions, *distributions):
+        """Run the gate against an importable Triton described by `versions`."""
+        with (
+            _triton_installed(versions),
+            _triton_provided_by(*distributions),
+            _triton_module_at(_MODULE_ORIGIN),
+            _triton_records({}),
+            patch.object(triton_utils._cuda, "is_built", return_value=True),
+            patch.object(triton_utils, "_unavailable_reason", return_value=None),
+        ):
+            yield
+
+    def test_wheel_distribution_name_passes_the_gate(self):
+        with self._installed_triton({"triton-rocm": "3.7.1"}, "triton-rocm"):
+            self.assertTrue(triton_utils.runtime_available())
+            self.assertEqual(triton_utils.runtime_version(), Version("3.7.1"))
+            self.assertTrue(triton_utils._version_is_sufficient())
+
+    def test_versionless_install_still_fails_the_gate(self):
+        with self._installed_triton({}):
+            self.assertTrue(triton_utils.runtime_available())
+            self.assertIsNone(triton_utils.runtime_version())
+            self.assertFalse(triton_utils._version_is_sufficient())
+
+    @parametrize("version", ("3.6.0", "3.42.0"))
+    def test_supported_versions_pass_the_gate(self, version):
+        with self._installed_triton({"triton-rocm": version}, "triton-rocm"):
+            self.assertTrue(triton_utils._version_is_sufficient())
+
+    # The off-major cases clear the minor threshold.
+    @parametrize("version", ("3.5.9", "2.9.0", "4.6.0"))
+    def test_unsupported_versions_fail_the_gate(self, version):
+        with self._installed_triton({"triton-rocm": version}, "triton-rocm"):
+            self.assertFalse(triton_utils._version_is_sufficient())
+
+    def test_version_skip_overrides_an_unsupported_version(self):
+        with (
+            self._installed_triton({"triton-rocm": "3.5.0"}, "triton-rocm"),
+            patch.object(triton_utils, "check_native_version_skip", return_value=True),
+        ):
+            self.assertTrue(triton_utils._version_is_sufficient())
+
+    def test_version_skip_does_not_rescue_an_unreported_version(self):
+        with (
+            self._installed_triton({}),
+            patch.object(triton_utils, "check_native_version_skip", return_value=True),
+        ):
+            self.assertFalse(triton_utils._version_is_sufficient())
+
+
 instantiate_parametrized_tests(TestNativeDSLOps)
+instantiate_parametrized_tests(TestTritonDistributionDiscovery)
+instantiate_parametrized_tests(TestTritonVersionGate)
 
 
 if __name__ == "__main__":
