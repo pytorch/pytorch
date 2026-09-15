@@ -99,8 +99,14 @@ bool should_use_cublaslt_grouped_gemm(
   if (fp16_grouped_gemm) {
     return true;
   }
-  return bf16_grouped_gemm &&
-      at::globalContext().preferCublasltGroupedGemm();
+  if (!bf16_grouped_gemm) {
+    return false;
+  }
+#if CUDA_VERSION >= 13040
+  return true;
+#else
+  return false;
+#endif
 }
 #endif
 
