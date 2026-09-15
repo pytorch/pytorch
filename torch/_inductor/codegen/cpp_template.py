@@ -40,6 +40,10 @@ class CppTemplate(KernelTemplate):
         self.layout = layout
         self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
+        # Input buffers this template's kernel mutates in place (for example the
+        # logsumexp/max_scores auxiliary outputs of flex attention). Subclasses
+        # set this before generate() is called.
+        self.mutated_inputs: list[ir.IRNode] | None = None
 
     def generate(self, **kwargs):
         kernel_name = f"cpp_{self.name}"
@@ -122,6 +126,7 @@ class CppTemplate(KernelTemplate):
             make_kernel_render,
             bmreq,
             self,
+            mutated_inputs=self.mutated_inputs,
         )
 
     def header(self) -> IndentedBuffer:

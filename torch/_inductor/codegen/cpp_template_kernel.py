@@ -618,6 +618,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
         info_kwargs: dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]
         | None = None,
+        mutated_inputs: list[ir.IRNode] | None = None,
     ):
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -625,6 +626,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
         self.bmreq = bmreq
         self.template = template
         self.info_kwargs = info_kwargs
+        self.mutated_inputs = mutated_inputs
 
     def precompile(self) -> None:
         if self.bmreq is None:
@@ -659,6 +661,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
             make_kernel_render=self.make_kernel_render,
             template=self.template,
             choice=self,
+            mutated_inputs=self.mutated_inputs,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
