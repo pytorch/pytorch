@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import functools
+import itertools
 import math
 import re
 import unittest
@@ -1082,6 +1083,62 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         expected = fn(a, b)
         result = opt_fn(a, b)
         self.assertEqual(result, expected)
+
+    def test_selective_checkpoint_preserves_registered_effect(self):
+        call_count = 0
+        with torch.library._scoped_library("test_compile_sac_effect", "FRAGMENT"):
+
+            @torch.library.custom_op(
+                "test_compile_sac_effect::identity", mutates_args=()
+            )
+            def effectful_identity(x: torch.Tensor) -> torch.Tensor:
+                nonlocal call_count
+                call_count += 1
+                return x.clone()
+
+            @effectful_identity.register_fake
+            def _(x):
+                return torch.empty_like(x)
+
+            def backward(_ctx, grad_output):
+                return grad_output
+
+            effectful_identity.register_autograd(backward)
+            effectful_identity.register_effect(torch.library.EffectType.ORDERED)
+
+            def run(use_compile, policy):
+                nonlocal call_count
+                call_count = 0
+
+                def context_fn():
+                    return create_selective_checkpoint_contexts(
+                        lambda _ctx, _op, *args, **kwargs: policy
+                    )
+
+                def fn(x):
+                    return checkpoint(
+                        lambda value: effectful_identity(value).sin(),
+                        x,
+                        use_reentrant=False,
+                        context_fn=context_fn,
+                    )
+
+                x = torch.randn(3, requires_grad=True)
+                run_fn = (
+                    torch.compile(fn, backend="aot_eager", fullgraph=True)
+                    if use_compile
+                    else fn
+                )
+                run_fn(x).sum().backward()
+
+                self.assertEqual(call_count, 1)
+                self.assertEqual(x.grad, x.cos())
+
+            for use_compile, policy in itertools.product(
+                (False, True), (False, CheckpointPolicy.MUST_RECOMPUTE)
+            ):
+                with self.subTest(compile=use_compile, policy=policy):
+                    run(use_compile, policy)
 
     @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
