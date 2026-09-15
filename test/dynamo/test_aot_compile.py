@@ -2069,13 +2069,14 @@ from user code:
         message = str(ctx.exception)
         self.assertIn("No AOT compiled graph matched this call", message)
         self.assertIn("Tried 2 compiled input(s)", message)
-        self.assertIn("[0]", message)
-        self.assertIn("[1]", message)
         # One line per input, not a multi-line GuardDebugInfo repr per input: the
-        # two entries are the two lines after the header, and the advice that
-        # follows is not indented, so it is not a continuation of the second.
+        # two entries are the two lines after the header, each says something
+        # after its index, and the advice that follows is not indented, so it
+        # is not a continuation of the second.
         lines = message.splitlines()
-        self.assertEqual([line[:5] for line in lines[1:3]], ["  [0]", "  [1]"])
+        self.assertEqual([line[:6] for line in lines[1:3]], ["  [0] ", "  [1] "])
+        for line in lines[1:3]:
+            self.assertTrue(line[6:].strip(), f"entry says nothing: {line!r}")
         self.assertFalse(lines[3].startswith(" "), lines[3])
         self.assertIn("Add a ModelInput", message)
 
@@ -2164,17 +2165,17 @@ from user code:
         counting = patch.object(AOTCompiledFunction, "prepare_f_locals", counted)
         with counting, patch.object(results[3], "fn", wraps=results[3].fn) as served:
             self.assertEqual(model(xs[3]), mod(xs[3]))
-            served.assert_called_once()
-            self.assertEqual(binds, [results[0]])
-            binds.clear()
             with self.assertRaises(RuntimeError) as ctx:
                 model(torch.ones(3, 3, dtype=torch.float16))
-            self.assertEqual(len(binds), 1)
-        # One entry per result off that single bind, whatever else the report
+        message = str(ctx.exception)
+        served.assert_called_once()
+        # One bind for the matched call and one for the call nothing matched, and
+        # one entry per result off that second bind, whatever else the report
         # carries.
-        lines = str(ctx.exception).splitlines()
+        self.assertEqual(binds, [results[0], results[0]])
+        lines = message.splitlines()
         self.assertEqual(sum(line.startswith("  [") for line in lines), len(xs))
-        self.assertIn("Add a ModelInput", str(ctx.exception))
+        self.assertIn("Add a ModelInput", message)
 
     def test_module_dispatch_decides_a_shared_binding_past_the_first_result(self):
         # Whether results bind alike is asked only once the first result has
