@@ -19,11 +19,15 @@ PYBIND11_MODULE(_nccl_ep, m) {
   using namespace c10d::nccl_ep;
 
 #ifdef NCCL_EP_JIT_HOME
-  // Point nccl-ep's runtime JIT at the in-tree headers baked at build time
-  // (NCCL_EP_HOME -> include/nccl_ep, NCCL_HOME -> include/nccl.h, both under
-  // this dir). overwrite=0 so an explicit user setting wins.
+  // Point nccl-ep's runtime JIT at the headers selected at build time. An
+  // in-tree build uses one root, while a system build may use separate roots.
+  // overwrite=0 so an explicit user setting wins.
   setenv("NCCL_EP_HOME", NCCL_EP_JIT_HOME, /*overwrite=*/0);
+#ifdef NCCL_EP_JIT_NCCL_HOME
+  setenv("NCCL_HOME", NCCL_EP_JIT_NCCL_HOME, /*overwrite=*/0);
+#else
   setenv("NCCL_HOME", NCCL_EP_JIT_HOME, /*overwrite=*/0);
+#endif
 #endif
 
   py::enum_<NcclEpLayout>(m, "Layout")
