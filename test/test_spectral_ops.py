@@ -748,6 +748,25 @@ class TestFFT(TestCase):
                 func(n=100, d=.5, out=actual)
             self.assertEqual(actual, expect)
 
+    @skipCPUIfNoFFT
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.double)
+    def test_fftfreq_out_noncontiguous(self, device, dtype):
+        for func in (torch.fft.fftfreq, torch.fft.rfftfreq):
+            for n in (4, 5, 8, 100):
+                expect = func(n=n, d=.5, device=device, dtype=dtype)
+                size = expect.numel()
+                # Every other element of a buffer, so out has stride 2 and the
+                # elements between its own are not part of it.
+                buffer = torch.full((2 * size,), -1, device=device, dtype=dtype)
+                actual = buffer[::2]
+                self.assertFalse(actual.is_contiguous())
+
+                func(n=n, d=.5, out=actual)
+
+                self.assertEqual(actual, expect)
+                self.assertEqual(buffer[1::2], torch.full_like(buffer[1::2], -1))
+
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
