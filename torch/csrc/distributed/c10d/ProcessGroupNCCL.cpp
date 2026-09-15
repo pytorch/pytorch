@@ -849,22 +849,14 @@ void ProcessGroupNCCL::WorkNCCL::recordEndEvent(
   if (asyncOp && captureStatus == c10::cuda::CaptureStatus::Active) {
     capturedEndEvent_ =
         CUDAEventCache::get(device_.index())->create(false, true);
-    auto info = c10::cuda::captureInfoMayInitCtx(stream);
+    const cudaGraphNode_t* dependencies = nullptr;
+    size_t count = 0;
+    auto info = c10::cuda::captureInfoMayInitCtx(stream, &dependencies, &count);
     captureId_ = info.id;
     retainCapturedEvent(info.graph, capturedEndEvent_);
     capturedEndEvent_->create(stream.device_index());
     const at::cuda::CUDAGuard guard(stream.device_index());
 
-    cudaStreamCaptureStatus status{};
-    const cudaGraphNode_t* dependencies = nullptr;
-    size_t count = 0;
-#if CUDA_VERSION >= 13000
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
-        stream, &status, nullptr, nullptr, &dependencies, nullptr, &count));
-#else
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
-        stream, &status, nullptr, nullptr, &dependencies, &count));
-#endif
     cudaGraphNode_t node{};
     C10_CUDA_CHECK(cudaGraphAddEventRecordNode(
         &node, info.graph, dependencies, count, capturedEndEvent_->event()));
