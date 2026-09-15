@@ -11,7 +11,13 @@ import expecttest
 
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_WINDOWS,
     run_tests,
@@ -41,7 +47,16 @@ PRUNE_FUNCTIONS = {
     # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
     "cudaGetDeviceCount": PRUNE_ALL,
     "cudaGetDeviceProperties_v2": PRUNE_ALL,
+    # PTI overhead markers on XPU; how many are emitted varies run to run.
+    "Instrumentation": PRUNE_ALL,
 }
+
+# On XPU the Level-Zero driver calls, and the UR allocations that sit on top of
+# them, depend on the driver version and on whether the SYCL kernel is already
+# JIT compiled and the block already cached by the allocator, so the first
+# profiled run sees many more of them than later ones. The `urEnqueue*` layer
+# above is stable, so that is what the XPU trees assert on.
+PRUNE_PATTERN = re.compile(r"ze[A-Z]\w*|urUSM\w*")
 
 # ROCTracer is currently not producing events that profiler can extract. We
 # should bring it up to parity with CUPTI Kineto / profiler integration, but in
@@ -94,11 +109,11 @@ class ProfilerTree:
         """
 
         @functools.wraps(f)
-        def begin_unit_test_marker(self, replicates=3):
+        def begin_unit_test_marker(self, *args, replicates=3, **kwargs):
             try:
                 for i in range(replicates):
                     self.tree_replicate = i
-                    out = f(self)
+                    out = f(self, *args, **kwargs)
                     if self.tree_replicate is None:
                         break
                 return out
@@ -117,6 +132,8 @@ class ProfilerTree:
                 cls.validate_node(node)
                 name = cls.fmt_name(node.name)
                 prune_level = PRUNE_FUNCTIONS.get(name.strip(), None)
+                if prune_level is None and PRUNE_PATTERN.fullmatch(name.strip()):
+                    prune_level = PRUNE_ALL
                 if prune_level is None:
                     out.append((depth, name))
                     flatten(node.children, depth + 1, out)
@@ -197,6 +214,10 @@ class ProfilerTree:
                 name,
             )
 
+        # XPU kernels are SYCL functors, so the template arguments spell out the
+        # whole operand type list rather than ending in an argument list.
+        name = re.sub(r"^(at::native::xpu::\w+)<.+>$", r"\1<...>", name)
+
         # HACK: this patches around the fact that PyBind11 improperly sets the
         # __qualname__ attribute on functions and methods; see
         # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
@@ -231,8 +252,7 @@ class ProfilerTree:
                     raise AssertionError(f"{parent_name} vs. {caller_name}")
 
 
-@unittest.skipIf(IS_ARM64, "Not working on ARM")
-class TestProfilerTree(TestCase):
+class _TestProfilerTreeBase(TestCase):
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
         #   Different platforms will have subtly different behavior for Python
@@ -275,63 +295,10 @@ class TestProfilerTree(TestCase):
                 else:
                     raise
 
-    # TODO: Add logic for CUDA version of test
-    @ProfilerTree.test
-    @unittest.skipIf(
-        torch.cuda.is_available() or torch.xpu.is_available(),
-        "Test not working for CUDA and XPU",
-    )
-    def test_profiler_experimental_tree(self):
-        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
-        with torch.profiler.profile() as p:
-            z = torch.add(t1, t2)
-            y = torch.ones(1)
-            loss = (y - z) ** 2
-            loss.backward()
 
-        self.assertTreesMatch(
-            ProfilerTree.format(p.profiler, 12),
-            """\
-            aten::add
-            aten::ones
-              aten::empty
-              aten::fill_
-            aten::sub
-            aten::pow
-              aten::result_type
-              aten::to
-            aten::ones_like
-              aten::empty_like
-                aten::empty_strided
-              aten::fill_
-            autograd::engine::evaluate_function: PowBackward0
-              PowBackward0
-                aten::pow
-                  aten::result_type
-                  aten::to
-                  aten::copy_
-                aten::mul
-                  aten::mul
-                    aten::to
-                      aten::_to_copy
-                        aten::empty_strided
-                        aten::copy_
-                aten::mul
-            autograd::engine::evaluate_function: SubBackward0
-              SubBackward0
-                aten::neg
-            autograd::engine::evaluate_function: AddBackward0
-              AddBackward0
-            autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-              torch::autograd::AccumulateGrad
-                aten::new_empty_strided
-                  aten::empty_strided
-                aten::copy_
-            autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-              torch::autograd::AccumulateGrad
-                aten::detach
-                  detach""",
-        )
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCPU(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CPU
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
@@ -575,6 +542,11 @@ class TestProfilerTree(TestCase):
                   ...""",
         )
 
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTree(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("too slow")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
@@ -787,160 +759,10 @@ class TestProfilerTree(TestCase):
                   ...""",
         )
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda(self):
-        with torch.profiler.profile(profile_memory=True) as p:
-            weight = torch.ones(1, device="cuda", requires_grad=True)
-            x = torch.ones(1, device="cuda")
-            y = torch.add(weight, x)
-            loss = torch.pow(y, 2)
-            loss.backward()
-            torch.optim.SGD([weight], lr=0.01, momentum=0.9).step()
 
-        self.assertTreesMatch(
-            ProfilerTree.format(p.profiler, 12),
-            """\
-            aten::ones
-              aten::empty
-                [memory]
-              aten::fill_
-                cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(...)
-            aten::ones
-              aten::empty
-                [memory]
-              aten::fill_
-                cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(...)
-            aten::add
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-              [memory]
-            aten::pow
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-              aten::result_type
-              aten::to
-              [memory]
-            aten::ones_like
-              aten::empty_like
-                aten::empty_strided
-                  [memory]
-              aten::fill_
-                cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(...)
-            autograd::engine::evaluate_function: PowBackward0
-              PowBackward0
-                aten::pow
-                  aten::result_type
-                  aten::to
-                  [memory]
-                  aten::copy_
-                    cudaMemcpyAsync
-                      Memcpy DtoD (Device -> Device)
-                aten::mul
-                  [memory]
-                  aten::mul
-                    cudaLaunchKernel
-                      void at::native::vectorized_elementwise_kernel<...>(...)
-                    [memory]
-                  [memory]
-                aten::mul
-                  cudaLaunchKernel
-                    void at::native::vectorized_elementwise_kernel<...>(...)
-                  [memory]
-                [memory]
-                [memory]
-            autograd::engine::evaluate_function: AddBackward0
-              AddBackward0
-            autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-              torch::autograd::AccumulateGrad
-                aten::detach
-                  detach
-            [memory]
-            aten::zeros
-              aten::zeros
-                aten::empty
-                  [memory]
-                aten::zero_
-            Optimizer.step#SGD.step
-              aten::empty
-                [memory]
-              [memory]
-              [memory]
-              aten::clone
-                aten::empty_strided
-                  [memory]
-                aten::copy_
-                  cudaMemcpyAsync
-                    Memcpy DtoD (Device -> Device)
-              aten::detach
-                detach
-              aten::add_
-                cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(...)
-            [memory]""",
-            allow_failure=ALLOW_CUDA_FAILURE,
-        )
-
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda_with_stream(self):
-        streams = [torch.cuda.Stream() for _ in range(3)]
-        results = []
-        with torch.profiler.profile(profile_memory=True) as p:
-            x = torch.ones((4, 4), device="cuda")
-            for stream in streams:
-                with torch.cuda.stream(stream):
-                    results.append(torch.tanh(x) - x)
-        del results
-        for s in streams:
-            torch.cuda.current_stream().wait_stream(s)
-
-        self.assertTreesMatch(
-            ProfilerTree.format(p.profiler, 12),
-            """\
-            aten::ones
-              aten::empty
-                [memory]
-              aten::fill_
-                cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(...)
-            aten::tanh
-              cudaMalloc
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-              [memory]
-            aten::sub
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-              [memory]
-            [memory]
-            aten::tanh
-              cudaMalloc
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-              [memory]
-            aten::sub
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-              [memory]
-            [memory]
-            aten::tanh
-              cudaMalloc
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-              [memory]
-            aten::sub
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-              [memory]
-            [memory]""",
-            allow_failure=ALLOW_CUDA_FAILURE,
-        )
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCUDA(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(
@@ -1153,6 +975,360 @@ class TestProfilerTree(TestCase):
                     ...""",
             allow_failure=ALLOW_CUDA_FAILURE,
         )
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeDevice(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/83606")
+    @ProfilerTree.test
+    def test_profiler_experimental_tree(self, device):
+        with torch.profiler.profile(profile_memory=True) as p:
+            weight = torch.ones(1, device=device, requires_grad=True)
+            x = torch.ones(1, device=device)
+            y = torch.add(weight, x)
+            loss = torch.pow(y, 2)
+            loss.backward()
+            torch.optim.SGD([weight], lr=0.01, momentum=0.9).step()
+
+        # One golden per device: the runtime calls, the kernel names and even
+        # the aten ops the optimizer dispatches to differ between backends, so
+        # each device needs its own call site for EXPECTTEST_ACCEPT to work.
+        actual = ProfilerTree.format(p.profiler, 16)
+        if self.device_type == "cuda":
+            self.assertTreesMatch(
+                actual,
+                """\
+                aten::ones
+                  aten::empty
+                    [memory]
+                  aten::fill_
+                    cudaLaunchKernel
+                      void at::native::vectorized_elementwise_kernel<...>(...)
+                aten::ones
+                  aten::empty
+                    [memory]
+                  aten::fill_
+                    cudaLaunchKernel
+                      void at::native::vectorized_elementwise_kernel<...>(...)
+                aten::add
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(...)
+                  [memory]
+                aten::pow
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(...)
+                  aten::result_type
+                  aten::to
+                  [memory]
+                aten::ones_like
+                  aten::empty_like
+                    aten::empty_strided
+                      [memory]
+                  aten::fill_
+                    cudaLaunchKernel
+                      void at::native::vectorized_elementwise_kernel<...>(...)
+                autograd::engine::evaluate_function: PowBackward0
+                  PowBackward0
+                    aten::pow
+                      aten::result_type
+                      aten::to
+                      [memory]
+                      aten::copy_
+                        cudaMemcpyAsync
+                          Memcpy DtoD (Device -> Device)
+                    aten::mul
+                      [memory]
+                      aten::mul
+                        cudaLaunchKernel
+                          void at::native::vectorized_elementwise_kernel<...>(...)
+                        [memory]
+                      [memory]
+                    aten::mul
+                      cudaLaunchKernel
+                        void at::native::vectorized_elementwise_kernel<...>(...)
+                      [memory]
+                    [memory]
+                    [memory]
+                autograd::engine::evaluate_function: AddBackward0
+                  AddBackward0
+                autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                  torch::autograd::AccumulateGrad
+                    aten::detach
+                      detach
+                [memory]
+                aten::zeros
+                  aten::zeros
+                    aten::empty
+                      [memory]
+                    aten::zero_
+                Optimizer.step#SGD.step
+                  aten::empty
+                    [memory]
+                  [memory]
+                  [memory]
+                  aten::clone
+                    aten::empty_strided
+                      [memory]
+                    aten::copy_
+                      cudaMemcpyAsync
+                        Memcpy DtoD (Device -> Device)
+                  aten::detach
+                    detach
+                  aten::add_
+                    cudaLaunchKernel
+                      void at::native::vectorized_elementwise_kernel<...>(...)
+                [memory]""",
+                allow_failure=ALLOW_CUDA_FAILURE,
+            )
+        elif self.device_type == "xpu":
+            self.assertTreesMatch(
+                actual,
+                """\
+                aten::ones
+                  aten::empty
+                    [memory]
+                  aten::fill_
+                    urEnqueueKernelLaunchWithArgsExp
+                      at::native::xpu::VectorizedElementwiseKernel<...>
+                aten::ones
+                  aten::empty
+                    [memory]
+                  aten::fill_
+                    urEnqueueKernelLaunchWithArgsExp
+                      at::native::xpu::VectorizedElementwiseKernel<...>
+                aten::add
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  [memory]
+                aten::pow
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  aten::result_type
+                  aten::to
+                  [memory]
+                aten::ones_like
+                  aten::empty_like
+                    aten::empty_strided
+                      [memory]
+                  aten::fill_
+                    urEnqueueKernelLaunchWithArgsExp
+                      at::native::xpu::VectorizedElementwiseKernel<...>
+                autograd::engine::evaluate_function: PowBackward0
+                  PowBackward0
+                    aten::pow
+                      aten::result_type
+                      aten::to
+                      [memory]
+                      aten::copy_
+                        urEnqueueUSMMemcpy
+                          Memcpy D2D (Device -> Device)
+                    aten::mul
+                      [memory]
+                      aten::mul
+                        urEnqueueKernelLaunchWithArgsExp
+                          at::native::xpu::VectorizedElementwiseKernel<...>
+                        [memory]
+                      [memory]
+                    aten::mul
+                      urEnqueueKernelLaunchWithArgsExp
+                        at::native::xpu::VectorizedElementwiseKernel<...>
+                      [memory]
+                    [memory]
+                    [memory]
+                autograd::engine::evaluate_function: AddBackward0
+                  AddBackward0
+                autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                  torch::autograd::AccumulateGrad
+                    aten::detach
+                      detach
+                Optimizer.step#SGD.step
+                  Optimizer.step#SGD.step
+                  aten::detach
+                    detach
+                  aten::clone
+                    aten::empty_strided
+                      [memory]
+                    aten::copy_
+                      urEnqueueUSMMemcpy
+                        Memcpy D2D (Device -> Device)
+                  aten::_foreach_add_
+                    urEnqueueUSMMemcpy
+                      Memcpy H2D (Host (Driver Allocated) -> Device)
+                    urEnqueueUSMMemcpy
+                      Memcpy H2D (Host (Driver Allocated) -> Device)
+                    urEnqueueKernelLaunchWithArgsExp
+                      at::native::xpu::MultiTensorApplyKernelFunctor<...>
+                    aten::empty
+                      [memory]
+                    aten::empty
+                      [memory]
+                    [memory]
+                    [memory]""",
+            )
+        else:  # cpu
+            self.assertTreesMatch(
+                actual,
+                """\
+                aten::ones
+                  aten::empty
+                    [memory]
+                  aten::fill_
+                aten::ones
+                  aten::empty
+                    [memory]
+                  aten::fill_
+                aten::add
+                  [memory]
+                aten::pow
+                  aten::result_type
+                  aten::to
+                  [memory]
+                aten::ones_like
+                  aten::empty_like
+                    aten::empty_strided
+                      [memory]
+                  aten::fill_
+                autograd::engine::evaluate_function: PowBackward0
+                  PowBackward0
+                    aten::pow
+                      aten::result_type
+                      aten::to
+                      [memory]
+                      aten::copy_
+                    aten::mul
+                      [memory]
+                      aten::mul
+                        aten::to
+                          aten::_to_copy
+                            aten::empty_strided
+                              [memory]
+                            aten::copy_
+                        [memory]
+                        [memory]
+                      [memory]
+                    aten::mul
+                      [memory]
+                    [memory]
+                    [memory]
+                autograd::engine::evaluate_function: AddBackward0
+                  AddBackward0
+                autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                  torch::autograd::AccumulateGrad
+                    aten::detach
+                      detach
+                [memory]
+                Optimizer.step#SGD.step
+                  aten::detach
+                    detach
+                  aten::clone
+                    aten::empty_strided
+                      [memory]
+                    aten::copy_
+                  aten::add_
+                [memory]""",
+            )
+
+    @onlyAccelerator
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/83606")
+    @ProfilerTree.test
+    def test_profiler_experimental_tree_with_stream(self, device):
+        device_module = torch.get_device_module(device)
+        streams = [device_module.Stream() for _ in range(3)]
+        results = []
+        with torch.profiler.profile(profile_memory=True) as p:
+            x = torch.ones((4, 4), device=device)
+            for stream in streams:
+                with device_module.stream(stream):
+                    results.append(torch.tanh(x) - x)
+        del results
+        for s in streams:
+            device_module.current_stream().wait_stream(s)
+
+        actual = ProfilerTree.format(p.profiler, 16)
+        if self.device_type == "cuda":
+            self.assertTreesMatch(
+                actual,
+                """\
+                aten::ones
+                  aten::empty
+                    [memory]
+                  aten::fill_
+                    cudaLaunchKernel
+                      void at::native::vectorized_elementwise_kernel<...>(...)
+                aten::tanh
+                  cudaMalloc
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(...)
+                  [memory]
+                aten::sub
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(...)
+                  [memory]
+                [memory]
+                aten::tanh
+                  cudaMalloc
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(...)
+                  [memory]
+                aten::sub
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(...)
+                  [memory]
+                [memory]
+                aten::tanh
+                  cudaMalloc
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(...)
+                  [memory]
+                aten::sub
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(...)
+                  [memory]
+                [memory]""",
+                allow_failure=ALLOW_CUDA_FAILURE,
+            )
+        else:  # xpu
+            self.assertTreesMatch(
+                actual,
+                """\
+                aten::ones
+                  aten::empty
+                    [memory]
+                  aten::fill_
+                    urEnqueueKernelLaunchWithArgsExp
+                      at::native::xpu::VectorizedElementwiseKernel<...>
+                aten::tanh
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  [memory]
+                aten::sub
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  [memory]
+                aten::tanh
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  [memory]
+                aten::sub
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  [memory]
+                aten::tanh
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  [memory]
+                aten::sub
+                  urEnqueueKernelLaunchWithArgsExp
+                    at::native::xpu::VectorizedElementwiseKernel<...>
+                  [memory]""",
+            )
+
+
+instantiate_device_type_tests(
+    TestProfilerTreeDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
