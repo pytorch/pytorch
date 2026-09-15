@@ -8367,6 +8367,174 @@ class TestLinalgDevice(TestLinalg):
             out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
+    @onlyAccelerator
+    # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @largeTensorTest('16GB', device='cuda')
+    def test_large_bmm_mm_backward(self, device):
+        A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
+        B = torch.randn([1024, 65536], device=device, requires_grad=True)
+        G = torch.randn([1024, 2, 65536], device=device)
+
+        # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
+        (A @ B).backward(G)
+
+    @onlyAccelerator
+    # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @largeTensorTest('16GB', device='cuda')
+    def test_large_bmm_backward(self, device):
+        A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
+        B = torch.randn([1, 1024, 65536], device=device, requires_grad=True)
+        G = torch.randn([1024, 2, 65536], device=device)
+
+        # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
+        (A @ B).backward(G)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(SM90OrLater and not TEST_WITH_ROCM, "Expected failure on sm90")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @parametrize("k", [16, 32])
+    @parametrize("n", [16, 32])
+    @parametrize("use_transpose_a", [True, False])
+    @parametrize("use_transpose_b", [True, False])
+    def test__int_mm(self, device, k, n, use_transpose_a, use_transpose_b):
+        def genf_int_float(x, y, use_transpose):
+            if use_transpose:
+                x, y = y, x
+            x_int8 = torch.randint(-10, 10, (x, y), dtype=torch.int8, device=device)
+            x_float = x_int8.to(torch.float32)
+            if use_transpose:
+                return x_int8.t(), x_float.t()
+            return x_int8, x_float
+
+        def _test(m, k, n, transpose_a, transpose_b, test_equal=True):
+            a_int8, a_float = genf_int_float(m, k, transpose_a)
+            b_int8, b_float = genf_int_float(k, n, transpose_b)
+            c_int32 = torch._int_mm(a_int8, b_int8)
+            self.assertTrue(c_int32.dtype is torch.int32)
+            self.assertEqual(c_int32.device, torch.device(device))
+            if test_equal:
+                self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
+            else:
+                self.assertNotEqual(c_int32.float(), torch.mm(a_float, b_float))
+            c_int32_result = c_int32.new_empty(c_int32.size())
+            # Checking out variant
+            torch._int_mm(a_int8, b_int8, out=c_int32_result)
+            if test_equal:
+                self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+            else:
+                self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+
+        if self.device_type != "cuda":
+            _test(17, k, n, use_transpose_a, use_transpose_b, True)
+            return
+
+        # Skip specific failing cases on CUDA 13.0
+        if (not TEST_WITH_ROCM) and _get_torch_cuda_version() >= (13, 0):
+            if not use_transpose_a and not use_transpose_b:
+                self.skipTest("xfail on CUDA 13 until cuBLAS adds the supported kernel")
+
+        # NOTE: We're just exercising terrible failures here.
+        version = _get_torch_cuda_version()
+        SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+        SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
+        SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
+
+        if TEST_WITH_ROCM:
+            _test(17, k, n, use_transpose_a, use_transpose_b, True)
+        else:
+            if not use_transpose_a and use_transpose_b:
+                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                    _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
+                else:
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                        _test(17, k, n, use_transpose_a, use_transpose_b)
+
+            if use_transpose_a and not use_transpose_b:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                    _test(17, k, n, use_transpose_a, use_transpose_b)
+
+            if use_transpose_a and use_transpose_b:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                    _test(17, k, n, use_transpose_a, use_transpose_b)
+
+            if not use_transpose_a and not use_transpose_b:
+                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                    _test(17, k, n, use_transpose_a, use_transpose_b)
+                else:
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                        _test(17, k, n, use_transpose_a, use_transpose_b)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    def test__int_mm_errors(self, device):
+
+        def genf_int(x, y):
+            return torch.empty((x, y), dtype=torch.int8, device=device)
+
+        def _gen_pair(m, k, n):
+            return genf_int(m, k), genf_int(k, n)
+
+        common_cases = [
+            (
+                r"expected scalar type Char but found Float|Expected self dtype to be int8 or uint8 but got float",
+                lambda: torch._int_mm(genf_int(17, 8).float(), genf_int(8, 32)),
+            ),
+            (
+                r"expected scalar type Char but found Float|Expected mat2 dtype to be of type int8 but got float",
+                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32).float()),
+            ),
+            (
+                r"Expected result dtype to be of type kInt but got float",
+                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 32).float()),
+            ),
+            (
+                r"Expected result.size\(0\) to be 17 but got 15",
+                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(15, 32).int()),
+            ),
+            (
+                r"Expected result.size\(0\) to be 17 but got 16",
+                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()),
+            ),
+        ]
+
+        for regex, fn in common_cases:
+            self.assertRaisesRegex(RuntimeError, regex, fn)
+
+        if self.device_type == "cuda":
+            cuda_cases = [
+                (
+                    r"self.size\(0\) needs to be greater than 16, but got 16",
+                    lambda: torch._int_mm(*_gen_pair(16, 8, 32)),
+                ),
+                (
+                    r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
+                    lambda: torch._int_mm(*_gen_pair(17, 7, 32)),
+                ),
+                (
+                    r"mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
+                    lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)),
+                ),
+                (
+                    r"mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",
+                    lambda: torch._int_mm(*_gen_pair(17, 8, 31)),
+                ),
+            ]
+        else:
+            non_cuda_cases = [
+                (
+                    r"self.size\(1\) needs to match mat2.size\(0\) but got 8 and 7|mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
+                    lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)),
+                ),
+            ]
+            cuda_cases = non_cuda_cases
+
+        for regex, fn in cuda_cases:
+            self.assertRaisesRegex(RuntimeError, regex, fn)
+
 class TestLinalgCpu(TestLinalg):
     hw_classification = HardwareClassification.CPU
 
@@ -11150,26 +11318,6 @@ class TestLinalgCuda(TestCase):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
-    # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @largeTensorTest('16GB', device='cuda')
-    def test_large_bmm_mm_backward(self, device):
-        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
-        B = torch.randn([1024, 65536], device="cuda", requires_grad=True)
-        G = torch.randn([1024, 2, 65536], device="cuda")
-
-        # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
-        (A @ B).backward(G)
-
-    # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @largeTensorTest('16GB', device='cuda')
-    def test_large_bmm_backward(self, device):
-        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
-        B = torch.randn([1, 1024, 65536], device="cuda", requires_grad=True)
-        G = torch.randn([1024, 2, 65536], device="cuda")
-
-        # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
-        (A @ B).backward(G)
-
     @skipIfRocm
     @slowTest
     @skipCUDAIfNoCusolver
@@ -11530,119 +11678,6 @@ class TestLinalgCuda(TestCase):
         else:
             self.assertTrue((out == 10000.).all())
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
-
-    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
-    @unittest.skipIf(SM90OrLater and not TEST_WITH_ROCM, "Expected failure on sm90")
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @parametrize("k", [16, 32])
-    @parametrize("n", [16, 32])
-    @parametrize("use_transpose_a", [True, False])
-    @parametrize("use_transpose_b", [True, False])
-    def test__int_mm(self, device, k, n, use_transpose_a, use_transpose_b):
-        # Skip specific failing cases on CUDA 13.0
-        if (not TEST_WITH_ROCM) and _get_torch_cuda_version() >= (13, 0):
-            if not use_transpose_a and not use_transpose_b:
-                self.skipTest("xfail on CUDA 13 until cuBLAS adds the supported kernel")
-
-        def genf_int_float(x, y, use_transpose):
-            if use_transpose:
-                x, y = y, x
-            x_int8 = torch.randint(-10, 10, (x, y), dtype=torch.int8, device=device)
-            x_float = x_int8.to(torch.float32)
-            if use_transpose:
-                return x_int8.t(), x_float.t()
-            return x_int8, x_float
-
-        def _test(m, k, n, transpose_a, transpose_b, test_equal=True):
-            a_int8, a_float = genf_int_float(m, k, transpose_a)
-            b_int8, b_float = genf_int_float(k, n, transpose_b)
-            c_int32 = torch._int_mm(a_int8, b_int8)
-            self.assertTrue(c_int32.dtype is torch.int32)
-            self.assertEqual(c_int32.device, torch.device(device))
-            if test_equal:
-                self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
-            else:
-                self.assertNotEqual(c_int32.float(), torch.mm(a_float, b_float))
-            c_int32_result = c_int32.new_empty(c_int32.size())
-            # Checking out variant
-            torch._int_mm(a_int8, b_int8, out=c_int32_result)
-            if test_equal:
-                self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
-            else:
-                self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
-
-        # NOTE: We're just exercising terrible failures here.
-        version = _get_torch_cuda_version()
-        SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
-        SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
-        SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
-
-        if TEST_WITH_ROCM:
-            _test(17, k, n, use_transpose_a, use_transpose_b, True)
-        else:
-            if not use_transpose_a and use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
-                    _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
-                else:
-                    with self.assertRaisesRegex(RuntimeError,
-                                                "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
-                        _test(17, k, n, use_transpose_a, use_transpose_b)
-
-            if use_transpose_a and not use_transpose_b:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
-                    _test(17, k, n, use_transpose_a, use_transpose_b)
-
-            if use_transpose_a and use_transpose_b:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
-                    _test(17, k, n, use_transpose_a, use_transpose_b)
-
-            if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
-                    _test(17, k, n, use_transpose_a, use_transpose_b)
-                else:
-                    with self.assertRaisesRegex(RuntimeError,
-                                                "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
-                        _test(17, k, n, use_transpose_a, use_transpose_b)
-
-    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    def test__int_mm_errors(self, device):
-
-        def genf_int(x, y):
-            return torch.empty((x, y), dtype=torch.int8, device=device)
-
-        def _gen_pair(m, k, n):
-            return genf_int(m, k), genf_int(k, n)
-
-        self.assertRaisesRegex(RuntimeError,
-                               r"self.size\(0\) needs to be greater than 16, but got 16",
-                               lambda: torch._int_mm(*_gen_pair(16, 8, 32)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
-                               lambda: torch._int_mm(*_gen_pair(17, 7, 32)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",
-                               lambda: torch._int_mm(*_gen_pair(17, 8, 31)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"expected scalar type Char but found Float",
-                               lambda: torch._int_mm(genf_int(17, 8).float(), genf_int(8, 32)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"expected scalar type Char but found Float",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32).float()))
-        self.assertRaisesRegex(RuntimeError,
-                               r"Expected result dtype to be of type kInt but got float",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 32).float()))
-        self.assertRaisesRegex(RuntimeError,
-                               r"Expected result.size\(0\) to be 17 but got 15",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(15, 32).int()))
-        self.assertRaisesRegex(RuntimeError,
-                               r"Expected result.size\(0\) to be 17 but got 16",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
 
 class TestGroupedMM(TestCase):
     def setUp(self):
