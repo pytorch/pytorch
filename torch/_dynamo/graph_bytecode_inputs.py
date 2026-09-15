@@ -34,7 +34,7 @@ CURRENT_STREAM_INDEX = 0
 
 
 def set_external_object_by_index(index: int, value: object) -> None:
-    """Update an entry in the external object registry at runtime."""
+    """Add or update an entry in the external object registry at runtime."""
     keep_alive.append(value)
     if index == len(index_to_external_object_weakref):
         index_to_external_object_weakref.append(weakref.ref(value))
