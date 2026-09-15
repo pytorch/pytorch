@@ -551,7 +551,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                             else:
                                 y.backward()
                                 dist_y.backward()
-                            self.assertEqual(comm_mode.get_total_counts(), 0)
+                            # 1 all_reduce from _log_softmax_backward_handler
+                            # (unfused from nll_loss backward for GH-190746)
+                            self.assertEqual(comm_mode.get_total_counts(), 1)
+                            self.assertEqual(
+                                comm_mode.get_comm_counts()[c10d_functional.all_reduce],
+                                1,
+                            )
                             self.assertTrue(
                                 dist_x.grad.placements[0].is_shard(shard_dim)
                             )
@@ -565,6 +571,116 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                             dist_y = F.cross_entropy(
                                 dist_x, target, reduction=reduction
                             )
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize(
+        "input_size, softmax_dim, dtype",
+        [
+            ((8, 16), 1, torch.float32),
+            ((8, 16), -1, torch.float32),
+            ((4, 16, 6), 1, torch.float32),
+            ((8, 16), 1, torch.float16),
+        ],
+    )
+    def test_loss_parallel_log_softmax_non_cross_entropy(
+        self, input_size, softmax_dim, dtype
+    ):
+        """Regression test for GH-190746: log_softmax inside loss_parallel() not
+        feeding into cross_entropy must still get the correct distributed backward."""
+        device_mesh = self.build_device_mesh()
+        channel_dim = softmax_dim % len(input_size)
+
+        x = torch.rand(
+            *input_size, device=self.device_type, dtype=dtype, requires_grad=True
+        )
+        c = torch.rand(*input_size, device=self.device_type, dtype=dtype)
+
+        dist_x = distribute_tensor(x, device_mesh, [Shard(channel_dim)])
+        dist_c = distribute_tensor(c, device_mesh, [Shard(channel_dim)])
+
+        x_ref = x.clone().detach().requires_grad_(True)
+        ref_dtype = torch.float32 if dtype == torch.float16 else None
+        (F.log_softmax(x_ref, dim=softmax_dim, dtype=ref_dtype) * c).sum().backward()
+
+        comm_mode = CommDebugMode()
+        with loss_parallel():
+            with comm_mode:
+                (
+                    F.log_softmax(dist_x, dim=softmax_dim, dtype=ref_dtype) * dist_c
+                ).sum().backward()
+            # 2 all_reduces in forward (max, sumexp) + 1 in backward (grad sum)
+            self.assertEqual(comm_mode.get_total_counts(), 3)
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 3)
+
+        self.assertEqual(dist_x.grad.full_tensor(), x_ref.grad)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_loss_parallel_log_softmax_placement_mismatch(self):
+        """Exercise the redistribute guard in _log_softmax_backward_handler:
+        when grad_output arrives with placements different from the forward
+        output, the handler must redistribute before computing the backward."""
+        device_mesh = self.build_device_mesh()
+        channel_size, channel_dim = 16, 1
+
+        class _ForceGradPlacement(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, mesh, placements):
+                ctx.mesh = mesh
+                ctx.placements = tuple(placements)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.redistribute(ctx.mesh, ctx.placements), None, None
+
+        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
+        c = torch.rand(8, channel_size, device=self.device_type)
+        dist_x = distribute_tensor(x, device_mesh, [Shard(channel_dim)])
+        dist_c = distribute_tensor(c, device_mesh, [Shard(channel_dim)])
+
+        x_ref = x.clone().detach().requires_grad_(True)
+        (F.log_softmax(x_ref, dim=channel_dim) * c).sum().backward()
+
+        with loss_parallel():
+            lsm = F.log_softmax(dist_x, dim=channel_dim)
+            lsm = _ForceGradPlacement.apply(lsm, device_mesh, [Replicate()])
+            (lsm * dist_c).sum().backward()
+
+        self.assertEqual(dist_x.grad.full_tensor(), x_ref.grad)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_log_softmax_non_cross_entropy_multi_dim_mesh(self):
+        """Regression test for GH-190746 on a 2D mesh (dp=2, tp=2): standalone
+        log_softmax inside loss_parallel() must all_reduce over the TP dim only."""
+        mesh_2d = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        comm_mode = CommDebugMode()
+        channel_size, channel_dim = 16, 1
+
+        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
+        c = torch.rand(8, channel_size, device=self.device_type)
+
+        dist_x = distribute_tensor(x, mesh_2d, [Shard(0), Shard(channel_dim)])
+        dist_c = distribute_tensor(c, mesh_2d, [Shard(0), Shard(channel_dim)])
+
+        x_ref = x.clone().detach().requires_grad_(True)
+        (F.log_softmax(x_ref, dim=channel_dim) * c).sum().backward()
+
+        with loss_parallel():
+            with comm_mode:
+                (F.log_softmax(dist_x, dim=channel_dim) * dist_c).sum().backward()
+            # 2 all_reduces in forward (max, sumexp) + 1 in backward (grad sum),
+            # all on the TP mesh dim only
+            self.assertEqual(comm_mode.get_total_counts(), 3)
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 3)
+
+        self.assertEqual(dist_x.grad.full_tensor(), x_ref.grad)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
