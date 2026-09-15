@@ -413,7 +413,10 @@ class TestScheduler(TestCase):
 
     @xfailIfNoAcceleratorTriton
     @onlyCUDA
-    def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
+    @parametrize("full_correctness", [False, True])
+    def test_fusion_memory_guard_rejects_in_torch_compile(
+        self, device, full_correctness
+    ):
         def fn(x, weight):
             early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
             late = torch.cos(x).sum(dim=0)
@@ -460,6 +463,7 @@ class TestScheduler(TestCase):
                         "reorder_for_peak_memory": False,
                         "fusion_memory_timeline_peak_memory_increase_gb": increase_gb,
                         "fusion_memory_timeline_peak_memory_pct_threshold": pct_threshold,
+                        "fusion_memory_timeline_full_correctness": full_correctness,
                     },
                 )
                 self.assertEqual(compiled(x, weight), fn(x, weight))
