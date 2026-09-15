@@ -20,7 +20,11 @@ from contextlib import contextmanager
 import torch
 import torch._functorch.config
 from torch._functorch.aot_autograd import aot_function
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 trace_log = logging.getLogger("torch.__trace")
@@ -31,6 +35,8 @@ def _nop_compiler(gm, example_inputs):  # type: ignore[no-untyped-def]
 
 
 class TestCodegenDedup(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextmanager
     def _capture_codegen_source(self, artifact_name):
         """Capture codegen artifacts from the structured trace log."""
