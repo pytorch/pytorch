@@ -1038,6 +1038,11 @@ score_fusion_memory_threshold = 10
 fusion_memory_timeline_peak_memory_increase_gb: float | None = None
 fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
 
+# Low compile time overhead mode for memory timeline modelling.
+# True means full correctness mode, recomputing timeline after each accepted fusion.
+# False means using heuristics to skip full modeling.
+fusion_memory_timeline_full_correctness: bool = False
+
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
     os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
