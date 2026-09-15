@@ -9,6 +9,8 @@ import textwrap
 import unittest
 from unittest.mock import patch
 
+import pytest
+
 import torch
 import torch.compiler.config as compiler_config
 import torch.distributed as dist
@@ -272,7 +274,6 @@ def _current_device_nodes(gm):
     return [n for n in gm.graph.nodes if n.op == "call_function" and n.target is target]
 
 
-@instantiate_parametrized_tests
 class TestCompileOnOneRankDeviceAsParameter(TestCase):
     """Device-as-parameter for the make_fx tracing path used by graph_trainer/CooR.
 
@@ -536,6 +537,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_rng_ops_compile_under_coor(self):
+        from torch._inductor.utils import fresh_cache
+
         # Not a divergence -- a hard failure, and it covers every RNG op, not just
         # dropout:
         #
@@ -553,12 +556,13 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             "randn_like": lambda x: (torch.randn_like(x) + x).sum(),
             "randint_like": lambda x: (torch.randint_like(x, 0, 10) * x).sum(),
         }
-        for name, fn in cases.items():
-            with self.subTest(op=name):
-                torch._dynamo.reset()
-                x = torch.randn(64, 128, device="cuda", requires_grad=True)
-                out = torch.compile(fn, backend="inductor")(x)
-                self.assertEqual(out.shape, torch.Size([]))
+        with fresh_cache():
+            for name, fn in cases.items():
+                with self.subTest(op=name):
+                    torch._dynamo.reset()
+                    x = torch.randn(64, 128, device="cuda", requires_grad=True)
+                    out = torch.compile(fn, backend="inductor")(x)
+                    self.assertEqual(out.shape, torch.Size([]))
 
     @staticmethod
     def _repro_storage_line(dev):
@@ -672,12 +676,17 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(
             baked, [], f"guard baked a rank-specific device index: {baked}"
         )
+        self.assertTrue(
+            all("device=current" in part for part in parts),
+            f"guard did not use the current device: {parts}",
+        )
 
+    @pytest.mark.multigpu
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_guard_string_identical_across_devices_under_coor(self):
-        # The serialized guard is part of a precompile artifact, so it has to match
-        # across ranks even if the runtime check itself were already device-relative.
+        # Guard diagnostics appear in structured traces, so they should be
+        # rank-invariant along with the runtime check.
         def guards_on(dev):
             with torch.cuda.device(dev):
                 torch._dynamo.reset()
@@ -690,12 +699,14 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(guards_on(0), guards_on(1))
 
+    @pytest.mark.multigpu
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_guard_still_rejects_noncurrent_device_index_under_coor(self):
         # Relaxing the index must not mean ignoring it: a tensor on a device that is
         # not the current one still has to miss the cache. Deleting the check outright
         # would silently pass here.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
         from torch._dynamo.testing import CompileCounter
 
         def f(x):
@@ -707,13 +718,22 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             compiled = torch.compile(f, backend=cnt)
             compiled(torch.randn(4, device="cuda:0"))
             before = cnt.frame_count
-            compiled(torch.randn(4, device="cuda:1"))
+            other = torch.randn(4, device="cuda:1")
+            root = _debug_get_cache_entry_list(f)[0].guard_manager.root
+            debug_info = root.check_verbose({"x": other})
+            self.assertFalse(debug_info.result)
+            self.assertIn(
+                "current device (0), actual 1",
+                "\n".join(debug_info.verbose_code_parts),
+            )
+            compiled(other)
             self.assertEqual(
                 cnt.frame_count,
                 before + 1,
                 "a tensor on a non-current device must still fail the guard",
             )
 
+    @pytest.mark.multigpu
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_guard_hits_when_current_device_changes_under_coor(self):
@@ -746,6 +766,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             "a tensor on the new current device should reuse the existing compile",
         )
 
+    @pytest.mark.multigpu
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_cloned_tensor_guard_tracks_current_device_under_coor(self):
@@ -765,6 +786,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             inputs = {"x": torch.zeros(1, device="cuda:1")}
             self.assertTrue(cloned_root.check(inputs))
 
+    @pytest.mark.multigpu
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
     @parametrize("origin", ("input", "intermediate"))
@@ -824,6 +846,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @parametrize("origin", ("input", "factory"))
     def test_device_observations_track_current_device_under_coor(self, origin):
         from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._inductor.utils import fresh_cache
 
         def f(x):
             y = torch.zeros(x.shape, device=x.device) if origin == "factory" else x
@@ -837,13 +860,14 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         cnt = CompileCounterWithBackend("inductor")
         torch._dynamo.reset()
-        compiled = torch.compile(f, backend=cnt, fullgraph=True)
-        with torch.cuda.device(0):
-            x = torch.zeros(1, device="cuda:0")
-            self.assertEqual(compiled(x), f(x))
-        with torch.cuda.device(1):
-            x = torch.zeros(1, device="cuda:1")
-            self.assertEqual(compiled(x), f(x))
+        with fresh_cache():
+            compiled = torch.compile(f, backend=cnt, fullgraph=True)
+            with torch.cuda.device(0):
+                x = torch.zeros(1, device="cuda:0")
+                self.assertEqual(compiled(x), f(x))
+            with torch.cuda.device(1):
+                x = torch.zeros(1, device="cuda:1")
+                self.assertEqual(compiled(x), f(x))
 
         self.assertEqual(cnt.frame_count, 1)
 
@@ -1237,6 +1261,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             relaxed, [], f"a cpu tensor's guard must not be relaxed: {relaxed}"
         )
 
+    @pytest.mark.multigpu
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     def test_device_index_still_guarded_without_coor(self):
         # Multi-GPU in one process is legal outside CooR (e.g. model parallel), so the
@@ -1292,6 +1317,28 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     def _coor_template_fn(a, b):
         return (a @ b).relu()
 
+    @staticmethod
+    def _coor_combo_fn(a, b):
+        return a.sin(), b.cos()
+
+    @staticmethod
+    def _make_coor_user_defined_triton_fn():
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_one_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < n
+            tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            add_one_kernel[(1,)](x, out, x.numel(), BLOCK=128)
+            return out
+
+        return fn
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch(
@@ -1315,7 +1362,10 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # The metadata path is dtype-independent; float32 keeps it covered on pre-SM80.
         a = torch.randn(256, 256, device="cuda")
         b = torch.randn(256, 256, device="cuda")
-        with patch.object(inductor_utils, "is_big_gpu", return_value=True):
+        with (
+            inductor_utils.fresh_cache(),
+            patch.object(inductor_utils, "is_big_gpu", return_value=True),
+        ):
             _, codes = inductor_utils.run_and_get_code(compiled, a, b)
         code = "\n".join(codes)
         self.assertIn("triton_tem_fused", code)
@@ -1332,18 +1382,18 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     def test_inductor_combo_kernel_no_baked_device(self):
         # Combo kernels build triton_meta separately from ordinary pointwise kernels.
         # Disable benchmarking and memory gating to isolate that codegen path.
-        from torch._inductor.utils import run_and_get_code
-
-        def fn(a, b):
-            return a.sin(), b.cos()
+        from torch._inductor.utils import fresh_cache, run_and_get_code
 
         torch._dynamo.reset()
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        compiled = torch.compile(
+            self._coor_combo_fn, backend="inductor", fullgraph=True
+        )
         args = (
             torch.randn(8192, device="cuda"),
             torch.randn(4096, device="cuda"),
         )
-        _, codes = run_and_get_code(compiled, *args)
+        with fresh_cache():
+            _, codes = run_and_get_code(compiled, *args)
         code = "\n".join(codes)
         self.assertIn("combo_grid_meta", code)
         self._assert_no_baked_device(code)
@@ -1354,26 +1404,14 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # A user-defined @triton.jit kernel gets its triton_meta from a third site,
         # define_user_defined_triton_kernel in codegen/wrapper.py, which is neither
         # the TritonKernel path nor the template path.
-        import triton
-        import triton.language as tl
-
-        from torch._inductor.utils import run_and_get_code
-
-        @triton.jit
-        def add_one_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
-            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
-            mask = offs < n
-            tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
-
-        def fn(x):
-            out = torch.empty_like(x)
-            add_one_kernel[(1,)](x, out, x.numel(), BLOCK=128)
-            return out
+        from torch._inductor.utils import fresh_cache, run_and_get_code
 
         torch._dynamo.reset()
+        fn = self._make_coor_user_defined_triton_fn()
         compiled = torch.compile(fn, backend="inductor", fullgraph=True)
         x = torch.randn(128, device="cuda")
-        out, codes = run_and_get_code(compiled, x)
+        with fresh_cache():
+            out, codes = run_and_get_code(compiled, x)
         self.assertEqual(out, x + 1)
         self._assert_no_baked_device("\n".join(codes))
 
@@ -1385,60 +1423,121 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertNotRegex(code, r"device\(type=.cuda., index=\d")
         self.assertNotRegex(code, r"DeviceProperties\([^)]*index=\d")
 
-    def _inductor_code_on_device(self, dev):
+    def _inductor_code_on_device(self, dev, fn, input_shapes):
         from torch._inductor.utils import run_and_get_code
 
         torch._dynamo.reset()
         with torch.cuda.device(dev):
-            compiled = torch.compile(
-                self._coor_inductor_fn, backend="inductor", fullgraph=True
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            inputs = tuple(
+                torch.randn(shape, device=f"cuda:{dev}") for shape in input_shapes
             )
-            _, codes = run_and_get_code(
-                compiled, torch.randn(2, 8, device=f"cuda:{dev}")
-            )
+            _, codes = run_and_get_code(compiled, *inputs)
         return "\n".join(codes)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_inductor_code_identical_across_devices(self):
+    @parametrize(
+        "path",
+        (
+            "benchmark_kernel",
+            "compile_time_autotune",
+            "template",
+            "combo_kernel",
+            "user_defined_triton",
+        ),
+    )
+    def test_inductor_code_identical_across_devices(self, path):
         # The inductor-side rewrite is a dozen independent opt-in `if _coor_enabled():`
         # sites with no structural funnel, so pattern-matching one rank's output cannot
         # show that none was missed. Diffing the code generated on two different devices
-        # can. benchmark_kernel is enabled because that harness is emitted into the
-        # kernel's own source (hence its hash), so a baked index there breaks
-        # rank-identity too.
+        # can. Cover the ordinary kernel's benchmark and compile-time autotune harnesses,
+        # plus every independent triton_meta construction path.
         import re
+        from contextlib import nullcontext
 
-        # The AOT id is a per-process compile counter ("0_inference", "1_inference"), not
-        # a rank-specific value -- it differs only because both compiles run in this one
-        # process, so normalize it before diffing.
+        from torch._inductor import utils as inductor_utils
+
         def norm(s):
             return re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
 
-        # Each config emits device references through a different path: the kernel's own
-        # benchmark harness, and the compile-time autotune harness
-        # (generate_example_value). Both are part of generated text that must match.
-        for cfg in (
-            {"benchmark_kernel": True},
-            {"triton.autotune_at_compile_time": True},
-        ):
-            with self.subTest(cfg=cfg), torch._inductor.config.patch(**cfg):
-                code0 = self._inductor_code_on_device(0)
-                code1 = self._inductor_code_on_device(1)
-                if norm(code0) != norm(code1):
-                    diff = "".join(
-                        difflib.unified_diff(
-                            norm(code0).splitlines(keepends=True),
-                            norm(code1).splitlines(keepends=True),
-                            fromfile="cuda:0",
-                            tofile="cuda:1",
-                        )
-                    )
-                    self.fail(
-                        f"inductor code differs across devices under CooR "
-                        f"with {cfg}:\n{diff}"
-                    )
-                self._assert_no_baked_device(code0)
+        cases = {
+            "benchmark_kernel": (
+                self._coor_inductor_fn,
+                ((2, 8),),
+                {"benchmark_kernel": True},
+                False,
+            ),
+            "compile_time_autotune": (
+                self._coor_inductor_fn,
+                ((2, 8),),
+                {"triton.autotune_at_compile_time": True},
+                False,
+            ),
+            "template": (
+                self._coor_template_fn,
+                ((256, 256), (256, 256)),
+                {
+                    "deterministic": True,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                },
+                True,
+            ),
+            "combo_kernel": (
+                self._coor_combo_fn,
+                ((8192,), (4096,)),
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": False,
+                    "combo_kernel_peak_memory_increase_gb": None,
+                    "combo_kernel_peak_memory_pct_threshold": None,
+                },
+                False,
+            ),
+            "user_defined_triton": (
+                self._make_coor_user_defined_triton_fn,
+                ((128,),),
+                {},
+                False,
+            ),
+        }
+        fn, input_shapes, cfg, force_big_gpu = cases[path]
+        if path == "user_defined_triton":
+            fn = fn()
+
+        def code_on(dev):
+            big_gpu = (
+                patch.object(inductor_utils, "is_big_gpu", return_value=True)
+                if force_big_gpu
+                else nullcontext()
+            )
+            with (
+                torch._inductor.config.patch(**cfg),
+                inductor_utils.fresh_cache(),
+                big_gpu,
+            ):
+                return self._inductor_code_on_device(dev, fn, input_shapes)
+
+        code0 = code_on(0)
+        code1 = code_on(1)
+        if norm(code0) != norm(code1):
+            diff = "".join(
+                difflib.unified_diff(
+                    norm(code0).splitlines(keepends=True),
+                    norm(code1).splitlines(keepends=True),
+                    fromfile="cuda:0",
+                    tofile="cuda:1",
+                )
+            )
+            self.fail(
+                f"inductor code differs across devices under CooR for {path}:\n{diff}"
+            )
+        if path == "template":
+            self.assertIn("triton_tem_fused", code0)
+        elif path == "combo_kernel":
+            self.assertIn("combo_grid_meta", code0)
+        self._assert_no_baked_device(code0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -1523,7 +1622,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         def code_with_fresh_cache():
             with fresh_cache():
-                return self._inductor_code_on_device(0)
+                return self._inductor_code_on_device(
+                    0, self._coor_inductor_fn, ((2, 8),)
+                )
 
         code_a, code_b = code_with_fresh_cache(), code_with_fresh_cache()
 
@@ -1672,6 +1773,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out1.device, torch.device("cuda:1"))
         self.assertEqual(out0, ref0)
         self.assertEqual(out1, ref1)
+
+
+instantiate_parametrized_tests(TestCompileOnOneRankDeviceAsParameter)
 
 
 def _baked_pg_constants(gm):
