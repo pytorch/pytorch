@@ -1166,20 +1166,20 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
       );
       // }
 
-      // 2. Trailing matrix update of B[curr_step + 1: curr_step + 1:] {
+      // 2. Trailing matrix update of B[step + curr_nb: step + curr_nb:] {
       // D2H to update the step on the host
       auto curr_step = panel_step_holder.item().toInt();
-      //if (curr_step < n) {
-      //  at::cuda::blas::gemm(
-      //    'n', 'n',
-      //    n - curr_step, n - curr_step, curr_step - step,
-      //    /*alpha=*/static_cast<scalar_t>(-1),
-      //    /*L21=*/dLD + LinOff(curr_step, step, lda), lda,
-      //    /*U12=*/dLD + LinOff(step, curr_step, lda), lda,
-      //    /*beta=*/static_cast<scalar_t>(1),
-      //    /*LD22=*/dLD + LinOff(curr_step, curr_step, lda), lda
-      //  );
-      //}
+      if (step + curr_nb < n) {
+        at::cuda::blas::gemm(
+          'n', 'n',
+          n - step - curr_nb, n - step - curr_nb, curr_step - step,
+          /*alpha=*/static_cast<scalar_t>(-1),
+          /*L21=*/dLD + LinOff(step + curr_nb, step, lda), lda,
+          /*U12=*/dLD + LinOff(step, step + curr_nb, lda), lda,
+          /*beta=*/static_cast<scalar_t>(1),
+          /*LD22=*/dLD + LinOff(step + curr_nb, step + curr_nb, lda), lda
+        );
+      }
 
       // Finish iteration
       step = curr_step;
