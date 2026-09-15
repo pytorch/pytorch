@@ -3064,6 +3064,74 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self.assertEqual(flex_output.dtype, torch.float16)
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_mps  # asserts masked Triton loads in generated code
+    def test_score_mod_captured_loads_are_bounds_checked(self, device):
+        B, H, S, D = 1, 1, 128, 16
+        max_len = S - 1
+        buffer = torch.randn(max_len, device=device, requires_grad=True)
+        buffer_ref = buffer.detach().clone().requires_grad_(True)
+
+        def mask_mod(b, h, q, kv):
+            return (kv < max_len) & (q >= kv)
+
+        def score_mod(score, b, h, q, kv):
+            return score + buffer[kv]
+
+        def safe_score_mod(score, b, h, q, kv):
+            return score + buffer_ref[torch.where(kv < max_len, kv, 0)]
+
+        def make_tensor():
+            return torch.randn(
+                (B, H, S, D), device=device, dtype=torch.float16, requires_grad=True
+            )
+
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        block_mask = create_block_mask(mask_mod, B, H, S, S, device=device)
+        compiled_sdpa = torch.compile(
+            create_attention(score_mod, block_mask), dynamic=False
+        )
+        out, code = run_and_get_code(compiled_sdpa, q, k, v)
+        ref = create_attention(safe_score_mod, block_mask)(q_ref, k_ref, v_ref)
+        out.sum().backward()
+        ref.sum().backward()
+
+        torch.testing.assert_close(out, ref, atol=1e-3, rtol=1e-2)
+        for grad, ref_grad in zip(
+            (q.grad, k.grad, v.grad, buffer.grad),
+            (q_ref.grad, k_ref.grad, v_ref.grad, buffer_ref.grad),
+        ):
+            torch.testing.assert_close(grad, ref_grad, atol=2e-3, rtol=2e-2)
+        FileCheck().check("tl.load").check("mask=((").check(") < 127").check(
+            "other=0"
+        ).run("\n".join(code))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_mps  # asserts unmasked Triton captured-buffer loads in generated code
+    def test_score_mod_captured_load_bounds_elided_when_safe(self, device):
+        B, H, S, D = 1, 1, 128, 16
+        buffer = torch.randn(S, device=device)
+
+        def score_mod(score, b, h, q, kv):
+            return score + buffer[kv]
+
+        def make_tensor():
+            return torch.randn((B, H, S, D), device=device, dtype=torch.float16)
+
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        block_mask = create_block_mask(noop_mask, B, H, S, S, device=device)
+        compiled_sdpa = torch.compile(
+            create_attention(score_mod, block_mask), dynamic=False
+        )
+        _, code = run_and_get_code(compiled_sdpa, q, k, v)
+
+        FileCheck().check("tl.load(in_ptr").check_not("other=0").run("\n".join(code))
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
