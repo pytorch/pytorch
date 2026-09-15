@@ -3402,6 +3402,8 @@ class BaseSchedulerNode:
             return ret
 
         dtype = buf.node.maybe_get_dtype()
+        if dtype is None:
+            return 0
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12

@@ -10,6 +10,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -19,6 +20,34 @@ try:
     TRITON_AVAILABLE = True
 except ImportError:
     TRITON_AVAILABLE = False
+
+
+class TestMemoryTimeline(TestCase):
+    class FakeSchedulerNode:
+        def get_outputs(self):
+            return ()
+
+    def test_freeable_input_with_only_weak_dependencies(self):
+        node = self.FakeSchedulerNode()
+        input_buffer = memory.FreeableInputBuffer(
+            "arg0",
+            memory.MemoryPlanningInfoForBuffer(
+                size_free=16,
+                succ_nodes=OrderedSet(),
+                succ_nodes_for_ordering=OrderedSet([node]),
+            ),
+        )
+
+        buffer_info, node_to_step, last_uses = memory.compute_memory_timeline(
+            [node], {"arg0": input_buffer}, OrderedSet()
+        )
+
+        self.assertEqual(
+            buffer_info,
+            [memory.BufferInfo(input_buffer, 16, 16, 0, -1)],
+        )
+        self.assertEqual(node_to_step, {node: 0})
+        self.assertNotIn(input_buffer, last_uses)
 
 
 class Foo(torch.nn.Module):
