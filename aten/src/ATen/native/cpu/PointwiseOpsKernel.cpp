@@ -9,6 +9,11 @@
 namespace at::native {
 namespace {
 
+// `Vectorized` operator* followed by operator+ is two roundings and can never
+// be contracted, so the vectorized lambdas below have to match however the
+// compiler treated the scalar ones. clang and gcc contract into an FMA; MSVC
+// does not, because these kernels are built with /fp:strict (see
+// cmake/Codegen.cmake).
 void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
   ScalarType dtype = iter.common_dtype();
   if (at::isReducedFloatingType(dtype)) {
@@ -26,8 +31,13 @@ void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
             auto [self_vec0, self_vec1] = convert_to_float<scalar_t>(self_vec);
             auto [t1_vec0, t1_vec1] = convert_to_float<scalar_t>(t1_vec);
             auto [t2_vec0, t2_vec1] = convert_to_float<scalar_t>(t2_vec);
+#if defined(_MSC_VER)
             self_vec0 = self_vec0 + float_vec * t1_vec0 * t2_vec0;
             self_vec1 = self_vec1 + float_vec * t1_vec1 * t2_vec1;
+#else
+            self_vec0 = vec::fmadd(float_vec * t1_vec0, t2_vec0, self_vec0);
+            self_vec1 = vec::fmadd(float_vec * t1_vec1, t2_vec1, self_vec1);
+#endif
             return convert_from_float<scalar_t>(self_vec0, self_vec1);
           });
     });
@@ -44,7 +54,11 @@ void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
           [=](Vectorized<scalar_t> self_vec,
               Vectorized<scalar_t> t1_vec,
               Vectorized<scalar_t> t2_vec) {
+#if defined(_MSC_VER)
             return self_vec + scalar_vec * t1_vec * t2_vec;
+#else
+            return vec::fmadd(scalar_vec * t1_vec, t2_vec, self_vec);
+#endif
           });
     });
   }

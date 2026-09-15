@@ -75,7 +75,15 @@ void addr_kernel(TensorIterator &iter,
           [=](Vec self_vec,
               Vec vec1_vec,
               Vec vec2_vec) __ubsan_ignore_undefined__ {
+            // Match however the compiler treated the scalar lambda: clang and
+            // gcc contract it into fma(beta, self, alpha * vec1 * vec2), MSVC
+            // does not because these kernels are built with /fp:strict (see
+            // cmake/Codegen.cmake).
+#if defined(_MSC_VER)
             return beta_vec * self_vec + alpha_vec * vec1_vec * vec2_vec;
+#else
+            return vec::fmadd(beta_vec, self_vec, alpha_vec * vec1_vec * vec2_vec);
+#endif
           }
         );
       }
