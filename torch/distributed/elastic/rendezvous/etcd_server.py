@@ -55,11 +55,15 @@ def find_free_port():
         family, type, proto, _, _ = addr
         try:
             s = socket.socket(family, type, proto)
+        except OSError as e:
+            print(f"Socket creation attempt failed: {e}")
+            continue
+        try:
             s.bind(("localhost", 0))
             s.listen(0)
             return s
         except OSError as e:
-            s.close()  # type: ignore[possibly-undefined]
+            s.close()
             print(f"Socket creation attempt failed: {e}")
     raise RuntimeError("Failed to create a socket")
 
