@@ -316,6 +316,23 @@ class GemmLocalReduceStore:
 
 
 @dataclasses.dataclass(frozen=True)
+class GemmIndexedOutputStore:
+    """Describe one terminal row-indexed output stored from the main result."""
+
+    node: torch.fx.Node
+    indices: torch.fx.Node
+    owned_nodes: tuple[torch.fx.Node, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.node, torch.fx.Node)
+            or not isinstance(self.indices, torch.fx.Node)
+            or not all(isinstance(node, torch.fx.Node) for node in self.owned_nodes)
+        ):
+            raise RuntimeError("indexed output plans require tensor nodes")
+
+
+@dataclasses.dataclass(frozen=True)
 class GemmOutputLocalReducePlan:
     """Bind a matched local reduction to store and/or main-output consumers.
 
@@ -338,17 +355,12 @@ class GemmOutputLocalReducePlan:
 
 @dataclasses.dataclass(frozen=True)
 class GemmOutputPlan:
-    """Classify the values returned by a FlexGEMM body.
-
-    Attributes:
-        output: FX node returned as the main GEMM result.
-        returned_aux_outputs: Auxiliary FX outputs in the user-visible tuple order.
-        local_reduce: Compressed or feed-main local-reduction output behavior.
-    """
+    """Classify returned values and backend-owned terminal stores."""
 
     output: torch.fx.Node
     returned_aux_outputs: tuple[torch.fx.Node, ...] = ()
     local_reduce: GemmOutputLocalReducePlan | None = None
+    indexed_output: GemmIndexedOutputStore | None = None
     output_contraction: FlexGemmOutputContraction | None = None
     output_storage: torch.fx.Node | None = None
     output_storage_nodes: tuple[torch.fx.Node, ...] = ()
@@ -361,24 +373,56 @@ class GemmOutputPlan:
                 for aux_output in self.returned_aux_outputs
             )
             or (
+                self.local_reduce is not None
+                and not isinstance(self.local_reduce, GemmOutputLocalReducePlan)
+            )
+            or (
+                self.indexed_output is not None
+                and not isinstance(self.indexed_output, GemmIndexedOutputStore)
+            )
+            or (
                 self.output_storage is not None
                 and not isinstance(self.output_storage, torch.fx.Node)
             )
             or not all(
                 isinstance(node, torch.fx.Node) for node in self.output_storage_nodes
             )
+            or bool(self.output_storage_nodes) != (self.output_storage is not None)
+            or any(
+                node not in self.returned_aux_outputs
+                for node in self.structural_outputs
+            )
         ):
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
 
     @property
+    def structural_outputs(self) -> tuple[torch.fx.Node, ...]:
+        """Return auxiliary values stored by backend-owned EpiOps."""
+        store = None if self.local_reduce is None else self.local_reduce.store
+        return (
+            *(() if self.indexed_output is None else (self.indexed_output.node,)),
+            *(() if store is None else (store.node,)),
+        )
+
+    @property
     def aux_outputs(self) -> tuple[torch.fx.Node, ...]:
         """Return ordinary auxiliary values emitted by the generated callback."""
-        store = None if self.local_reduce is None else self.local_reduce.store
         return tuple(
             output
             for output in self.returned_aux_outputs
-            if store is None or output is not store.node
+            if output not in self.structural_outputs
         )
+
+    @property
+    def terminal_rewrites(self) -> dict[torch.fx.Node, torch.fx.Node | None]:
+        """Map terminal wrappers to aliases or backend-owned omissions."""
+        rewrites = dict.fromkeys(self.output_storage_nodes, self.output_storage)
+        store = None if self.local_reduce is None else self.local_reduce.store
+        if store is not None and store.output_storage is not None:
+            rewrites.update(dict.fromkeys(store.output_storage.nodes))
+        if self.indexed_output is not None:
+            rewrites.update(dict.fromkeys(self.indexed_output.owned_nodes))
+        return rewrites
 
 
 @dataclasses.dataclass
@@ -930,7 +974,7 @@ class GemmLocalReduceAnalysis:
         return GemmOutputPlan(
             output,
             aux_outputs,
-            match.to_plan(store=None, feeds_main=True),
+            local_reduce=match.to_plan(store=None, feeds_main=True),
         )
 
 

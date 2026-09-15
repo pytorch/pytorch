@@ -24,10 +24,12 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     use_cutedsl_fast_math,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR,
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
+    INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR,
@@ -50,6 +52,7 @@ from torch._inductor.kernel.gemm_epilogue import (
 )
 from torch._inductor.kernel.gemm_epilogue_analysis import (
     build_output_contraction_plan,
+    GemmIndexedOutputStore,
     GemmLocalReduceAnalysis,
     GemmOutputLocalReducePlan,
     GemmOutputPlan,
@@ -62,7 +65,10 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLOpOverrides,
     lower_gemm_epilogue_fx_node,
 )
-from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
+from torch._inductor.kernel.gemm_epilogue_utils import (
+    statically_known_equal,
+    statically_known_shape_equal,
+)
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -109,20 +115,141 @@ def bind_terminal_output_storage(
     )
 
 
+def terminal_dtype_conversion_source(node: torch.fx.Node) -> torch.fx.Node:
+    """Peel one terminal element-type conversion from an output."""
+    if node.target not in (
+        torch.ops.aten._to_copy.default,
+        torch.ops.prims.convert_element_type.default,
+    ):
+        return node
+    source = node.args[0]
+    return source if isinstance(source, torch.fx.Node) else node
+
+
+def flex_gemm_indexed_output_store(
+    main_output: torch.fx.Node,
+    aux: torch.fx.Node,
+) -> GemmIndexedOutputStore | None:
+    """Match one terminal row gather.
+
+    Return ``None`` when the graph is not this topology. Raise when a matched
+    gather violates a FlexGEMM legality requirement.
+    """
+    main_meta = main_output.meta.get("val")
+    aux_meta = aux.meta.get("val")
+    if (
+        not isinstance(main_meta, torch.Tensor)
+        or not isinstance(aux_meta, torch.Tensor)
+        or main_meta.ndim != 2
+        or not statically_known_shape_equal(aux_meta.shape, (main_meta.shape[0],))
+    ):
+        return None
+
+    target = terminal_dtype_conversion_source(aux)
+    target_conversion = () if target is aux else (aux,)
+    gather_node = squeeze_source_node(target)
+    if not isinstance(gather_node, torch.fx.Node):
+        return None
+    squeeze_dim = target.args[1] if len(target.args) > 1 else None
+    if squeeze_dim is not None:
+        squeeze_dims = (
+            tuple(squeeze_dim)
+            if isinstance(squeeze_dim, (tuple, list))
+            else (squeeze_dim,)
+        )
+        if len(squeeze_dims) != 1 or squeeze_dims[0] not in (-1, 1):
+            return None
+    if gather_node.target is not torch.ops.aten.gather.default:
+        return None
+    source, dim, unsqueeze_node, *gather_options = gather_node.args
+    sparse_grad = (
+        gather_options[0]
+        if gather_options
+        else gather_node.kwargs.get("sparse_grad", False)
+    )
+    if (
+        len(gather_options) > 1
+        or not isinstance(source, torch.fx.Node)
+        or dim not in (-1, 1)
+        or not isinstance(unsqueeze_node, torch.fx.Node)
+        or sparse_grad is not False
+        or unsqueeze_node.target is not torch.ops.aten.unsqueeze.default
+    ):
+        return None
+    if (
+        source not in (main_output, terminal_dtype_conversion_source(main_output))
+        or aux_meta.dtype is not main_meta.dtype
+    ):
+        raise NotImplementedError(FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR)
+    indices, unsqueeze_dim = unsqueeze_node.args
+    indices_meta = (
+        indices.meta.get("val") if isinstance(indices, torch.fx.Node) else None
+    )
+    gather_meta = gather_node.meta.get("val")
+    if (
+        unsqueeze_dim not in (-1, 1)
+        or not isinstance(indices, torch.fx.Node)
+        or indices.op != "placeholder"
+        or tuple(indices.users) != (unsqueeze_node,)
+        or tuple(unsqueeze_node.users) != (gather_node,)
+        or tuple(gather_node.users) != (target,)
+        or (target is not aux and tuple(target.users) != (aux,))
+        or any(user.op != "output" for user in aux.users)
+        or not isinstance(indices_meta, torch.Tensor)
+        or indices_meta.dtype not in (torch.int32, torch.int64)
+        or not statically_known_shape_equal(indices_meta.shape, aux_meta.shape)
+        or not isinstance(gather_meta, torch.Tensor)
+        or not statically_known_shape_equal(gather_meta.shape, (main_meta.shape[0], 1))
+    ):
+        return None
+    if not statically_known_equal(indices_meta.stride(0), 1):
+        raise NotImplementedError("FlexGEMM indexed output indices must be contiguous")
+    return GemmIndexedOutputStore(
+        aux,
+        indices,
+        (unsqueeze_node, gather_node, target, *target_conversion),
+    )
+
+
+def flex_gemm_indexed_output_plan(
+    output: Any,
+    aux_outputs: tuple[Any, ...],
+) -> GemmIndexedOutputStore | None:
+    """Return the unique indexed auxiliary output store, if any."""
+    if not isinstance(output, torch.fx.Node):
+        return None
+    indexed_plans = tuple(
+        plan
+        for aux_output in aux_outputs
+        if isinstance(aux_output, torch.fx.Node)
+        if (plan := flex_gemm_indexed_output_store(output, aux_output)) is not None
+    )
+    if len(indexed_plans) > 1:
+        raise NotImplementedError("FlexGEMM supports one indexed row output")
+    return indexed_plans[0] if indexed_plans else None
+
+
 def tuple_output_plan(
     output: Any,
     aux_outputs: tuple[Any, ...],
     analysis: GemmLocalReduceAnalysis,
 ) -> GemmOutputPlan:
-    """Classify multi-output epilogues after checking local-reduce consumers."""
+    """Classify ordinary and backend-owned auxiliary outputs."""
     if not isinstance(output, torch.fx.Node) or not all(
         isinstance(aux_output, torch.fx.Node) for aux_output in aux_outputs
     ):
         raise NotImplementedError(FLEX_GEMM_OUTPUT_TENSOR_ERROR)
-    feed_match = analysis.common_feed_main_match((output, *aux_outputs))
+
+    indexed_output = flex_gemm_indexed_output_plan(output, aux_outputs)
+    indexed_node = None if indexed_output is None else indexed_output.node
+    non_indexed_aux_outputs = tuple(
+        aux_output for aux_output in aux_outputs if aux_output is not indexed_node
+    )
+
+    feed_match = analysis.common_feed_main_match((output, *non_indexed_aux_outputs))
     compressed_aux_plans = tuple(
         plan
-        for aux_output in aux_outputs
+        for aux_output in non_indexed_aux_outputs
         if (plan := analysis.compressed_aux_plan(output, aux_output)) is not None
     )
     if len(compressed_aux_plans) > 1:
@@ -149,11 +276,35 @@ def tuple_output_plan(
             output,
             aux_outputs,
             local_reduce=compressed_aux_plan,
+            indexed_output=indexed_output,
         )
-    feed_main_plan = analysis.feed_main_output_plan(output, aux_outputs)
+    feed_main_plan = analysis.feed_main_output_plan(output, non_indexed_aux_outputs)
     if feed_main_plan is not None:
-        return feed_main_plan
-    return GemmOutputPlan(output, aux_outputs)
+        return dataclasses.replace(
+            feed_main_plan,
+            returned_aux_outputs=aux_outputs,
+            indexed_output=indexed_output,
+        )
+    return GemmOutputPlan(
+        output,
+        aux_outputs,
+        indexed_output=indexed_output,
+    )
+
+
+def flex_gemm_output_values(
+    graph_module: torch.fx.GraphModule,
+) -> tuple[Any, tuple[Any, ...]]:
+    """Return the main value and ordered auxiliary values from the FX output."""
+    output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
+    if len(output_nodes) != 1:
+        raise NotImplementedError("FlexGEMM expects one output node")
+    output_value = output_nodes[0].args[0]
+    if isinstance(output_value, (tuple, list)):
+        if not output_value:
+            raise NotImplementedError("FlexGEMM expects one tensor output")
+        return output_value[0], tuple(output_value[1:])
+    return output_value, ()
 
 
 def output_plan(
@@ -161,16 +312,9 @@ def output_plan(
     local_reduce: GemmLocalReduceAnalysis,
 ) -> GemmOutputPlan:
     """Classify output consumers from one shared local-reduce analysis."""
-    output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
-    if len(output_nodes) != 1:
-        raise NotImplementedError("FlexGEMM expects one output node")
-    output_value = output_nodes[0].args[0]
-    if isinstance(output_value, (tuple, list)):
-        if len(output_value) == 1:
-            output_value = output_value[0]
-        else:
-            output, *aux_outputs = output_value
-            return tuple_output_plan(output, tuple(aux_outputs), local_reduce)
+    output_value, aux_outputs = flex_gemm_output_values(graph_module)
+    if aux_outputs:
+        return tuple_output_plan(output_value, aux_outputs, local_reduce)
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
     feed_main_plan = local_reduce.feed_main_output_plan(output_value)
@@ -243,6 +387,10 @@ class FlexGemmEpilogueAnalysis:
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
         validate_output_layout_transforms(local_reduce.graph, outputs)
         reject_unplanned_reductions(local_reduce, outputs)
+        if outputs.indexed_output is not None and outputs.output_storage_nodes:
+            raise NotImplementedError(
+                "FlexGEMM indexed outputs do not compose with terminal dtype views"
+            )
         contraction_plan = build_output_contraction_plan(
             outputs.output_storage or outputs.output,
             gemm,
@@ -259,7 +407,7 @@ class FlexGemmEpilogueAnalysis:
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
             local_reduce.commit_output_guards(outputs)
             return cls(gemm, outputs, local_reduce)
-        if outputs.aux_outputs:
+        if outputs.aux_outputs or outputs.indexed_output is not None:
             raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
         if contraction_plan.transform.chunked and outputs.local_reduce is not None:
             raise NotImplementedError(
@@ -677,14 +825,7 @@ class FlexGemmEpilogueEmitter:
             analysis.output_contraction_select_indices
         )
         self.output_contraction_layouts = analysis.output_contraction_layouts
-        local_reduce_store = (
-            None if self.local_reduce is None else self.local_reduce.store
-        )
-        self.local_reduce_output_storage = (
-            None if local_reduce_store is None else local_reduce_store.output_storage
-        )
-        self.output_storage = self.outputs.output_storage
-        self.output_storage_nodes = frozenset(self.outputs.output_storage_nodes)
+        self.terminal_rewrites = self.outputs.terminal_rewrites
         self.local_reduce_spec: FlexGemmEpiModLocalReduceSpec | None = None
         self.local_reduce_prepass: FlexGemmEpiModReductionSpec | None = None
         self.local_reduce_source_nodes: frozenset[torch.fx.Node] = frozenset()
@@ -1020,17 +1161,10 @@ class FlexGemmEpilogueEmitter:
                         node, self.output_contraction_select_indices[node]
                     )
                     continue
-                if node in self.output_storage_nodes:
-                    if self.output_storage is None:
-                        raise AssertionError("output storage wrapper requires a source")
-                    self.env[node] = flex_gemm_epilogue_arg(
-                        self.output_storage, self.env
-                    )
-                    continue
-                if (
-                    self.local_reduce_output_storage is not None
-                    and node in self.local_reduce_output_storage.nodes
-                ):
+                if node in self.terminal_rewrites:
+                    source = self.terminal_rewrites[node]
+                    if source is not None:
+                        self.env[node] = flex_gemm_epilogue_arg(source, self.env)
                     continue
                 if self.local_reduce_prepass is not None and node in prepass_aliases:
                     if self.local_reduce_prepass_value is None:
@@ -1086,6 +1220,8 @@ class FlexGemmEpilogueEmitter:
             (main_name, main_result),
             *zip(aux_names, aux_results, strict=True),
         ]
+        if self.outputs.indexed_output is not None:
+            result_items.append((INDEXED_OUTPUT_STORE_ARG_NAME, main_result))
         if (
             self.local_reduce is not None
             and sink is not None
