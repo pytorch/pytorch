@@ -65,7 +65,6 @@ from ..utils import (
     use_triton_template,
     use_triton_tma_template,
 )
-from .decompose_k import decompose_k_subgraph_template
 from .mm_common import (
     _fits_int32_buffer_span,
     _is_static_problem,
@@ -370,6 +369,58 @@ def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
         inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
         lambda: "all inputs must be on the same device",
     )
+
+
+def decomposeK(a, b, k_splits):
+    m = a.shape[0]
+    n = b.shape[1]
+    k = a.shape[1]
+
+    k_parts = k // k_splits
+    B = k_splits
+    a_reshaped = torch.permute(a.reshape(m, B, k_parts), (1, 0, 2))
+    b_reshaped = b.reshape(B, k_parts, n)
+    result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
+    reduced_buf = torch.sum(result, 0)
+    return reduced_buf.to(a.dtype)
+
+
+class DecomposeKSugraphTemplate(SubgraphTemplate):
+    def __init__(self):
+        super().__init__(
+            name="decompose_k",
+        )
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        k_split: int,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        name = f"decompose_k_mm_{k_split}_split"
+        description = f"{k_split=}"
+
+        with enable_python_dispatcher():
+            decompositions = select_decomp_table()
+            fn = make_fx(
+                functools.partial(decomposeK, k_splits=k_split),
+                decompositions,
+            )
+
+            return super().generate(
+                name=name,
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=fn,
+                description=description,
+            )
+
+
+decompose_k_subgraph_template = DecomposeKSugraphTemplate()
 
 
 class ContiguousTemplate(SubgraphTemplate):
@@ -708,27 +759,12 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         return box
 
-    # Some subgraph choices must be selected and inlined before scheduling so
-    # their inner templates can participate in fusion. MultiTemplateBuffer
-    # otherwise preserves the subgraph boundary until after fusion.
-    inline_selected_subgraph = mat2.get_name() not in V.graph.graph_inputs and any(
-        isinstance(choice, SubgraphChoiceCaller) and choice.inline_after_autotune
-        for choice in choices
-    )
-    if not inline_selected_subgraph:
-        for choice in choices:
-            if isinstance(choice, SubgraphChoiceCaller):
-                choice.inline_after_autotune = False
-    subgraph_autotune_kwargs = (
-        {"return_multi_template": False} if inline_selected_subgraph else {}
-    )
     node, _ = autotune_select_algorithm(
         name,
         choices,
         kernel_inputs.nodes(),
         layout,
         best_config_future=best_config_future,
-        **subgraph_autotune_kwargs,
     )
     return node
 
@@ -1045,21 +1081,106 @@ def _is_blockwise1xTILESIZE_scaling(
     tile_size: int,
     transpose: bool,
 ) -> bool:
-    lhs = 1 if transpose else 0
-    rhs = 0 if transpose else 1
-    return V.graph.sizevars.statically_known_equals(
-        sz[lhs], tensor_sz[lhs]
-    ) and V.graph.sizevars.statically_known_equals(
-        sz[rhs], ceildiv(tensor_sz[rhs], tile_size)
+    # scale_a is [M, ceil(K/tile)]. scale_b is [N, ceil(K/tile)] as the template
+    # reads it, or [ceil(K/tile), N] as v1 torch._scaled_mm passes it; this runs
+    # on both the raw and the normalized input, so accept either.
+    sizevars = V.graph.sizevars
+    if not transpose:
+        return sizevars.statically_known_equals(
+            sz[0], tensor_sz[0]
+        ) and sizevars.statically_known_equals(sz[1], ceildiv(tensor_sz[1], tile_size))
+    out_dim, k_blocks = tensor_sz[1], ceildiv(tensor_sz[0], tile_size)
+    # Template layout [N, ceil(K/tile)] (v2 raw, and v1 after normalization).
+    normalized = sizevars.statically_known_equals(
+        sz[0], out_dim
+    ) and sizevars.statically_known_equals(sz[1], k_blocks)
+    # v1 raw layout [ceil(K/tile), N].
+    v1_raw = sizevars.statically_known_equals(
+        sz[0], k_blocks
+    ) and sizevars.statically_known_equals(sz[1], out_dim)
+    return normalized or v1_raw
+
+
+def _blockwise128x128_shape_match(
+    sz: Sequence[_IntLike],
+    tensor_sz: Sequence[_IntLike],
+    transpose: bool,
+) -> tuple[bool, bool, _IntLike]:
+    # Triton reads [out_blocks, k_blocks]; cuBLAS supplies the transpose of that.
+    # _scaled_mm_v2 pads K to a multiple of 4, torch._scaled_mm does not, so both
+    # widths are a valid cuBLAS shape. Returns whether sz matches each layout, and
+    # the K extent the cuBLAS form implies -- which is also its row stride.
+    if transpose:
+        out_blocks = ceildiv(tensor_sz[1], 128)
+        k_blocks = ceildiv(tensor_sz[0], 128)
+    else:
+        out_blocks = ceildiv(tensor_sz[0], 128)
+        k_blocks = ceildiv(tensor_sz[1], 128)
+    k_blocks_padded = ceildiv(k_blocks, 4) * 4
+    sizevars = V.graph.sizevars
+    triton_ok = sizevars.statically_known_equals(
+        sz[0], out_blocks
+    ) and sizevars.statically_known_equals(sz[1], k_blocks)
+    cublas_out_ok = sizevars.statically_known_equals(sz[1], out_blocks)
+    cublas_padded = cublas_out_ok and sizevars.statically_known_equals(
+        sz[0], k_blocks_padded
     )
+    cublas_unpadded = cublas_out_ok and sizevars.statically_known_equals(
+        sz[0], k_blocks
+    )
+    cublas_k = k_blocks_padded if cublas_padded else k_blocks
+    return triton_ok, cublas_padded or cublas_unpadded, cublas_k
 
 
 def _is_blockwise128x128_scaling(
-    sz: Sequence[_IntLike], tensor_sz: Sequence[_IntLike]
+    sz: Sequence[_IntLike],
+    tensor_sz: Sequence[_IntLike],
+    transpose: bool = False,
 ) -> bool:
-    return V.graph.sizevars.statically_known_equals(
-        sz[0], ceildiv(tensor_sz[0], 128)
-    ) and V.graph.sizevars.statically_known_equals(sz[1], ceildiv(tensor_sz[1], 128))
+    triton_ok, cublas_ok, _ = _blockwise128x128_shape_match(sz, tensor_sz, transpose)
+    return triton_ok or cublas_ok
+
+
+def _uses_cublas_blockwise128x128_layout(
+    scale: Any,
+    mat: Any,
+    scale_option: ScalingType,
+    transpose: bool = False,
+) -> bool:
+    if scale_option != ScalingType.BlockWise128x128:
+        return False
+    triton_layout, cublas_layout, cublas_k = _blockwise128x128_shape_match(
+        scale.get_size(), mat.get_size(), transpose
+    )
+    if not cublas_layout:
+        return False
+    if not triton_layout:
+        return True
+
+    # Both shapes match, so only the strides tell them apart.
+    sizevars = V.graph.sizevars
+    scale_stride = scale.maybe_get_stride()
+    if scale_stride is None:
+        return False
+    return sizevars.statically_known_equals(
+        scale_stride[0], 1
+    ) and sizevars.statically_known_equals(scale_stride[1], cublas_k)
+
+
+def _scale_is_transposed(
+    scale: Any,
+    mat: Any,
+    scale_option: ScalingType,
+    transpose: bool = False,
+    v1_scale_layout: bool = False,
+) -> bool:
+    # The template reads a blockwise scale as [out, k_blocks]. cuBLAS supplies the
+    # transpose of that (128x128 is also K-padded, which the k_blocks mask clips),
+    # and so does torch._scaled_mm for a 1x128 scale_b. The caller passes the ABI
+    # because at N == ceil(K/128) the scale is square and the two have one shape.
+    if transpose and v1_scale_layout and scale_option == ScalingType.BlockWise1x128:
+        return True
+    return _uses_cublas_blockwise128x128_layout(scale, mat, scale_option, transpose)
 
 
 def is_desired_scaling(
@@ -1078,7 +1199,7 @@ def is_desired_scaling(
                 scale_size, t.get_size(), 128, transpose
             )
         case ScalingType.BlockWise128x128:
-            return _is_blockwise128x128_scaling(scale_size, t.get_size())
+            return _is_blockwise128x128_scaling(scale_size, t.get_size(), transpose)
         case _:
             raise AssertionError(f"Unsupported scaling type {scaling_type}")
 
@@ -1157,21 +1278,7 @@ def tuned_scaled_mm_v2(
     #   - any non-fp32 block scale
     # The eager op is called directly so it keeps its native v2 scale_b
     # convention, unlike the v1 aten__fp8_mm choice used on the supported path.
-    def check_supported_recipe(recipe: list[int]) -> bool:
-        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
-        return all(ScalingType(r) not in disallowed for r in recipe)
-
-    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
-    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
-        recipe_b
-    )
-    if (
-        any(s != 0 for s in swizzle_a)
-        or any(s != 0 for s in swizzle_b)
-        or not supported_recipe
-        or not is_single_level_scale
-        or scale_a[0].dtype != torch.float32
-    ):
+    def fallback():
         # contraction_dim is a non-optional int[] in the schema (default []);
         # this lowering defaults it to None, so coerce before the eager call.
         fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
@@ -1189,6 +1296,36 @@ def tuned_scaled_mm_v2(
             fallback_contraction_dim,
             use_fast_accum,
         )
+
+    def check_supported_recipe(recipe: list[int]) -> bool:
+        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
+        return all(ScalingType(r) not in disallowed for r in recipe)
+
+    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
+    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
+        recipe_b
+    )
+    if (
+        any(s != 0 for s in swizzle_a)
+        or any(s != 0 for s in swizzle_b)
+        or not supported_recipe
+        or not is_single_level_scale
+        or scale_a[0].dtype != torch.float32
+    ):
+        return fallback()
+
+    def _is_dynamic(sz) -> bool:
+        return PythonWrapperCodegen.statically_known_int_or_none(sz) is None
+
+    if ScalingType(recipe_a[0]) == ScalingType.BlockWise128x128 and (
+        _is_dynamic(mat_a.get_size()[0]) or _is_dynamic(mat_a.get_size()[1])
+    ):
+        return fallback()
+    if ScalingType(recipe_b[0]) == ScalingType.BlockWise128x128 and (
+        _is_dynamic(mat_b.get_size()[1]) or _is_dynamic(mat_b.get_size()[0])
+    ):
+        return fallback()
+
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
@@ -1209,12 +1346,20 @@ def tuned_scaled_mm_v2(
 
     scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
 
+    # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
+    #       first scale types passed.
+    scale_option_a, scale_option_b = (
+        ScalingType(recipe_a[0]),
+        ScalingType(recipe_b[0]),
+    )
+
+    bias_real = realize_inputs(bias) if bias else None
+
     input_nodes: list[Any]
 
     if not bias:
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
     else:
-        bias_real = realize_inputs(bias)
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
@@ -1246,13 +1391,6 @@ def tuned_scaled_mm_v2(
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
-        # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
-        #       first scale types passed.
-        scale_option_a, scale_option_b = (
-            ScalingType(recipe_a[0]),
-            ScalingType(recipe_b[0]),
-        )
-
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if (
@@ -1267,17 +1405,27 @@ def tuned_scaled_mm_v2(
             ):
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
-                    overriders
+                    dict(overriders)
                 )
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                overriders["SCALE_A_TRANSPOSED"] = _scale_is_transposed(
+                    scale_a_real, mat_a, scale_option_a
+                )
+                overriders["SCALE_B_TRANSPOSED"] = _scale_is_transposed(
+                    scale_b_real,
+                    mat_b,
+                    scale_option_b,
+                    transpose=True,
+                    v1_scale_layout=False,
+                )
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
+                    dict(overriders)
                 )
             else:
                 raise AssertionError(
@@ -1292,13 +1440,15 @@ def tuned_scaled_mm_v2(
             and not bias
         ):
             templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = dict(
+                overriders
+            )
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
         ):
             templates_to_use.append(mm_template)
-            kwarg_overrides[mm_template.uid] = overriders
+            kwarg_overrides[mm_template.uid] = dict(overriders)
 
     # Single unified call for all templates
     choices.extend(
@@ -1387,12 +1537,13 @@ def tuned_scaled_mm(
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
 
+    bias_real = realize_inputs(bias) if bias else None
+
     input_nodes: list[Any]
 
     if not bias:
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
     else:
-        bias_real = realize_inputs(bias)
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
@@ -1442,17 +1593,27 @@ def tuned_scaled_mm(
             ):
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
-                    overriders
+                    dict(overriders)
                 )
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                overriders["SCALE_A_TRANSPOSED"] = _scale_is_transposed(
+                    scale_a_real, mat_a, scale_option_a
+                )
+                overriders["SCALE_B_TRANSPOSED"] = _scale_is_transposed(
+                    scale_b_real,
+                    mat_b,
+                    scale_option_b,
+                    transpose=True,
+                    v1_scale_layout=True,
+                )
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
+                    dict(overriders)
                 )
             else:
                 raise AssertionError(
@@ -1467,13 +1628,15 @@ def tuned_scaled_mm(
             and not bias
         ):
             templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = dict(
+                overriders
+            )
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
         ):
             templates_to_use.append(mm_template)
-            kwarg_overrides[mm_template.uid] = overriders
+            kwarg_overrides[mm_template.uid] = dict(overriders)
 
     # Single unified call for all templates
     choices.extend(

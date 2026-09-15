@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     scoped_load_inline,
     skipIfTorchDynamo,
@@ -25,6 +26,8 @@ class DummyProcessGroup(dist.ProcessGroup):
 @unittest.skipIf(not dist.is_available(), "requires distributed")
 @skipIfTorchDynamo("JIT/C++ extension test")
 class TestProcessGroupCapsule(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @scoped_load_inline
     def test_processgroup_capsule_discrimination(self, load_inline):
         """Test C++ can distinguish string vs ProcessGroup vs other capsule types."""

@@ -60,7 +60,6 @@ from .codegen.common import (
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
-    TensorArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -568,19 +567,20 @@ class TritonTemplateKernel(TritonKernel):
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
     ) -> None:
-        tma_tiled = tma_store or tma_load_for_template_epilogue
+        tma_2d = tma_store or tma_load_for_template_epilogue
+        if tma_store:
+            pass
         numel = sympy_product(output_node.get_size())
-        if tma_tiled:
-            output_rank = len(output_node.get_size())
-            supported_ranks = (2, 3) if tma_store else (2,)
-            if output_rank not in supported_ranks:
+        if tma_2d:
+            if len(output_node.get_size()) != 2:
                 raise AssertionError(
-                    f"TMA template output rank must be in {supported_ranks}, "
-                    f"got {output_rank}"
+                    "TMA load/store only supported for 2D with templates"
                 )
-            prefixes = ("x", "y", "z")
-            tiling = dict(zip(prefixes, output_node.get_size()))
-            tiling["r0_"] = sympy.S.One
+            tiling = {
+                "x": output_node.get_size()[0],
+                "y": output_node.get_size()[1],
+                "r0_": sympy.S.One,
+            }
         else:
             tiling = {
                 "x": numel,
@@ -591,7 +591,7 @@ class TritonTemplateKernel(TritonKernel):
             features=SIMDKernelFeatures([], numel),
             hint_override=hint_override,
         )
-        if tma_tiled:
+        if tma_2d:
             # By default `construct_range_trees` will return the range_trees in the order
             # ["z", "y", "x", "r0_", "r1_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
@@ -661,7 +661,6 @@ class TritonTemplateKernel(TritonKernel):
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
         # input buffers which we are fusing into, which preserve a zero mask
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
-        self.prologue_descriptor_vars: dict[str, str] = {}
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -943,50 +942,16 @@ class TritonTemplateKernel(TritonKernel):
         else:
             self.triton_meta.update(triton_meta)
 
-        # Upgrade signature for host-side TMA: pointer args that the launcher
-        # will replace with TensorDescriptors need tensordesc<> types so Triton
-        # compiles the kernel with the correct arg types.
-        if self.host_tma_descriptor_args:
-            from .codegen.triton_utils import _type_of
-
-            sig = self.triton_meta["signature"]
-            for argname, arg in zip(argdefs, signature):
-                if (
-                    isinstance(arg, TensorArg)
-                    and arg.name in self.host_tma_descriptor_args
-                ):
-                    info = self.host_tma_descriptor_args[arg.name]
-                    block_shape = (
-                        info["block_shape"]
-                        if isinstance(info, dict)
-                        else info.block_shape
-                    )
-                    dtype = V.graph.get_dtype(arg.buffer)
-                    inner = _type_of(dtype)[1:]  # strip "*": *bf16 -> bf16
-                    sig[argname.name] = f"tensordesc<{inner}{list(block_shape)}>"
-
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
         if self.host_tma_descriptor_args:
-            # This meta is repr'd into the generated module, so every value must
-            # be a plain resolved dict. Epilogue accesses register a
-            # TensorDescriptorOptions (whose block shape is still symbolic), which
-            # only TritonKernel.inductor_meta_per_kernel knows how to resolve.
-            unsupported = [
-                inner
-                for inner, info in self.host_tma_descriptor_args.items()
-                if not isinstance(info, dict)
-            ]
-            if unsupported:
-                raise NotImplementedError(
-                    "host-side TMA for template epilogue accesses is not supported "
-                    f"(unresolved descriptors: {unsupported})"
-                )
-            inductor_meta["host_tma_descriptor_args"] = dict(
-                self.host_tma_descriptor_args
+            # This meta is repr'd into the generated module, so epilogue-registered
+            # TensorDescriptorOptions must be resolved to plain dims first.
+            inductor_meta["host_tma_descriptor_args"] = (
+                self.resolved_host_tma_descriptor_args()
             )
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -1336,10 +1301,6 @@ class TritonTemplateKernel(TritonKernel):
         other: float | int | None = 0.0,
         indent_width: int = 4,
         index_shape: tuple[str] | None = None,
-        unfused_load: str | None = None,
-        prologue_descriptor_offsets: tuple[str, ...] | None = None,
-        prologue_descriptor_block_shape: tuple[str, ...] | None = None,
-        prologue_descriptor_cat2: bool = False,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1350,35 +1311,9 @@ class TritonTemplateKernel(TritonKernel):
             mask (Optional[str]): An optional mask to use for the load operation.
             other (Optional[Union[float, int]]): The value to use for masked elements. Default is 0.0.
             indent_width (int): The number of spaces to use for indentation.
-            prologue_descriptor_offsets: Descriptor offsets for source loads in
-                a fused prologue. Must be paired with prologue_descriptor_block_shape.
-            prologue_descriptor_block_shape: Descriptor block shape for source
-                loads in a fused prologue.
-            prologue_descriptor_cat2: Generate two half-width descriptor loads
-                for an exact contiguous cat/cast producer when possible.
         """
 
-        if (prologue_descriptor_offsets is None) != (
-            prologue_descriptor_block_shape is None
-        ):
-            raise AssertionError(
-                "descriptor offsets and block shape must be provided together"
-            )
-
         input_node = self.named_input_nodes[input_name]
-        cat2_code = None
-        if (
-            prologue_descriptor_cat2
-            and prologue_descriptor_offsets is not None
-            and prologue_descriptor_block_shape is not None
-            and input_node.get_name() in self.prologue_fused_inputs
-        ):
-            cat2_code = self.codegen_cat2_prologue_descriptors(
-                input_node,
-                output_name,
-                prologue_descriptor_offsets,
-                prologue_descriptor_block_shape,
-            )
         if not self.prologue_loads_all_inputs:
             self.prologue_supported_inputs.add(input_node.get_name())
 
@@ -1437,20 +1372,6 @@ class TritonTemplateKernel(TritonKernel):
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
                 name = "StoreOutputSubstitution"
-
-                def load(self, name: str, index: sympy.Expr):
-                    if prologue_descriptor_offsets is not None:
-                        if prologue_descriptor_block_shape is None:
-                            raise AssertionError("missing descriptor block shape")
-                        return V.kernel.load_prologue_descriptor(
-                            name,
-                            index,
-                            tuple(indices),
-                            tuple(lengths),
-                            prologue_descriptor_offsets,
-                            prologue_descriptor_block_shape,
-                        )
-                    return super().load(name, index)
 
                 def store(
                     self,
@@ -1538,143 +1459,17 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             with self.set_subgraph_body(hook_key):
                 self.cse.invalidate(OrderedSet())
-                if (
-                    cat2_code is not None
-                    and input_node.get_name() in self.prologue_fused_inputs
-                ):
-                    self.body.writeline(cat2_code)
-                else:
-                    self.codegen_body()
+                self.codegen_body()
                 self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
-                    if unfused_load is not None:
-                        self.body.writeline(f"{output_name} = {unfused_load}")
-                    elif load_code is None:
+                    if load_code is None:
                         raise AssertionError("load_code must not be None")
-                    else:
-                        self.body.writeline(load_code)
+                    self.body.writeline(load_code)
 
                 result = self.body.getvalue()
                 if indent_width:
                     result = textwrap.indent(result, " " * indent_width)
                 return result.strip()
-
-        return self._register_hook(hook_key, hook)
-
-    def codegen_cat2_prologue_descriptors(
-        self,
-        input_node: Any,
-        output_name: str,
-        offsets: tuple[str, ...],
-        block_shape: tuple[str, ...],
-    ) -> str | None:
-        """Codegen an exact ``cat([Kx64, Kx64], 1).to(BF16)`` via TMA."""
-        from .kernel.decompose_k import get_cat2_fp32_prologue_sources
-
-        source_names = get_cat2_fp32_prologue_sources(input_node)
-        if (
-            source_names is None
-            or len(offsets) != 2
-            or len(block_shape) != 2
-            or block_shape[1] != "BLOCK_N"
-        ):
-            return None
-
-        descriptor_names: list[str] = []
-        for source_name in source_names:
-            source = V.graph.get_buffer(source_name)
-            source_size = tuple(V.graph.sizevars.simplify(s) for s in source.get_size())
-
-            descriptor = self.prologue_descriptor_vars.get(source_name)
-            if descriptor is None:
-                descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
-                self.prologue_descriptor_vars[source_name] = descriptor
-                source_var = self.args.input(source_name)
-                source_k = texpr(self.rename_indexing(source_size[0]))
-                self.prologue.writeline(
-                    f"{descriptor} = tl.make_tensor_descriptor("
-                    f"{source_var}, shape=[{source_k}, 64], strides=[64, 1], "
-                    f"block_shape=[{block_shape[0]}, 64])"
-                )
-            descriptor_names.append(descriptor)
-
-        return (
-            f"{output_name}_left = {descriptor_names[0]}.load([{offsets[0]}, 0])\n"
-            f"{output_name}_right = {descriptor_names[1]}.load([{offsets[0]}, 0])\n"
-            f"{output_name} = tl.cat({output_name}_left, {output_name}_right, "
-            "dim=1).to(tl.bfloat16)"
-        )
-
-    def load_prologue_descriptor(
-        self,
-        name: str,
-        index: sympy.Expr,
-        index_names: tuple[str, ...],
-        expected_size: tuple[sympy.Expr, ...],
-        offsets: tuple[str, ...],
-        block_shape: tuple[str, ...],
-    ) -> CSEVariable:
-        """Load a contiguous rank-2 FP32 or BF16 prologue source through TMA."""
-        buffer = V.graph.get_buffer(name)
-        size = tuple(V.graph.sizevars.simplify(s) for s in buffer.get_size())
-        stride = tuple(V.graph.sizevars.simplify(s) for s in buffer.get_stride())
-        expected_index = sympy_dot(
-            stride,
-            [sympy.Symbol(index_name, integer=True) for index_name in index_names],
-        )
-        if (
-            len(size) != 2
-            or len(stride) != 2
-            or buffer.get_dtype() not in (torch.float32, torch.bfloat16)
-            or size != expected_size
-            or not V.graph.sizevars.statically_known_equals(stride[1], 1)
-            or not V.graph.sizevars.statically_known_equals(stride[0], size[1])
-            or not V.graph.sizevars.statically_known_equals(
-                buffer.get_layout().offset, 0
-            )
-            # CSEProxy canonicalizes the exact contiguous expression to xindex.
-            or not (
-                str(index) == "xindex"
-                or V.graph.sizevars.statically_known_equals(index, expected_index)
-            )
-        ):
-            return super().load(name, index)
-
-        descriptor = self.prologue_descriptor_vars.get(name)
-        if descriptor is None:
-            descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
-            self.prologue_descriptor_vars[name] = descriptor
-            var = self.args.input(name)
-            shape_str = ", ".join(texpr(self.rename_indexing(s)) for s in size)
-            stride_str = ", ".join(texpr(self.rename_indexing(s)) for s in stride)
-            block_shape_str = ", ".join(block_shape)
-            self.prologue.writeline(
-                f"{descriptor} = tl.make_tensor_descriptor("
-                f"{var}, shape=[{shape_str}], strides=[{stride_str}], "
-                f"block_shape=[{block_shape_str}])"
-            )
-
-        return self.cse.generate(
-            self.loads,
-            f"{descriptor}.load([{', '.join(offsets)}])",
-            dtype=buffer.get_dtype(),
-            shape=block_shape,
-        )
-
-    def unfused_input(
-        self,
-        input_name: str,
-        code: str,
-        indent_width: int = 4,
-    ) -> str:
-        """Emit ``code`` only when ``input_name`` was not prologue-fused."""
-        input_node = self.named_input_nodes[input_name]
-        hook_key = f"<UNFUSED_INPUT_{input_name}_{self._gen_tmp_var()}>"
-
-        def hook() -> str:
-            if input_node.get_name() in self.prologue_fused_inputs:
-                return ""
-            return textwrap.indent(code, " " * indent_width).strip()
 
         return self._register_hook(hook_key, hook)
 
@@ -1811,10 +1606,9 @@ class TritonTemplateKernel(TritonKernel):
                     raise AssertionError(
                         "Blocking indexing requires passing in val_shape"
                     )
-                if len(val_shape) != len(lengths):
+                if len(val_shape) != 2:
                     raise AssertionError(
-                        "Blocking indexing requires one value dimension per output "
-                        f"dimension, got {len(val_shape)} and {len(lengths)}"
+                        "Blocking indexing only supports 2D data at this time"
                     )
                 if mask:
                     raise AssertionError("Mask is not supported with blocking indexing")
@@ -1844,7 +1638,7 @@ class TritonTemplateKernel(TritonKernel):
                         intermediate_lines.extend(
                             self._generate_index_from_tma_index(
                                 name,
-                                name.replace("index", "offset"),
+                                "xoffset" if name == "xindex" else "yoffset",
                                 index_symbols[i],
                                 val_shape[i],
                                 i,
@@ -1857,7 +1651,7 @@ class TritonTemplateKernel(TritonKernel):
                             self._generated_mask_for_tma(
                                 name,
                                 self.size(None, i),
-                                name.replace("index", "mask"),
+                                "xmask" if name == "xindex" else "ymask",
                             )
                         )
                         # Update the val_shape information to use consistent naming
@@ -2049,7 +1843,6 @@ class TritonTemplateKernel(TritonKernel):
                 self.stride,
                 self.store_output,
                 self.load_input,
-                self.unfused_input,
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,
@@ -4085,11 +3878,15 @@ def create_inputs_key(input_nodes) -> str:
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    # bfx9 has no legacy equivalent, and the legacy getter may reject it.
+    if precision != "bfx9":
+        precision = torch.get_float32_matmul_precision()
     return ":".join(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            precision,
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
@@ -4396,8 +4193,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
         if config.autotune_in_subproc or has_cutlass:
-            # Warmup the subprocess pool early so it's ready for benchmarking
-            torch._inductor.autotune_process.get_tuning_process_pool()
+            # Initialize the worker pool (subprocess or thread) so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_pool()
 
         precompile_fn = self.make_precompile_fn(
             choices,
