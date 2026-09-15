@@ -486,6 +486,11 @@ class _SingleLevelFunction(
         corresponding input. If an input is not a Tensor or is a Tensor not
         requiring grads, you can just pass None as a gradient for that input.
 
+        The strides of the gradients passed to :func:`backward` are undefined:
+        they are not guaranteed to be contiguous or to match the strides of the
+        corresponding forward outputs, so implementations must not assume a
+        particular memory layout.
+
         The context can be used to retrieve tensors saved during the forward
         pass. It also has an attribute :attr:`ctx.needs_input_grad` as a tuple
         of booleans representing whether each input needs gradient. E.g.,
