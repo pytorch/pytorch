@@ -51,7 +51,7 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties, InductorMeta
+from ..runtime.hints import DeviceProperties, InductorMeta, ReductionHint
 from ..runtime.runtime_utils import (
     green_text,
     last_power_of_2,
@@ -77,7 +77,7 @@ from ..utils import (
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
-from .multi_kernel import MultiKernel, SizeHintMultiKernel
+from .multi_kernel import MultiKernel, MultiKernelPlan, SizeHintMultiKernel
 from .simd_kernel_features import (
     DisableReduction,
     EnableReduction,
@@ -3613,6 +3613,134 @@ class SIMDScheduling(BaseScheduling):
             raise AssertionError("sub-parent reduction plan was lost before codegen")
         return self._codegen_reduction_with_sub_parent_epilogue(nodes, plan)
 
+    def _codegen_single_kernel_for_plan(self, node):
+        nodes = list(node.get_nodes())
+        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+        tiling, tiling_score = self.get_tiling_and_scores(
+            node_schedule,
+            kernel_features.numel,
+            kernel_features.reduction_numel,
+            kernel_features.coalesce_analysis,
+        )
+        with config.patch("triton.multi_kernel", 0):
+            kernels = self.create_kernel_choices(
+                kernel_features,
+                [tiling],
+                {
+                    "features": kernel_features,
+                    "tiling_scores": tiling_score,
+                },
+            )
+        if len(kernels) != 1:
+            raise AssertionError(
+                f"expected one bounded kernel choice, got {len(kernels)}"
+            )
+        kernel = kernels[0]
+        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        config_patches = self._collect_config_patches(node_schedule)
+        with V.set_kernel_handler(kernel), config.patch(**config_patches):
+            src_code = kernel.codegen_kernel()
+        kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+        kernel.code_hash = code_hash(src_code)
+        return kernel, node_schedule
+
+    def codegen_outer_reduction_plans(self, node):
+        """Codegen and select one-pass versus structural outer-reduction plans."""
+        if not isinstance(node, scheduler.FusedOuterReductionPlans):
+            raise AssertionError(f"unexpected outer reduction plan type: {type(node)}")
+        partials = node.partial_reductions
+        finals = node.final_reductions
+        if len(partials) != len(finals) or not all(
+            isinstance(snode.node, ir.ComputedBuffer) for snode in (*partials, *finals)
+        ):
+            raise AssertionError(
+                "outer reduction plans require paired computed buffers"
+            )
+
+        # The structural kernels use the IR selected by Reduction.create().
+        partial_kernel, partial_schedule = self._codegen_single_kernel_for_plan(
+            node.partial_node
+        )
+        final_kernels_and_schedules = [
+            self._codegen_single_kernel_for_plan(final_node)
+            for final_node in node.final_nodes
+        ]
+
+        # Reconstruct the original reduction in a temporary scheduler node and
+        # make it write the structural plan's externally visible output.
+        active_scheduler = self.scheduler
+        if active_scheduler is None:
+            raise AssertionError("outer reduction plan codegen requires a scheduler")
+        with contextlib.ExitStack() as stack:
+            original_names = []
+            one_pass_nodes = []
+            try:
+                for partial, final in zip(partials, finals):
+                    partial_buffer = partial.node
+                    final_buffer = final.node
+                    if not (
+                        isinstance(partial_buffer, ir.ComputedBuffer)
+                        and isinstance(final_buffer, ir.ComputedBuffer)
+                    ):
+                        raise AssertionError("expected computed reduction buffers")
+                    original_names.append((partial_buffer, partial_buffer.name))
+                    stack.enter_context(partial_buffer.with_original_inner_fn())
+                    partial_buffer.name = final_buffer.name
+                    partial_buffer.layout = final_buffer.layout
+                    if not isinstance(partial_buffer.data, ir.Reduction):
+                        raise AssertionError("expected reconstructed Reduction")
+                    partial_buffer.data = dataclasses.replace(
+                        partial_buffer.data,
+                        reduction_hint=ReductionHint.OUTER_NO_SPLIT,
+                    )
+                    one_pass_node = scheduler.SchedulerNode(
+                        active_scheduler, partial_buffer
+                    )
+                    # These temporary nodes are created after scheduler
+                    # initialization; inherit the ordering metadata required
+                    # to form a fused codegen-only owner.
+                    for attr in (
+                        "min_order",
+                        "max_order",
+                        "min_input_distance",
+                        "max_input_distance",
+                    ):
+                        setattr(one_pass_node, attr, getattr(partial, attr))
+                    one_pass_nodes.append(one_pass_node)
+                one_pass_owner = (
+                    one_pass_nodes[0]
+                    if len(one_pass_nodes) == 1
+                    else scheduler.FusedSchedulerNode(active_scheduler, one_pass_nodes)
+                )
+                one_pass_kernel, _ = self._codegen_single_kernel_for_plan(
+                    one_pass_owner
+                )
+            finally:
+                for partial_buffer, original_name in original_names:
+                    partial_buffer.name = original_name
+
+        final_kernels = [kernel for kernel, _schedule in final_kernels_and_schedules]
+        plan = MultiKernelPlan([[one_pass_kernel], [partial_kernel, *final_kernels]])
+        with V.set_kernel_handler(plan):
+            structural_schedules = [partial_schedule] + [
+                schedule for _kernel, schedule in final_kernels_and_schedules
+            ]
+            for scheduled_node in itertools.chain.from_iterable(structural_schedules):
+                if isinstance(scheduled_node, BaseSchedulerNode):
+                    scheduled_node.mark_run()
+        self._launch_kernel_and_cleanup(
+            plan,
+            list(node.get_nodes()),
+            free_buffers=False,
+        )
+        # The selected plan writes the final buffers, but those buffers retain
+        # the operation names of the structural final-reduction nodes.  Match
+        # hooks against physical output names from the one-pass kernel.
+        self._codegen_intermediate_hooks(one_pass_kernel, finals, use_buffer_names=True)
+        self.free_buffers_in_scheduler()
+
     def _codegen_nested_reduction(self, node, plan):
         """
         Generate a single kernel with an outer reduction, a group
@@ -4354,27 +4482,35 @@ class SIMDScheduling(BaseScheduling):
             free_buffers=False,
         )
 
-        if (
+        self._codegen_intermediate_hooks(kernels[0], kernel_features.scheduler_nodes())
+
+        self.free_buffers_in_scheduler()
+
+    @staticmethod
+    def _codegen_intermediate_hooks(
+        kernel, nodes, *, use_buffer_names: bool = False
+    ) -> None:
+        if not (
             V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
             and config.generate_intermediate_hooks
         ):
-            # Not every node in the schedule will actually be live on output;
-            # we can't check dead buffers.
-            live_outs = kernels[0].args.live_output_buffers()
-            for node in kernel_features.scheduler_nodes():
-                name = node.get_name()
-                if name not in live_outs:
-                    continue
-                if node.node is None:
-                    raise AssertionError("expected node.node to not be None")
-                origin_node = node.node.get_origin_node()
-                if origin_node is not None:
-                    counters["inductor"]["intermediate_hooks"] += 1
-                    V.graph.wrapper_code.writeline(
-                        f"run_intermediate_hooks({origin_node.name!r}, {name})"
-                    )
+            return
 
-        self.free_buffers_in_scheduler()
+        # Not every node in the schedule will actually be live on output;
+        # we can't check dead buffers.
+        live_outs = kernel.args.live_output_buffers()
+        for node in nodes:
+            if node.node is None:
+                raise AssertionError("expected node.node to not be None")
+            origin_node = node.node.get_origin_node()
+            names = node.get_buffer_names() if use_buffer_names else [node.get_name()]
+            for name in names:
+                if name not in live_outs or origin_node is None:
+                    continue
+                counters["inductor"]["intermediate_hooks"] += 1
+                V.graph.wrapper_code.writeline(
+                    f"run_intermediate_hooks({origin_node.name!r}, {name})"
+                )
 
     def _launch_kernel_and_cleanup(
         self,
