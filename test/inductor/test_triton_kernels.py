@@ -493,6 +493,46 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Make sure it is NOT modified
         self.assertEqual(output, torch.zeros_like(t1))
 
+    @requires_cuda_and_triton
+    def test_triton_kernel_functional_e8m0_arg(self):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.fx_passes.post_grad import (
+            decompose_triton_kernel_wrapper_functional,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        kernel_side_table.reset_table()
+        kernel_idx = kernel_side_table.add_kernel(add_kernel_with_optional_param)
+        constant_args_idx = kernel_side_table.add_constant_args(
+            {"n_elements": 16, "ARGS_PASSED": "one", "BLOCK_SIZE": 16}
+        )
+
+        def copy_e8m0(scale, output):
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_idx,
+                constant_args_idx=constant_args_idx,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={
+                    "in_ptr0": scale,
+                    "in_ptr1": scale,
+                    "out_ptr": output,
+                },
+                tensors_to_clone=["out_ptr"],
+            )
+            return out["out_ptr"]
+
+        raw_scale = torch.arange(16, dtype=torch.uint8, device=GPU_TYPE)
+        scale_e8m0 = raw_scale.view(torch.float8_e8m0fnu)
+        output = torch.zeros_like(raw_scale)
+        gm = make_fx(copy_e8m0, tracing_mode="fake")(scale_e8m0, output)
+        decompose_triton_kernel_wrapper_functional(gm.graph)
+        functional_nodes = gm.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+        )
+        self.assertEqual(len(functional_nodes), 0)
+
     @requires_gpu
     def test_triton_kernel_functionalize(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
