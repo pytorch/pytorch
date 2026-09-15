@@ -847,24 +847,27 @@ class AOTCompiledFunction:
 
     def _missing_global_hint(self) -> str:
         """Advice for a guard that failed on a global its scope does not define,
-        worded for the scope the guards were actually resolved against."""
+        worded for the scope the guards were actually resolved against. Returns a
+        bare sentence; a caller that continues a line of its own adds the
+        separator."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
+            rebuilt = (
+                "a guarded global is missing from the scope rebuilt from the artifact"
+            )
             if self._forward_not_resolved_reason is not None:
                 # A module load takes no f_globals=, which is the function load's
                 # parameter; _load_aot_compiled_module takes only the bytes.
                 return (
-                    " -- a guarded global is missing from the scope rebuilt from "
-                    "the artifact. That scope was rebuilt because "
+                    f"{rebuilt}. That scope was rebuilt because "
                     f"{self._forward_not_resolved_reason}, or pass "
                     "AOTCompiledModel.deserialize a guard_globals= scope that "
                     "carries the name."
                 )
             return (
-                " -- a guarded global is missing from the scope rebuilt from the "
-                "artifact; load with an f_globals= that is a complete live scope "
-                "carrying the name -- normally vars(mod) for the module mod that "
-                "defined the function, which is usually not the module doing the "
-                "loading -- so the guard can resolve it."
+                f"{rebuilt}; load with an f_globals= that is a complete live "
+                "scope carrying the name -- normally vars(mod) for the module "
+                "mod that defined the function, which is usually not the module "
+                "doing the loading -- so the guard can resolve it."
             )
         if self._guard_scope is _GuardScope.SUPPLIED:
             # SUPPLIED implies a scope; named by its module when it is one,
@@ -873,16 +876,16 @@ class AOTCompiledFunction:
             namespace = _module_namespace_name(self._guard_globals or {})
             where = "" if namespace is None else f", here vars({namespace})"
             return (
-                " -- a guarded global is missing from the live scope this "
-                f"artifact was loaded against{where}; define it there so the "
-                "guard can resolve it."
+                "a guarded global is missing from the live scope this artifact "
+                f"was loaded against{where}; define it there so the guard can "
+                "resolve it."
             )
         # CAPTURED: the guards hold the globals they were traced against BY
         # REFERENCE, so a name deleted after capture can be defined there again
         # to make the guard resolve -- the same advice as SUPPLIED, worded for
         # the dict this path actually used.
         return (
-            " -- a guarded global is missing from the globals of the module the "
+            "a guarded global is missing from the globals of the module the "
             "compiled function was traced in, which its guards still resolve "
             "against; define it there so the guard can resolve it."
         )
@@ -899,7 +902,7 @@ class AOTCompiledFunction:
                 # ends in a newline, so the hint has to be appended to the
                 # stripped message: otherwise its inline continuation lands on a
                 # line of its own, starting with a stray space.
-                msg = msg.rstrip() + self._missing_global_hint()
+                msg = msg.rstrip() + " -- " + self._missing_global_hint()
             raise RuntimeError(msg)
         return self.fn(*args, **kwargs)
 
@@ -1458,7 +1461,11 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
-def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
+# Parameters as (name, kind, default id), co_freevars, closure cell ids.
+_BindingKey = tuple[tuple[tuple[str, int, int], ...], tuple[str, ...], tuple[int, ...]]
+
+
+def _binding_key(artifacts: CompileArtifacts) -> _BindingKey:
     # What prepare_f_locals reads, with defaults and cells by identity. Signature
     # equality is unusable here: Parameter.__eq__ takes bool() of
     # `default == default`, which raises for a tensor default.
@@ -1495,25 +1502,30 @@ class AOTCompiledModel:
     would pass can therefore be outranked by a later result whose first check
     accepted. When neither pass accepts, the call is served by the first result
     that opted out through ``disable_guard_check()``, from any index, and only
-    when none did is it handed to ``compiled_results[0]``, which raises
-    ``GuardManager check failed``. That is all the flag does here: ``check()``
-    never reads it, so an opted-out result is scanned and re-checked like any
-    other and is served in index order when its check accepts, and on the
-    strength of its opt-out alone only after both the scan and the re-check
-    found no match.
+    when none did does it raise the ``No AOT compiled graph matched this call``
+    report below. That is all the flag does here: ``check()`` never reads it,
+    so an opted-out result is scanned and re-checked like any other and is
+    served in index order when its check accepts, and on the strength of its
+    opt-out alone only after both the scan and the re-check found no match; one
+    opt-out replaces the ``No AOT compiled graph matched this call`` error for
+    the whole model.
+
+    When no result matches and none opted out, the call raises ``RuntimeError``
+    with a report headed ``No AOT compiled graph matched this call``: one line
+    per compiled result quoting the guards that refused it, at most one
+    ``For [i]:`` hint, for the first entry whose guards failed on a global the
+    process does not define, and the advice to add a ``ModelInput`` or check
+    which guards ``guard_filter_fn`` kept.
     """
 
     model: torch.nn.Module
     compiled_results: list[AOTCompiledFunction]
-    # The results last judged and whether one bind of a call serves them all.
-    # compiled_results is public, so a call that finds them changed decides
-    # again. One field on purpose: a single attribute store publishes contents
-    # and verdict together (an instance-dict store is atomic under the GIL and
-    # locked on free-threaded builds), so a reader sees the old pair or the new
-    # one, never one list's contents beside another's verdict; two fields have
-    # no store order that keeps them consistent. Weak references, so a result
-    # the caller dropped is not kept alive here. The default is the verdict
-    # over no results.
+    # The results last judged, weakly so a dropped one is not kept alive, and
+    # whether one bind of a call serves them all; the default is the verdict
+    # over no results. One field so one store publishes both and a reader never
+    # sees one list's contents beside another's verdict. A hint, not a lock:
+    # the last writer wins, and a call that finds the contents changed decides
+    # again.
     _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
         dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
@@ -1533,23 +1545,24 @@ class AOTCompiledModel:
         # compiled_results is public, so read it once: every stage below judges
         # the results this call began with, on the binding decided over them.
         results = tuple(self.compiled_results)
-        bound: list[dict[str, object]] = []
-        # Whether results that bind alike reuse the first one's binding (a bind
-        # costs more than a check()), decided once a second result is reached
-        # so a call the first result serves pays nothing for it.
-        shared: bool | None = None
-        # check() ignores _guard_check_enabled, so scan every result.
-        for result in results:
-            if bound and shared is None:
-                shared = self._binds_alike(results)
-            if shared:
-                f_locals = bound[0]
-            else:
+        # check() ignores _guard_check_enabled, so scan every result. The first
+        # is bound and checked as at a single-result model; only a call it
+        # refuses asks whether the rest bind alike and can reuse its binding, a
+        # bind costing more than a check(). The reuse rests on check() only
+        # reading the f_locals it is handed, so one dict can serve every tree.
+        first = results[0]
+        f_locals = first.prepare_f_locals(self.model, *args, **kwargs)
+        if first._live_guard_manager().check(f_locals):
+            # The guards just passed: call fn rather than result(), whose
+            # __call__ would bind and evaluate them again.
+            return first.fn(self.model, *args, **kwargs)
+        bound = [f_locals]
+        shared = len(results) > 1 and self._binds_alike(results)
+        for result in results[1:]:
+            if not shared:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
             bound.append(f_locals)
             if result._live_guard_manager().check(f_locals):
-                # The guards just passed: call fn rather than result(), whose
-                # __call__ would bind and evaluate them again.
                 return result.fn(self.model, *args, **kwargs)
         # One exit of check() refuses without running the tree: a tag-safe root's
         # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
@@ -1566,9 +1579,37 @@ class AOTCompiledModel:
         for result in results:
             if not result._guard_check_enabled:
                 return result.fn(self.model, *args, **kwargs)
-        # Every result's guards failed and none opted out, so results[0] is
-        # enabled and raises the guard check error.
-        return results[0](self.model, *args, **kwargs)
+        raise RuntimeError(self._no_match_report(results, bound))
+
+    def _no_match_report(
+        self, results: tuple[AOTCompiledFunction, ...], bound: list[dict[str, object]]
+    ) -> str:
+        """A report naming every compiled input and what its guards said.
+
+        ``results`` and ``bound`` are the results the dispatch above judged and
+        the f_locals it judged them on, one per result, so the report explains
+        the same call rather than a fresh one."""
+        lines = [
+            "No AOT compiled graph matched this call. Tried "
+            f"{len(results)} compiled input(s):"
+        ]
+        missing_at: int | None = None
+        for i, result in enumerate(results):
+            reason = result._live_guard_manager().check_verbose(bound[i])
+            parts = reason.verbose_code_parts
+            if missing_at is None and any(map(_names_a_missing_global, parts)):
+                missing_at = i
+            lines.append(f"  [{i}] {'; '.join(parts)}")
+        if missing_at is not None:
+            hint = results[missing_at]._missing_global_hint()
+            lines.append(f"For [{missing_at}]: {hint}")
+        lines.append(
+            "Add a ModelInput covering this call, or check whether "
+            "guard_filter_fn kept a guard this call cannot satisfy -- both "
+            "belong to the process that compiles the artifacts, which need not "
+            "be the one that loaded them."
+        )
+        return "\n".join(lines)
 
     def serialize(self) -> bytes:
         # Nothing threads external_data down this path (_save_aot_compiled_module
