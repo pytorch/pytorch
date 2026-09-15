@@ -1306,6 +1306,16 @@ class FSDPParam:
         return local_grad.to(device=self.sharded_param.device)
 
     def _redistribute_pending_grad(self, grad: DTensor) -> DTensor:
+        if grad._spec == self._pending_grad_spec:
+            return grad
+        grad = self._normalize_pending_grad(grad)
+        if self._pending_unsharded_grad_spec is not None:
+            self._pending_unsharded_grad_spec = replace(
+                self._pending_unsharded_grad_spec, tensor_meta=grad._spec.tensor_meta
+            )
+        return grad
+
+    def _normalize_pending_grad(self, grad: DTensor) -> DTensor:
         target_spec = self._pending_grad_spec
         if target_spec is None:
             raise AssertionError("Expected a saved pending gradient spec")
@@ -1348,10 +1358,6 @@ class FSDPParam:
             if torch._C._overlaps(local_grad, grad._local_tensor):
                 local_grad = local_grad.clone()
             grad = _from_local_no_grad(local_grad, target_spec)
-        if self._pending_unsharded_grad_spec is not None:
-            self._pending_unsharded_grad_spec = replace(
-                self._pending_unsharded_grad_spec, tensor_meta=source_spec.tensor_meta
-            )
         return grad
 
     @torch.no_grad()
@@ -1495,6 +1501,78 @@ class FSDPParam:
         grad = self.unsharded_param.grad
         if grad is None:
             raise AssertionError("Expects unsharded_param.grad to not be None")
+        return self._get_grad_inner_tensor(grad)
+
+    @property
+    @torch.no_grad()
+    def unsharded_accumulated_grad(self) -> torch.Tensor | None:
+        """Read a storage-sharing unreduced gradient without communication.
+
+        This compatibility view follows the current owner's device and lifetime,
+        rather than the former separate buffer. Use the data accessor to
+        normalize replacement layouts that require redistribution.
+        """
+        return self._get_unsharded_accumulated_grad(normalize=False)
+
+    def _get_unsharded_accumulated_grad(
+        self, *, normalize: bool
+    ) -> torch.Tensor | None:
+        if not self._grad_is_partial:
+            param = getattr(self, "_unsharded_param", None)
+            return param.grad if param is not None else None
+        grad = self.sharded_param.grad
+        if grad is None:
+            return None
+        if not isinstance(grad, DTensor):
+            raise AssertionError("Expected a DTensor for the pending gradient")
+        if grad._spec is not self._pending_grad_spec:
+            if normalize:
+                grad = self._normalize_pending_grad(grad)
+            else:
+                source_spec = grad._spec
+                target_spec = self._pending_grad_spec
+                if target_spec is None:
+                    raise AssertionError("Expected a saved pending gradient spec")
+                if source_spec.mesh != target_spec.mesh:
+                    raise ValueError(
+                        "Replacing a pending gradient with a DTensor on a different "
+                        "mesh is not supported"
+                    )
+                if source_spec.tensor_meta is None or target_spec.tensor_meta is None:
+                    raise AssertionError("Expected pending gradient tensor metadata")
+                if source_spec.tensor_meta.dtype != target_spec.tensor_meta.dtype:
+                    raise ValueError(
+                        "Replacement pending gradient must preserve its dtype"
+                    )
+                if (
+                    source_spec.placements != target_spec.placements
+                    or source_spec.shard_order != target_spec.shard_order
+                ):
+                    raise RuntimeError(
+                        "Reading unsharded_accumulated_grad requires redistribution "
+                        "after a gradient layout change. Read sharded_param.grad for "
+                        "the current layout, or use unsharded_accumulated_grad_data "
+                        "on all participating ranks to normalize it."
+                    )
+        local_grad = grad._local_tensor
+        if normalize:
+            local_grad = local_grad.to(device=self.device)
+        if self._pending_unsharded_grad_spec is None:
+            return local_grad
+        return _from_local_no_grad(
+            local_grad,
+            replace(
+                self._pending_unsharded_grad_spec, tensor_meta=grad._spec.tensor_meta
+            ),
+        )
+
+    @property
+    @torch.no_grad()
+    def unsharded_accumulated_grad_data(self) -> torch.Tensor:
+        """Read normalized local data on the compute device; may copy and communicate."""
+        grad = self._get_unsharded_accumulated_grad(normalize=True)
+        if grad is None:
+            raise AssertionError("Expects unsharded_accumulated_grad to not be None")
         return self._get_grad_inner_tensor(grad)
 
     @property
