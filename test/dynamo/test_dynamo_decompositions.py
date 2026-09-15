@@ -8,6 +8,8 @@ import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_WINDOWS,
     run_tests,
     skipIfCrossRef,
     TestCase,
@@ -607,9 +609,20 @@ class GraphModule(torch.nn.Module):
         )
 
 
+def _is_windows_arm64():
+    return IS_WINDOWS and IS_ARM64
+
+
 @xfailIfNoAcceleratorTriton
 class TestDynamoDecompositionsNumerics(TestCase):
     """Numerics tests for dynamo decompositions across devices."""
+
+    def assertAddTensorAlphaFmaEqual(self, expected, actual, device):
+        # WoA can differ by a few fp32 ULPs between eager ATen and Inductor C++ FMA.
+        if device == "cpu" and _is_windows_arm64():
+            self.assertEqual(expected, actual)
+        else:
+            self.assertEqual(expected, actual, atol=0, rtol=0)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
@@ -802,7 +815,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
         expected = fn(x.clone(), other, alpha)
         actual = torch.compile(fn, fullgraph=True)(x.clone(), other, alpha)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(expected, actual, atol=0, rtol=0)
+        self.assertAddTensorAlphaFmaEqual(expected, actual, device)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
