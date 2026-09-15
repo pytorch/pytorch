@@ -6,51 +6,56 @@ import unittest
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
+from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
 
-class PackedSequenceTest(TestCase):
-    _type_by_name = {
-        "torch.DoubleTensor": (torch.DoubleTensor, "double"),
-        "torch.FloatTensor": (torch.FloatTensor, "float"),
-        # We leave out `'torch.HalfTensor': (torch.HalfTensor, 'half'),`
-        # because of an error in `pad_packed_sequence`
-        # > AttributeError: 'torch.HalfTensor' object has no attribute 'fill_'
-        "torch.LongTensor": (torch.LongTensor, "long"),
-        "torch.IntTensor": (torch.IntTensor, "int"),
-        "torch.ShortTensor": (torch.ShortTensor, "short"),
-        "torch.CharTensor": (torch.CharTensor, "char"),
-        "torch.ByteTensor": (torch.ByteTensor, "byte"),
+class _PackedSequenceTestMixin:
+    batch_size = 5
+    max_length = 6
+
+    _dtype_by_name = {
+        "torch.DoubleTensor": (torch.float64, "double"),
+        "torch.FloatTensor": (torch.float32, "float"),
+        # float16 is excluded because `pad_packed_sequence` raised `AttributeError:
+        # 'torch.HalfTensor' object has no attribute 'fill_'` back when this map held
+        # legacy tensor types. Probably stale now, but enabling a dtype is out of scope.
+        "torch.LongTensor": (torch.int64, "long"),
+        "torch.IntTensor": (torch.int32, "int"),
+        "torch.ShortTensor": (torch.int16, "short"),
+        "torch.CharTensor": (torch.int8, "char"),
+        "torch.ByteTensor": (torch.uint8, "byte"),
     }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.batch_size = 5
-        self.max_length = 6
-
-    def _ordered_sequence(self, tensor_type):
+    def _ordered_sequence(self, dtype, device=None):
         """Create ordered list of random sequences"""
         seqs = [
-            tensor_type(random.randint(1, self.max_length))
+            torch.empty(random.randint(1, self.max_length), dtype=dtype, device=device)
             for _ in range(self.batch_size)
         ]
-        if tensor_type == torch.ByteTensor:
-            seqs = [s.random_(0, 256) for s in seqs]
-        else:
-            seqs = [s.random_(-128, 128) for s in seqs]
+        low, high = (0, 256) if dtype == torch.uint8 else (-128, 128)
+        seqs = [s.random_(low, high) for s in seqs]
         ordered = sorted(seqs, key=len, reverse=True)
         return ordered
 
-    def _padded_sequence(self, tensor_type):
+    def _padded_sequence(self, dtype, device=None):
         """Create Tensor of random padded sequences"""
-        ordered = self._ordered_sequence(tensor_type)
+        ordered = self._ordered_sequence(dtype, device)
         lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
+
+
+class PackedSequenceTest(_PackedSequenceTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
@@ -58,10 +63,10 @@ class PackedSequenceTest(TestCase):
     )
     def test_type_casts(self):
         """Test type casting of `PackedSequence` against type casting of tensor"""
-        for input_type, _ in self._type_by_name.values():
-            for expected_type_str, (_, cast_str) in self._type_by_name.items():
+        for input_dtype, _ in self._dtype_by_name.values():
+            for expected_type_str, (_, cast_str) in self._dtype_by_name.items():
                 for enforce_sorted in [True, False]:
-                    padded, lengths = self._padded_sequence(input_type)
+                    padded, lengths = self._padded_sequence(input_dtype)
                     packed = rnn_utils.pack_padded_sequence(
                         padded, lengths, enforce_sorted=enforce_sorted
                     )
@@ -70,36 +75,92 @@ class PackedSequenceTest(TestCase):
                     unpacked, _ = rnn_utils.pad_packed_sequence(masked)
                     self.assertEqual(unpacked.type(), expected_type_str)
 
-    def test_wrong_order(self):
-        a = torch.ones(25, 300)
-        b = torch.ones(22, 300)
+    def test_pad_sequence_with_non_iterable_sequences(self):
+        msg = r"Expected iterable for input sequences, but got arg of type"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.nn.utils.rnn.pad_sequence(5)
+
+    # The dynamo gate is inherited verbatim from the pre-refactor `test_to`.
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
+        "Frame Handling Difference between Python versions",
+    )
+    def test_to_without_device_change(self):
+        """`to()` is a no-op when it would not move the sequence"""
+        for enforce_sorted in (True, False):
+            padded, lengths = self._padded_sequence(torch.int32)
+            a = rnn_utils.pack_padded_sequence(
+                padded, lengths, enforce_sorted=enforce_sorted
+            ).cpu()
+
+            self.assertIs(a, a.to("cpu"))
+            self.assertIs(a, a.cpu())
+            self.assertIs(a, a.to("cpu", dtype=torch.int32))
+            self.assertEqual(a.long(), a.to(torch.int64))
+
+
+class PackedSequenceTestDevice(_PackedSequenceTestMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
+        "Frame Handling Difference between Python versions",
+    )
+    def test_to(self, device):
+        for enforce_sorted in (True, False):
+            padded, lengths = self._padded_sequence(torch.int32)
+            a = rnn_utils.pack_padded_sequence(
+                padded, lengths, enforce_sorted=enforce_sorted
+            ).cpu()
+
+            # self.device_type is the bare device string, device the indexed
+            # one (e.g. "cuda" vs "cuda:0"); both must round-trip.
+            for dev in (self.device_type, device):
+                b = a.to(dev)
+                self.assertIs(b, b.to(dev))
+                self.assertEqual(a, b.to("cpu"))
+                self.assertEqual(b, a.to(dev))
+                self.assertEqual(a, b.to("cpu", dtype=torch.int32))
+                self.assertIs(b, b.to(dtype=torch.int32))
+                self.assertEqual(b.long(), b.to(dtype=torch.int64))
+
+    @deviceCountAtLeast(2)
+    def test_to_multiple_devices(self, devices):
+        padded, lengths = self._padded_sequence(torch.int32)
+        a = rnn_utils.pack_padded_sequence(padded, lengths).cpu()
+        for dev in devices:
+            b = a.to(dev)
+            self.assertEqual(b.data.device, torch.device(dev))
+            self.assertEqual(a, b.to("cpu"))
+
+    def test_wrong_order(self, device):
+        a = torch.ones(25, 300, device=device)
+        b = torch.ones(22, 300, device=device)
         b_a = rnn_utils.pad_sequence([b, a])
         self.assertRaises(
             RuntimeError,
             lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25], enforce_sorted=True),
         )
 
-    def test_pad_sequence_with_tensor_sequences(self):
+    def test_pad_sequence_with_tensor_sequences(self, device):
         seq_tuple_input = torch.nn.utils.rnn.pad_sequence(
-            (torch.tensor([[7, 6]]), torch.tensor([[-7, -1]]))
+            (
+                torch.tensor([[7, 6]], device=device),
+                torch.tensor([[-7, -1]], device=device),
+            )
         )
         seq_tensor_input = torch.nn.utils.rnn.pad_sequence(
-            torch.tensor([[[7, 6]], [[-7, -1]]])
+            torch.tensor([[[7, 6]], [[-7, -1]]], device=device)
         )
         self.assertEqual(seq_tuple_input, seq_tensor_input)
         self.assertEqual(seq_tuple_input.shape, torch.Size([1, 2, 2]))
-
-    def test_pad_sequence_with_non_iterable_sequences(self):
-        msg = r"Expected iterable for input sequences, but got arg of type"
-        with self.assertRaisesRegex(RuntimeError, msg):
-            torch.nn.utils.rnn.pad_sequence(5)
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
         "Frame Handling Difference between Python versions",
     )
-    def test_total_length(self):
-        padded, lengths = self._padded_sequence(torch.FloatTensor)
+    def test_total_length(self, device):
+        padded, lengths = self._padded_sequence(torch.float32, device)
         max_length = max(lengths)
         packed = rnn_utils.pack_padded_sequence(padded, lengths)
         # test ValueError if total_length < max_length
@@ -143,44 +204,14 @@ class PackedSequenceTest(TestCase):
                     ref_output = torch.cat([no_extra_pad, extra_pad], 0)
                 self.assertEqual(unpacked, ref_output)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
-        "Frame Handling Difference between Python versions",
-    )
-    def test_to(self):
-        for enforce_sorted in (True, False):
-            padded, lengths = self._padded_sequence(torch.IntTensor)
-            a = rnn_utils.pack_padded_sequence(
-                padded, lengths, enforce_sorted=enforce_sorted
-            ).cpu()
-
-            self.assertIs(a, a.to("cpu"))
-            self.assertIs(a, a.cpu())
-            self.assertIs(a, a.to("cpu", dtype=torch.int32))
-            self.assertEqual(a.long(), a.to(torch.int64))
-
-            if torch.cuda.is_available():
-                for cuda in [
-                    "cuda",
-                    "cuda:0" if torch.cuda.device_count() == 1 else "cuda:1",
-                ]:
-                    b = a.cuda(device=cuda)
-                    self.assertIs(b, b.to(cuda))
-                    self.assertIs(b, b.cuda())
-                    self.assertEqual(a, b.to("cpu"))
-                    self.assertEqual(b, a.to(cuda))
-                    self.assertEqual(a, b.to("cpu", dtype=torch.int32))
-                    self.assertIs(b, b.to(dtype=torch.int32))
-                    self.assertEqual(b.long(), b.to(dtype=torch.int64))
-
-    def test_to_memory_format(self):
+    def test_to_memory_format(self, device):
         m = torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, bias=True)
-        m = m.to(memory_format=torch.channels_last)
+        m = m.to(device=device, memory_format=torch.channels_last)
         for param in m.parameters():
             if param.dim() == 4:
                 self.assertTrue(param.is_contiguous(memory_format=torch.channels_last))
 
-    def test_pad_sequence(self):
+    def test_pad_sequence(self, device):
         def pad(tensor, length):
             return torch.cat(
                 [
@@ -192,12 +223,12 @@ class PackedSequenceTest(TestCase):
             )
 
         # single dimensional
-        a = torch.tensor([1, 2, 3])
-        b = torch.tensor([4, 5])
-        c = torch.tensor([6])
+        a = torch.tensor([1, 2, 3], device=device)
+        b = torch.tensor([4, 5], device=device)
+        c = torch.tensor([6], device=device)
 
         # batch_first = true
-        expected = torch.tensor([[4, 5, 0], [1, 2, 3], [6, 0, 0]])
+        expected = torch.tensor([[4, 5, 0], [1, 2, 3], [6, 0, 0]], device=device)
         padded = rnn_utils.pad_sequence([b, a, c], True)
         self.assertEqual(padded, expected)
 
@@ -206,7 +237,7 @@ class PackedSequenceTest(TestCase):
         self.assertEqual(padded, expected.transpose(0, 1))
 
         # padding_side = "left", batch_first=True
-        expected = torch.tensor([[0, 4, 5], [1, 2, 3], [0, 0, 6]])
+        expected = torch.tensor([[0, 4, 5], [1, 2, 3], [0, 0, 6]], device=device)
         padded = rnn_utils.pad_sequence(
             [b, a, c],
             batch_first=True,
@@ -223,12 +254,12 @@ class PackedSequenceTest(TestCase):
         self.assertEqual(padded, expected.transpose(0, 1))
 
         # pad with non-zero value
-        expected = torch.tensor([[4, 5, 1], [1, 2, 3], [6, 1, 1]])
+        expected = torch.tensor([[4, 5, 1], [1, 2, 3], [6, 1, 1]], device=device)
         padded = rnn_utils.pad_sequence([b, a, c], True, 1)
         self.assertEqual(padded, expected)
 
         # Test pad sorted sequence
-        expected = torch.tensor([[1, 2, 3], [4, 5, 0], [6, 0, 0]])
+        expected = torch.tensor([[1, 2, 3], [4, 5, 0], [6, 0, 0]], device=device)
         padded = rnn_utils.pad_sequence([a, b, c], True)
         self.assertEqual(padded, expected)
 
@@ -239,7 +270,7 @@ class PackedSequenceTest(TestCase):
             trailing_dims = [4] * num_dim
             for i in range(1, maxlen + 1):
                 seq_len = i * i
-                sequences.append(torch.rand(seq_len, 5, *trailing_dims))
+                sequences.append(torch.rand(seq_len, 5, *trailing_dims, device=device))
             random.shuffle(sequences)
             # batch first = true
             expected = torch.stack([pad(seq, maxlen * maxlen) for seq in sequences])
@@ -269,11 +300,11 @@ class PackedSequenceTest(TestCase):
             )
             self.assertEqual(padded, expected.transpose(0, 1))
 
-    def test_unpad_sequence(self):
+    def test_unpad_sequence(self, device):
         # single dimensional
-        a = torch.tensor([1, 2, 3])
-        b = torch.tensor([4, 5])
-        c = torch.tensor([6])
+        a = torch.tensor([1, 2, 3], device=device)
+        b = torch.tensor([4, 5], device=device)
+        c = torch.tensor([6], device=device)
         sequences = [a, b, c]
 
         lengths = torch.as_tensor([v.size(0) for v in sequences])
@@ -293,7 +324,7 @@ class PackedSequenceTest(TestCase):
             trailing_dims = [4] * num_dim
             for i in range(1, maxlen + 1):
                 seq_len = i * i
-                sequences.append(torch.rand(seq_len, 5, *trailing_dims))
+                sequences.append(torch.rand(seq_len, 5, *trailing_dims, device=device))
             random.shuffle(sequences)
 
             lengths = torch.as_tensor([v.size(0) for v in sequences])
@@ -305,7 +336,7 @@ class PackedSequenceTest(TestCase):
             )
             self.assertEqual(sequences, unpadded_sequences)
 
-    def test_pack_sequence(self):
+    def test_pack_sequence(self, device):
         def _compatibility_test(sequences, lengths, batch_first, enforce_sorted=False):
             padded = rnn_utils.pad_sequence(sequences, batch_first)
             packed = rnn_utils.pack_sequence(sequences, enforce_sorted)
@@ -317,11 +348,11 @@ class PackedSequenceTest(TestCase):
             self.assertEqual(packed, pack_padded)
 
         # single dimensional
-        a = torch.tensor([1, 2, 3])
-        b = torch.tensor([4, 5])
-        c = torch.tensor([6])
+        a = torch.tensor([1, 2, 3], device=device)
+        b = torch.tensor([4, 5], device=device)
+        c = torch.tensor([6], device=device)
         packed = rnn_utils.pack_sequence([a, b, c], enforce_sorted=False)
-        expected = torch.tensor([1, 4, 6, 2, 5, 3])
+        expected = torch.tensor([1, 4, 6, 2, 5, 3], device=device)
         self.assertEqual(packed.batch_sizes, [3, 2, 1])
         self.assertEqual(packed.data.data, expected)
         self.assertEqual(packed.sorted_indices, [0, 1, 2])
@@ -357,7 +388,7 @@ class PackedSequenceTest(TestCase):
             for i in range(maxlen, 0, -1):
                 seq_len = i * i
                 lengths.append(seq_len)
-                sequences.append(torch.rand(seq_len, 5, *trailing_dims))
+                sequences.append(torch.rand(seq_len, 5, *trailing_dims, device=device))
             unsorted_sequences = [s.clone() for s in sequences]
             random.shuffle(unsorted_sequences)
             unsorted_sequences_lengths = [t.size(0) for t in unsorted_sequences]
@@ -370,11 +401,11 @@ class PackedSequenceTest(TestCase):
                     unsorted_sequences, unsorted_sequences_lengths, batch_first
                 )
 
-    def test_unpack_sequence(self):
+    def test_unpack_sequence(self, device):
         # single dimensional
-        a = torch.tensor([1, 2, 3])
-        b = torch.tensor([4, 5])
-        c = torch.tensor([6])
+        a = torch.tensor([1, 2, 3], device=device)
+        b = torch.tensor([4, 5], device=device)
+        c = torch.tensor([6], device=device)
         sequences = [a, b, c]
 
         packed_sequences = rnn_utils.pack_sequence(sequences, enforce_sorted=False)
@@ -388,14 +419,14 @@ class PackedSequenceTest(TestCase):
             trailing_dims = [4] * num_dim
             for i in range(1, maxlen + 1):
                 seq_len = i * i
-                sequences.append(torch.rand(seq_len, 5, *trailing_dims))
+                sequences.append(torch.rand(seq_len, 5, *trailing_dims, device=device))
             random.shuffle(sequences)
 
             packed_sequences = rnn_utils.pack_sequence(sequences, enforce_sorted=False)
             unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
             self.assertEqual(sequences, unpacked_sequences)
 
-    def test_pack_padded_sequence(self):
+    def test_pack_padded_sequence(self, device):
         def generate_test_case(sorted_lengths, should_shuffle):
             def pad(tensor, length):
                 return torch.cat(
@@ -418,7 +449,7 @@ class PackedSequenceTest(TestCase):
                     for i, l in enumerate(sorted_lengths, 1)
                 ],
                 1,
-            )
+            ).to(device)
             expected_data = [
                 [
                     torch.arange(1.0, 6) + (i + 1) * 100 + 5 * n
@@ -434,8 +465,10 @@ class PackedSequenceTest(TestCase):
                 permutation = list(range(len(sorted_lengths)))
                 random.shuffle(permutation)
 
+                # `lengths` has to stay on the CPU for pack_padded_sequence, so
+                # keep the index on the CPU too and only move it for the gather.
                 unsorted_indices = torch.tensor(permutation)
-                padded = padded.index_select(1, unsorted_indices)
+                padded = padded.index_select(1, unsorted_indices.to(device))
                 lengths = torch.tensor(sorted_lengths).index_select(0, unsorted_indices)
             else:
                 unsorted_indices = None
@@ -501,15 +534,21 @@ class PackedSequenceTest(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, "You can pass `enforce_sorted=False`"
         ):
-            packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
-        with self.assertRaisesRegex(RuntimeError, "empty tensor"):
-            packed = rnn_utils.pack_padded_sequence(torch.randn(0, 0), [])
+            packed = rnn_utils.pack_padded_sequence(
+                torch.randn(3, 3, device=device), [1, 3, 2]
+            )
         with self.assertRaisesRegex(RuntimeError, "empty tensor"):
             packed = rnn_utils.pack_padded_sequence(
-                torch.randn([0, 1, 10]), torch.randn([11, 14, 14, 2]), True
+                torch.randn(0, 0, device=device), []
+            )
+        with self.assertRaisesRegex(RuntimeError, "empty tensor"):
+            packed = rnn_utils.pack_padded_sequence(
+                torch.randn([0, 1, 10], device=device),
+                torch.randn([11, 14, 14, 2]),
+                True,
             )
 
-    def test_empty_packed_sequence(self):
+    def test_empty_packed_sequence(self, device):
         """
         Regression test for https://github.com/pytorch/pytorch/issues/149622
         Tests that pad_packed_sequence and unpack_sequence handle empty tensors
@@ -517,7 +556,7 @@ class PackedSequenceTest(TestCase):
         """
         # Test case 1: pad_packed_sequence with empty tensors
         # Previously caused segmentation fault
-        empty_data = torch.randn(0, 5)
+        empty_data = torch.randn(0, 5, device=device)
         empty_batch_sizes = torch.tensor([], dtype=torch.int64)
         empty_packed = rnn_utils.PackedSequence(
             empty_data, empty_batch_sizes, None, None
@@ -529,7 +568,7 @@ class PackedSequenceTest(TestCase):
 
         # Test case 2: unpack_sequence with empty tensors
         # Previously caused segmentation fault
-        empty_data = torch.tensor([])
+        empty_data = torch.tensor([], device=device)
         empty_batch_sizes = torch.tensor([], dtype=torch.int64)
         packed = rnn_utils.PackedSequence(
             data=empty_data, batch_sizes=empty_batch_sizes
@@ -538,6 +577,43 @@ class PackedSequenceTest(TestCase):
         # Should not crash - either return empty list or raise informative error
         with self.assertRaises(RuntimeError):
             rnn_utils.unpack_sequence(packed)
+
+
+class PackedSequenceTestCUDA(_PackedSequenceTestMixin, TestCase):
+    """`PackedSequence.cuda()` has no accelerator-generic counterpart."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
+        "Frame Handling Difference between Python versions",
+    )
+    def test_to_cuda_legacy_api(self, device):
+        for enforce_sorted in (True, False):
+            padded, lengths = self._padded_sequence(torch.int32)
+            a = rnn_utils.pack_padded_sequence(
+                padded, lengths, enforce_sorted=enforce_sorted
+            ).cpu()
+
+            for cuda in (self.device_type, device):
+                b = a.cuda(device=cuda)
+                self.assertIs(b, b.cuda())
+                self.assertEqual(a, b.to("cpu"))
+
+    @deviceCountAtLeast(2)
+    def test_to_cuda_legacy_api_multiple_devices(self, devices):
+        padded, lengths = self._padded_sequence(torch.int32)
+        a = rnn_utils.pack_padded_sequence(padded, lengths).cpu()
+        for dev in devices:
+            b = a.cuda(device=dev)
+            self.assertEqual(b.data.device, torch.device(dev))
+            self.assertEqual(a, b.to("cpu"))
+
+
+instantiate_device_type_tests(
+    PackedSequenceTestDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(PackedSequenceTestCUDA, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
