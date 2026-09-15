@@ -164,6 +164,7 @@ class TestTorchDeviceType(TestCase):
         base[2:2].zero_()
         self.assertEqual(base, torch.ones(4, device=device))
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5378")
     @dtypes(torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8,
             torch.bits16, torch.float4_e2m1fn_x2)
     def test_zero_dtypes_without_fill_kernel(self, device, dtype):
@@ -290,6 +291,7 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(_throws_on_data_ptr_access(s2))
         self.assertFalse(raises_on_data_ptr(s2))
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5377")
     @xfailIfTorchDynamo
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
@@ -1113,6 +1115,8 @@ class TestTorchDeviceType(TestCase):
         ],
     )
     def test_broadcast(self, fn, device):
+        if torch.device(device).type == 'xpu' and fn in ['map', 'map2']:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5374")
         # functions with three tensor arguments
         fns_3_args = {"map2"}
         fns_value_kwarg = {"addcdiv", "addcmul"}
@@ -3667,6 +3671,8 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_scatter_reduce_operations_to_large_input(self, device, dtype):
+        if torch.device(device).type == 'xpu' and dtype.is_complex:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5376")
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
             (torch.zeros(4, 4, device=device, dtype=dtype),
@@ -3694,6 +3700,8 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_scatter_reduce_scalar(self, device, dtype):
+        if torch.device(device).type == 'xpu' and dtype.is_complex:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5376")
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
             (torch.zeros(4, 4, device=device, dtype=dtype), 1,
@@ -3733,6 +3741,8 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_scatter_reduce_non_unique_index(self, device, dtype):
+        if torch.device(device).type == 'xpu' and dtype.is_complex:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5376")
         height = 2
         width = 2
         index = torch.zeros(height, width, dtype=torch.long, device=device)
@@ -3806,7 +3816,7 @@ class TestTorchDeviceType(TestCase):
     # FIXME: find a test suite for the masked scatter operator
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_masked_scatter(self, device, dtype):
-        if device.startswith("xpu") and (dtype == torch.complex64 or dtype == torch.complex128):
+        if device.startswith("xpu"):
             self.skipTest("intel/torch-xpu-ops/issues/5286")
 
         dt = dtype
@@ -5627,6 +5637,7 @@ class TestTorchDeviceType(TestCase):
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
         self.assertEqual(found_inf, 1.0)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5375")
     def test_grad_scaling_state_dict(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.GradScaler, device=device.type)
@@ -11130,7 +11141,6 @@ class TestTorchDeviceSpecific(TestCase):
     hw_classification = HardwareClassification.CUDA
     exact_dtype = True
 
-    @onlyCUDA
     def test_dtypetensor_warnings(self, device):
         msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
         with self.assertWarnsOnceRegex(UserWarning, msg):
@@ -11139,29 +11149,26 @@ class TestTorchDeviceSpecific(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.cuda.DoubleTensor([0])
 
-    @onlyCUDA
     @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_zero_dense_emits_memset(self, device):
         base = torch.ones(64, 96, device=device)
         with torch.profiler.profile() as prof:
             base[16:32].zero_()
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("Memset" in name for name in names), names)
 
-    @onlyCUDA
     @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_zero_strided_emits_fill_kernel(self, device):
         base = torch.ones(64, 96, device=device)
         with torch.profiler.profile() as prof:
             base[:, ::2].zero_()
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("elementwise_kernel" in name for name in names), names)
 
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
-    @onlyCUDA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
         def fn():
@@ -11175,21 +11182,19 @@ class TestTorchDeviceSpecific(TestCase):
             fn,
             'cudnn_grid_sampler_backward')
 
-    @onlyCUDA
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @dtypes(torch.bfloat16, torch.half)
     def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
         src = make_tensor((1024, 1024), dtype=dtype, device=device)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         with torch.profiler.profile() as prof:
             src.to(torch.float32)
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
 
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
-    @onlyCUDA
     @skipIfTorchInductor("FIXME: error not thrown")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(3, device=devices[0])
@@ -11201,7 +11206,6 @@ class TestTorchDeviceSpecific(TestCase):
     # Note - reports a leak of 512 bytes on CUDA device 1
     @deviceCountAtLeast(2)
     @skipCUDAMemoryLeakCheckIf(True)
-    @onlyCUDA
     def test_tensor_set_errors_multigpu(self, devices):
         f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device=devices[0])
         f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device=devices[1])
@@ -11212,8 +11216,7 @@ class TestTorchDeviceSpecific(TestCase):
         self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1))
 
     # FIXME: move to test_serialization
-    @onlyCUDA
-    @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
+    @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices 
     def test_serialization(self, devices):
         def _test_serialization(filecontext_lambda):
             t0 = torch.cuda.FloatTensor(5).fill_(1)
@@ -11235,7 +11238,6 @@ class TestTorchDeviceSpecific(TestCase):
 
     # FIXME: convert this to an automated OpInfo test
     @deviceCountAtLeast(2)
-    @onlyCUDA
     def test_device_guard(self, devices):
         # verify that all operators with `device_guard: False` behave properly with multiple devices.
         # TODO: if we had operator introspection we could figure out this set of operators automatically...
@@ -11323,7 +11325,6 @@ class TestTorchDeviceSpecific(TestCase):
         x.to(x, copy=True)
 
     @deviceCountAtLeast(1)
-    @onlyCUDA
     @parametrize("non_blocking", (True, False))
     def test_storage_all_devices(self, devices, non_blocking):
         for device in devices:
@@ -11332,7 +11333,7 @@ class TestTorchDeviceSpecific(TestCase):
             s = t.untyped_storage()
             s_cpu = s.to(device='cpu', non_blocking=non_blocking)
             if non_blocking:
-                torch.cuda.synchronize()
+                torch.accelerator.synchronize()
                 self.assertTrue(s_cpu.is_pinned())
             else:
                 self.assertFalse(s_cpu.is_pinned())
