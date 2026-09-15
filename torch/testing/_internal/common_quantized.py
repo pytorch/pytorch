@@ -3,6 +3,7 @@
 r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """
+import functools
 import numpy as np
 import torch
 from torch import Tensor
@@ -175,6 +176,7 @@ def override_cpu_allocator_for_qnnpack(qengine_is_qnnpack):
 # Currently for some of the tests it seems to have inconsistent params
 # for fbgemm vs qnnpack.
 def override_qengines(qfunction):
+    @functools.wraps(qfunction)
     def test_fn(*args, **kwargs):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
