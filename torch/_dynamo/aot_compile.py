@@ -5,13 +5,13 @@ import importlib
 import inspect
 import io
 import logging
-import operator
 import os
 import pickle
 import re
 import sys
 import tempfile
 import types
+import weakref
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack, nullcontext
 from dataclasses import dataclass
@@ -1455,11 +1455,14 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
-def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
-    # What prepare_f_locals reads, with defaults and cells by identity (id, since
-    # the artifacts keep them alive). Signature equality is unusable here:
-    # Parameter.__eq__ takes bool() of `default == default`, which raises for a
-    # tensor default.
+_ParamKey = tuple[str, inspect._ParameterKind, int]
+_BindingKey = tuple[list[_ParamKey], tuple[str, ...], list[int]]
+
+
+def _binding_key(artifacts: CompileArtifacts) -> _BindingKey:
+    # What prepare_f_locals reads, with defaults and cells by identity. Signature
+    # equality is unusable here: Parameter.__eq__ takes bool() of
+    # `default == default`, which raises for a tensor default.
     env, params = artifacts.runtime_env, artifacts.signature.parameters.values()
     return (
         [(p.name, p.kind, id(p.default)) for p in params],
@@ -1483,51 +1486,46 @@ class AOTCompiledModel:
     by a later result whose first check accepted. Opting a result out through
     ``disable_guard_check()`` does not skip its guard evaluation: it is served
     in index order when its check accepts, and on the strength of its opt-out
-    alone only when no check accepted the call; one opt-out replaces the
-    ``No AOT compiled graph matched this call`` error for the whole model.
+    alone only after both the scan and the re-check found no match; one
+    opt-out replaces the ``No AOT compiled graph matched this call`` error
+    for the whole model.
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, a ``For [i]:`` hint
-    when that entry's guards failed on a global the process does not define,
-    and the advice to add a ``ModelInput`` or check which guards
-    ``guard_filter_fn`` kept.
+    per compiled result quoting the guards that refused it, at most one
+    ``For [i]:`` hint, for the first entry whose guards failed on a global the
+    process does not define, and the advice to add a ``ModelInput`` or check
+    which guards ``guard_filter_fn`` kept.
     """
 
     model: torch.nn.Module
     compiled_results: list[AOTCompiledFunction]
-    # The list contents last judged and whether one bind of a call serves every
-    # one of them, as it does for every artifact aot_compile_module produces:
+    # The results last judged and whether one bind of a call serves them all.
     # compiled_results is public, so a call that finds them changed decides
-    # again. The comparison costs about what a bind does, so not once per call.
-    # One field, so a reader never sees the verdict about another list beside
-    # these contents. The default is the verdict over no results, so the first
-    # call decides.
-    _binding_verdict: tuple[tuple[AOTCompiledFunction, ...], bool] = dataclasses.field(
-        default=((), False), init=False, compare=False, repr=False
+    # again; one field, so no reader pairs the verdict with another list's
+    # contents; weak references, so a result the caller dropped is not kept
+    # alive here. The default is the verdict over no results.
+    _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
+        dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
 
     def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
-        # By identity, not ==: the dataclass __eq__ would reach the Signature
-        # compare _binding_key exists to avoid. Measured at 0.27us for four
-        # results, call included, against 0.81us for one check().
         prior, shared = self._binding_verdict
-        if len(results) == len(prior) and all(map(operator.is_, results, prior)):
+        if len(results) == len(prior) and all(w() is r for w, r in zip(prior, results)):
             return shared
         key = _binding_key(results[0]._artifacts) if results else None
         shared = key is not None and all(
             _binding_key(result._artifacts) == key for result in results[1:]
         )
-        self._binding_verdict = (results, shared)
+        self._binding_verdict = (tuple(weakref.ref(r) for r in results), shared)
         return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         # compiled_results is public, so read it once: every stage below judges
         # the results this call began with, on the binding decided over them.
         results = tuple(self.compiled_results)
-        # Bound ahead of every guard, so a call the signature cannot bind still
-        # surfaces as bind_locals' TypeError, as the plain module call would; a
-        # bind costs more than a check(), so results that share one bind once.
+        # A bind costs more than a check(), so results that bind alike share
+        # one, made ahead of every guard like the per-result binds below.
         shared = (
             results[0].prepare_f_locals(self.model, *args, **kwargs)
             if self._binds_alike(results)
@@ -1544,8 +1542,8 @@ class AOTCompiledModel:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
                 bound.append(f_locals)
             if result._live_guard_manager().check(f_locals):
-                # The guards already passed; call fn directly so result() does
-                # not re-run the guard eval on this hot dispatch path.
+                # The guards just passed: call fn rather than result(), whose
+                # __call__ would bind and evaluate them again.
                 return result.fn(self.model, *args, **kwargs)
         # A check() can reject from the dict-tag fast path without running the
         # tree; a second check() then runs the tree the fast path skipped,
@@ -1577,7 +1575,13 @@ class AOTCompiledModel:
         ]
         missing_at: int | None = None
         for i, result in enumerate(results):
-            reason = result._live_guard_manager().check_verbose(bound[i])
+            try:
+                reason = result._live_guard_manager().check_verbose(bound[i])
+            except Exception as e:
+                # check_verbose runs paths check() did not (a repr of a user
+                # object, for one); one entry raising must not cost the others.
+                lines.append(f"  [{i}] <guard check could not be described: {e!r}>")
+                continue
             if reason.result:
                 lines.append(
                     f"  [{i}] <guards rejected this call twice and then accepted "

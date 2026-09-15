@@ -22,7 +22,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.symbolic_convert import _import_module
+from torch._dynamo.symbolic_convert import _import_source_cache
 from torch._dynamo.testing import CompileCounter, reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -987,9 +987,10 @@ def add(x, y):
     def test_import_alias_binds_the_live_module(self):
         # The alias roots the guards for every attribute read off the module,
         # while the graph is specialized on what IMPORT_NAME pushed, which is
-        # what __import__ returned: live sys.modules. Binding the memoized
-        # module instead guards an object the graph never saw, and the guard is
-        # then blind to every later change to the one the program does use.
+        # what __import__ returned: live sys.modules. Binding the module an
+        # earlier compile resolved instead guards an object the graph never
+        # saw, and the guard is then blind to every later change to the one
+        # the program does use.
         name = "torch_test_package_import_alias_live"
         alias = f"__import_{name}"
         stale = types.ModuleType(name)
@@ -1003,7 +1004,8 @@ def add(x, y):
 
         try:
             sys.modules[name] = stale
-            _import_module(name)  # as any earlier compile in the process does
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            torch._dynamo.reset()
             fresh = types.ModuleType(name)
             fresh.VALUE = 3
             sys.modules[name] = fresh
@@ -1017,7 +1019,7 @@ def add(x, y):
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
-            _import_module.cache_clear()
+            _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
     def test_import_alias_survives_a_sys_modules_rebind(self):
@@ -1077,6 +1079,7 @@ def add(x, y):
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
+            _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
     def test_import_alias_rebind_makes_a_stale_artifact_visible(self):
@@ -1121,7 +1124,8 @@ def add(x, y):
             newer = types.ModuleType(name)
             newer.VALUE = 7
             sys.modules[name] = newer
-            torch.compile(fn2, backend="eager", fullgraph=True)(*args)
+            compiled_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
+            self.assertEqual(fn2(*args), compiled_fn2(*args))
             self.assertIs(fn.__globals__[alias], newer)
 
             with torch.compiler.set_stance("fail_on_recompile"):
@@ -1131,6 +1135,7 @@ def add(x, y):
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
+            _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
     def test_import_alias_accepts_a_stale_module_under_an_aliased_key(self):
@@ -1371,7 +1376,10 @@ def add(x, y):
                         self.assertEqual(fn(*args), compiled_fn(*args))
                         asked = [call.args[0] for call in import_module.call_args_list]
                         self.assertNotIn(name, asked)
-                        self.assertIs(sys.modules.get(name), None)
+                        if blocked:
+                            self.assertIsNone(sys.modules[name])
+                        else:
+                            self.assertNotIn(name, sys.modules)
                     self.assertIs(fn.__globals__[alias], profiler)
         finally:
             fn.__globals__.pop(alias, None)
