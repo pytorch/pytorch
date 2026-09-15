@@ -49,6 +49,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-preview-py3.12-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-preview-py3.12
+      rocm-arch-list: gfx950
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
