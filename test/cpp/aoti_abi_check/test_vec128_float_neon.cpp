@@ -78,8 +78,7 @@ TEST(TestVec128FloatNeon, TestConstructionAndTraits) {
   EXPECT_FLOAT_EQ(from_lanes[0], 0.5f);
   EXPECT_FLOAT_EQ(from_array[0], 0.5f);
 
-  static_assert(
-      torch::headeronly::vec::is_vec_specialized_for<float>::value);
+  static_assert(torch::headeronly::vec::is_vec_specialized_for<float>::value);
   static_assert(torch::headeronly::vec::is_vec_specialized_for_v<float>);
   static_assert(std::is_same_v<Vec::value_type, float>);
   static_assert(std::is_same_v<Vec::size_type, int>);

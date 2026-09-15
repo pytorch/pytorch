@@ -4,7 +4,7 @@
 
 #include <cmath>
 
-namespace at::vec {
+namespace at::vec::inline CPU_CAPABILITY {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -13,8 +13,6 @@ namespace at::vec {
 // linked together. We do this by declaring objects in an `inline
 // namespace` which changes the name mangling, but can still be
 // accessed as `at::vec`.
-inline namespace CPU_CAPABILITY {
-
 #if defined(CPU_CAPABILITY_SVE128) || defined(CPU_CAPABILITY_SVE256)
 // Implementation copied from Arm Optimized Routines:
 // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/expf.c
@@ -99,5 +97,4 @@ static inline svfloat32_t fexp_u20(svfloat32_t values) {
 }
 #endif
 
-} // namespace CPU_CAPABILITY
-} // namespace at::vec
+} // namespace at::vec::inline CPU_CAPABILITY

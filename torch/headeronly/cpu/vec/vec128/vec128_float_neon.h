@@ -830,5 +830,3 @@ inline Vectorized<float> Vectorized<float>::erf() const {
 #endif /* defined(aarch64) */
 
 C10_DIAGNOSTIC_POP()
-
-

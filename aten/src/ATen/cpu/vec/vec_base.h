@@ -31,7 +31,6 @@
 
 #include <ATen/NumericUtils.h>
 #include <ATen/cpu/vec/intrinsics.h>
-#include <torch/headeronly/cpu/vec/vec_base.h>
 #include <ATen/native/Math.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/macros/Macros.h>
@@ -43,6 +42,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/copysign.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/cpu/vec/vec_base.h>
 
 #if defined(__GNUC__)
 #define __FORCE_INLINE __attribute__((always_inline)) inline
@@ -58,19 +58,6 @@ Windows llvm will not have this definition.
 */
 #define __msvc_cl__
 #endif
-
-// These macros helped us unify vec_base.h
-#ifdef CPU_CAPABILITY_AVX512
-#define VECTOR_WIDTH 64
-#define int_vector __m512i
-#elif defined(__aarch64__) && \
-    !defined(CPU_CAPABILITY_SVE256) // CPU_CAPABILITY_AVX512
-// SVE code expects 256-vectors; leave that set for SVE?
-#define VECTOR_WIDTH 16
-#else // CPU_CAPABILITY_AVX512
-#define VECTOR_WIDTH 32
-#define int_vector __m256i
-#endif // CPU_CAPABILITY_AVX512
 
 // See Note [CPU_CAPABILITY namespace]
 namespace at::vec::inline CPU_CAPABILITY {
