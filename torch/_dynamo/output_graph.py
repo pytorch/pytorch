@@ -2742,6 +2742,29 @@ class OutputGraph(OutputGraphCommon):
                 restart_reason="autograd.grad consumed grad_fns of returned tensors"
             )
 
+    def _requires_grad_input_edges(self) -> set[torch.autograd.graph.Node]:
+        """Gradient edges of the graph inputs that require grad.
+
+        A graph input is a placeholder or a get_attr tensor (parameters and
+        buffers). For a leaf input the edge is its AccumulateGrad node, for a
+        non-leaf input it is the external grad_fn. These are the autograd
+        nodes AOTAutograd differentiates the compiled function against.
+        """
+        edges: set[torch.autograd.graph.Node] = set()
+        for node in self.graph.nodes:
+            if node.op not in ("placeholder", "get_attr"):
+                continue
+            example_value = node.meta.get("example_value")
+            if not isinstance(example_value, torch.Tensor):
+                continue
+            if not example_value.requires_grad:
+                continue
+            try:
+                edges.add(torch.autograd.graph.get_gradient_edge(example_value).node)
+            except RuntimeError:
+                continue
+        return edges
+
     def _check_requires_grad_intermediate_outputs(
         self, rv: list["VariableTracker"], tx: "InstructionTranslatorBase"
     ) -> None:
@@ -2751,6 +2774,16 @@ class OutputGraph(OutputGraphCommon):
         so returning them (or tensors derived from them) produces wrong results.
         We detect this via FX graph reachability: find the requires_grad_() nodes
         for source-less intermediates, then check if any output is downstream.
+
+        A downstream output is still safe when its autograd graph also reaches
+        a graph input that requires grad (see _requires_grad_input_edges).
+        AOTAutograd then returns a differentiable output whose backward is the
+        eager backward restricted to the graph inputs; the only autograd state
+        lost is the AccumulateGrad edge into the source-less intermediate, and
+        that intermediate never escapes the compiled region. This is the
+        ``energy -> autograd.grad(create_graph=True) -> force`` pattern of
+        force-supervised training, where the force is returned so that a loss
+        on it can be backpropagated into the parameters.
         """
         from .variables.tensor import TensorVariable
 
@@ -2770,6 +2803,8 @@ class OutputGraph(OutputGraphCommon):
             if any(inp in tainted_nodes for inp in node.all_input_nodes):
                 tainted_nodes.add(node)
 
+        input_edges: set[torch.autograd.graph.Node] | None = None
+
         # Check leaked outputs: tainted + requires_grad means the output
         # carries autograd state that AOTAutograd would silently drop.
         # Detached outputs (requires_grad=False) are fine — no autograd to lose.
@@ -2779,13 +2814,25 @@ class OutputGraph(OutputGraphCommon):
                 and var.requires_grad
                 and var.as_proxy().node in tainted_nodes
             ):
+                # Differentiable w.r.t. a graph input: AOTAutograd keeps the
+                # output differentiable and its backward reaches that input.
+                if input_edges is None:
+                    input_edges = self._requires_grad_input_edges()
+                if input_edges:
+                    fake_tensor = var.as_proxy().node.meta.get("example_value")
+                    if isinstance(fake_tensor, torch.Tensor):
+                        reachable = collect_reachable_grad_fns([(fake_tensor, None)])
+                        if reachable & input_edges:
+                            continue
                 msg = (
                     "An intermediate tensor that had requires_grad_() called "
                     "on it (or a tensor derived from it) is being returned "
-                    "from the compiled region. AOTAutograd's functionalization "
-                    "drops the requires_grad_() effect on graph outputs, "
-                    "producing wrong results. If you only need the tensor "
-                    "values without gradients, call .detach() before returning."
+                    "from the compiled region, and it is not differentiable "
+                    "with respect to any graph input. AOTAutograd's "
+                    "functionalization drops the requires_grad_() effect on "
+                    "graph outputs, producing wrong results. If you only need "
+                    "the tensor values without gradients, call .detach() "
+                    "before returning."
                 )
                 if tx.one_graph:
                     unimplemented(

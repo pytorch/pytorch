@@ -1461,7 +1461,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled, eager)
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_requires_grad_setattr_leaked_output_graph_breaks(self):
+    def test_requires_grad_setattr_output_differentiable_wrt_params_single_graph(
+        self,
+    ):
+        # The returned tensor derives from a source-less requires_grad_()
+        # intermediate, but it is also differentiable w.r.t. the parameters,
+        # so AOTAutograd keeps it differentiable and no graph break is needed.
         mod = torch.nn.Linear(4, 4)
 
         def fn(x):
@@ -1470,13 +1475,6 @@ class GraphModule(torch.nn.Module):
             return mod(y).sum()
 
         x = torch.randn(2, 4)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "returning intermediate with requires_grad_\\(\\)",
-        ):
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
-
-        torch._dynamo.reset()
         for p in mod.parameters():
             p.grad = None
         eager_out = fn(x)
@@ -1486,13 +1484,98 @@ class GraphModule(torch.nn.Module):
         for p in mod.parameters():
             p.grad = None
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        out = torch.compile(fn, backend=cnt)(x)
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertTrue(out.requires_grad)
         out.backward()
 
         self.assertEqual(out, eager_out)
         for name, p in mod.named_parameters():
             self.assertEqual(eager_grads[name], p.grad)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_requires_grad_intermediate_force_output_single_graph(self):
+        # energy -> autograd.grad(create_graph=True) -> force, returned so a
+        # force loss can be backpropagated into the parameters.
+        mod = torch.nn.Linear(3, 1)
+
+        def energy_and_force(x):
+            create_graph = torch.is_grad_enabled()
+            pos = x.detach().requires_grad_(True)
+            with torch.enable_grad():
+                energy = mod(pos).pow(2).sum()
+                (grad,) = torch.autograd.grad(energy, pos, create_graph=create_graph)
+            return energy.detach(), -grad
+
+        def loss_fn(x):
+            energy, force = energy_and_force(x)
+            return energy + force.pow(2).sum()
+
+        x = torch.randn(4, 3)
+        for p in mod.parameters():
+            p.grad = None
+        eager_loss = loss_fn(x)
+        eager_loss.backward()
+        eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
+
+        for p in mod.parameters():
+            p.grad = None
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        loss = torch.compile(loss_fn, backend=cnt, fullgraph=True)(x)
+        self.assertTrue(loss.requires_grad)
+        loss.backward()
+
+        self.assertEqual(loss, eager_loss)
+        for name, p in mod.named_parameters():
+            self.assertEqual(eager_grads[name], p.grad)
+        self.assertEqual(cnt.frame_count, 1)
+
+        with torch.no_grad():
+            energy, force = torch.compile(
+                energy_and_force, backend="aot_eager", fullgraph=True
+            )(x)
+            eager_energy, eager_force = energy_and_force(x)
+        self.assertFalse(force.requires_grad)
+        self.assertEqual(energy, eager_energy)
+        self.assertEqual(force, eager_force)
+
+    def test_requires_grad_intermediate_leaked_output_graph_breaks(self):
+        # The returned tensor depends only on the source-less intermediate:
+        # AOTAutograd would return it with requires_grad=False.
+        def fn(x):
+            x = x.sin()
+            y = x.detach().requires_grad_()
+            return y * 2
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "returning intermediate with requires_grad_\\(\\)",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        out = torch.compile(fn, backend=cnt)(x)
+        self.assertTrue(out.requires_grad)
+        self.assertEqual(out, fn(x))
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_requires_grad_intermediate_leaked_output_unrelated_input_graph_breaks(
+        self,
+    ):
+        # A graph input requires grad, but the returned tensor is not
+        # differentiable w.r.t. it: its backward would reach the wrong leaves.
+        def fn(x, w):
+            y = x.detach().requires_grad_()
+            return y * 2, (w * 2).sum()
+
+        x = torch.randn(4)
+        w = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "returning intermediate with requires_grad_\\(\\)",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x, w)
 
     def test_requires_grad_setattr_graph_input_graph_breaks(self):
         def fn(x):
