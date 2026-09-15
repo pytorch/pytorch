@@ -1488,7 +1488,7 @@ class Reduction(Loops):
 
         The measured first-stage schedule uses XBLOCK=128, R0_BLOCK=8, and one
         warp. Targeting 28 one-warp CTAs per SM and rounding down to an eight-way
-        split quantum reproduces the useful graph-206 split band without a split
+        split quantum reproduces the useful measured split band without a split
         sweep. The result is also bounded by FP32 workspace traffic and capacity.
         """
         first_stage_xblock = 128
