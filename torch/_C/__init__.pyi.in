@@ -2360,6 +2360,7 @@ class _CudaDeviceProperties:
     is_integrated: _int
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
+    max_threads_per_block: _int
     gcnArchName: str
     warp_size: _int
     uuid: str
@@ -2369,6 +2370,10 @@ class _CudaDeviceProperties:
     memory_bus_width: _int
     shared_memory_per_block: _int
     shared_memory_per_multiprocessor: _int
+    # Registered only without ROCm, but stubs cannot be platform-conditional; gcnArchName
+    # above is the reciprocal HIP-only case.
+    shared_memory_per_block_optin: _int
+    regs_per_multiprocessor: _int
 
 # Functions related to SDPA
 class _SDPAParams:
@@ -2702,11 +2707,10 @@ class _XPUMemPool:
         allocator: _xpu_XPUAllocator | None = None,
         is_user_created: _bool = True,
         use_on_oom: _bool = False,
+        no_split: _bool = False,
     ) -> None: ...
     @property
     def id(self) -> tuple[_int, _int]: ...
-    @property
-    def allocator(self) -> _xpu_XPUAllocator | None: ...
     def use_count(self) -> _int: ...
 
 # Defined in torch/csrc/xpu/Graph.cpp
