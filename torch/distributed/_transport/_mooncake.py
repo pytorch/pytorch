@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport
+from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
 
 
 def _load_backend() -> Any:
@@ -92,7 +92,7 @@ class MooncakeMemory:
 
 
 class MooncakeTransport(Transport):
-    """Synchronous one-sided CPU/CUDA transfers using Mooncake's P2P metadata."""
+    """One-sided CPU/CUDA transfers using Mooncake's P2P metadata."""
 
     def __init__(
         self,
@@ -213,13 +213,38 @@ class MooncakeTransport(Transport):
             )
         return 0
 
-    def write(self, local_buffer: MemoryView, remote_buffer: RemoteBuffer) -> int:
-        return self._transfer(local_buffer, remote_buffer, read=False)
+    def write(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
+        if not isinstance(local_buffer, MooncakeMemoryView):
+            raise TypeError("local_buffer was not registered by this transport")
+        return self._run_transfer(
+            lambda: self._transfer(local_buffer, remote_buffer, read=False),
+            local_buffer._memory._device,
+            async_op=async_op,
+        )
 
-    def read(self, local_buffer: MutableMemoryView, remote_buffer: RemoteBuffer) -> int:
-        return self._transfer(local_buffer, remote_buffer, read=True)
+    def read(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
+        if not isinstance(local_buffer, MooncakeMutableMemoryView):
+            raise TypeError("local_buffer was not registered by this transport")
+        return self._run_transfer(
+            lambda: self._transfer(local_buffer, remote_buffer, read=True),
+            local_buffer._memory._device,
+            async_op=async_op,
+        )
 
     def close(self) -> None:
+        self._close_work()
         with self._operation_lock:
             if self._engine is None:
                 return

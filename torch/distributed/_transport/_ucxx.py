@@ -14,7 +14,7 @@ from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import torch
 
-from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport
+from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
 
 
 if TYPE_CHECKING:
@@ -353,15 +353,24 @@ class UCXXTransport(Transport):
                 registered = self._registered[(remote.buffer_id, remote.access_key)]
         return UCXXMemory(self, tensor, remote, registered, reused)
 
-    def write(self, local_buffer: MemoryView, remote_buffer: RemoteBuffer) -> int:
+    def write(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
         local = self._local_view(local_buffer, mutable=False)
         remote = self._remote_buffer(remote_buffer)
         if local.size() > remote.length:
             raise ValueError("local view does not fit in the remote buffer")
-        self._run(self._write(local, remote), "write")
-        return 0
+        return self._run_transfer(
+            lambda: self._run(self._write(local, remote), "write"),
+            local._memory._tensor.device,
+            async_op=async_op,
+        )
 
-    async def _write(self, local: UCXXMemoryView, remote: UCXXRemoteBuffer) -> None:
+    async def _write(self, local: UCXXMemoryView, remote: UCXXRemoteBuffer) -> int:
         async with self._operation_lock:
             endpoint = self._connection()
             request_id = self._new_request_id()
@@ -380,20 +389,30 @@ class UCXXTransport(Transport):
                     endpoint, self._view_buffer(local, readonly=True), read=False
                 )
             await self._receive_response(endpoint, request_id, _DONE)
+        return 0
 
-    def read(self, local_buffer: MutableMemoryView, remote_buffer: RemoteBuffer) -> int:
+    def read(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
         local = cast(
             UCXXMutableMemoryView, self._local_view(local_buffer, mutable=True)
         )
         remote = self._remote_buffer(remote_buffer)
         if local.size() > remote.length:
             raise ValueError("local view does not fit in the remote buffer")
-        self._run(self._read(local, remote), "read")
-        return 0
+        return self._run_transfer(
+            lambda: self._run(self._read(local, remote), "read"),
+            local._memory._tensor.device,
+            async_op=async_op,
+        )
 
     async def _read(
         self, local: UCXXMutableMemoryView, remote: UCXXRemoteBuffer
-    ) -> None:
+    ) -> int:
         async with self._operation_lock:
             endpoint = self._connection()
             request_id = self._new_request_id()
@@ -411,6 +430,7 @@ class UCXXTransport(Transport):
                 await self._transfer_buffer(
                     endpoint, self._view_buffer(local, readonly=False), read=True
                 )
+        return 0
 
     async def _serve(self, endpoint: Any) -> None:
         while not endpoint.closed:
@@ -610,6 +630,7 @@ class UCXXTransport(Transport):
             listener.close()
 
     def close(self) -> None:
+        self._close_work()
         with self._state_lock:
             thread = self._thread
             if thread is not None and current_thread() is thread:

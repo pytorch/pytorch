@@ -320,7 +320,7 @@ class TestIBVerbsTransport(TransportTestMixin, TestCase):
         transport.connect(transport.bind())
         registration = _rdma4py._Registration(
             transport,
-            mock.Mock(),
+            mock.Mock(device=torch.device("cuda:0")),
             SimpleNamespace(lkey=11, rkey=12),
             1000,
             64,
@@ -401,7 +401,7 @@ class TestIBVerbsTransport(TransportTestMixin, TestCase):
         transport.connect(transport.bind())
         registration = _rdma4py._Registration(
             transport,
-            mock.Mock(),
+            mock.Mock(device=torch.device("cuda:0")),
             SimpleNamespace(lkey=11, rkey=12),
             1000,
             16,
@@ -435,7 +435,7 @@ class TestGPUNetIOCompilation(TestCase):
             libraries = gpunetio.external_libraries(arch=f"sm_{major}{minor}")
         except (ImportError, OSError, RuntimeError) as error:
             self.skipTest(str(error))
-        if runtime.BITCODE_ABI < 2:
+        if getattr(runtime, "BITCODE_ABI", 0) < 2:
             self.skipTest("requires GPUNetIO bitcode ABI 2")
 
         put, _, _ = _rdma4py._create_triton_kernels(triton, language, gpunetio)

@@ -4,6 +4,23 @@ Most backends accept `new_transport(backend)` and infer devices from registered
 tensors. Passing `device` preserves each backend's device selection and
 validation. Torchcomms and ibverbs CUDA graph mode require an explicit device.
 
+Reads and writes block by default. Use `async_op=True` to return a
+`torch.distributed.Work` and overlap a transfer with host computation:
+
+```python
+work = transport.write(local_view, remote_buffer, async_op=True)
+work.wait()
+```
+
+`is_completed()` polls completion; `wait()` raises transfer errors.
+`wait(datetime.timedelta(...))` bounds the wait without cancelling the transfer.
+`get_future()` resolves to an empty list or raises the transfer error.
+Backends process queued operations in order on one worker per transport.
+The worker retains local buffers and waits for prior work on the submitting
+CUDA stream. Do not modify or resize buffers until completion. Peers must finish
+all accesses before releasing exposed memory; `close()` drains local work.
+Asynchronous operations cannot be captured in CUDA graphs.
+
 Install the optional backend package matching the operation:
 
 ```bash
@@ -44,6 +61,9 @@ Add `--cuda-graph` to capture one write and one read and benchmark graph
 replay. The `ibverbs` backend also needs `"cuda_graph":true` in each rank's
 options to select GPUNetIO.
 
+Add `--async-op` to measure submission plus `Work.wait()` for each transfer.
+It includes worker dispatch overhead and keeps one transfer outstanding per pair.
+
 ## Mooncake transport
 
 The Mooncake adapter uses Transfer Engine with P2P metadata exchange; no metadata
@@ -60,8 +80,8 @@ torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
 
 Set `MC_USE_IPV6=1` on both ranks when `host` uses IPv6.
 
-Use `--device cuda` for GPU memory. Transfers synchronize the local CUDA stream
-and complete before returning; CUDA graph capture is unsupported. Peers must
+Use `--device cuda` for GPU memory. Synchronous transfers synchronize the local
+CUDA stream and complete before returning; CUDA graph capture is unsupported. Peers must
 finish accessing exposed buffers before exchanging descriptors or starting
 transfers. Keep registered allocations unchanged until the transport closes.
 Without `nvidia_peermem`, set `WITH_NVIDIA_PEERMEM=0` to use DMA-BUF registration.
