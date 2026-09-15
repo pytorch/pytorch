@@ -87,4 +87,10 @@ TORCH_API void mkldnn_matmul_i8i8i32(
     const Tensor &mat2,
     const Tensor &result);
 
+// x: u8 or s8 * w:s8 -> y:f32 or y:bf16
+TORCH_API void mkldnn_matmul_i8i8_dtype(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result);
+
 }
