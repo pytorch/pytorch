@@ -53,6 +53,7 @@ from torch._inductor.runtime.hints import (
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
+    _enforce_native_matmul_config_min_xblock,
     _enforce_reduction_config_block_minimums,
     _find_names,
     _num_warps,
@@ -240,6 +241,24 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
 
+    def test_native_matmul_min_xblock_is_power_of_two(self):
+        cfgs = _enforce_native_matmul_config_min_xblock(
+            [triton.Config({"XBLOCK": 32, "YBLOCK": 64, "R0_BLOCK": 32})],
+            62,
+        )
+        self.assertEqual(len(cfgs), 1)
+        self.assertEqual(cfgs[0].kwargs["XBLOCK"], 64)
+
+        cfgs = _enforce_native_matmul_config_min_xblock(
+            [triton.Config({"XBLOCK": 32, "YBLOCK": 32, "R0_BLOCK": 32})],
+            128,
+        )
+        self.assertEqual(len(cfgs), 1)
+        self.assertEqual(
+            cfgs[0].kwargs,
+            {"XBLOCK": 128, "YBLOCK": 16, "R0_BLOCK": 16},
+        )
+
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
             [triton.Config({"XBLOCK": 64, "R0_BLOCK": 1024})],
@@ -350,6 +369,7 @@ class TestTritonHeuristics(TestCase):
         scalar_tiled_products = tiled_block_products({AutotuneHint.SCALAR_ACCUMULATORS})
         self.assertEqual(scalar_tiled_products[0], 4096)
         self.assertIn(baseline_rblock, scalar_tiled_products)
+
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
             pass
