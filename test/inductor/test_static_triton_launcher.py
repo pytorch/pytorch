@@ -595,6 +595,29 @@ class TestStaticTritonLauncher(TestCase):
         self.assertEqual(new_arg0, arg0)
 
     @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_n_spills_reported_per_lane(self):
+        # Inductor's spill thresholds are calibrated on the CUDA/HIP unit,
+        # dword-equivalents per lane, while Level Zero reports spill memory in
+        # bytes per hardware thread. The static launcher normalizes the same way
+        # the triton driver does (intel/intel-xpu-backend-for-triton#7950), so
+        # the two must report the same number for the same binary.
+        @triton.jit
+        def spilling_kernel(z, BLOCK: tl.constexpr):
+            off = tl.arange(0, BLOCK)
+            a = tl.load(z + off)
+            result = tl.sum(a, axis=0, keep_dims=True)
+            tl.store(z + off, a + result)
+
+        BLOCK = 1024 * 8
+        z = torch.empty(BLOCK, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = spilling_kernel[(1,)](z, BLOCK=BLOCK, num_warps=2)
+        launcher = self._make_launcher(compiled_kernel)
+
+        if compiled_kernel.n_spills == 0:
+            raise unittest.SkipTest("fixture no longer spills on this IGC version")
+        self.assertEqual(launcher.n_spills, compiled_kernel.n_spills)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
     def test_xpu_kernel_arg_count_mismatch(self):
         @triton.jit
         def simple_kernel(arg0):
