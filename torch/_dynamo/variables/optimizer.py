@@ -23,7 +23,7 @@ optimizer-specific optimizations and safety guarantees.
 import logging
 import weakref
 from collections.abc import Iterable
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._dynamo.variables.tensor import TensorVariable
@@ -227,7 +227,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 and isinstance(arg.source.base, AttrSource)
                 and arg.source.base.member == "param_groups"
             ):
-                return self.value.param_groups[arg.source.index]
+                return self.value.param_groups[cast(int, arg.source.index)]
 
             raise ArgMappingException
 

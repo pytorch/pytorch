@@ -150,6 +150,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // that are not allowed once stream capture is active.
   if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
     (void)at::cuda::getCurrentCUDABlasLtHandle();
+    // The line above only covers this thread. Backward inside the capture
+    // region runs its gemms from an autograd worker thread, whose first
+    // hipblaslt use on the capture stream would create a handle mid-capture;
+    // stock a spare in the shared pool for it to reserve instead.
+    at::cuda::ensureCublasLtHandlesAvailable(1);
   }
 #endif
 
