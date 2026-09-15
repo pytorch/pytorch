@@ -871,6 +871,65 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs=2)
         self.opt = old_opt
 
+    def _get_lrs(self, scheduler):
+        lrs = []
+        for _ in range(5):
+            lrs.append(scheduler.get_last_lr())
+            scheduler.optimizer.step()
+            scheduler.step()
+        return lrs
+
+    def test_nested_sequentiallr_does_not_skip_an_epoch(self):
+        def make_scheduler(optimizer):
+            """Construct the SequentialLR used at both nesting depths."""
+            return SequentialLR(
+                optimizer,
+                [
+                    ConstantLR(optimizer, factor=0.2),
+                    ConstantLR(optimizer, factor=0.5),
+                ],
+                milestones=[2],
+            )
+
+        one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        one_level_scheduler = make_scheduler(one_level_optimizer)
+
+        two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        two_level_scheduler = SequentialLR(
+            two_level_optimizer,
+            [make_scheduler(two_level_optimizer)],
+            milestones=[],
+        )
+
+        one_level_lrs = self._get_lrs(one_level_scheduler)
+        two_level_lrs = self._get_lrs(two_level_scheduler)
+        self.assertEqual(two_level_lrs, one_level_lrs)
+
+    def test_nested_chained_scheduler_does_not_skip_an_epoch(self):
+        def make_scheduler(optimizer):
+            """Construct the ChainedScheduler used at both nesting depths."""
+            return ChainedScheduler(
+                [
+                    ConstantLR(optimizer, factor=0.5),
+                    ExponentialLR(optimizer, gamma=0.9),
+                ],
+                optimizer=optimizer,
+            )
+
+        one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        one_level_scheduler = make_scheduler(one_level_optimizer)
+
+        two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        two_level_scheduler = SequentialLR(
+            two_level_optimizer,
+            [make_scheduler(two_level_optimizer)],
+            milestones=[],
+        )
+
+        one_level_lrs = self._get_lrs(one_level_scheduler)
+        two_level_lrs = self._get_lrs(two_level_scheduler)
+        self.assertEqual(two_level_lrs, one_level_lrs)
+
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
             LinearLR(self.opt, start_factor=0.4, total_iters=3),
