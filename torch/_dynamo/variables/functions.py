@@ -2938,8 +2938,7 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.wrapper_obj = wrapper_obj
-        self.attr_to_trace = attr_to_trace
+        self.fn = WrapperUserFunctionVariable(wrapper_obj, attr_to_trace, **kwargs)
         self.obj = self_obj
 
     def python_type(self) -> type:
@@ -2949,43 +2948,30 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
         return [self.obj]
 
     def get_module(self) -> str:
-        return self.wrapper_obj.__module__
+        return self.fn.get_module()
 
     def get_name(self) -> str:
-        return self.wrapper_obj.__name__
+        return self.fn.get_name()
 
     def get_qualname(self) -> str:
-        qualname = getattr(self.wrapper_obj, "__qualname__", None)
-        return super().get_qualname() if qualname is None else qualname
+        return self.fn.get_qualname()
 
     def get_code(self) -> types.CodeType:
-        return self.get_function().__code__
+        return self.fn.get_code()
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name == self.attr_to_trace:
-            val = getattr(self.wrapper_obj, self.attr_to_trace)
-            source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, val, source)
-        return super().tp_getattro_impl(tx, name)
+        return self.fn.tp_getattro_impl(tx, name)
 
     def get_function(self):
-        return getattr(self.wrapper_obj, self.attr_to_trace)
+        return self.fn.get_function()
 
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
-        wrapper_dict = getattr(self.wrapper_obj, "__dict__", None)
-        if not wrapper_dict or name not in wrapper_dict:
-            return None
-        source = self.get_source()
-        source = AttrSource(source, name) if source is not None else None
-        if source is not None:
-            return variables.LazyVariableTracker.create(
-                wrapper_dict[name], source, tx=tx
-            )
-        return VariableTracker.build(tx, wrapper_dict[name])
+        return self.fn.lookup_instance_dict(tx, name)
+
 
     def call_function(
         self,
@@ -2993,72 +2979,10 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if hasattr(self.wrapper_obj, "cache_info"):
-            target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
-            module_name = getattr(target_fn, "__module__", "") or ""
-            is_allowed_lru_cache_wrapper = (
-                is_lru_cache_wrapper_trace_without_warning_allowed(self.wrapper_obj)
-            )
-
-            if (
-                module_name.split(".", maxsplit=1)[0] != "torch"
-                and not is_allowed_lru_cache_wrapper
-            ):
-                frame_summary = tx.frame_summary()
-                filename = os.path.basename(frame_summary.filename)
-                lineno = frame_summary.lineno
-                msg = (
-                    "Dynamo detected a call to a `functools.lru_cache`-wrapped "
-                    f"function at '{filename}:{lineno}'. Dynamo ignores the "
-                    "cache wrapper and directly traces the wrapped function. "
-                    "Silent incorrectness is only a *potential* risk, not "
-                    "something we have observed. "
-                    "Enable TORCH_LOGS=+dynamo for a DEBUG stack trace.\n\n"
-                    "This call originates from:\n"
-                    f"{''.join(traceback.format_list([frame_summary]))}"
-                )
-
-                torch._dynamo.utils.warn_once(msg)
-
-                dynamo_logger = torch._dynamo.utils.logging.getLogger("torch._dynamo")
-                if dynamo_logger.isEnabledFor(logging.DEBUG):
-                    user_stack = torch._guards.TracingContext.extract_stack()
-                    user_stack = get_stack_above_dynamo() + user_stack
-                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                    user_stack_formatted = "".join(traceback.format_list(user_stack))
-                    user_stack_trace = f"call to a lru_cache wrapped function at: {frame_loc[0]}:{frame_loc[1]}\n"
-                    user_stack_trace += str(user_stack_formatted)
-                    dynamo_logger.debug(user_stack_trace)
-
-        all_args = self.self_args() + list(args)
-        is_inner_torch_compile = (
-            self.attr_to_trace == "_torchdynamo_inline"
-            and inspect.getattr_static(self.wrapper_obj, "_is_torch_compile", False)
-            and getattr(
-                inspect.getattr_static(
-                    self.wrapper_obj, "_torchdynamo_orig_callable", None
-                ),
-                "__code__",
-                None,
-            )
-            is not tx.output.root_tx.f_code
-        )
-        polyfill = (
-            polyfills.getattr_and_trace_no_nested_graph_breaks
-            if is_inner_torch_compile
-            else polyfills.getattr_and_trace
-        )
-        return VariableTracker.build(
-            tx,
-            polyfill,  # type: ignore[arg-type]
-        ).call_function(
-            tx,
-            [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
-            kwargs,
-        )
+        return self.fn.call_function(tx, self.self_args() + list(args), kwargs)
 
     def get_real_python_backed_value(self) -> object:
-        return self.wrapper_obj
+        return self.fn.get_real_python_backed_value()
 
 
 def _traceable_collective_remaps() -> dict[Any, Any]:
