@@ -239,6 +239,9 @@ struct C10_API FakeTensorMode {
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
 
+  // allows data_ptr() calls on a FakeTensor's storage
+  bool allow_unsafe_data_ptr_access_ = true;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
@@ -1500,6 +1503,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_CHECK(
           mode->allow_meta_,
           "device.type must not be 'meta' when allow_meta is False");
+    }
+    if (mode && has_storage()) {
+      auto* storage_impl = storage().unsafeGetStorageImpl();
+      if (mode->allow_unsafe_data_ptr_access_) {
+        storage_impl->set_warn_deprecated_on_mutable_data_ptr();
+      } else {
+        storage_impl->set_throw_on_mutable_data_ptr();
+      }
     }
     extra_meta.fake_tensor_mode_ = std::move(mode);
   }
