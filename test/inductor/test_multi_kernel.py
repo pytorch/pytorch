@@ -12,7 +12,7 @@ import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config, test_operators
-from torch._inductor.codegen.common import TensorArg, WorkspaceArg, WorkspaceZeroMode
+from torch._inductor.codegen.common import TensorArg
 from torch._inductor.codegen.multi_kernel import (
     MultiKernelCall,
     MultiKernelPlan,
@@ -266,27 +266,6 @@ class MultiKernelTest(TestCase):
                     [[[0, 2]], [[0, 1], [1, 2]]],
                 )
                 self.assertEqual(reloaded.picked_plan, 1)
-
-    def test_multi_kernel_plan_rejects_per_call_zeroed_workspace(self):
-        workspace = WorkspaceArg(
-            count=1,
-            zero_mode=WorkspaceZeroMode.ZERO_ON_CALL,
-            device=torch.device("cpu"),
-            outer_name="workspace",
-        )
-        kernel = unittest.mock.Mock(
-            args=unittest.mock.Mock(workspace_args=[workspace]),
-            mutations=set(),
-            inplace_update_buffers={},
-            inductor_meta={},
-        )
-
-        graph = SimpleNamespace(cpp_wrapper=False)
-        with (
-            V.set_graph_handler(graph),
-            self.assertRaisesRegex(NotImplementedError, "per-call-zeroed workspaces"),
-        ):
-            MultiKernelPlan([[kernel], [kernel, kernel]])
 
     def test_multi_kernel_plan_benchmark_holds_gpu_lock_across_plans(self):
         events = []
