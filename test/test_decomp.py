@@ -1179,6 +1179,42 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 class DecompOneOffTests(TestCase):
     @onlyNativeDeviceTypes
+    def test_layer_norm_param_dtype_matches_eager(self, device):
+        # native_layer_norm's ref checks that weight/bias share the input's dtype,
+        # but the check used to fire only for CUDA, so on every other backend the
+        # ref accepted a call eager refuses. Assert agreement rather than a fixed
+        # outcome: if some backend does accept the mismatch, this reports that the
+        # ref needs a carve-out instead of silently passing.
+        input = torch.randn(4, 8, device=device)
+        weight = torch.randn(8, dtype=torch.float16, device=device)
+
+        def rejects(fn):
+            try:
+                fn()
+            except RuntimeError:
+                return True
+            return False
+
+        eager = rejects(
+            lambda: torch.native_layer_norm(input, (8,), weight, None, 1e-5)
+        )
+        ref = rejects(
+            lambda: torch._refs.native_layer_norm(input, (8,), weight, None, 1e-5)
+        )
+        self.assertEqual(
+            ref,
+            eager,
+            msg=f"ref and eager disagree on a mismatched param dtype on {device}",
+        )
+
+        # The matched-dtype path must be untouched.
+        matched = torch.randn(8, device=device)
+        self.assertEqual(
+            torch._refs.native_layer_norm(input, (8,), matched, None, 1e-5)[0],
+            torch.native_layer_norm(input, (8,), matched, None, 1e-5)[0],
+        )
+
+    @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_softmax(self, device):
         size = (2, 4, 3, 3)
