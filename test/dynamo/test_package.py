@@ -4,10 +4,12 @@ import functools
 import gc
 import importlib
 import os
+import pickle
 import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -17,12 +19,19 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.guards import CheckFunctionManager
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    _collapse_device_types,
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -148,6 +157,102 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    def test_collapse_device_types_prefers_an_accelerator(self):
+        # The single string both callers record. Among several accelerators
+        # one SystemInfo.check_compatibility checks wins: alphabetical order
+        # would record "mps" for {"mps", "xpu"}, and a name outside CHECK_GPUS
+        # skips every host check the way the old "cpu" did.
+        self.assertEqual(_collapse_device_types(frozenset()), "cpu")
+        self.assertEqual(_collapse_device_types(frozenset(("cpu",))), "cpu")
+        self.assertEqual(_collapse_device_types(frozenset(("cpu", "cuda"))), "cuda")
+        self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
+        self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
+        self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
+
+    def test_package_records_the_devices_a_graph_names(self):
+        # The recording side of the scan, which is what the artifact carries. A
+        # stand-in for a dynamic-shape cuda capture, whose first meta value is a
+        # SymInt with no device, has to record cuda: reading the first leaf
+        # recorded "cpu", which skips every GPU check at load. Both graphs are
+        # fake and never run, so this needs no accelerator.
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            cuda = torch.empty(2, device="cuda")
+            s0 = shape_env.create_unbacked_symint()
+            meta = torch.empty(2, device="meta")
+
+        def fn(x):
+            return x + 1
+
+        graph = torch.fx.Graph()
+        graph.placeholder("s0").meta["val"] = s0
+        x = graph.placeholder("x")
+        x.meta["val"] = cuda
+        graph.call_function(torch.ops.aten.add.Tensor, (x, 1)).meta["val"] = cuda
+
+        package = CompilePackage(fn)
+        # A package that has scanned no graph starts at cpu, so the flip below
+        # is this scan's answer rather than that initial value.
+        self.assertEqual(package.cache_entry().device_type, "cpu")
+        package.update_device_type(graph)
+        self.assertEqual(package.cache_entry().device_type, "cuda")
+
+        meta_graph = torch.fx.Graph()
+        meta_graph.placeholder("x").meta["val"] = meta
+        package = CompilePackage(fn)
+        package.update_device_type(meta_graph)
+        # Dropping meta leaves no device named, which reads as cpu rather than
+        # as no answer.
+        self.assertEqual(package.cache_entry().device_type, "cpu")
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_package_keeps_a_device_a_later_frame_does_not_name(self):
+        # update_device_type runs once per compiled frame and a package spans
+        # frames, so recording only the last answer let the cpu-only resume
+        # frame of this cuda compile erase the cuda the first frame named. The
+        # input is fake, so the compile needs no accelerator.
+        def fn(x):
+            _y = x.sin()
+            torch._dynamo.graph_break()
+            return torch.ones(2) + 1
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            torch.compile(fn, backend="eager")(torch.randn(3, 2, device="cuda"))
+
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        names = [n for code in entry.codes for n in code.function_names]
+        self.assertTrue(any("resume" in n for n in names))
+        self.assertEqual(entry.device_type, "cuda")
+
+    def test_package_keeps_a_loaded_device_a_recompile_does_not_name(self):
+        # A package rebuilt from a saved entry keeps the entry's codes, so its
+        # union has to start from the device those codes recorded: started at
+        # frozenset(), one cpu-only recompile after a reload re-snapshotted the
+        # entry as "cpu" and the cuda code still in it lost its GPU load check.
+        # The graphs are fake and never run; is_available is patched so
+        # check_versions accepts the cuda entry on a host without one.
+        with FakeTensorMode():
+            cuda = torch.empty(2, device="cuda")
+            cpu = torch.empty(2)
+
+        def fn(x):
+            return x + 1
+
+        cuda_graph = torch.fx.Graph()
+        cuda_graph.placeholder("x").meta["val"] = cuda
+        cpu_graph = torch.fx.Graph()
+        cpu_graph.placeholder("x").meta["val"] = cpu
+
+        package = CompilePackage(fn)
+        package.update_device_type(cuda_graph)
+        saved = pickle.loads(pickle.dumps(package.cache_entry()))
+        self.assertEqual(saved.device_type, "cuda")
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            package = CompilePackage(fn, dynamo=saved)
+        self.assertEqual(package.cache_entry().device_type, "cuda")
+        package.update_device_type(cpu_graph)
+        self.assertEqual(package.cache_entry().device_type, "cuda")
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
