@@ -44,8 +44,15 @@ class Memory(Protocol):
 class Transport(ABC):
     """Base class for one-sided tensor transports."""
 
-    def __init__(self, device: torch.device | str) -> None:
-        self.device = torch.device(device)
+    def __init__(self, device: torch.device | str | None = None) -> None:
+        self.device = torch.device(device) if device is not None else None
+
+    def _check_device(self, device: torch.device) -> None:
+        if self.device is not None and (
+            device.type != self.device.type
+            or (self.device.index is not None and device.index != self.device.index)
+        ):
+            raise ValueError(f"expected a tensor on {self.device}, got {device}")
 
     @staticmethod
     @abstractmethod

@@ -17,7 +17,12 @@ on:
     paths: [.github/workflows/create_release.yml]
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   release:
+    needs: check-ci
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Create Release
     runs-on: ubuntu-24.04
