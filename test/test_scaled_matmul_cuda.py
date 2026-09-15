@@ -47,6 +47,7 @@ from torch.testing._internal.common_device_type import (
     E5M2_MAX_POS,
     skipXPU,
     skipCUDAIf,
+    skipMPS,
 )
 
 from torch.testing._internal.common_xpu import Xe2_Or_Later
@@ -235,7 +236,8 @@ def scaled_mm_wrap(
     bias=None,
     wrap_v2=wrap,
 ):
-    if not wrap_v2:
+    # MPS only implements _scaled_mm; route it to v1 until _scaled_mm_v2 lands there.
+    if not wrap_v2 or a.device.type == "mps":
         return torch._scaled_mm(
             a,
             b,
@@ -743,6 +745,8 @@ class TestFP8Matmul(TestCase):
                               size: int = 16) -> None:
         if not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
+        if "mps" in device and e5m2_type in (x_dtype, y_dtype):
+            raise unittest.SkipTest("MPS has no float8_e5m2")
         x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
         y_fp8 = torch.eye(size, device=device, dtype=y_dtype)
         if not x_cm:
@@ -848,7 +852,8 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
         with self.assertRaises(
-            AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
+            TypeError if "mps" in device
+            else AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
             else RuntimeError
         ):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
@@ -857,8 +862,8 @@ class TestFP8Matmul(TestCase):
     def test_float8_scale(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
-        # hipblaslt does not yet support mixed e4m3_type input
-        y_type = e4m3_type if torch.version.hip else e5m2_type
+        # hipblaslt does not yet support mixed e4m3_type input; MPS has no e5m2
+        y_type = e4m3_type if torch.version.hip or "mps" in device else e5m2_type
         y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
@@ -1723,7 +1728,7 @@ class TestFP8Matmul(TestCase):
         # XPU and CPU supports the case when out_dtype is fp32 + bias. So we just test it with normal run.
         if "xpu" not in device and "cpu" not in device:
             self.assertRaisesRegex(
-                ValueError if torch.cuda.is_available() else RuntimeError,
+                ValueError if torch.cuda.is_available() or "mps" in device else RuntimeError,
                 "Bias is not supported when out_dtype is set to Float32",
                 lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
             )
@@ -1747,8 +1752,8 @@ class TestFP8Matmul(TestCase):
     def test_float8_scale_fast_accum(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
-        # hipblaslt does not yet support mixed e4m3_type input
-        y_type = e4m3_type if torch.version.hip else e5m2_type
+        # hipblaslt does not yet support mixed e4m3_type input; MPS has no e5m2
+        y_type = e4m3_type if torch.version.hip or "mps" in device else e5m2_type
         y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
@@ -1860,7 +1865,11 @@ class TestFP8Matmul(TestCase):
         is_cuda_device = "cuda" in device
         is_xpu_device = "xpu" in device
 
-        if is_xpu_device or not is_cuda_device:
+        if "mps" in device:
+            # MPS has no float8_e5m2 dtype
+            with self.assertRaisesRegex(RuntimeError, "Undefined type Float8_e5m2"):
+                e5m2()
+        elif is_xpu_device or not is_cuda_device:
             out = e5m2()
             self.assertEqual(out, torch.ones_like(out) * 128.)
         elif (torch.cuda.get_device_capability() == (9, 0) and
@@ -3491,6 +3500,7 @@ class TestFP8Matmul(TestCase):
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm
+    @skipMPS  # no _scaled_mm_v2 kernel on MPS
     def test_scaled_mm_v2_fullgraph(self, device) -> None:
         m, n, k = 15, 32, 16
         a = torch.randn(m, k, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
@@ -3542,7 +3552,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(actual, expected)
 
 
-instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
