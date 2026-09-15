@@ -1612,6 +1612,7 @@ def _slow_gradcheck(
     complex_indices=None,
     test_imag=False,
     masked=False,
+    equal_nan=False,
 ):
     func_out = _as_tuple(func_out)
     if not outputs:
@@ -1641,7 +1642,9 @@ def _slow_gradcheck(
         for i, n_per_out in enumerate(numerical):
             for j, n in enumerate(n_per_out):
                 a = analytical_forward[j][i]
-                if not _allclose_with_type_promotion(a, n.to(a.device), rtol, atol):
+                if not _allclose_with_type_promotion(
+                    a, n.to(a.device), rtol, atol, equal_nan=equal_nan
+                ):
                     raise GradcheckError(
                         _get_notallclose_msg(
                             a, n, i, j, complex_indices, test_imag, is_forward_ad=True
@@ -1654,7 +1657,9 @@ def _slow_gradcheck(
             )
 
             for j, (a, n) in enumerate(zip(analytical, numerical[i])):
-                if not _allclose_with_type_promotion(a, n.to(a.device), rtol, atol):
+                if not _allclose_with_type_promotion(
+                    a, n.to(a.device), rtol, atol, equal_nan=equal_nan
+                ):
                     raise GradcheckError(
                         _get_notallclose_msg(a, n, i, j, complex_indices, test_imag)
                     )
@@ -1670,11 +1675,11 @@ def _dot_with_type_promotion(u, v):
     return (u * v).sum()
 
 
-def _allclose_with_type_promotion(a, b, rtol, atol):
+def _allclose_with_type_promotion(a, b, rtol, atol, *, equal_nan=False):
     promoted_type = torch.promote_types(a.dtype, b.dtype)
     a = a.to(dtype=promoted_type)
     b = b.to(dtype=promoted_type)
-    return torch.allclose(a, b, rtol, atol)
+    return torch.allclose(a, b, rtol, atol, equal_nan=equal_nan)
 
 
 def _to_real_dtype(dtype):
@@ -1793,7 +1798,16 @@ If the test
 
 
 def _run_slow_mode_and_get_error(
-    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, eps, is_forward_ad
+    func,
+    tupled_inputs,
+    outputs,
+    input_idx,
+    output_idx,
+    rtol,
+    atol,
+    eps,
+    is_forward_ad,
+    equal_nan,
 ):
     # Compute jacobians in slow mode for better error message
     if is_forward_ad:
@@ -1833,7 +1847,9 @@ def _run_slow_mode_and_get_error(
     # Assume jacobians are non-empty and have the same shape
     slow_max_diff = (slow_numerical - slow_analytical).abs().max()
 
-    slow_allclose = torch.allclose(slow_analytical, slow_numerical, rtol, atol)
+    slow_allclose = torch.allclose(
+        slow_analytical, slow_numerical, rtol, atol, equal_nan=equal_nan
+    )
     msg = (
         "\nThe above quantities relating the numerical and analytical jacobians are computed \n"
         "in fast mode. See: https://github.com/pytorch/pytorch/issues/53876 for more background \n"
@@ -1901,6 +1917,7 @@ def _check_analytical_numerical_equal(
     test_imag,
     *,
     is_forward_ad=False,
+    equal_nan=False,
 ):
     for i, all_numerical_for_input_i in enumerate(all_numerical):
         for j, n in enumerate(all_numerical_for_input_i):
@@ -1911,9 +1928,20 @@ def _check_analytical_numerical_equal(
                 a = all_analytical[j][i]
             n = n.to(device=a.device)
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
-            if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
+            if not _allclose_with_type_promotion(
+                a, n.to(a.device), rtol, updated_atol, equal_nan=equal_nan
+            ):
                 jacobians_str = _run_slow_mode_and_get_error(
-                    func, tupled_inputs, outputs, i, j, rtol, atol, eps, is_forward_ad
+                    func,
+                    tupled_inputs,
+                    outputs,
+                    i,
+                    j,
+                    rtol,
+                    atol,
+                    eps,
+                    is_forward_ad,
+                    equal_nan,
                 )
                 raise GradcheckError(
                     _get_notallclose_msg(
@@ -1938,6 +1966,7 @@ def _fast_gradcheck(
     complex_indices=None,
     test_imag=False,
     masked=False,
+    equal_nan=False,
 ):
     # See https://github.com/pytorch/pytorch/issues/53876 for details
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
@@ -2000,6 +2029,7 @@ def _fast_gradcheck(
         eps,
         test_imag,
         is_forward_ad=use_forward_ad,
+        equal_nan=equal_nan,
     )
 
     return True
@@ -2018,6 +2048,7 @@ def gradcheck(
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
+    equal_nan: bool = False,
     raise_exception: bool = True,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
@@ -2070,6 +2101,8 @@ def gradcheck(
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
         rtol (float, optional): relative tolerance
+        equal_nan (bool, optional): if ``True``, consider matching ``NaN`` values
+            in numerical and analytical gradients to be equal. Defaults to ``False``.
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
@@ -2125,6 +2158,7 @@ def _gradcheck_helper(
     eps,
     atol,
     rtol,
+    equal_nan,
     nondet_tol,
     check_undefined_grad,
     check_grad_dtypes,
@@ -2143,7 +2177,9 @@ def _gradcheck_helper(
     _check_outputs(outputs)
 
     gradcheck_fn = functools.partial(
-        _fast_gradcheck if fast_mode else _slow_gradcheck, masked=masked
+        _fast_gradcheck if fast_mode else _slow_gradcheck,
+        masked=masked,
+        equal_nan=equal_nan,
     )
     _gradcheck_real_imag(
         gradcheck_fn,
@@ -2187,6 +2223,7 @@ def gradgradcheck(
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
+    equal_nan: bool = False,
     gen_non_contig_grad_outputs: bool = False,
     raise_exception: bool = True,
     nondet_tol: float = 0.0,
@@ -2230,6 +2267,8 @@ def gradgradcheck(
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
         rtol (float, optional): relative tolerance
+        equal_nan (bool, optional): if ``True``, consider matching ``NaN`` values
+            in numerical and analytical gradients to be equal. Defaults to ``False``.
         gen_non_contig_grad_outputs (bool, optional): if :attr:`grad_outputs` is
             ``None`` and :attr:`gen_non_contig_grad_outputs` is ``True``, the
             randomly generated gradient outputs are made to be noncontiguous
@@ -2327,6 +2366,7 @@ def gradgradcheck(
         eps=eps,
         atol=atol,
         rtol=rtol,
+        equal_nan=equal_nan,
         raise_exception=raise_exception,
         nondet_tol=nondet_tol,
         check_undefined_grad=check_undefined_grad,
