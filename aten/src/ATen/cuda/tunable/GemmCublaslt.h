@@ -593,6 +593,7 @@ class CublasltScaledGemmProblem : public CublasltGemmProblemBase {
       }
     }
 
+#if CUDA_VERSION >= 12080
     int a_scale_mode = at::cuda::blas::detail::cublasLtMatmulScaleMode(
         params_->a_scaling_type,
         params_->a_swizzle_type,
@@ -603,7 +604,6 @@ class CublasltScaledGemmProblem : public CublasltGemmProblemBase {
         params_->b_swizzle_type,
         params_->b_scale_dtype,
         params_->use_fast_accum);
-#if CUDA_VERSION >= 12080
     compute_desc_.setAttribute(
         CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
     compute_desc_.setAttribute(
