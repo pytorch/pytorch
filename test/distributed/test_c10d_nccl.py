@@ -4471,11 +4471,16 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
                 # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
                 # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
-                "NCCL_ALGO": "NVLS",
                 "NCCL_DEBUG": "INFO",
                 "NCCL_DEBUG_SUBSYS": "NVLS",
                 "NCCL_DEBUG_FILE": nccl_debug_file.name,
             }
+            # NCCL 2.31 uses NCCL_ALGO to exclude symmetric kernels.
+            if (
+                torch.cuda.nccl.version() < (2, 31)
+                or self._testMethodName == "test_nccl_user_buffer_registration"
+            ):
+                nccl_env["NCCL_ALGO"] = "NVLS"
             if torch.cuda.nccl.version() >= (2, 24, 3):
                 nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
             self.env_patcher = mock.patch.dict(os.environ, nccl_env)
