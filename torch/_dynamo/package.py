@@ -32,7 +32,7 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -829,6 +829,20 @@ class SystemInfo:
                 )
 
 
+def _collapse_device_types(device_types: frozenset[str]) -> str:
+    """The single device type a package or an AOT artifact records: an
+    accelerator wins over cpu, and naming no device reads as cpu. Among several
+    accelerators one in `SystemInfo.CHECK_GPUS` wins, since any other name skips
+    the load check; the rest tie alphabetically. One string cannot say that a
+    graph needs two accelerators: it records the preferred one, and the load
+    check is for that one.
+    """
+    for device_type in SystemInfo.CHECK_GPUS:
+        if device_type in device_types:
+            return device_type
+    return next((d for d in sorted(device_types) if d != "cpu"), "cpu")
+
+
 @dataclasses.dataclass
 class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
@@ -1002,8 +1016,8 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        # Every device type the graphs compiled into this package named.
+        self._device_types: frozenset[str] = frozenset()
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -1068,6 +1082,12 @@ class CompilePackage:
                         function_names=list(code.function_names),
                         import_sources=dict(code.import_sources),
                     )
+            # The codes come back, so the device they recorded must too, or one
+            # recompile after a reload re-saves the entry as what that frame
+            # alone named. The collapse is a maximum under one order, so
+            # re-collapsing its string with later frames gives what the full
+            # set would: the re-saved string is never below the loaded one.
+            self._device_types = frozenset((dynamo.device_type,))
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -1179,7 +1199,10 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        self._device_type = _graph_device_type(graph)
+        # One call per compiled frame, and a package spans frames (a graph
+        # break adds a resume code), so accumulate: a cpu-only resume frame
+        # must not erase the accelerator an earlier frame named.
+        self._device_types |= _graph_device_types(graph)
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
@@ -1417,7 +1440,7 @@ class CompilePackage:
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=_collapse_device_types(self._device_types),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )

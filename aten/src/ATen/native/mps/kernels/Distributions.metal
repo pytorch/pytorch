@@ -110,7 +110,7 @@ kernel void exponential(
 template <typename T>
 kernel void uniform_dist(
     device T* output [[buffer(0)]],
-    constant float2& params [[buffer(1)]],
+    constant float4& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
@@ -122,7 +122,10 @@ kernel void uniform_dist(
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = static_cast<T>(from + scale * u);
+    T value = static_cast<T>(from + scale * u);
+    // Casting to T can round up to the excluded upper bound.
+    output[base + i] =
+        float(value) == params.w ? static_cast<T>(params.z) : value;
   }
 }
 
@@ -217,9 +220,14 @@ REGISTER_OP(geometric, short);
 REGISTER_OP(geometric, char);
 REGISTER_OP(geometric, uchar);
 
-REGISTER_OP(uniform_dist, float);
-REGISTER_OP(uniform_dist, half);
-REGISTER_OP(uniform_dist, bfloat);
+#define REGISTER_UNIFORM(DTYPE)                              \
+  template [[host_name("uniform_dist_" #DTYPE)]] kernel void \
+  uniform_dist<DTYPE>(                                       \
+      device DTYPE*, constant float4&, constant long2&, constant uint&, uint)
+
+REGISTER_UNIFORM(float);
+REGISTER_UNIFORM(half);
+REGISTER_UNIFORM(bfloat);
 
 REGISTER_OP(normal, float);
 REGISTER_OP(normal, half);
