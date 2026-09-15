@@ -929,8 +929,10 @@ class FlexGemmEpilogueEmitter:
         if self.alpha != 1:
             params.append("alpha")
             gemm_value = "(acc * alpha)"
-        for name in self.operand_names[: self.mainloop_scale_count]:
-            gemm_value = f"({gemm_value} * {name})"
+        scales = self.operand_names[: self.mainloop_scale_count]
+        if scales:
+            # Match native: combine global scales before scaling the accumulator.
+            gemm_value = f"({gemm_value} * ({' * '.join(scales)}))"
         if (
             self.gemm.target
             in (
