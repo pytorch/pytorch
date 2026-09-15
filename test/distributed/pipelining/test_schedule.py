@@ -4,11 +4,13 @@ import copy
 import csv
 import logging
 import os
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from model_registry import MultiMLP
 
 import torch
+import torch.distributed.config as dist_config
 from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     Schedule1F1B,
@@ -55,6 +57,9 @@ from torch.distributed.pipelining.schedules import (
     W,
 )
 from torch.distributed.pipelining.stage import (
+    _build_p2p_edge_groups,
+    _p2p_edge_matchings,
+    _p2p_topology,
     _PipelineStageBase,
     _RecvBufferPool,
     _RecvInfo,
@@ -78,6 +83,105 @@ logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
 
+class P2PTopologyTest(TestCase):
+    def test_neighbor_warmup_uses_pipeline_group_ranks(self):
+        stage = MockPipelineStage(num_stages=2, group_size=2, group_rank=1)
+        stage.stage_index = 0
+        stage.stage_index_to_group_rank = {0: 1, 1: 0}
+        stage.device = torch.device("cpu")
+
+        with patch("torch.distributed.pipelining.stage.dist.P2POp") as p2p:
+            stage._get_init_p2p_neighbors_ops()
+
+        self.assertEqual(
+            [call.kwargs["group_peer"] for call in p2p.call_args_list], [0, 0]
+        )
+        del stage.stage_index_to_group_rank[1]
+        with self.assertRaisesRegex(PipeliningMetadataError, "neighboring stage 1"):
+            stage._get_init_p2p_neighbors_ops()
+
+    def test_loop_topology_uses_four_disjoint_split_rounds(self):
+        topology = _p2p_topology({stage: stage % 4 for stage in range(8)}, group_size=4)
+
+        self.assertEqual(
+            _p2p_edge_matchings(topology),
+            (
+                ((0, 1), (2, 3)),
+                ((1, 0), (3, 2)),
+                ((0, 3), (1, 2)),
+                ((3, 0), (2, 1)),
+            ),
+        )
+
+    def test_v_topology_excludes_same_rank_turn_and_wraparound(self):
+        topology = _p2p_topology(
+            dict(enumerate((0, 1, 2, 3, 3, 2, 1, 0))),
+            group_size=4,
+        )
+
+        rounds = _p2p_edge_matchings(topology)
+        edges = {edge for round_edges in rounds for edge in round_edges}
+        self.assertEqual(
+            edges,
+            {(0, 1), (1, 0), (1, 2), (2, 1), (2, 3), (3, 2)},
+        )
+        self.assertNotIn((0, 3), edges)
+        self.assertNotIn((3, 3), edges)
+        self.assertTrue(
+            all(
+                len({rank for edge in round_edges for rank in edge})
+                == 2 * len(round_edges)
+                for round_edges in rounds
+            )
+        )
+
+    def test_topology_requires_contiguous_valid_stage_mapping(self):
+        with self.assertRaisesRegex(ValueError, "contiguous indices"):
+            _p2p_topology({0: 0, 2: 1}, group_size=2)
+        with self.assertRaisesRegex(ValueError, "outside"):
+            _p2p_topology({0: 0, 1: 2}, group_size=2)
+
+    def test_cpu_edge_groups_inherit_parent_timeout(self):
+        timeout = timedelta(seconds=17)
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store, timeout=timeout
+        )
+        parent = torch.distributed.distributed_c10d._get_default_group()
+        backend = MagicMock()
+        backend.options._timeout = timeout
+        try:
+            with (
+                patch.object(
+                    torch.accelerator,
+                    "current_accelerator",
+                    return_value=torch.device("cuda"),
+                ),
+                patch.object(torch.distributed, "get_backend", return_value="gloo"),
+                patch.object(
+                    torch.distributed,
+                    "get_backend_config",
+                    return_value="cpu:gloo",
+                ),
+                patch.object(
+                    torch.distributed.ProcessGroup,
+                    "_get_backend",
+                    return_value=backend,
+                ),
+                patch.object(
+                    torch.distributed, "split_group", return_value=parent
+                ) as split_group,
+            ):
+                _build_p2p_edge_groups(parent, {0: 0, 1: 1})
+
+            self.assertEqual(split_group.call_count, 2)
+            for call in split_group.call_args_list:
+                self.assertIsNone(call.kwargs["backend"])
+                self.assertEqual(call.kwargs["timeout"], timeout)
+        finally:
+            torch.distributed.destroy_process_group()
+
+
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
@@ -86,6 +190,7 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group")
+        self.p2p_per_edge = False
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -744,7 +849,8 @@ class ScheduleTest(TestCase):
             torch.distributed.destroy_process_group()
 
     @parametrize("rank", [0, 1])
-    def test_fake_pg_cross_rank_uses_static_metadata(self, rank):
+    @parametrize("per_edge", [False, True])
+    def test_fake_pg_cross_rank_uses_static_metadata(self, rank, per_edge):
         """
         With a fake process group, the cross-rank warm-up vote cannot exchange
         real data, so the schedule must infer the metadata mode locally:
@@ -763,19 +869,41 @@ class ScheduleTest(TestCase):
         x = torch.randn(batch_size, d_hid, device=device)
         mb = torch.randn(batch_size // num_microbatches, d_hid, device=device)
         try:
-            stage = PipelineStage(
-                mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
-            )
-            schedule = ScheduleGPipe(stage, num_microbatches)
-            schedule.step(x) if rank == 0 else schedule.step()
-            self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+            with dist_config.patch(pipeline_per_edge_p2p=per_edge):
+                stage = PipelineStage(
+                    mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
+                )
+                schedule = ScheduleGPipe(stage, num_microbatches)
+                schedule.step(x) if rank == 0 else schedule.step()
+                self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
 
-            # Without static metadata, dynamic inference is required, which
-            # cannot work over a fake group and must fail loudly.
-            stage_dyn = PipelineStage(mod, rank, n_stages, device)
-            schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
-            with self.assertRaisesRegex(RuntimeError, "fake process group"):
-                schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
+                # Without static metadata, dynamic inference is required, which
+                # cannot work over a fake group and must fail loudly.
+                stage_dyn = PipelineStage(mod, rank, n_stages, device)
+                schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
+                with self.assertRaisesRegex(RuntimeError, "fake process group"):
+                    schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_p2p_edge_topology_cannot_change(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store
+        )
+        try:
+            with dist_config.patch(pipeline_per_edge_p2p=True):
+                stage = PipelineStage(
+                    torch.nn.Linear(2, 2),
+                    0,
+                    2,
+                    torch.device("cpu"),
+                    input_args=torch.ones(1, 2),
+                )
+                stage._configure_p2p_edge_groups()
+                stage.stage_index_to_group_rank = {0: 1, 1: 0}
+                with self.assertRaisesRegex(ValueError, "mapping changed"):
+                    stage._configure_p2p_edge_groups()
         finally:
             torch.distributed.destroy_process_group()
 

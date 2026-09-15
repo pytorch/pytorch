@@ -1665,15 +1665,12 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 instantiate_parametrized_tests(CustomSchedulesTest)
 
 
-class PerDirectionScheduleTest(MultiProcContinuousTest):
-    """Per-direction PP communicators (``config.pipeline_per_direction_p2p``).
+class PerEdgeScheduleTest(MultiProcContinuousTest):
+    """Per-edge PP communicators (``config.pipeline_per_edge_p2p``).
 
-    A single PP communicator serializes all send/recv in one FIFO; splitting
-    downstream (r -> r+1 activations) and upstream (r -> r-1 gradients) onto two
-    communicators removes the cross-batch deadlock hazard. PipelineStage builds
-    the two subgroups with ``split_group``, which requires a device-bound default
-    PG -- so this class binds ``device_id`` in ``_init_pg`` (see below) rather
-    than relying on the shared MultiProcContinuousTest path.
+    A single PP communicator serializes all send/recv in one FIFO. The schedule
+    initializes the PP parent and derives directed children from its final
+    logical-stage placement.
     """
 
     world_size = 4
@@ -1684,21 +1681,11 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Bind device_id so PipelineStage can split the default PG into
-        # downstream/upstream subgroups. We override here instead of changing
-        # MultiProcContinuousTest._init_pg, which also serves CPU/Gloo callers
-        # where device_id would alter PG initialization semantics.
+        """Initialize a lazy default PG to exercise parent-local initialization."""
         if rdvz_file is None:
             raise AssertionError("Expected rdvz_file to not be None")
         os.environ["LOCAL_RANK"] = str(rank)
         store = dist.FileStore(rdvz_file, world_size)
-        # _init_pg runs at class spawn, before the per-test skip_if_lt_x_gpu(4).
-        # Only bind device_id when every rank maps to a real accelerator;
-        # otherwise the tests are skipped anyway and an out-of-range device_id
-        # would make init_process_group raise instead of skip.
-        device_id = None
-        if torch.accelerator.device_count() >= world_size:
-            device_id = torch.device(cls.device_type(), rank)
         dist.init_process_group(
             backend=cls.backend_str(),
             world_size=world_size,
@@ -1706,7 +1693,6 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             store=store,
             pg_options=cls.opts(),
             timeout=cls.timeout,
-            device_id=device_id,
         )
         cls.pg = dist.distributed_c10d._get_default_group()
 
@@ -1725,43 +1711,65 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @skip_if_lt_x_gpu(4)
-    def test_creates_distinct_direction_groups(self):
-        """PipelineStage builds two distinct, non-WORLD direction groups when the
-        config flag is set (no constructor arg)."""
-        with dist_config.patch(pipeline_per_direction_p2p=True):
+    def test_creates_distinct_edge_groups(self):
+        """Schedule warm-up builds only the directed edges in its topology."""
+        with dist_config.patch(pipeline_per_edge_p2p=True):
             mod, _, x, _, _ = setup_models_and_data(self.config)
             chunks = 2 * self.world_size
             stage, _, _ = create_single_stage_pipeline(
                 self.config, mod, x, chunks, use_tracer=False
             )
-            self.assertTrue(stage.p2p_per_direction)
-            self.assertIsNot(stage._downstream_group, dist.group.WORLD)
-            self.assertIsNot(stage._upstream_group, dist.group.WORLD)
-            self.assertIsNot(stage._downstream_group, stage._upstream_group)
+            self.assertTrue(stage.p2p_per_edge)
+            self.assertFalse(stage._p2p_edge_groups)
+
+            schedule = ScheduleGPipe(stage, chunks, scale_grads=False)
+            if self.rank == 0:
+                schedule.step(x)
+            else:
+                schedule.step()
+
+            directed_edges = {
+                edge
+                for rank in range(self.world_size - 1)
+                for edge in ((rank, rank + 1), (rank + 1, rank))
+            }
+            self.assertEqual(
+                set(stage._p2p_edge_groups),
+                {edge for edge in directed_edges if self.rank in edge},
+            )
+            groups = list(stage._p2p_edge_groups.values())
+            self.assertEqual(len({id(group) for group in groups}), len(groups))
+            self.assertTrue(all(group is not dist.group.WORLD for group in groups))
+            self.assertTrue(
+                all(
+                    {group_device.type for group_device in group._device_types}
+                    == {self.device.type}
+                    for group in groups
+                )
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @parametrize("use_tracer", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_per_direction(self, ScheduleClass):
-        """Per-direction P2P only changes which communicator carries the bytes,
+    def test_grad_with_per_edge(self, ScheduleClass, use_tracer):
+        """Per-edge P2P only changes which communicator carries the bytes,
         not the math: gradients/outputs must still match the reference model."""
-        with dist_config.patch(pipeline_per_direction_p2p=True):
+        with dist_config.patch(pipeline_per_edge_p2p=True):
             mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
             # Run reference
             ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
 
-            # Create manual pipeline stage; the per-direction groups are built
-            # inside PipelineStage from the config flag set above.
             chunks = 2 * self.world_size
             stage, stage_module, _ = create_single_stage_pipeline(
-                self.config, mod, x, chunks, use_tracer=False
+                self.config, mod, x, chunks, use_tracer=use_tracer
             )
-            self.assertTrue(stage.p2p_per_direction)
-            self.assertIsNot(stage._downstream_group, stage._upstream_group)
+            self.assertTrue(stage.p2p_per_edge)
+            self.assertFalse(stage._p2p_edge_groups)
 
             schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
@@ -1777,6 +1785,16 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
                 else:
                     schedule.step()
 
+            directed_edges = {
+                edge
+                for rank in range(self.world_size - 1)
+                for edge in ((rank, rank + 1), (rank + 1, rank))
+            }
+            self.assertEqual(
+                set(stage._p2p_edge_groups),
+                {edge for edge in directed_edges if self.rank in edge},
+            )
+
             dist.barrier(device_ids=[self.rank])
 
             # Last rank checks result
@@ -1788,8 +1806,73 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             # Check gradients using helper method
             check_gradients(self.config, stage_module, ref_mod)
 
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_grad_with_v_schedule(self):
+        """A V schedule uses local transfer at its turn and P2P elsewhere."""
+        with dist_config.patch(pipeline_per_edge_p2p=True):
+            num_stages = 2 * self.world_size
+            rank_stages = {
+                0: [0, 7],
+                1: [1, 6],
+                2: [2, 5],
+                3: [3, 4],
+            }
+            mod, ref_mod, x, target, loss_fn = setup_models_and_data(
+                self.config, n_layers=num_stages
+            )
+            ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
+            stage_indices = rank_stages[self.rank]
+            stages, stage_modules, submod_names = create_multi_stage_pipeline(
+                self.config, mod, len(stage_indices), num_stages, stage_indices
+            )
+            schedule = ScheduleDualPipeV(
+                stages,
+                2 * self.world_size,
+                loss_fn=loss_fn,
+                scale_grads=False,
+                reuse_recv_buffers=True,
+            )
 
-instantiate_parametrized_tests(PerDirectionScheduleTest)
+            out = None
+            losses = []
+            group_ids = None
+            for step in range(2):
+                zero_gradients(stage_modules)
+                if self.rank == 0:
+                    out = schedule.step(x, target=target, losses=losses)
+                else:
+                    schedule.step()
+                current_group_ids = {
+                    edge: id(group)
+                    for edge, group in stages[0]._p2p_edge_groups.items()
+                }
+                if step == 0:
+                    group_ids = current_group_ids
+                else:
+                    self.assertEqual(current_group_ids, group_ids)
+
+            expected_edges = {
+                edge
+                for rank in range(self.world_size - 1)
+                for edge in ((rank, rank + 1), (rank + 1, rank))
+            }
+            self.assertEqual(
+                set(stages[0]._p2p_edge_groups),
+                {edge for edge in expected_edges if self.rank in edge},
+            )
+
+            dist.barrier(device_ids=[self.rank])
+            if self.rank == 0:
+                torch.testing.assert_close(out, ref_out)
+                torch.testing.assert_close(sum(losses), ref_loss)
+            check_gradients(self.config, stage_modules, ref_mod, submod_names)
+
+
+instantiate_parametrized_tests(PerEdgeScheduleTest)
 
 
 if __name__ == "__main__":
