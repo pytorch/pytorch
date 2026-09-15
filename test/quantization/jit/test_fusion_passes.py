@@ -3,12 +3,18 @@
 # torch
 import torch
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 
 class TestFusionPasses(QuantizationTestCase):
-    def test_quantized_add_relu_fusion(self):
+    hw_classification = HardwareClassification.CPU
+
+    def test_quantized_add_relu_fusion(self, device):
         class MAdd(torch.nn.Module):
             def forward(self, x, y):
                 a = torch.ops.quantized.add(x, y, 1.0, 0)
@@ -106,6 +112,8 @@ class TestFusionPasses(QuantizationTestCase):
         output = scripted_m(qA, 3.0, qC)
         self.assertEqual(ref_output, output)
 
+
+instantiate_device_type_tests(TestFusionPasses, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
