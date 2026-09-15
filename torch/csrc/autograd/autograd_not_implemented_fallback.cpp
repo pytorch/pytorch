@@ -98,7 +98,7 @@ static void reportAutogradNotImplemented(
         "but we are trying to backprop through it. This can lead to silently incorrect behavior. ",
         "If your operator is differentiable, please ensure you have registered an "
         "autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, "
-        "). If your operator is not "
+        "DispatchKey::CompositeImplicitAutograd). If your operator is not "
         "differentiable and ensure NO gradients flow through this operator, "
         "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd."));
   }
