@@ -30,8 +30,8 @@ std::vector<std::optional<const Use>> gatherLastUses(
 // Values which do not have uses or which do not have a last use
 // outside of the subgraph to be merged into we do not need to track.
 struct ValueMapper {
-  // `to_merge` is the node we're merginginto a subgraph, `existing_subgraph` is
-  // the subgraph node that we're merging into if it exists
+  // `to_merge` is the node we're merging into a subgraph, `existing_subgraph`
+  // is the subgraph node that we're merging into if it exists
   ValueMapper(
       Node* to_merge,
       AliasDb& db,

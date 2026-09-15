@@ -35,7 +35,7 @@ sudo apt-get update
 sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0
 
 # Detect CUDA version and use appropriate wheel index
-# DESIRED_CUDA is set as ENV in the Dockerfile (e.g., "13.0.2", "12.8.1")
+# DESIRED_CUDA is set as ENV in the Dockerfile (e.g., "13.0.3", "12.8.1")
 if [[ "${DESIRED_CUDA}" == 13.* ]]; then
   CUDA_INDEX_URL="https://download.pytorch.org/whl/cu130"
   echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu130 wheels"
@@ -60,11 +60,14 @@ install_timm
 # NS: It's very important to uninstall some of the system dependencies
 # Otherwise torchnbench test might start to fail with hard to detect errors
 # Especially if cudnn/nccl version are different between nightly and last release
+# Same for nvshmem, where a stale wheel breaks `import torch` outright
 env_run pip uninstall -y torch torchvision torchaudio triton torchao
 if [[ "${DESIRED_CUDA}" == 13.* ]]; then
   env_run pip uninstall -y nvidia-nccl-cu13
   env_run pip uninstall -y nvidia-cudnn-cu13
+  env_run pip uninstall -y nvidia-nvshmem-cu13
 else
   env_run pip uninstall -y nvidia-nccl-cu12
   env_run pip uninstall -y nvidia-cudnn-cu12
+  env_run pip uninstall -y nvidia-nvshmem-cu12
 fi
