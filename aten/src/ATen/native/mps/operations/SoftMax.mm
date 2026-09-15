@@ -1,134 +1,153 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/mps/OperationUtils.h>
-
-#ifdef __OBJC__
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
+#include <ATen/native/mps/kernels/SoftMax.h>
+#include <c10/util/TypeCast.h>
+#include <c10/util/accumulate.h>
+#include <bit>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_log_softmax_native.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
 #include <ATen/ops/_softmax_native.h>
+#include <ATen/ops/empty.h>
 #endif
 
 namespace at::native {
 
-static void get_shapes(MPSShape* input_shape_readonly,
-                       NSMutableArray<NSNumber*>*& input_shape,
-                       int num_input_dims,
-                       c10::MemoryFormat memory_format) {
-  // Modify the shape
-  if (memory_format == at::MemoryFormat::Contiguous) {
-    for (int i = 0; i < num_input_dims; i++)
-      input_shape[i] = input_shape_readonly[i];
-  } else { // ChannelsLast
-    auto num_channels = input_shape_readonly[1];
-    input_shape[0] = input_shape_readonly[0];
-    for (int i = 1; i < num_input_dims - 1; i++)
-      input_shape[i] = input_shape_readonly[i + 1];
-    input_shape[num_input_dims - 1] = num_channels;
+using namespace mps;
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/SoftMax_metallib.h>
+#endif
+
+static SoftmaxParams<uint32_t> narrow_params(const SoftmaxParams<uint64_t>& params) {
+  SoftmaxParams<uint32_t> result{.dim_size = c10::checked_convert<uint32_t>(params.dim_size, "uint32_t"),
+                                 .num_rows = c10::checked_convert<uint32_t>(params.num_rows, "uint32_t"),
+                                 .inner_size = c10::checked_convert<uint32_t>(params.inner_size, "uint32_t"),
+                                 .chunk_size = c10::checked_convert<uint32_t>(params.chunk_size, "uint32_t"),
+                                 .n_chunks = c10::checked_convert<uint32_t>(params.n_chunks, "uint32_t"),
+                                 .ndim = params.ndim,
+                                 .dim = params.dim};
+  for (const auto d : c10::irange(params.ndim)) {
+    result.sizes[d] = c10::checked_convert<uint32_t>(params.sizes[d], "uint32_t");
+    result.strides[d] = c10::checked_convert<uint32_t>(params.strides[d], "uint32_t");
+  }
+  return result;
+}
+
+template <typename... Tensors>
+static void run_softmax(MPSStream* stream,
+                        const std::string& kernel,
+                        const Tensor& self,
+                        bool use_u32,
+                        MTLSize grid,
+                        MTLSize group,
+                        const SoftmaxParams<uint64_t>& params,
+                        const Tensors&... tensors) {
+  auto encoder = stream->commandEncoder();
+  auto pso =
+      lib.getPipelineStateForFunc(fmt::format("{}_{}{}", kernel, scalarToMetalTypeString(self), mtlIdxSuffix(use_u32)));
+  getMPSProfiler().beginProfileKernel(pso, kernel, {self}, stream);
+  [encoder setComputePipelineState:pso];
+  if (use_u32) {
+    mtl_setArgs(encoder, tensors..., narrow_params(params));
+  } else {
+    mtl_setArgs(encoder, tensors..., params);
+  }
+  [encoder dispatchThreadgroups:grid threadsPerThreadgroup:group];
+  getMPSProfiler().endProfileKernel(pso, stream);
+}
+
+static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float, const Tensor& out, bool log_softmax) {
+  const std::string kernel = log_softmax ? "log_softmax" : "softmax";
+  TORCH_CHECK(!half_to_float, kernel, " with half to float conversion is not supported on MPS");
+  if (self.numel() == 0) {
+    return;
+  }
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self), kernel, " not implemented on MPS for ", self.scalar_type());
+
+  const auto self_ = self.dim() == 0 ? self.view(1) : self;
+  const auto wrapped_dim = maybe_wrap_dim(dim, self_.dim());
+  const auto dim_size = static_cast<uint64_t>(self_.size(wrapped_dim));
+  const auto inner_size = static_cast<uint64_t>(c10::multiply_integers(self_.sizes().slice(wrapped_dim + 1)));
+  const auto num_rows = static_cast<uint64_t>(self_.numel()) / dim_size;
+  const auto output = out.is_contiguous() ? out : at::empty(out.sizes(), out.options());
+  const bool use_u32 = offsetsFitIn<int32_t>(self_, output);
+  const bool contiguous_rows = self_.is_contiguous() && wrapped_dim == self_.dim() - 1;
+  // one simdgroup per row stops paying off past this width
+  constexpr uint64_t row_kernel_max_dim = 2048;
+  // rows wider than this need many rows to fill the GPU
+  constexpr uint64_t row_kernel_solo_dim = 1024;
+  constexpr uint64_t row_kernel_min_rows = 128;
+  const bool row_dim_fits = dim_size <= row_kernel_solo_dim || num_rows >= row_kernel_min_rows;
+  const bool use_row_kernel = contiguous_rows && dim_size <= row_kernel_max_dim && row_dim_fits;
+  // split long rows into enough chunks to occupy the GPU
+  constexpr uint64_t split_target_groups = 512;
+  // below this width a chunk cannot amortize the second pass
+  constexpr uint64_t split_min_chunk = 2048;
+  const auto n_chunks = std::clamp(split_target_groups / num_rows, uint64_t(1), ceil_div(dim_size, split_min_chunk));
+  const auto chunk_size = ceil_div(dim_size, n_chunks);
+  const bool use_split = contiguous_rows && !use_row_kernel && n_chunks > 1;
+  SoftmaxParams<uint64_t> params{.dim_size = dim_size,
+                                 .num_rows = num_rows,
+                                 .inner_size = inner_size,
+                                 .chunk_size = chunk_size,
+                                 .n_chunks = n_chunks,
+                                 .ndim = static_cast<uint32_t>(self_.dim()),
+                                 .dim = static_cast<uint32_t>(wrapped_dim)};
+  for (const auto d : c10::irange(self_.dim())) {
+    params.sizes[d] = self_.size(d);
+    params.strides[d] = self_.size(d) == 1 ? 0 : self_.stride(d);
+  }
+  const auto partials = use_split
+      ? at::empty({static_cast<int64_t>(num_rows), static_cast<int64_t>(n_chunks), 2}, self.options().dtype(kFloat))
+      : Tensor();
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      if (use_row_kernel) {
+        constexpr auto rows_per_group = kSoftmaxThreads / c10::metal::simdgroup_size;
+        const auto grid = MTLSizeMake(ceil_div(num_rows, uint64_t(rows_per_group)), 1, 1);
+        const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
+        run_softmax(stream, kernel + "_row", self, use_u32, grid, group, params, self_, output);
+      } else if (use_split) {
+        const auto grid = MTLSizeMake(n_chunks, num_rows, 1);
+        const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
+        run_softmax(stream, "softmax_partial", self, use_u32, grid, group, params, self_, partials);
+        run_softmax(stream, kernel + "_finalize", self, use_u32, grid, group, params, self_, output, partials);
+      } else {
+        // double the width for 2-byte dtypes so a threadgroup row spans a full 128-byte cache line
+        const auto max_tg_x = uint64_t((self.element_size() == 2 ? 2u : 1u) * c10::metal::simdgroup_size);
+        const auto tg_x = std::min(inner_size, max_tg_x);
+        const auto tg_y =
+            std::min({std::bit_ceil(dim_size), uint64_t(kSoftmaxThreads), std::bit_floor(kSoftmaxMaxThreads / tg_x)});
+        const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, 1);
+        const auto group = MTLSizeMake(tg_x, tg_y, 1);
+        run_softmax(stream, kernel, self, use_u32, grid, group, params, self_, output);
+      }
+    }
+  });
+  if (!out.is_contiguous()) {
+    out.copy_(output);
   }
 }
 
-// Note - Currently only supported for 4D image tensors
-
 TORCH_IMPL_FUNC(softmax_mps_out)
-(const Tensor& input_, const int64_t dim, const bool half_to_float, const Tensor& output) {
-  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");
-  TORCH_CHECK(c10::isFloatingType(input_.scalar_type()), "softmax only supported for floating types");
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
+(const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
+  softmax_mps_impl(self, dim, half_to_float, out, false);
+}
 
-  if (input_.numel() == 0) {
-    return;
-  }
-
-  Tensor input;
-  if (input_.dim() == 0) {
-    input = input_.view(1);
-  } else
-    input = input_;
-
-  int64_t dim_ = maybe_wrap_dim(dim, input.dim());
-  TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(), "Softmax:dim must be non-negative and less than input dimensions");
-
-  const auto memory_format = input.suggest_memory_format();
-  // TORCH_CHECK(input.suggest_memory_format() == output.suggest_memory_format(), "Input and output memory format should
-  // match")
-
-  using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string mem_format_key = get_mem_format_string(memory_format);
-    MPSShape* input_shape_readonly = mps::getMPSShape(input);
-    int num_input_dims = [input_shape_readonly count];
-    // Check - Channels last implies 4d
-    TORCH_CHECK(memory_format != at::MemoryFormat::ChannelsLast || num_input_dims == 4,
-                "ChannelsLast implies 4d tensor")
-    // Input shape changes based on memory format
-    NSMutableArray<NSNumber*>* input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-
-    get_shapes(input_shape_readonly, input_shape, num_input_dims, memory_format);
-
-    // Change dim
-    if (memory_format == at::MemoryFormat::ChannelsLast && dim_ > 0 && !is_macOS_15_0_or_newer) {
-      switch (dim_) {
-        case 1:
-          dim_ = 3;
-          break;
-        case 2:
-          dim_ = 1;
-          break;
-        case 3:
-          dim_ = 2;
-          break;
-        default:
-          assert(0 && "Invalid dim\n");
-      }
-    }
-
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
-    std::string key = "softmax_mps_out" + getTensorsStringKey(input, true, /*exclude_shape*/ true) + ":" +
-        mem_format_key + ":" + std::to_string(dim_);
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()));
-
-      // passing selector of softMaxWithTensor on the mpsGraph object
-      MPSGraphTensor* outputTensor = [mpsGraph softMaxWithTensor:inputTensor axis:(NSInteger)dim_ name:nil];
-
-      // Output needs to be contiguous format
-      if (memory_format == at::MemoryFormat::ChannelsLast && !is_macOS_15_0_or_newer) {
-        auto N = input_shape[0];
-        auto H = input_shape[1];
-        auto W = input_shape[2];
-        auto C = input_shape[3];
-
-        outputTensor = [mpsGraph reshapeTensor:outputTensor
-                                     withShape:@[ N, ([NSNumber numberWithInt:[H intValue] * [W intValue]]), C ]
-                                          name:nil];
-        outputTensor = [mpsGraph transposeTensor:outputTensor dimension:1 withDimension:2 name:nil];
-        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:@[ N, C, H, W ] name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor_, input, is_macOS_15_0_or_newer ? nil : input_shape);
-    // This must be the Contiguous shape
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+TORCH_IMPL_FUNC(log_softmax_mps_out)
+(const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
+  softmax_mps_impl(self, dim, half_to_float, out, true);
 }
 
 TORCH_IMPL_FUNC(softmax_backward_mps_out)

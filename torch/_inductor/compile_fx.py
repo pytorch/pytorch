@@ -2180,12 +2180,7 @@ def get_input_idxs_to_check(
     This function runs at compile time, and generates a list of indices for which we
     might need to do a copy to preserve alignment requirements.
     """
-    ids_to_check: list[int] = []
-
-    # Strict mode: the generated wrapper asserts that inputs assumed aligned
-    # actually are, instead of the runtime realigning them with a clone.
-    if config.alignment_asserts_inputs:
-        return ids_to_check
+    ids_to_check = []
 
     for i, input in enumerate(inputs):
         if not isinstance(input, torch.Tensor):
@@ -2236,12 +2231,6 @@ def cudagraphify(
 
     cudagraphify_fn: Callable[..., Any]
     if config.triton.cudagraph_trees:
-        managed_input_rerecord_limit = (
-            config.triton.cudagraph_managed_input_rerecord_limit
-        )
-        managed_input_rerecord_action = (
-            config.triton.cudagraph_managed_input_rerecord_action
-        )
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
@@ -2253,11 +2242,6 @@ def cudagraphify(
             mutated_input_idxs=mutated_input_idxs,
             kernel_free_cudagraph=kernel_free_cudagraph,
             user_visible_output_idxs=user_visible_output_idxs,
-            cudagraph_managed_input_rerecord_limit=managed_input_rerecord_limit,
-            cudagraph_managed_input_rerecord_action=managed_input_rerecord_action,
-            cudagraph_initial_mempool_allocation_gb=(
-                config.triton.cudagraph_initial_mempool_allocation_gb
-            ),
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
@@ -2750,6 +2734,7 @@ class CompilerConfigExtra:
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
+    """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
 
     # Although cudagraphs may have been enabled via config, various

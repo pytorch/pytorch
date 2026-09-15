@@ -49,7 +49,6 @@ from .common import (
 )
 from .wrapper import (
     AllocateLine,
-    AssertAlignmentLine,
     BufferLike,
     CommentLine,
     DynamicScalarLine,
@@ -835,14 +834,7 @@ class FxConverter:
         pass
 
     def _generate_assert_alignment(self, line: WrapperLine) -> None:
-        from torch._C._dynamo.guards import assert_alignment
-
-        if not isinstance(line, AssertAlignmentLine):
-            raise AssertionError(f"expected AssertAlignmentLine, got {type(line)}")
-        self.gm.graph.call_function(
-            assert_alignment,
-            args=(self.buffer_to_node[line.name], line.alignment, line.op_name),
-        )
+        pass
 
     def _generate_comment(self, line: WrapperLine) -> None:
         if not isinstance(line, CommentLine):
