@@ -783,7 +783,7 @@ if HAS_CUDA_AND_TRITON:
             torch._dynamo.mark_dynamic(y, 0)
 
             self.assertEqual(fn(x, y), torch.nn.functional.pad(x, (4, -4)))
-        
+
         @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
         @torch._inductor.config.patch("graph_partition", True)
         def test_skip_dynamic_does_not_propagate_to_static_downstream(self):

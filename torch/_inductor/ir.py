@@ -6802,6 +6802,8 @@ def is_node_sequence(
 
 @ir_dataclass(frozen=False)
 class InputsKernel(OperationBuffer):
+    """A kernel that tracks and manages a sequence of input IR nodes."""
+
     inputs: Sequence[IRNode | Sequence[IRNode]]
 
     def input_name(self, i: int) -> str:
