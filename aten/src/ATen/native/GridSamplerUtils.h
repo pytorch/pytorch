@@ -82,9 +82,9 @@ inline void check_grid_sampler_3d(
     " and grid with sizes ", grid.sizes());
 }
 
-// TODO: drop this overload once torch-xpu-ops stops calling it. In-tree backends
-// call the one above and refuse bicubic themselves; torch-xpu-ops still passes
-// the mode here, at the commit third_party/xpu.txt pins.
+// TODO: drop this overload once torch-xpu-ops stops calling it. torch-xpu-ops
+// passes the mode; in-tree backends call the overload above and refuse bicubic
+// themselves.
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_3d(
   const TensorBase& input,

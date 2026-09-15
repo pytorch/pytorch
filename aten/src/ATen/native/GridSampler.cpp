@@ -40,11 +40,8 @@ using at::native::detail::GridSamplerPadding;
 
 namespace {
 
-  // compute_coordinates with the reflection parity taken by fmod rather than
-  // through an int, which is undefined once the fold count passes INT_MAX. It
-  // forms the same bounds as compute_coordinates and clips the same way, so the
-  // two answer alike wherever the merged helper is defined, and the CUDA twin
-  // reaches the same voxel where it is not.
+  // compute_coordinates with the reflection parity taken by fmod: an int fold count
+  // is undefined past INT_MAX. The bounds and the clipping are compute_coordinates'.
   template <typename scalar_t>
   static inline scalar_t compute_coordinates_sized(scalar_t coord, int64_t size,
                                                    GridSamplerPadding padding_mode,
@@ -52,8 +49,7 @@ namespace {
     if (padding_mode == GridSamplerPadding::Border) {
       coord = clip_coordinates(coord, size);
     } else if (padding_mode == GridSamplerPadding::Reflection) {
-      // the bounds reflect_coordinates halves, reached without doubling an extent
-      // the type may not represent
+      // the bounds reflect_coordinates halves, formed without doubling the extent
       const scalar_t low =
           align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
       const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
@@ -72,11 +68,9 @@ namespace {
   }
 
   // The four cubic taps one axis contributes at `coord`: the Keys coefficients of its fractional
-  // part, the index each tap reads at, and, when `coeffs_grad` is given, the derivative the grid
-  // gradient needs. The taps sit around the UNCLIPPED index; a clipped one would place them around
-  // the wrong voxel. A tap the padding drops takes a negative index and contributes a zero value
-  // while keeping its coefficient, which is what get_value_bounded does in 4-D. The bound is
-  // taken on the truncated index, as 4-D takes it.
+  // part, the index each tap reads, and, when `coeffs_grad` is given, the coefficient derivatives.
+  // The taps sit around the unclipped index. A tap the padding drops takes a negative index,
+  // contributes a zero value and keeps its coefficient, as get_value_bounded does in 4-D.
   template <typename scalar_t, typename index_t>
   static inline void resolve_cubic_taps(
       scalar_t coord,
@@ -96,8 +90,7 @@ namespace {
     for (const auto i : c10::irange(4)) {
       const scalar_t tap =
           compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
-      // the comparison guards the cast: a coordinate that is not finite, or past the
-      // index type, fails it. The extent is exact only as an integer
+      // a tap that is not finite, or past the index type, fails before the cast
       const index_t index = (tap >= 0 && tap < index_limit)
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
@@ -262,10 +255,9 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-                // The taps are placed around the unclipped index, so this branch samples at
-                // the raw x, y, z and never forms a clipped source index. It works in the
-                // accumulate type: the coefficients and the reflection arithmetic need more
-                // precision than a half carries, and CUDA computes every mode in it.
+                // The taps sit around the unclipped index, at the raw x, y, z, and are placed in
+                // the accumulate type: the coefficients and the reflection arithmetic need more
+                // precision than a half carries.
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
                 int64_t x_taps[4], y_taps[4], z_taps[4];
                 resolve_cubic_taps(grid_sampler_unnormalize(static_cast<opmath_t>(x), inp_W, align_corners),
@@ -275,9 +267,9 @@ namespace {
                 resolve_cubic_taps(grid_sampler_unnormalize(static_cast<opmath_t>(z), inp_D, align_corners),
                                    inp_D, padding_mode, align_corners, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
 
-                // Only zero padding drops a tap, and only near the rim, so the sum splits: the
-                // common case reads all 64 taps and the test would only stop the vectoriser. A
-                // negative index marks a dropped tap; the OR is negative when any of them is.
+                // Only zero padding drops a tap, near the rim. With none dropped, all 64 are read
+                // without a per-tap test, for the vectoriser; the OR of the indices is negative
+                // when one is dropped.
                 const bool every_tap_reads =
                     (x_taps[0] | x_taps[1] | x_taps[2] | x_taps[3] |
                      y_taps[0] | y_taps[1] | y_taps[2] | y_taps[3] |
@@ -557,8 +549,8 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-                // The taps are placed around the unclipped index, so this branch forms no
-                // clipped source index; the grid multipliers are the unnormalize ones.
+                // The taps sit around the unclipped index; the grid multipliers are the
+                // unnormalize ones.
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
                 opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];
                 int64_t x_taps[4], y_taps[4], z_taps[4];
@@ -576,7 +568,7 @@ namespace {
 
                 const scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
                 const scalar_t *inp_ptr_NC = inp_ptr_N;
-                // an offset rather than a pointer, since grad_input is undefined when it is not asked for
+                // an offset, not a pointer: grad_input is undefined when it is not asked for
                 int64_t gInp_offset_NC = n * gInp_sN;
                 for (int64_t c = 0; c < C;
                      ++c, gOut_ptr_NCDHW += gOut_sC, gInp_offset_NC += gInp_sC, inp_ptr_NC += inp_sC) {

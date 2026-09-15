@@ -322,8 +322,7 @@ void get_cubic_coefficients_grad(
 
 
 // grid_sampler_unnormalize with the extent in index_t, for the kernels that
-// index with int64_t. It converts where the int-taking helper converts, so the
-// two agree for any extent. Separate copies keep the shared kernels unchanged.
+// index with int64_t. It converts where the int-taking helper converts.
 template <typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t grid_sampler_unnormalize_sized(scalar_t coord, index_t size,
@@ -349,10 +348,9 @@ scalar_t grid_sampler_unnormalize_set_grad_sized(scalar_t coord, index_t size,
   }
 }
 
-// compute_coordinates with the extent in index_t: narrowing it to int would
-// fold a dimension past INT_MAX onto the wrong voxel. It forms the same bounds,
-// but takes the reflection parity with fmod and skips the downgrade, so no float
-// converts to an integer and no valid position past INT_MAX is clipped.
+// compute_coordinates with the extent in index_t, the reflection parity
+// taken with fmod and no downgrade: no float converts to an integer, and a
+// position past INT_MAX keeps its voxel.
 template <typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
@@ -362,8 +360,7 @@ scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
     coord = ::min(static_cast<scalar_t>(size - 1),
                   ::max(coord, static_cast<scalar_t>(0)));
   } else if (padding_mode == GridSamplerPadding::Reflection) {
-    // reflect_coordinates halves the difference of two integer bounds. Halving
-    // what it doubles reaches them with one exact conversion of the extent.
+    // the bounds reflect_coordinates halves, formed without doubling the extent
     const scalar_t low =
         align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
     const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
@@ -403,8 +400,7 @@ void resolve_cubic_taps(
   for (int i = 0; i < 4; ++i) {
     const scalar_t tap = compute_coordinates_sized(
         base - 1 + i, size, padding_mode, align_corners);
-    // the comparison guards the cast: a coordinate that is not finite, or
-    // past the index type, fails it. The extent is exact only as an integer
+    // a tap that is not finite, or past the index type, fails before the cast
     const index_t index = (tap >= 0 && tap < index_limit)
         ? static_cast<index_t>(tap)
         : static_cast<index_t>(-1);

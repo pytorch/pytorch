@@ -21982,16 +21982,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
-            # Only CPU and CUDA sample 5-D bicubic; mps and xpu refuse it in eager, so the
-            # 5-D bicubic samples fail every test that runs the op on all of them. The
-            # xfails are strict: each flips to a failure once a backend gains the mode.
-            # test_dtypes stays unmarked on purpose: a raising sample only makes a dtype
-            # "partially supported", which is a printed warning, so it keeps passing there
-            # (vacuously, on those two backends). test_out_warning stays unmarked because
-            # the supports_out=False path returns inside its first iteration, and the
-            # first sample is 4-D bilinear.
+            # mps and xpu refuse 5-D bicubic in eager. Not listed: test_dtypes, where a
+            # raising sample only marks a dtype partially supported, and test_out_warning,
+            # which returns on the first sample, a 4-D bilinear one.
             # TODO: drop these when mps / xpu implement 5-D bicubic.
-            # MPS TestConsistency carries its own entry in common_mps.py.
+            # MPS TestConsistency has its own entry in common_mps.py.
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
@@ -22000,7 +21995,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          "test_variant_consistency_eager", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="xpu"),
-            # The remaining classes are not instantiated on mps at all.
+            # not instantiated on mps
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
                          "test_operator", device_type="xpu"),
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
@@ -22013,7 +22008,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          "test_fake_crossref_backward_no_amp", device_type="xpu"),
             DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
                          "test_fake_crossref_backward_amp", device_type="xpu"),
-            # float64 is claimed on xpu, so the gradient suites reach the samples there.
+            # the gradient suites run on xpu, which claims float64
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
                          "test_fn_grad", device_type="xpu"),
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients",

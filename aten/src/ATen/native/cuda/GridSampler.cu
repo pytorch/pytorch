@@ -301,9 +301,8 @@ namespace {
     }
   }
 
-  // Bicubic gets its own kernel rather than a branch in the one above: the 64 taps need twice
-  // the registers of a trilinear sample, and a shared kernel is allocated for its worst branch,
-  // which would cost bilinear and nearest the occupancy of a mode they never take.
+  // Bicubic has a kernel of its own: a kernel is allocated for its worst branch, and the 64
+  // taps need twice the registers of a trilinear sample.
   template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(512)
   __global__ void grid_sampler_3d_bicubic_kernel(
@@ -349,8 +348,7 @@ namespace {
       opmath_t y = grid.data[grid_offset + grid_sCoor];
       opmath_t z = grid.data[grid_offset + 2 * grid_sCoor];
 
-      // The taps are placed around the unclipped index, so this branch samples at the raw
-      // x, y, z rather than at the clipped ix, iy, iz above.
+      // The taps sit around the unclipped index, at the raw x, y, z.
       opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
       index_t x_taps[4], y_taps[4], z_taps[4];
       resolve_cubic_taps(grid_sampler_unnormalize_sized(x, inp_W, align_corners), inp_W, padding_mode,
@@ -392,8 +390,7 @@ namespace {
 // lies relative to the entire tensor, so we pass the base grad_input.data and full offset information,
 // including batch * channel offset (NC_offset).
 
-  // Bicubic's own backward kernel, for the reason its forward has one: 64 taps hold twice the
-  // registers of the trilinear sample the shared kernel is otherwise allocated for.
+  // Bicubic's own backward kernel, for the reason given on its forward kernel.
   template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_3d_bicubic_backward_kernel(
@@ -457,8 +454,7 @@ namespace {
       scalar_t z = grid.data[grid_offset + 2 * grid_sCoor];
 
       using opmath_t = at::opmath_type<scalar_t>;
-      // The taps are placed around the unclipped index, so the clipping ix, iy, iz went through
-      // above is undone here; their multipliers are the unnormalize ones.
+      // The taps sit around the unclipped index; the grid multipliers are the unnormalize ones.
       opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
       opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];
       index_t x_taps[4], y_taps[4], z_taps[4];
@@ -486,8 +482,7 @@ namespace {
             const bool plane_reads = z_taps[k] >= 0 && y_taps[j] >= 0;
             auto row = plane_reads ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
                                    : inp_ptr_NC;
-            // the grad_input strides are int64_t whatever index_t is, so the offset is narrowed
-            // back to index_t, which is what fastAtomicAdd measures its span in
+            // the grad_input strides are int64_t; fastAtomicAdd takes the offset in index_t
             const index_t grad_row = plane_reads
                 ? NC_offset + static_cast<index_t>(z_taps[k] * gInp_sD + y_taps[j] * gInp_sH)
                 : NC_offset;

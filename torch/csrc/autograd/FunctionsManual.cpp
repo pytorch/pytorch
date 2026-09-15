@@ -8256,9 +8256,8 @@ static Tensor gs_scatter2d_bc_multi(
       .reshape({N, C, H, W});
 }
 
-// Multi-tap bounded gather for bicubic 3D: d/h/w_idx [N, Do, Ho, Wo, K] -> [N,
-// C, Do, Ho, Wo, K]. The padding maps every tap, as it does in the kernel,
-// instead of the caller having mapped the coordinate once.
+// Multi-tap bounded gather for bicubic 3D: d/h/w_idx [N, Do, Ho, Wo, K] ->
+// [N, C, Do, Ho, Wo, K]. The padding maps every tap, as in the kernel.
 static Tensor gs_gather3d_bc_multi(
     const Tensor& input,
     const Tensor& d_idx,
@@ -8669,16 +8668,13 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   }
 
   if (interpolation == GridSamplerInterpolation::Bicubic) {
-    // As in 2D: the bicubic backward differentiates the UNNORMALIZED coordinate
-    // and applies the padding tap by tap, so the multiplier is the unnormalize
-    // scale alone. gs_compute_coords would zero it at a border and lose a
-    // sensitivity the kernel still has.
+    // As in 2D: the backward differentiates the unnormalized coordinate and
+    // pads tap by tap, and the multiplier is the unnormalize scale alone.
     auto D = input.size(2), H = input.size(3), W = input.size(4);
     auto x_scale = static_cast<double>(align_corners ? W - 1 : W) / 2.0;
     auto y_scale = static_cast<double>(align_corners ? H - 1 : H) / 2.0;
     auto z_scale = static_cast<double>(align_corners ? D - 1 : D) / 2.0;
-    // the kernels place a sample in the accumulate type, so a reduced-precision
-    // grid has to resolve the same voxel here
+    // the sample is placed in the accumulate type, as in the kernels
     const auto acc = at::toOpMathType(grid.scalar_type());
     const auto grid_acc = grid.to(acc);
     const auto ggGrid_acc = ggGrid.to(acc);
@@ -8718,7 +8714,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
           -1);
       return std::make_pair(std::move(c), std::move(dc));
     };
-    // only the ggGrid half needs the second derivative, so it is built there
+    // the second derivative is for the ggGrid half only
     auto second = [](const Tensor& t) {
       auto t1 = t + 1.0, t2 = 1.0 - t, t3 = 2.0 - t;
       return at::stack(
@@ -8732,10 +8728,9 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto [cy, dcy] = coeffs(fy);
     auto [cz, dcz] = coeffs(fz);
 
-    // Walk the 64 taps four at a time, one (z, y) pair per step. Materialising
-    // them together would hold three [N, Do, Ho, Wo, 64] index tensors and a
-    // gather of the same width times the channels, which is gigabytes at a
-    // realistic volume size.
+    // The 64 taps four at a time, one (z, y) pair per step: all at once is
+    // three [N, Do, Ho, Wo, 64] index tensors and a gather of that width per
+    // channel.
     auto offs = at::arange(-1, 3, x0.options());
     auto x_idx = x0.unsqueeze(-1) + offs;
 
