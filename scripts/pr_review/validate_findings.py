@@ -33,8 +33,12 @@ import sys
 from pathlib import Path
 
 from extract_verdict import (
+    _is_repo_path,
     build,
     load_structured,
+    MAX_PATH,
+    neutralize,
+    neutralize_path,
     parse_diff,
     Rejected,
     sanitize_findings,
@@ -42,6 +46,21 @@ from extract_verdict import (
 
 
 MAX_REPORTED_LINES = 12
+# Everything this module prints to stderr is folded into the model's
+# `additionalContext` by `validate-post-write.sh`, which that script's header
+# identifies as a system message. The file names come from the PR's own diff, so
+# a fork contributor chooses them: `_is_repo_path` admits any printable ASCII
+# except `|`, backtick, `\`, `<`, `>` and `&`, which leaves spaces, colons,
+# quotes and whole sentences legal, up to MAX_PATH each. Bounding the COUNT is
+# what keeps a hundred 400-character names from arriving as 40KB of
+# attacker-chosen prose wearing trusted framing.
+MAX_REPORTED_FILES = 20
+MAX_REPORTED_KEY = 60
+# The same argument for the other direction. A dropped record's `path` is what
+# the MODEL wrote, already neutralized by `sanitize_findings` but bounded only
+# per-name: `drop()` tracks up to 200 of them, so an injected model emitting
+# junk findings could still push ~80KB back through the same channel.
+MAX_REPORTED_DROPS = 20
 
 
 def _ranges(lines: set[int]) -> str:
@@ -63,35 +82,98 @@ def _ranges(lines: set[int]) -> str:
     return ", ".join(out)
 
 
+def _safe_path(path: object) -> str:
+    """Render one RAW diff path for the system-message channel.
+
+    For keys of `touched` only. Those come straight off the diff's `+++` lines,
+    so they are PR-authored and have had nothing done to them beyond
+    `_is_repo_path`. `neutralize_path` rather than `neutralize`, deliberately:
+    the model is being told which file to anchor to, so the name has to stay
+    exactly recoverable, and escaping preserves that where rewriting would not.
+
+    NOT for a dropped record's `path`. Those have already been through
+    `sanitize_findings`, so they arrive escaped — `pkg/[click].py` is already
+    `pkg/\\[click\\].py` — and `_is_repo_path` refuses a backslash, so running
+    them through here would report a perfectly publishable name as unusable.
+    """
+    text = str(path)
+    if not _is_repo_path(text):
+        return "(not a usable repo path)"
+    return neutralize_path(text)
+
+
+def _sanitized_path(path: object) -> str:
+    """Render a path that `sanitize_findings` has already neutralized.
+
+    Nothing to escape — the publisher did it — so this only bounds the length,
+    since a dropped record is diagnostic and never passed the publisher's caps.
+    """
+    return str(path)[:MAX_PATH]
+
+
+def _safe_file_list(touched: dict[str, set[int]]) -> str:
+    """The changed-file list, bounded in count as well as in per-name length."""
+    names = sorted(touched)
+    if not names:
+        return "(the diff touches no files)"
+    shown = ", ".join(_safe_path(n) for n in names[:MAX_REPORTED_FILES])
+    if len(names) > MAX_REPORTED_FILES:
+        return f"{shown}, … ({len(names)} files total)"
+    return shown
+
+
 def _report_drops(dropped: list[dict], touched: dict[str, set[int]]) -> None:
     """Explain each dropped finding, and for an anchor miss say what WOULD work."""
     print(
         f"{len(dropped)} finding(s) would be DISCARDED before publication:",
         file=sys.stderr,
     )
-    for d in dropped:
+    if len(dropped) > MAX_REPORTED_DROPS:
+        print(
+            f"  (showing the first {MAX_REPORTED_DROPS}; fixing those usually "
+            f"fixes the rest)",
+            file=sys.stderr,
+        )
+    anchor_misses = False
+    for d in dropped[:MAX_REPORTED_DROPS]:
         path = d.get("path")
         reason = d.get("reason", "unknown")
         if path is None:
             where = "(finding with no usable path)"
         elif d.get("line") is not None:
-            where = f"{path}:{d['line']}"
+            where = f"{_sanitized_path(path)}:{d['line']}"
         else:
-            where = str(path)
+            where = _sanitized_path(path)
         # `keys` names which fields were rejected; without it the model is
-        # told only "unexpected_keys" and cannot tell which one to drop.
+        # told only "unexpected_keys" and cannot tell which one to drop. They
+        # are keys from the model's own file, so they get the prose treatment
+        # rather than the path one.
         keys = d.get("keys")
-        detail = f" ({', '.join(map(str, keys))})" if keys else ""
+        detail = (
+            f" ({', '.join(neutralize(str(k), MAX_REPORTED_KEY) for k in keys)})"
+            if keys
+            else ""
+        )
         print(f"  - {where} — {reason}{detail}", file=sys.stderr)
         if reason == "line_not_in_diff" and path in touched:
             print(
                 f"      `line` must be a line number in the file at the head commit.\n"
-                f"      Lines this PR touches in {path}: {_ranges(touched[path])}",
+                # `path in touched` is the guard: it is a raw diff key here, so
+                # `_safe_path` is the right one and cannot double-escape.
+                f"      Lines this PR touches in {_safe_path(path)}: "
+                f"{_ranges(touched[path])}",
                 file=sys.stderr,
             )
         elif reason == "path_not_in_diff":
-            known = ", ".join(sorted(touched)) or "(the diff touches no files)"
-            print(f"      Files this PR changed: {known}", file=sys.stderr)
+            anchor_misses = True
+    # ONCE, not once per drop. Printing it inside the loop multiplied the capped
+    # list by the drop count: 100 names at MAX_PATH with 20 drops measured 161KB
+    # of advisory output, which defeats the per-item caps above.
+    if anchor_misses:
+        print(
+            f"      Files this PR changed: {_safe_file_list(touched)}",
+            file=sys.stderr,
+        )
 
 
 def main() -> int:
