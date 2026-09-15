@@ -291,22 +291,19 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
   return flag;
 }
 
-#if defined(USE_ROCM) && defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)
-// NCCLSymmetricMemory keys the registry by the Python-visible group name, with
-// "0" standing in for the default WORLD group. See initNCCLComm.
-std::string symmMemGroupName(const std::string& groupName) {
-  return groupName.empty() ? "0" : groupName;
-}
-
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+// Retire this process group's registry entry. Identity-safe, so a delayed
+// caller cannot erase a same-name successor's entry. Aborted comms are skipped
+// because deregistering through one fails on the tested ROCm stack.
 void unregisterSymmetricMemoryComm(
     const std::shared_ptr<NCCLComm>& ncclComm,
-    const std::string& groupName) {
+    const std::string& groupUid) {
   if (!ncclComm || ncclComm->isAborted()) {
     return;
   }
   c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
   c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
-      symmMemGroupName(groupName), ncclComm->getNcclComm());
+      groupUid, ncclComm->getNcclComm());
 }
 #endif
 
@@ -1480,7 +1477,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // A retained symmetric-memory handle must stop resolving this RCCL
     // communicator before abort invalidates it. Identity-safe removal also
     // leaves a same-name successor untouched.
-    unregisterSymmetricMemoryComm(ncclComm, options_->group_name);
+    unregisterSymmetricMemoryComm(ncclComm, getGroupUid());
 #endif
     // abort() call now has GPU guard inside
     ncclComm->abort(abortReason);
@@ -1630,7 +1627,7 @@ void ProcessGroupNCCL::shutdown() {
       // Retire the registry entry while the RCCL communicator is still valid.
       // Late deregistration through a destroyed communicator produced
       // "invalid device ordinal" on the tested ROCm stack.
-      unregisterSymmetricMemoryComm(ncclComm, options_->group_name);
+      unregisterSymmetricMemoryComm(ncclComm, getGroupUid());
 #endif
       ncclComm->destroy();
     }
@@ -1654,20 +1651,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
-      if (!ncclComm || ncclComm->isAborted()) {
-        continue;
-      }
-#ifdef USE_ROCM
-      // ROCm rendezvous keys the manager by the Python-visible group name.
-      // Match the WORLD-group "0" fallback used at registration, and include
-      // the comm identity so a delayed destructor cannot erase a successor
-      // process group that reused the same name.
-      unregisterSymmetricMemoryComm(ncclComm, options_->group_name);
-#else
-      c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
-      c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
-          getGroupUid());
-#endif
+      unregisterSymmetricMemoryComm(ncclComm, getGroupUid());
     }
   }
 #endif
@@ -3362,21 +3346,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
     // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT.
     // Unregistered in ~ProcessGroupNCCL.
-#ifdef USE_ROCM
-    // ROCm is the first configuration in which stock ProcessGroupNCCL is a
-    // producer whose entries are actually read back out of this registry:
-    // NCCLSymmetricMemory rendezvous resolves a process group by its
-    // Python-visible name, which is not what getGroupUid() returns. Register
-    // under that name, with the same "0" fallback as the default WORLD group.
-    // CUDA stays on getGroupUid() so enabling ROCm cannot change an existing
-    // registry key; the divergence is a blast-radius choice, not a ROCm
-    // runtime behavior difference.
-    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-        symmMemGroupName(options_->group_name), ncclComm->getNcclComm());
-#else
     c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
         getGroupUid(), ncclComm->getNcclComm());
-#endif
 #endif
   }
 

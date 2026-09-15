@@ -32,15 +32,18 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     instantiate_parametrized_tests,
     IS_WINDOWS,
+    isRocmArchAnyOf,
+    lazy_skip_if,
     load_tests,
+    MI350_ARCH,
     NoTest,
     parametrize,
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -56,6 +59,16 @@ NCCL_SYMMEM_COMPILED = getattr(
     "_is_nccl_symmem_available",
     lambda: False,
 )()
+
+# The symmetric-memory defect that motivates a ROCm floor on the classes below
+# only reproduced on MI350, and was fixed in ROCm 10.1. Gating on the pair keeps
+# MI300 and MI200 covered on older ROCm instead of skipping every ROCm runner.
+skip_if_mi350_rocm_lt_10_1 = lazy_skip_if(
+    lambda: TEST_WITH_ROCM
+    and isRocmArchAnyOf(MI350_ARCH)
+    and getRocmVersion() < (10, 1),
+    "MI350 symmetric memory requires ROCm 10.1 or newer",
+)
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
     TestCase = NoTest
@@ -258,7 +271,7 @@ class TestNCCL(TestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-@skipIfRocmVersionLessThan((10, 1))
+@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
     "RCCL symmetric-memory API baseline is 2.30.4; the build also requires "
@@ -1246,7 +1259,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 
 @requires_cuda_p2p_access()
-@skipIfRocmVersionLessThan((10, 1))
+@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
     "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
@@ -1344,7 +1357,7 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
             )
 
 
-@skipIfRocmVersionLessThan((10, 1))
+@skip_if_mi350_rocm_lt_10_1
 class NCCLSymmetricMemoryNcclLazyTest(NCCLSymmetricMemoryNccl2Test):
     backend_name = "nccl-lazy"
 
@@ -1514,7 +1527,7 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-@skipIfRocmVersionLessThan((10, 1))
+@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory lifecycle test"
 )
@@ -1577,7 +1590,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
 
     @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_rejected_across_same_name_restart(
+    def test_stale_handle_recovers_across_same_name_restart(
         self, backend_name: str
     ) -> None:
         symm_mem.set_backend("NCCL")
@@ -1601,12 +1614,17 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         torch.cuda.synchronize(self.device)
 
         c10d.destroy_process_group()
+        # A handle the caller is still holding cannot be repointed, so using it
+        # stays an error for its whole lifetime.
         with self.assertRaisesRegex(
             RuntimeError, "stale because its RCCL communicator was destroyed"
         ):
             old_handle.barrier()
+        # Re-rendezvous is the recovery path, but there is nothing to recover
+        # onto until a successor registers, so it fails on the group lookup
+        # rather than on staleness.
         with self.assertRaisesRegex(
-            RuntimeError, "stale because its RCCL communicator was destroyed"
+            RuntimeError, "Could not resolve the process group"
         ):
             symm_mem.rendezvous(tensor, group=old_group_name)
 
@@ -1628,21 +1646,37 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             )
             self.assertTrue(peer_buffer.eq(peer).all())
 
+            # A successor registering under the same name must not silently
+            # adopt the predecessor's handle.
             with self.assertRaisesRegex(
                 RuntimeError, "stale because its RCCL communicator was destroyed"
             ):
                 old_handle.barrier()
+
+            # The tensor that predates the restart is recoverable: rendezvous
+            # drops the stale handle, re-registers the window against the
+            # successor communicator, and hands back a working one.
+            recovered = symm_mem.rendezvous(tensor, group=old_group_name)
+            self.assertIsNot(recovered, old_handle)
+            recovered.barrier()
+            torch.cuda.synchronize(self.device)
+            c10d.barrier()
+            recovered_peer = recovered.get_buffer(peer, tensor.shape, tensor.dtype)
+            self.assertTrue(recovered_peer.eq(peer).all())
+
+            # Recovery is per-rendezvous, not in-place: the reference the caller
+            # kept still names the retired registration.
             with self.assertRaisesRegex(
                 RuntimeError, "stale because its RCCL communicator was destroyed"
             ):
-                symm_mem.rendezvous(tensor, group=old_group_name)
+                old_handle.barrier()
 
             # Drop the retained process group and handle after the successor
             # has registered. Their delayed cleanup must leave it usable.
             del old_pg
             gc.collect()
             c10d.barrier()
-            del old_handle, tensor
+            del old_handle, recovered, recovered_peer, tensor
             gc.collect()
             torch.cuda.synchronize(self.device)
             c10d.barrier()
@@ -1690,14 +1724,16 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             RuntimeError, "stale because its RCCL communicator was destroyed"
         ):
             handle.barrier()
+        # No successor process group here, so the recovery path has nothing to
+        # rebind to and fails on the group lookup instead.
         with self.assertRaisesRegex(
-            RuntimeError, "stale because its RCCL communicator was destroyed"
+            RuntimeError, "Could not resolve the process group"
         ):
             symm_mem.rendezvous(tensor, group=group_name)
 
 
 @requires_cuda_p2p_access()
-@skipIfRocmVersionLessThan((10, 1))
+@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory capability gating test"
 )
@@ -1817,7 +1853,7 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
 
 
 @requires_cuda_p2p_access()
-@skipIfRocmVersionLessThan((10, 1))
+@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific subgroup rendezvous ordering test"
 )
@@ -1910,7 +1946,7 @@ class NCCLSymmetricMemorySubgroupTest(MultiProcessTestCase):
 
 
 @requires_cuda_p2p_access()
-@skipIfRocmVersionLessThan((10, 1))
+@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory process-group restart test"
 )
