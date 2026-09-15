@@ -5,13 +5,13 @@ import importlib
 import inspect
 import io
 import logging
-import operator
 import os
 import pickle
 import re
 import sys
 import tempfile
 import types
+import weakref
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack, nullcontext
 from dataclasses import dataclass
@@ -41,6 +41,13 @@ log = logging.getLogger(__name__)
 
 _EXTERNAL_DATA_HINT = (
     "Mark the value(s) as external data by using `external_data={'key': ...}`."
+)
+
+# What a raise costs the tree it came out of, said once: the no-match report and
+# the warning the serving paths log both name it.
+_STALE_AFTER_THROW = (
+    "a C++ throw out of it leaves its own relational guard state stale, so its "
+    "next check can reject a call it fits or accept one it does not"
 )
 
 
@@ -677,19 +684,7 @@ class AOTCompiledFunction:
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals = self.prepare_f_locals(*args, **kwargs)
-        # check_nopybind_template disables the TorchFunction TLS for its
-        # accessors and restores it without RAII, so a C++ throw leaves it
-        # disabled on this thread. This path propagates the throw instead of
-        # serving over it, so put the state back and let it travel out. Every
-        # exit that is not a raise restored the state itself, which is why this
-        # is a handler and not a finally: a finally would pay one more set per
-        # successful check on this dispatch path and repair nothing.
-        torch_function_state = torch._C._get_torch_function_state()
-        try:
-            return self._live_guard_manager().check(f_locals)
-        except BaseException:
-            torch._C._set_torch_function_state(torch_function_state)
-            raise
+        return self._live_guard_manager().check(f_locals)
 
     def __post_init__(self) -> None:
         from .package import load_guard_manager, load_guards_state
@@ -938,14 +933,7 @@ class AOTCompiledFunction:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
-            # Same non-RAII restore as in guard_check, on the tree's second
-            # evaluation.
-            torch_function_state = torch._C._get_torch_function_state()
-            try:
-                debug_info = self._live_guard_manager().check_verbose(f_locals)
-            except BaseException:
-                torch._C._set_torch_function_state(torch_function_state)
-                raise
+            debug_info = self._live_guard_manager().check_verbose(f_locals)
             msg = f"GuardManager check failed, reason: {debug_info}"
             if any(
                 _names_a_missing_global(part) for part in debug_info.verbose_code_parts
@@ -1512,11 +1500,14 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
-def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
-    # What prepare_f_locals reads, with defaults and cells by identity (id, since
-    # the artifacts keep them alive). Signature equality is unusable here:
-    # Parameter.__eq__ takes bool() of `default == default`, which raises for a
-    # tensor default.
+_ParamKey = tuple[str, inspect._ParameterKind, int]
+_BindingKey = tuple[list[_ParamKey], tuple[str, ...], list[int]]
+
+
+def _binding_key(artifacts: CompileArtifacts) -> _BindingKey:
+    # What prepare_f_locals reads, with defaults and cells by identity. Signature
+    # equality is unusable here: Parameter.__eq__ takes bool() of
+    # `default == default`, which raises for a tensor default.
     env, params = artifacts.runtime_env, artifacts.signature.parameters.values()
     return (
         [(p.name, p.kind, id(p.default)) for p in params],
@@ -1540,27 +1531,28 @@ class AOTCompiledModel:
     by a later result whose first check accepted. Opting a result out through
     ``disable_guard_check()`` does not skip its guard evaluation: it is served
     in index order when its check accepts, and on the strength of its opt-out
-    alone only when no check accepted the call and no checked input's guard
-    tree raised while being evaluated; one opt-out replaces the
-    ``No AOT compiled graph matched this call`` error for the whole model. A
-    tree that raises rejects nothing, so a raise from a checked input withholds
-    the opt-out, and the call raises the no-match ``RuntimeError`` with the
-    raise chained as its ``__cause__`` and the report naming the input that
-    raised. A raise beside an input whose guards did match is served over: the
-    matching graph runs, and the raise is logged once per ``(input index,
-    exception type)`` per model on the ``torch._dynamo.aot_compile`` logger. A
-    ``KeyboardInterrupt`` or ``SystemExit`` out of a guard tree is never read
-    as an answer and propagates.
+    alone only after both the scan and the re-check found no match and no
+    checked input's guard tree raised while being evaluated; one opt-out
+    replaces the ``No AOT compiled graph matched this call`` error for the
+    whole model. A tree that raises rejects nothing, so a raise from a checked
+    input withholds the opt-out, and the call raises the no-match
+    ``RuntimeError`` with the raise chained as its ``__cause__`` and the report
+    naming the input that raised. A raise beside an input whose guards did
+    match is served over: the matching graph runs, and the raise is logged once
+    per ``(input index, exception type)`` per model on the
+    ``torch._dynamo.aot_compile`` logger. A ``KeyboardInterrupt`` or
+    ``SystemExit`` out of a guard tree is never read as an answer and
+    propagates.
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, a ``For [i]:`` hint
-    when that entry's guards failed on a global the process does not define,
-    and the advice to add a ``ModelInput`` or check which guards
-    ``guard_filter_fn`` kept. When some checked input's guard tree raised, that
-    exception is the ``__cause__`` of the ``RuntimeError`` rather than the
-    exception the caller sees, so a caller catching the tree's own type
-    (``SystemError`` for a leaf that returned with an error set,
+    per compiled result quoting the guards that refused it, at most one
+    ``For [i]:`` hint, for the first entry whose guards failed on a global the
+    process does not define, and the advice to add a ``ModelInput`` or check
+    which guards ``guard_filter_fn`` kept. When some checked input's guard tree
+    raised, that exception is the ``__cause__`` of the ``RuntimeError`` rather
+    than the exception the caller sees, so a caller catching the tree's own
+    type (``SystemError`` for a leaf that returned with an error set,
     ``RuntimeError`` for a ``TORCH_CHECK``) catches the report instead.
     """
 
@@ -1572,29 +1564,24 @@ class AOTCompiledModel:
     _warned: set[tuple[int, str]] = dataclasses.field(
         default_factory=set, init=False, compare=False, repr=False
     )
-    # The list contents last judged and whether one bind of a call serves every
-    # one of them, as it does for every artifact aot_compile_module produces:
+    # The results last judged and whether one bind of a call serves them all.
     # compiled_results is public, so a call that finds them changed decides
-    # again. The comparison costs about what a bind does, so not once per call.
-    # One field, so a reader never sees the verdict about another list beside
-    # these contents. The default is the verdict over no results, so the first
-    # call decides.
-    _binding_verdict: tuple[tuple[AOTCompiledFunction, ...], bool] = dataclasses.field(
-        default=((), False), init=False, compare=False, repr=False
+    # again; one field, so no reader pairs the verdict with another list's
+    # contents; weak references, so a result the caller dropped is not kept
+    # alive here. The default is the verdict over no results.
+    _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
+        dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
 
     def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
-        # By identity, not ==: the dataclass __eq__ would reach the Signature
-        # compare _binding_key exists to avoid. Measured at 0.27us for four
-        # results, call included, against 0.81us for one check().
         prior, shared = self._binding_verdict
-        if len(results) == len(prior) and all(map(operator.is_, results, prior)):
+        if len(results) == len(prior) and all(w() is r for w, r in zip(prior, results)):
             return shared
         key = _binding_key(results[0]._artifacts) if results else None
         shared = key is not None and all(
             _binding_key(result._artifacts) == key for result in results[1:]
         )
-        self._binding_verdict = (results, shared)
+        self._binding_verdict = (tuple(weakref.ref(r) for r in results), shared)
         return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -1605,19 +1592,14 @@ class AOTCompiledModel:
         # resort and the report read, so scan every result.
         raised: dict[int, Exception] = {}
         # `unanswered` holds the indices whose LAST evaluation reached no answer,
-        # the only ones with no guard to quote, and `answered` those that reached
-        # one at least once, which is what a ModelInput could have covered.
+        # the only ones with no guard to quote; `answered` those that ever reached
+        # one, which a ModelInput could have covered; `trusted` those that did so
+        # with no raise of their own on record (see warn_swallowed).
         unanswered: set[int] = set()
         answered: set[int] = set()
-        # Read once per call, not once per check (measured 0.18us against a
-        # 0.93us check): every check that does not throw restores it itself.
-        torch_function_state = torch._C._get_torch_function_state()
-        # Binding this call costs more than a whole check() does, and the passes
-        # below and the report ask the same results about the same call, so it
-        # is bound once per call where the results share a binding, once per
-        # result where they do not, and reused. The shared bind happens ahead of
-        # every guard, so a call the signature cannot bind still surfaces as
-        # bind_locals' TypeError, as the plain module call would.
+        trusted: set[int] = set()
+        # A bind costs more than a check(), so results that bind alike share
+        # one, made ahead of every guard like the per-result binds below.
         shared = (
             results[0].prepare_f_locals(self.model, *args, **kwargs)
             if self._binds_alike(results)
@@ -1635,27 +1617,22 @@ class AOTCompiledModel:
             if f_locals is None:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
                 bound[i] = f_locals
-            guard_manager = result._live_guard_manager()
             try:
-                answer = guard_manager.check(f_locals)
-            except BaseException as e:
-                # check_nopybind_template disables the TorchFunction TLS for its
-                # accessors and restores it without RAII, so a C++ throw leaves it
-                # disabled on this thread. Put it back before anything runs under
-                # it, for an interrupt through the tree as much as for a throw.
-                torch._C._set_torch_function_state(torch_function_state)
-                if not isinstance(e, Exception):
-                    # An interrupt is not an answer about this call, and not
-                    # dispatch's to swallow.
-                    raise
-                # Keep going so another result can still match; what this tree
-                # last did and what it ever did decide different things.
+                answer = result._live_guard_manager().check(f_locals)
+            except Exception as e:
+                # Keep going so another result can still match.
                 raised[i] = e
                 unanswered.add(i)
                 return False
+            if answer:
+                return True
+            # Recorded on a rejection only: an accept serves and builds no report.
+            # Measured 0.06us for the three against a 0.93us check().
             unanswered.discard(i)
             answered.add(i)
-            return answer
+            if i not in raised:
+                trusted.add(i)
+            return False
 
         def warn_swallowed(served: int) -> None:
             # A raise is not a rejection, so it says nothing about the result
@@ -1673,9 +1650,7 @@ class AOTCompiledModel:
                 if results[i]._guard_check_enabled:
                     advice = (
                         f"Fix or drop input [{i}]: a tree that raises rejects "
-                        "nothing, and a C++ throw out of it leaves its own "
-                        "relational guard state stale, so its next check can "
-                        "reject a call it fits or accept one it does not."
+                        f"nothing, and {_STALE_AFTER_THROW}."
                     )
                 else:
                     # The last resort serves an opted-out result whatever its
@@ -1702,8 +1677,8 @@ class AOTCompiledModel:
             if accepts(i, result):
                 if raised:
                     warn_swallowed(i)
-                # The guard manager already passed; call fn directly so result()
-                # does not re-run the guard eval on this hot dispatch path.
+                # The guards just passed: call fn rather than result(), whose
+                # __call__ would bind and evaluate them again.
                 return result.fn(self.model, *args, **kwargs)
         # A check() can reject from the dict-tag fast path without running the
         # tree; a second check() then runs the tree the fast path skipped,
@@ -1729,7 +1704,7 @@ class AOTCompiledModel:
         if shared is not None:
             bound = dict.fromkeys(range(len(results)), shared)
         report = self._no_match_report(
-            results, raised, unanswered, answered, bound, torch_function_state
+            results, raised, unanswered, answered, trusted, bound
         )
         if raised:
             # `raised` is in recording order, so this chains the first index that
@@ -1746,19 +1721,15 @@ class AOTCompiledModel:
         raised: dict[int, Exception],
         unanswered: set[int],
         answered: set[int],
+        trusted: set[int],
         bound: dict[int, dict[str, object]],
-        torch_function_state: torch._C._TorchFunctionState,
-        /,
     ) -> str:
         """A report naming every compiled input and what its guard check said,
         raised, or -- for a withheld opt-out -- was never asked.
 
         ``results`` and ``bound`` are the results the dispatch above judged and
         the f_locals it judged them on, one per result, so the report explains
-        the same call rather than a fresh one, and ``torch_function_state`` the
-        TLS state dispatch read before evaluating anything: a throw here skips
-        the same non-RAII restore, and what has to come back is the state the
-        CALLER had, not one this dispatch left."""
+        the same call rather than a fresh one."""
         lines = [
             "No AOT compiled graph matched this call. Tried "
             f"{len(results)} compiled input(s):"
@@ -1769,18 +1740,10 @@ class AOTCompiledModel:
             (i for i in raised if results[i]._guard_check_enabled),
             None,
         )
-        # An entry that answered in EITHER dispatch pass rejected this call, so
-        # an input covering it is on the table even where its LAST evaluation
-        # raised and the line below is that raise.
-        covered = any(results[i]._guard_check_enabled for i in answered)
-        # A rejection that FOLLOWED a throw from the same tree is the answer the
-        # veto above refuses to trust, so when no enabled entry rejected the call
-        # before it raised, the advice below says so beside the ModelInput line.
-        answered_first = any(
-            results[i]._guard_check_enabled
-            for i in answered
-            if i not in raised or i in unanswered
-        )
+        # An entry that answered in either dispatch pass rejected this call, so a
+        # ModelInput could have covered it even where its line below is a raise.
+        coverable = any(results[i]._guard_check_enabled for i in answered)
+        trusted_rejection = any(results[i]._guard_check_enabled for i in trusted)
         missing_at: int | None = None
         withheld = False
         for i, result in enumerate(results):
@@ -1806,17 +1769,11 @@ class AOTCompiledModel:
                 # is the one the chain carries -- the FIRST index that raised.
                 lines.append(_raised_line(i, raised[i]))
                 continue
-            guard_manager = result._live_guard_manager()
-            f_locals = bound[i]
-            # A guard that raises only here must not replace the whole report.
             try:
-                reason = guard_manager.check_verbose(f_locals)
-            except BaseException as e:
-                torch._C._set_torch_function_state(torch_function_state)
-                if not isinstance(e, Exception):
-                    raise
-                # The dispatch passes got an answer out of this tree and it
-                # rejected the call, so only the explanation is missing.
+                reason = result._live_guard_manager().check_verbose(bound[i])
+            except Exception as e:
+                # check_verbose runs paths check() did not (a repr of a user
+                # object, for one); one entry raising must not cost the others.
                 lines.append(_raised_line(i, e))
                 continue
             if reason.result:
@@ -1870,31 +1827,25 @@ class AOTCompiledModel:
             )
         # An artifact holding no inputs at all -- which deserialize() accepts --
         # has no entry to answer, and adding an input is exactly the advice for it.
-        if covered or not results:
-            lines.append(
+        if coverable or not results:
+            advice = (
                 "Add a ModelInput covering this call, or check whether "
                 "guard_filter_fn kept a guard this call cannot satisfy -- both "
                 "belong to the process that compiles the artifacts, which need "
                 "not be the one that loaded them."
             )
-        if covered and not answered_first:
-            # Every rejection dispatch got out of an enabled tree followed a throw
-            # from the same tree -- the answer the veto above declines to act on
-            # -- so the ModelInput line stands on those alone. Keyed on what
-            # dispatch recorded, not on the entry lines: the re-check is a third
-            # evaluation and may have printed a raise or an accept instead, and a
-            # withheld line says only why the opt-out was withheld.
-            lines.append(
-                "The ModelInput advice above rests only on rejections dispatch "
-                "took after the same tree had raised, so they can be about the "
-                "relational guard state a C++ throw leaves stale rather than "
-                "about this call."
-            )
-        elif raised and not withheld and not covered:
-            # No tree whose guards were asked about ever got as far as rejecting
-            # the call, so adding a ModelInput cannot help. Not with an opted-out
-            # entry reported, whose withheld line has already said what happened,
-            # and not for the empty artifact above, which has no raise to describe.
+            if coverable and not trusted_rejection:
+                # Keyed on what dispatch recorded, not on the entry lines: the
+                # re-check may have printed a raise or an accept instead.
+                advice += (
+                    " Fix the raise above first: every rejection this advice "
+                    "rests on followed a raise from the same tree, and "
+                    f"{_STALE_AFTER_THROW}."
+                )
+            lines.append(advice)
+        if raised and not withheld and not coverable:
+            # Not beside a withheld line, which has already said what happened,
+            # and not for the empty artifact, which has no raise to describe.
             lines.append(
                 "Every guard tree raised while checking this call; the reasons "
                 "above are those raises, not guards this call failed."
