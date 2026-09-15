@@ -1521,6 +1521,84 @@ class TestGitHubPRGhstackDependencies(TestCase):
 
         self.assertIn("#106034", str(cm.exception))
 
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_gates_each_pr_on_its_own_ignored_checks(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_can_skip_internal_checks: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """Each stacked PR is gated against the checks that were failing on that
+        PR, not against the ones failing on the PR the merge was commented on."""
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+        mock_find_matching_merge_rule.return_value = (None, [], [], {})
+
+        top_pr.merge_ghstack_into(
+            mock_repo,
+            True,
+            ignore_current_checks={parent_pr.pr_num: ["parent-red-job"]},
+        )
+
+        mock_find_matching_merge_rule.assert_called_once()
+        self.assertEqual(
+            mock_find_matching_merge_rule.call_args.kwargs["ignore_current_checks"],
+            ["parent-red-job"],
+        )
+
+    @mock.patch("trymerge.check_greenlight_reviewed_head_sha")
+    @mock.patch("trymerge.get_ghstack_prs")
+    @mock.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
+    def test_lower_pr_failure_is_not_ignored_on_the_top_pr(
+        self,
+        _mock_can_skip_internal_checks: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        mock_get_ghstack_prs: mock.MagicMock,
+        _mock_check_greenlight: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """A job name red on a lower PR must not be waived on the top PR: job
+        names repeat across a stack, so a union would hide a new failure."""
+        lower_pr = mock.MagicMock(spec=GitHubPR)
+        lower_pr.pr_num = 1000
+        lower_pr.is_closed.return_value = False
+        lower_pr.is_docker_affecting.return_value = False
+        top_pr = mock.MagicMock(spec=GitHubPR)
+        top_pr.org = "pytorch"
+        top_pr.project = "pytorch"
+        top_pr.pr_num = 1001
+        top_pr.is_ghstack_pr.return_value = True
+        top_pr.is_closed.return_value = False
+        top_pr.is_docker_affecting.return_value = False
+        top_pr.is_dependabot_pr.return_value = False
+        top_pr.merge_changes_locally.side_effect = RuntimeError("stop after gates")
+        mock_get_ghstack_prs.return_value = [(lower_pr, "lower"), (top_pr, "top")]
+
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(
+                top_pr,
+                mock.MagicMock(spec=GitRepo),
+                comment_id=1,
+                ignore_current_checks={lower_pr.pr_num: ["lower-red-job"]},
+            )
+
+        self.assertIsNone(
+            mock_find_matching_merge_rule.call_args.kwargs["ignore_current_checks"]
+        )
+
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
@@ -1827,7 +1905,7 @@ class TestDockerCiGates(TestCase):
         mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
         mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
         top_pr.merge_changes_locally.assert_called_once_with(
-            repo, False, 1, ghstack_prs=ghstack_prs
+            repo, False, 1, ghstack_prs=ghstack_prs, ignore_current_checks=None
         )
 
 
@@ -2493,7 +2571,7 @@ class TestGreenlightGuardWiring(TestCase):
                 mock.MagicMock(spec=GitRepo),
                 comment_id=1,
                 skip_mandatory_checks=True,
-                ignore_current_checks=["some-check"],
+                ignore_current_checks={1: ["some-check"]},
             )
 
         self.assertEqual(mock_check.call_args.kwargs["skip_mandatory_checks"], True)
