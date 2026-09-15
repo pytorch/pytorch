@@ -1646,13 +1646,34 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     if IS_HIP_EXTENSION:
         from .hipify import hipify_python
-        build_dir = os.getcwd()
+        # Resolve symlinks/junctions and Windows `subst` drive aliases on the
+        # build directory so it and the source paths can be compared in a single
+        # canonical form. On Windows CI the build runs under a `subst` drive
+        # (e.g. B:) while source paths may resolve to the real drive (e.g. C:);
+        # without this the `includes` scope below matches nothing and hipify
+        # silently skips the sources, leaving CUDA headers unhipified. On POSIX
+        # `os.getcwd()` is already fully resolved, so this is a no-op there.
+        build_dir = os.path.realpath(os.getcwd())
+
+        def _canonical_source(s):
+            # Only canonicalize sources that don't already live under `build_dir`.
+            # Realpath-ing every source would relocate a source that is legitimately
+            # symlinked *into* the build dir to its real location outside it, which
+            # then pushes the generated `.hip` file out of `build_dir` and breaks the
+            # "paths relative to the setup.py directory" invariant below. Restricting
+            # realpath to sources outside `build_dir` still fixes the subst-drive case
+            # (source resolves to a different spelling than `build_dir`).
+            s_abs = os.path.abspath(s)
+            if s_abs.startswith(build_dir + os.sep):
+                return s_abs
+            return os.path.realpath(s)
+
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
             header_include_dirs=include_dirs,
             includes=[os.path.join(build_dir, '*')],  # limit scope to build_dir only
-            extra_files=[os.path.abspath(s) for s in sources],
+            extra_files=[_canonical_source(s) for s in sources],
             show_detailed=True,
             is_pytorch_extension=True,
             hipify_extra_files_only=True,  # don't hipify everything in includes path
@@ -1660,9 +1681,19 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
         hipified_sources = set()
         for source in sources:
-            s_abs = os.path.abspath(source)
-            hipified_s_abs = (hipify_result[s_abs].hipified_path if (s_abs in hipify_result and
-                              hipify_result[s_abs].hipified_path is not None) else s_abs)
+            s_abs = _canonical_source(source)
+            if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
+                hipified_s_abs = hipify_result[s_abs].hipified_path
+            else:
+                # A CUDA source that hipify didn't process is left as raw CUDA and
+                # fails to compile with hipcc (e.g. missing 'cuda_runtime_api.h').
+                # Warn loudly instead of silently skipping (the historical failure mode).
+                if source.endswith(('.cu', '.cuh')):
+                    logger.warning(
+                        "hipify did not process CUDA source '%s'; it will be built as-is, "
+                        "which typically fails under ROCm. This can happen when the source "
+                        "resolves outside the build directory '%s'.", source, build_dir)
+                hipified_s_abs = s_abs
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
             # *never* absolute paths
             try:
@@ -2425,11 +2456,24 @@ def _jit_compile(name,
                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                     if hipify_python is None:
                         raise AssertionError("expected hipify_python to be not None")
+                    # Canonicalize sources that don't already live under the build
+                    # directory (same reasoning as `CUDAExtension`): this fixes the
+                    # Windows `subst` drive / symlinked-path case where a caller-supplied
+                    # source resolves to a different spelling than `build_directory`,
+                    # without relocating sources symlinked into the build directory.
+                    build_dir_real = os.path.realpath(build_directory)
+
+                    def _canonical_source(s):
+                        s_abs = os.path.abspath(s)
+                        if s_abs.startswith(build_dir_real + os.sep):
+                            return s_abs
+                        return os.path.realpath(s)
+
                     hipify_result = hipify_python.hipify(
                         project_directory=build_directory,
                         output_directory=build_directory,
                         header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
-                        extra_files=[os.path.abspath(s) for s in sources],
+                        extra_files=[_canonical_source(s) for s in sources],
                         ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
                         show_detailed=verbose,
                         show_progress=verbose,
@@ -2439,10 +2483,17 @@ def _jit_compile(name,
 
                     hipified_sources = set()
                     for source in sources:
-                        s_abs = os.path.abspath(source)
+                        s_abs = _canonical_source(source)
                         if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
                             hipified_s_abs = hipify_result[s_abs].hipified_path
                         else:
+                            # A CUDA source that hipify didn't process is left as raw CUDA
+                            # and fails to compile with hipcc. Warn loudly instead of
+                            # silently skipping (the historical failure mode).
+                            if source.endswith(('.cu', '.cuh')):
+                                logger.warning(
+                                    "hipify did not process CUDA source '%s'; it will be built "
+                                    "as-is, which typically fails under ROCm.", source)
                             hipified_s_abs = s_abs
                         hipified_sources.add(hipified_s_abs)
                     sources = list(hipified_sources)
