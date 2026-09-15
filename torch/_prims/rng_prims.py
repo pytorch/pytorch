@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast
+from typing import Any, Callable, cast
 
 import torch
 import torch.utils._pytree as pytree
@@ -490,6 +490,11 @@ def register_run_dtensor_rng_op():
     run_dtensor_rng_op.py_impl(DispatchKey.CUDA)(_impl_device)
     run_dtensor_rng_op.py_impl(DispatchKey.XPU)(_impl_device)
 
+    # expose the device-generic impl to the module-level registration API
+    # (register_run_dtensor_rng_dispatch, defined below)
+    global _impl_run_dtensor_rng_device
+    _impl_run_dtensor_rng_device = _impl_device
+
     @run_dtensor_rng_op.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(start_offset_incr, end_offset_incr, op, *args, **kwargs):
         device = get_device(args, kwargs)
@@ -542,7 +547,40 @@ def register_run_dtensor_rng_op():
     return run_dtensor_rng_op
 
 
+# reference to the device-generic run_dtensor_rng_op impl, populated by
+# register_run_dtensor_rng_op() below and consumed by
+# register_run_dtensor_rng_dispatch below
+_impl_run_dtensor_rng_device: Callable[..., Any] | None = None
+
 run_dtensor_rng_op = register_run_dtensor_rng_op()
+
+_registered_dtensor_rng_dispatch_keys: set["DispatchKey"] = set()
+
+
+def register_run_dtensor_rng_dispatch(dispatch_key: "DispatchKey") -> None:
+    """Register ``run_dtensor_rng_op`` py_impl for a dispatch key.
+
+    This is the entry point for third-party backends (e.g. privateuse1
+    devices) whose RNG follows the counter-based (philox-style seed/offset)
+    contract to use the traceable DTensor RNG higher-order operator, instead
+    of each backend requiring a core-side code change. The backend's RNG
+    tracker (registered via
+    ``torch.distributed.tensor._random.register_rng_tracker``) must implement
+    the offset contract (``_compute_rng_offsets``).
+
+    This follows the same registration pattern as
+    ``register_graphsafe_rng_dispatch`` in this module.
+    """
+    if _impl_run_dtensor_rng_device is None:
+        raise RuntimeError(
+            "run_dtensor_rng_op has not been registered yet; "
+            "register_run_dtensor_rng_dispatch must be called after "
+            "importing torch"
+        )
+    if dispatch_key in _registered_dtensor_rng_dispatch_keys:
+        return
+    _registered_dtensor_rng_dispatch_keys.add(dispatch_key)
+    run_dtensor_rng_op.py_impl(dispatch_key)(_impl_run_dtensor_rng_device)
 
 
 def register_rng_prims():
