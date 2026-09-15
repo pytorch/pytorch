@@ -50,7 +50,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    expectedFailureMPSPre27, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -8785,7 +8785,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
-    @expectedFailureMPSPre27  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
@@ -9008,6 +9007,25 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6, but got: 7'):
             inp = torch.randn(1, 1, 3, 3, 3, device=device)
             torch.ops.aten.reflection_pad3d(inp, (1, 1, 1, 1, 1, 1, 1))
+
+    @parametrize_test("mode,pad", (("reflect", 1024), ("replicate", 1)))
+    @parametrize_test("ndim", (1, 2, 3))
+    @parametrize_test("length", (65537, 95520, 200000))
+    @parametrize_test("batched", (False, True))
+    def test_pad_large_width(self, device, mode, pad, ndim, length, batched):
+        # https://github.com/pytorch/pytorch/issues/196949
+        dtype = torch.bfloat16
+        shape = ((2, 3) if batched else (3,)) + (2,) * (ndim - 1) + (length,)
+        padding = (pad, pad) + (0, 0) * (ndim - 1)
+        x = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        ref_x = x.detach().cpu().double().requires_grad_()
+        out = F.pad(x, padding, mode=mode)
+        ref_out = F.pad(ref_x, padding, mode=mode)
+        self.assertEqual(out, ref_out.to(dtype), atol=0, rtol=0)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        ref_out.backward(grad.cpu().double())
+        self.assertEqual(x.grad, ref_x.grad.to(dtype), atol=0, rtol=0)
 
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad2d_large(self, device):
