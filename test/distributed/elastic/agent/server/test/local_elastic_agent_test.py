@@ -47,9 +47,11 @@ from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.utils.process_state import read_proc_state
 from torch.distributed.rpc.backend_registry import BackendType
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
+    TestCase,
 )
 
 
@@ -272,7 +274,9 @@ class Conf:
     tee: Std = Std.NONE
 
 
-class LocalElasticAgentTest(unittest.TestCase):
+class LocalElasticAgentTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         # start a standalone, single process etcd server to use for all tests
@@ -1755,12 +1759,14 @@ class LocalElasticAgentTest(unittest.TestCase):
                 os.environ[healthcheck_port_env_name] = original_healthcheck
 
 
-class LocalElasticAgentLogPrefixTest(unittest.TestCase):
+class LocalElasticAgentLogPrefixTest(TestCase):
     """Unit tests for ``log_line_prefix_template`` macro substitution.
 
     These tests do not require etcd or a real rendezvous; they mock out
     ``start_processes`` and inspect the prefixes the agent hands to it.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _make_agent(self, log_line_prefix_template: str) -> LocalElasticAgent:
         rdzv_handler = Mock()
@@ -1823,12 +1829,14 @@ class LocalElasticAgentLogPrefixTest(unittest.TestCase):
         )
 
 
-class LocalElasticAgentUninterruptibleStateTest(unittest.TestCase):
+class LocalElasticAgentUninterruptibleStateTest(TestCase):
     """Unit tests for uninterruptible (D-state) detection helpers in LocalElasticAgent.
 
     These tests do not require etcd or a real rendezvous and directly
     exercise the helpers with a mocked process context.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _make_agent(
         self, uninterruptible_state_timeout: float | None = None
