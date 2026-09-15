@@ -153,11 +153,15 @@ _OVERRIDES = (
 
 
 def register_linear_cross_entropy_overrides() -> None:
-    # Bail out before the import below when the DSL is unavailable or disabled;
-    # cu.register_op_override would drop the registration anyway, and the
-    # import is not free. Don't gate on torch.cuda.is_available() here -- it
-    # calls cuInit and poisons fork.
-    if not cu.runtime_available() or cu.check_native_jit_disabled():
+    # Bail out before the import below whenever `cu.register_op_override` would
+    # drop the registration anyway -- the DSL missing, disabled, or at a version
+    # that is not known-good -- since the import is not free. Don't gate on
+    # torch.cuda.is_available() here: it calls cuInit and poisons fork.
+    if (
+        not cu.runtime_available()
+        or cu.check_native_jit_disabled()
+        or not cu._version_is_ok()
+    ):
         return
 
     # This import is what defines the ops named in `_OVERRIDES`. torch.nn cannot pull

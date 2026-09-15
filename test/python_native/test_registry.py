@@ -394,6 +394,26 @@ class TestRegistry(TestCase):
             )
 
 
+def _restore_override_libs(registry, saved):
+    """Put `saved` back, minus any entry a test replaced, and say whether any
+    was replaced.
+
+    Registering over an existing (lib, op, key) destroys the library that was
+    there (`_install_override`), so a handle in the snapshot can be dead by the
+    time tearDown runs. Restoring it would leave the registry listing a kernel
+    the dispatcher no longer has; the caller rebuilds those from the restored
+    graphs instead.
+    """
+    clobbered = [
+        key for key, lib in saved.items() if registry._override_libs.get(key) is not lib
+    ]
+    registry._override_libs.clear()
+    registry._override_libs.update(
+        {key: lib for key, lib in saved.items() if key not in clobbered}
+    )
+    return bool(clobbered)
+
+
 @skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
 class TestRegistryRuntime(TestCase):
     """End-to-end runtime tests that exercise the real dispatcher.
@@ -411,6 +431,10 @@ class TestRegistryRuntime(TestCase):
             "graphs": dict(self.registry._graphs),
             "libs": dict(self.registry._libs),
             "override_libs": dict(self.registry._override_libs),
+            # Installation writes a compile router here as well as into the
+            # dispatcher, so a test that registers leaves one behind unless
+            # this is restored -- and its op may be gone by then.
+            "decomp_overrides": dict(self.registry._native_decomp_overrides),
             "def_libs": dict(self.registry._def_libs),
             "defined_native_ops": set(self.registry._defined_native_ops),
             "dsl_map": {
@@ -440,8 +464,7 @@ class TestRegistryRuntime(TestCase):
         for key, lib in list(self.registry._override_libs.items()):
             if key not in saved_override_libs:
                 lib._destroy()
-        self.registry._override_libs.clear()
-        self.registry._override_libs.update(saved_override_libs)
+        rebuild = _restore_override_libs(self.registry, saved_override_libs)
 
         # _native namespace DEF libraries and the ops defined on them persist
         # for the lifetime of the process (torch.library has no "undefine"),
@@ -463,6 +486,10 @@ class TestRegistryRuntime(TestCase):
         self.registry._dispatch_key_to_lib_graph.clear()
         for k, v in self._saved["dk_map"].items():
             self.registry._dispatch_key_to_lib_graph[k] = list(v)
+        self.registry._native_decomp_overrides.clear()
+        self.registry._native_decomp_overrides.update(self._saved["decomp_overrides"])
+        if rebuild:
+            self.registry._register_all_overrides()
 
     def _install(self, op_symbol, dispatch_key, lib_symbol="aten"):
         """Build the graph then push it through the real registration path."""
@@ -953,6 +980,53 @@ class TestRegistryRuntime(TestCase):
         )
         self.assertEqual(call_count[0], 2)
 
+    # torch.equal, not assertEqual, below: assertEqual computes its tolerances with
+    # tensor*float, which this UNCONDITIONAL override on mul.Tensor also catches, so
+    # the comparison helper would run through the override under test.
+    def _register_unconditional_mul(self):
+        def impl(a, b):
+            return torch.full_like(a, 5.0)
+
+        self.registry.register_op_override(
+            "test_dsl",
+            "aten",
+            "mul.Tensor",
+            "CPU",
+            None,
+            impl,
+            unconditional_override=True,
+        )
+        self._install("mul.Tensor", "CPU")
+        return torch.tensor([2.0, 3.0]), torch.tensor([4.0, 5.0])
+
+    def test_unconditional_override_survives_disable(self):
+        """An unconditional override IS the implementation, so the user-facing disable
+        must leave it installed: masking it changes what the op computes."""
+        a, b = self._register_unconditional_mul()
+        overridden = torch.tensor([5.0, 5.0])
+        self.assertTrue(torch.equal(torch.ops.aten.mul.Tensor(a, b), overridden))
+
+        try:
+            self.registry.deregister_op_overrides(disable_dsl_names="test_dsl")
+            self.assertTrue(torch.equal(torch.ops.aten.mul.Tensor(a, b), overridden))
+        finally:
+            self.registry.reenable_op_overrides(enable_dsl_names="test_dsl")
+
+    def test_private_hatch_masks_unconditional_override(self):
+        """The reference-computation hatch is the one thing that may mask it. It only
+        lifts the exemption, so the ordinary disable must also be in effect."""
+        a, b = self._register_unconditional_mul()
+        overridden = torch.tensor([5.0, 5.0])
+        stock = torch.tensor([8.0, 15.0])
+        try:
+            self.registry.deregister_op_overrides(disable_dsl_names="test_dsl")
+            with torch._native._unconditional_masked():
+                self.assertTrue(torch.equal(torch.ops.aten.mul.Tensor(a, b), stock))
+            # The hatch is scoped, so exiting restores it.
+            self.assertTrue(torch.equal(torch.ops.aten.mul.Tensor(a, b), overridden))
+        finally:
+            self.registry.reenable_op_overrides(enable_dsl_names="test_dsl")
+
 
 @skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
 class TestRegistryNonAtenNamespace(TestCase):
@@ -979,6 +1053,11 @@ class TestRegistryNonAtenNamespace(TestCase):
 
         self._saved_graphs = dict(self.registry._graphs)
         self._saved_override_libs = dict(self.registry._override_libs)
+        # Installing an override also records a compile router keyed on the
+        # overload (`_native_decomp_overrides`), which `native_decomp_table()`
+        # merges. Without this, a router for an op destroyed with the scoped
+        # library below outlives the test.
+        self._saved_decomp_overrides = dict(self.registry._native_decomp_overrides)
         self._saved_maps = {
             name: {k: list(v) for k, v in getattr(self.registry, name).items()}
             for name in (
@@ -1031,8 +1110,7 @@ class TestRegistryNonAtenNamespace(TestCase):
         for key, lib in list(self.registry._override_libs.items()):
             if key not in self._saved_override_libs:
                 lib._destroy()
-        self.registry._override_libs.clear()
-        self.registry._override_libs.update(self._saved_override_libs)
+        rebuild = _restore_override_libs(self.registry, self._saved_override_libs)
 
         self._stack.close()
 
@@ -1048,6 +1126,10 @@ class TestRegistryNonAtenNamespace(TestCase):
 
         self.registry._graphs.clear()
         self.registry._graphs.update(self._saved_graphs)
+        self.registry._native_decomp_overrides.clear()
+        self.registry._native_decomp_overrides.update(self._saved_decomp_overrides)
+        if rebuild:
+            self.registry._register_all_overrides()
         for name, saved in self._saved_maps.items():
             target = getattr(self.registry, name)
             target.clear()
@@ -1094,6 +1176,41 @@ class TestRegistryNonAtenNamespace(TestCase):
         self._install(self.NS)
         self.assertNotIn((self.NS, "twice", "CPU"), self.registry._override_libs)
         self.assertEqual(self.op(torch.tensor([1.0])), torch.tensor([2.0]))
+
+    def test_teardown_leaves_no_decomposition_router(self):
+        """Installation records a compile router in `_native_decomp_overrides`
+        as well as in the dispatcher, and `native_decomp_table()` merges that
+        dict. The scoped op it is keyed on dies with this class's library, so a
+        router left behind would outlive its op and shadow later work through
+        the decomposition table.
+
+        Written as a check of the state this class's own tearDown restores,
+        because the leak is only observable after tearDown has run -- the
+        instance is gone by then, so the assertion lives in the class that
+        installs the router rather than in a later test that happens to trip
+        over it.
+        """
+        before = dict(self.registry._native_decomp_overrides)
+        self._register(lambda *a, **k: True, lambda x: torch.full_like(x, 99.0))
+        self._install(self.NS)
+        self.assertNotEqual(
+            dict(self.registry._native_decomp_overrides),
+            before,
+            "installing an override should record a decomposition router",
+        )
+
+        # What tearDown does, in the order it does it.
+        for key, lib in list(self.registry._override_libs.items()):
+            if key not in self._saved_override_libs:
+                lib._destroy()
+        _restore_override_libs(self.registry, self._saved_override_libs)
+        self.registry._graphs.clear()
+        self.registry._graphs.update(self._saved_graphs)
+        self.registry._native_decomp_overrides.clear()
+        self.registry._native_decomp_overrides.update(self._saved_decomp_overrides)
+
+        self.assertEqual(dict(self.registry._native_decomp_overrides), before)
+        self.assertNotIn(self.op, self.registry._native_decomp_overrides)
 
     def _register_both(self):
         self._register(lambda *a, **k: True, lambda x: torch.full_like(x, 99.0))
