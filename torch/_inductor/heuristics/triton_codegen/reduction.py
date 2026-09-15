@@ -197,6 +197,12 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         )
 
         reduction_hint = inductor_meta.get("reduction_hint")
+        config_reduction_hint = (
+            ReductionHint.DEFAULT
+            if isinstance(reduction_hint, ReductionHint)
+            and reduction_hint.is_default_scheduling()
+            else reduction_hint
+        )
         rnumel = get_total_reduction_numel(size_hints)
 
         max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
@@ -242,6 +248,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             register_intensive=False,
             dynamic_scale_rblock=True,
             waves_per_eu=None,
+            min_num_warps=None,
         ):
             if "y" in size_hints:
                 tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
@@ -266,7 +273,8 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     register_intensive=register_intensive,
                     waves_per_eu=waves_per_eu,
                     dynamic_scale_rblock=dynamic_scale_rblock,
-                    reduction_hint=reduction_hint,
+                    reduction_hint=config_reduction_hint,
+                    min_num_warps=min_num_warps,
                     warp_size=warp_size,
                 )
 
@@ -369,6 +377,41 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             ]
             + scalar_acc_configs
         )
+
+        # Coordinate descent can reach this neighbor from (64, 64), but
+        # max-autotune only benchmarks explicitly enumerated configurations.
+        if (
+            inductor_meta.get("max_autotune")
+            and reduction_hint == ReductionHint.OUTER_NO_SPLIT
+            and triton_meta["device"].type == "cuda"
+            and torch.version.hip is None
+            and device_major is not None
+            and device_major >= 10
+            and "y" not in size_hints
+            and size_hints["x"] >= 8192
+            and rnumel >= 2048
+        ):
+            result_configs.append(make_config(64, 128, num_warps=16))
+
+        # The opt-in structural plan's first stage is deliberately represented
+        # by one extra configuration. Its split heuristic is derived from this
+        # X128/R8/one-warp geometry, so do not independently grow either search
+        # dimension here.
+        if (
+            inductor_meta.get("max_autotune")
+            and inductor_meta.get("enable_experimental_large_output_outer_reductions")
+            and not inductor_meta.get("deterministic")
+            and not inductor_meta.get("are_deterministic_algorithms_enabled")
+            and reduction_hint == ReductionHint.OUTER
+            and triton_meta["device"].type == "cuda"
+            and torch.version.hip is None
+            and device_major is not None
+            and device_major >= 10
+            and "y" not in size_hints
+            and size_hints["x"] >= 8192
+            and rnumel >= 128
+        ):
+            result_configs.append(make_config(128, 8, num_warps=1, min_num_warps=1))
 
         return self._finalize_configs(
             result_configs, make_config, size_hints, inductor_meta
@@ -613,8 +656,8 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 inductor_meta=inductor_meta,
                 triton_meta=triton_meta,
             )
-        for config in configs:
-            config.kwargs["RSPLIT"] = split  # type: ignore[union-attr]
+        for candidate_config in configs:
+            candidate_config.kwargs["RSPLIT"] = split  # type: ignore[union-attr]
         return configs
 
     def apply_rsplit_size(
