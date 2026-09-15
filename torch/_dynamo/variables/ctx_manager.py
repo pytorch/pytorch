@@ -849,6 +849,45 @@ class GenericDeviceVariable(ContextWrappingVariable):
         raise NotImplementedError
 
 
+class CurrentDeviceContextVariable(ContextWrappingVariable):
+    """A device context whose target is the CooR runtime current device.
+
+    CooR assumes one accelerator per rank, so entering this context is a no-op.
+    Reconstruct the real context manager when execution crosses a graph break.
+    """
+
+    _nonvar_fields = {
+        *ContextWrappingVariable._nonvar_fields,
+        "device_context",
+    }
+
+    def __init__(
+        self,
+        device_type: str,
+        device_context: type,
+        **kwargs: Any,
+    ) -> None:
+        self.device_context = device_context
+        super().__init__(target_values=[torch.device(device_type)], **kwargs)
+
+    def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return variables.ConstantVariable.create(None)
+
+    def exit(
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+    ) -> VariableTracker:
+        return variables.ConstantVariable.create(False)
+
+    def module_name(self) -> str:
+        return self.device_context.__module__
+
+    def fn_name(self) -> str:
+        return self.device_context.__name__
+
+    def python_type(self) -> type:
+        return self.device_context
+
+
 class CUDADeviceVariable(GenericDeviceVariable):
     """represents torch.cuda.device"""
 

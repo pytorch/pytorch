@@ -1278,9 +1278,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from ..side_effects import SideEffects
         from .builder import SourcelessBuilder, wrap_fx_proxy
         from .ctx_manager import (
+            CurrentDeviceContextVariable,
             GenericContextWrappingVariable,
             get_device_context_manager,
         )
+        from .tensor import CurrentDeviceVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -1457,6 +1459,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and len(args) == 1
             and (variable_cls := get_device_context_manager(self.value)) is not None
         ):
+            if (
+                isinstance(args[0], CurrentDeviceVariable)
+                and self.value is not torch.accelerator.device_index
+            ):
+                variable_cls._get_device_index_fn(args[0].value, optional=True)
+                return CurrentDeviceContextVariable(args[0].value.type, self.value)
             if not args[0].is_python_constant():
                 raise_type_error(
                     tx,
