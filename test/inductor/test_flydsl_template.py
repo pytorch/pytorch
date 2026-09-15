@@ -9,6 +9,7 @@ from unittest import mock
 
 import torch
 import torch.nn.functional as F
+from torch._inductor import config
 from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
 from torch._inductor.codegen.flydsl.flydsl_scheduling import (
@@ -16,12 +17,16 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
     FlyDSLScheduling,
 )
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
+from torch._inductor.heuristics.template.flydsl import FlyDSLMXFPConfig
 from torch._inductor.ir import Buffer, FixedLayout
+from torch._inductor.kernel import mm
 from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import OrderedSet
+from torch._inductor.utils import OrderedSet, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.nn.functional import ScalingType, SwizzleType  # type: ignore[attr-defined]
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -304,12 +309,16 @@ class TestFlyDSLTemplate(TestCase):
             )
         )
 
-    def test_precompile_metadata_supports_inputless_template(self):
+    @parametrize(
+        "input_names",
+        ((), ("mat1", "mat2", "scale_a", "scale_b")),
+    )
+    def test_precompile_metadata_supports_inputs(self, input_names):
         scheduling = FlyDSLScheduling(scheduler=None)
         layout = FixedLayout(torch.device("cpu"), torch.float32, [1], [1])
         kernel = FlyDSLTemplateKernel(
-            kernel_name="inputless",
-            input_nodes=[],
+            kernel_name="metadata",
+            input_nodes=[Buffer(name=name, layout=layout) for name in input_names],
             output_node=Buffer(name="output", layout=layout),
         )
         graph = SimpleNamespace(
@@ -321,15 +330,16 @@ class TestFlyDSLTemplate(TestCase):
             V.set_graph_handler(graph),
             mock.patch("torch.cuda.is_available", return_value=False),
         ):
-            kernel.def_kernel()
+            kernel.def_kernel(*input_names)
             metadata = scheduling._build_precompile_metadata(
                 kernel, SimpleNamespace(layout=layout)
             )
 
         self.assertIsNotNone(metadata)
-        self.assertEqual(metadata["precompile_shapes"], {"output": [1]})
-        self.assertEqual(metadata["precompile_strides"], {"output": [1]})
-        self.assertEqual(metadata["precompile_dtypes"], {"output": "float32"})
+        names = (*input_names, "output")
+        self.assertEqual(metadata["precompile_shapes"], dict.fromkeys(names, [1]))
+        self.assertEqual(metadata["precompile_strides"], dict.fromkeys(names, [1]))
+        self.assertEqual(metadata["precompile_dtypes"], dict.fromkeys(names, "float32"))
 
     @parametrize(
         "size,dtype,stride,offset,n",
@@ -354,7 +364,12 @@ class TestFlyDSLTemplate(TestCase):
 
         mat1 = node(size, stride, offset)
         mat2 = node([128, n], [1, 128])
-        layout = SimpleNamespace(stride=[n, 1], dtype=dtype, device=torch.device("cpu"))
+        layout = SimpleNamespace(
+            size=[64, n],
+            stride=[n, 1],
+            dtype=dtype,
+            device=torch.device("cpu"),
+        )
         sizevars = SimpleNamespace(
             statically_known_equals=lambda x, y: x == y,
             statically_known_multiple_of=lambda x, y: x % y == 0,
@@ -390,6 +405,7 @@ class TestFlyDSLTemplate(TestCase):
         n = 40
         k = 128
         layout = SimpleNamespace(
+            size=[m, n],
             stride=[n, 1],
             dtype=torch.bfloat16,
             device=torch.device("cpu"),
@@ -428,6 +444,7 @@ class TestFlyDSLTemplate(TestCase):
             )
 
             self.assertEqual(len(result), 1)
+            self.assertIs(result[0]["IS_MXFP"], False)
             self.assertEqual(result[0]["A_IS_TRANSPOSED"], a_is_transposed)
             self.assertEqual(result[0]["B_IS_TRANSPOSED"], b_is_transposed)
             get_configs.assert_called_once_with()
@@ -600,7 +617,8 @@ class TestFlyDSLTemplate(TestCase):
                 code = self._assert_compiled_mm(a, b)
                 self.assertIn(".mark_layout_dynamic()", code)
                 self.assertNotIn("mat2.transpose(0, 1)", code)
-                self.assertIn("_inductor_tensor_arg(mat2)", code)
+                self.assertIn("tensor_args = (output, mat1, mat2)", code)
+                self.assertIn("_inductor_tensor_arg(arg) for arg in tensor_args", code)
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
 
@@ -1109,6 +1127,486 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("extern_kernels._grouped_mm", code)
         self.assertEqual(result, fn(a_unaligned_base, b, offs), atol=3e-2, rtol=3e-2)
 
+
+E2M1_MAGNITUDES = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
+
+
+def _fake_node(shape, stride, dtype, *, offset=0, device=None):
+    shape = list(shape)
+    stride = list(stride)
+    device = device or torch.device("cuda", 0)
+    layout = SimpleNamespace(offset=offset)
+    return SimpleNamespace(
+        get_device=lambda: device,
+        get_size=lambda: shape,
+        get_stride=lambda: stride,
+        get_dtype=lambda: dtype,
+        get_layout=lambda: layout,
+    )
+
+
+def _make_mxfp_scale(rows, k, device):
+    exponents = (
+        torch.arange(rows * (k // 32), device=device, dtype=torch.int64)
+        .reshape(rows, k // 32)
+        .remainder(7)
+        .add(124)
+        .to(torch.uint8)
+    )
+    return (
+        exponents.contiguous().view(torch.float8_e8m0fnu),
+        torch.pow(2.0, exponents.float() - 127.0).repeat_interleave(32, dim=1),
+    )
+
+
+def _make_mxfp_operand(mxfp_format, rows, k, device):
+    if mxfp_format == "mxfp4":
+        codes = torch.arange(rows * k, device=device, dtype=torch.int64).reshape(
+            rows, k
+        )
+        codes = (codes * 5 + 3) % 16
+        lut = torch.tensor(E2M1_MAGNITUDES, device=device, dtype=torch.float32)
+        values = torch.where(
+            codes >= 8, -lut[(codes & 7).long()], lut[(codes & 7).long()]
+        )
+        operand = (codes[:, 0::2] | (codes[:, 1::2] << 4)).to(torch.uint8)
+        operand = operand.contiguous().view(torch.float4_e2m1fn_x2)
+    elif mxfp_format == "mxfp8":
+        values = (
+            (torch.arange(rows * k, device=device).reshape(rows, k) * 5 + 2) % 11
+            - 5
+        ) / 2
+        operand = values.to(torch.float8_e4m3fn)
+        values = operand.float()
+    else:
+        raise AssertionError(f"unsupported MXFP format: {mxfp_format}")
+    scale, scale_values = _make_mxfp_scale(rows, k, device)
+    return operand, scale, values * scale_values
+
+
+def _scaled_mm_mxfp(
+    a,
+    b,
+    scale_a,
+    scale_b,
+    out_dtype,
+    scaling_type=ScalingType.BlockWise1x32,
+):
+    recipe = [scaling_type.value]
+    swizzle = [SwizzleType.NO_SWIZZLE.value]
+    return torch._scaled_mm_v2(
+        a,
+        b,
+        [scale_a],
+        recipe,
+        swizzle,
+        [scale_b],
+        recipe,
+        swizzle,
+        None,
+        out_dtype,
+        [],
+        False,
+    )
+
+
+def _candidate_args(
+    mxfp_format, m=64, n=96, k=256, a_is_transposed=False, b_is_transposed=True,
+    **overrides
+):
+    dtype, elements_per_byte = (
+        (torch.float4_e2m1fn_x2, 2)
+        if mxfp_format == "mxfp4"
+        else (torch.float8_e4m3fn, 1)
+    )
+    storage_k = k // elements_per_byte
+    a_stride = (1, m) if a_is_transposed else (storage_k, 1)
+    b_stride = (1, storage_k) if b_is_transposed else (n, 1)
+    args = {
+        "mat_a": _fake_node((m, storage_k), a_stride, dtype),
+        "mat_b": _fake_node((storage_k, n), b_stride, dtype),
+        "scale_a": [_fake_node((m, k // 32), (k // 32, 1), torch.float8_e8m0fnu)],
+        "recipe_a": [ScalingType.BlockWise1x32.value],
+        "swizzle_a": [SwizzleType.NO_SWIZZLE.value],
+        "scale_b": [_fake_node((n, k // 32), (k // 32, 1), torch.float8_e8m0fnu)],
+        "recipe_b": [ScalingType.BlockWise1x32.value],
+        "swizzle_b": [SwizzleType.NO_SWIZZLE.value],
+        "bias": None,
+        "out_dtype": torch.bfloat16,
+        "contraction_dim": [],
+        "use_fast_accum": False,
+    }
+    args.update(overrides)
+    return args
+
+
+def _run_mxfp_tile(
+    mxfp_format,
+    shape,
+    tile,
+    out_dtype,
+    inputs,
+    *,
+    a_is_transposed=False,
+    b_is_transposed=True,
+):
+    import flydsl.compiler as flyc
+
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+        gemm_mxfp_gfx950,
+        make_mxfp_param_and_validate,
+    )
+
+    m, n, k = shape
+    out = torch.zeros(m, n, device=inputs[0].device, dtype=out_dtype)
+    tensors = (out, *(tensor.view(torch.uint8) for tensor in inputs))
+    param = make_mxfp_param_and_validate(
+        mxfp_format,
+        m,
+        n,
+        k,
+        "bfloat16" if out_dtype == torch.bfloat16 else "float16",
+        asdict(FlyDSLMXFPConfig(*tile)),
+        a_is_transposed=a_is_transposed,
+        b_is_transposed=b_is_transposed,
+    )
+    assert param is not None
+    compile_args = tuple(
+        flyc.from_torch_tensor(tensor).mark_layout_dynamic() for tensor in tensors
+    ) + (param, 0)
+    compiled = flyc.compile(gemm_mxfp_gfx950, *compile_args)
+    compiled(*tensors, param, 0)
+    torch.cuda.synchronize()
+    return out
+
+
+def _with_outer_contiguous_storage(tensor):
+    return tensor.view(torch.uint8).t().contiguous().t().view(tensor.dtype)
+
+
+def _mxfp_case(mxfp_format, shape, device, a_is_transposed=False, b_is_transposed=True):
+    m, n, k = shape
+    a, scale_a, a_ref = _make_mxfp_operand(mxfp_format, m, k, device)
+    b, scale_b, b_ref = _make_mxfp_operand(mxfp_format, n, k, device)
+    a = _with_outer_contiguous_storage(a) if a_is_transposed else a
+    b = b if b_is_transposed else _with_outer_contiguous_storage(b)
+    b = b.view(torch.uint8).t().view(b.dtype)
+    return (a, b, scale_a, scale_b), a_ref @ b_ref.t()
+
+
+class TestFlyDSLMXFPMetadata(TestCase):
+    @parametrize(
+        "mxfp_format,override,expected",
+        (
+            ("mxfp4", {"contraction_dim": None}, "mxfp4"),
+            ("mxfp8", {"contraction_dim": None}, "mxfp8"),
+            ("mxfp8", {"contraction_dim": []}, "mxfp8"),
+            ("mxfp4", {"swizzle_a": [SwizzleType.SWIZZLE_32_4_4.value]}, None),
+            ("mxfp4", {"recipe_b": [ScalingType.BlockWise1x16.value]}, None),
+            ("mxfp4", {"out_dtype": torch.float32}, None),
+            ("mxfp4", {"use_fast_accum": True}, None),
+            ("mxfp4", {"contraction_dim": [1]}, None),
+            ("mxfp8", {"bias": object()}, None),
+            ("mxfp8", {"scale_a": []}, None),
+            (
+                "mxfp8",
+                {"mat_b": _fake_node((256, 96), (1, 256), torch.float16)},
+                None,
+            ),
+        ),
+    )
+    def test_contract(self, mxfp_format, override, expected):
+        with mock.patch.object(torch.version, "hip", "test"):
+            self.assertEqual(
+                mm._get_rocm_mxfp_v2_format(
+                    **_candidate_args(mxfp_format, **override)
+                ),
+                expected,
+            )
+
+    @parametrize("mxfp_format,block_k_bytes", (("mxfp4", 128), ("mxfp8", 256)))
+    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
+    def test_tile_storage_units(self, mxfp_format, block_k_bytes):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            mxfp_gemm_derived,
+        )
+
+        derived = mxfp_gemm_derived(mxfp_format, 64, 64, 256, 2, 1, 1)
+        self.assertEqual(derived.block_k_bytes, block_k_bytes)
+        self.assertEqual(derived.k_halves, 2)
+
+    @parametrize(
+        "overrides,error",
+        (
+            ({"block_k": 64}, "block_k must be a multiple of the MFMA K depth"),
+            ({"stages": 1}, "stages must be at least 2 for the staged LDS pipeline"),
+            ({"m_waves": 3}, "block_m/block_n must be divisible by m_waves/n_waves"),
+            ({"block_m": 144}, "accumulator repeats exceed the register budget"),
+        ),
+    )
+    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
+    def test_invalid_tile_config(self, overrides, error):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            mxfp_gemm_derived,
+        )
+
+        config = {
+            "block_m": 128,
+            "block_n": 128,
+            "block_k": 128,
+            "stages": 2,
+            "m_waves": 1,
+            "n_waves": 1,
+        }
+        config.update(overrides)
+        with self.assertRaisesRegex(ValueError, error):
+            mxfp_gemm_derived("mxfp4", **config)
+
+    @parametrize(
+        "mxfp_format,expected_tile_ks",
+        (("mxfp4", (256, 512, 1024)), ("mxfp8", (128, 256, 512))),
+    )
+    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
+    def test_tuning_config_projection(self, mxfp_format, expected_tile_ks):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        gemm_configs = [
+            flydsl_heuristics.FlyDSLGemmConfig(64, 64, tile_k, 2, 1, 1, 0)
+            for tile_k in (64, 128, 256)
+        ]
+        candidates = [flydsl_heuristics._BASELINE_CONFIG[mxfp_format]]
+        candidates.extend(
+            flydsl_heuristics._project_mxfp_gemm_configs(
+                mxfp_format, gemm_configs
+            )
+        )
+        configs = flydsl_heuristics._get_valid_mxfp_gemm_configs(
+            mxfp_format, candidates
+        )
+        projected = {
+            (config_.TILE_K, config_.LDS_SCALE)
+            for config_ in configs
+            if config_.TILE_M == 64 and config_.TILE_N == 64
+        }
+        self.assertIn(flydsl_heuristics._BASELINE_CONFIG[mxfp_format], configs)
+        self.assertEqual(
+            projected,
+            {
+                (tile_k, lds_scale)
+                for tile_k in expected_tile_ks
+                for lds_scale in (0, 1)
+            },
+        )
+
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    @parametrize(
+        "m,n,k,a_is_transposed,b_is_transposed,expected",
+        (
+            (80, 112, 384, False, False, True),
+            (80, 112, 384, False, True, True),
+            (80, 112, 384, True, False, True),
+            (80, 112, 384, True, True, True),
+            (65, 97, 384, False, True, True),
+            (64, 96, 160, False, True, False),
+            (65, 96, 256, True, True, False),
+            (64, 97, 256, False, False, False),
+        ),
+    )
+    @config.patch(flydsl_enable_autotuning=False)
+    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
+    def test_config_filtering(
+        self,
+        mxfp_format,
+        m,
+        n,
+        k,
+        a_is_transposed,
+        b_is_transposed,
+        expected,
+    ):
+        args = _candidate_args(
+            mxfp_format,
+            m=m,
+            n=n,
+            k=k,
+            a_is_transposed=a_is_transposed,
+            b_is_transposed=b_is_transposed,
+        )
+        layout = SimpleNamespace(
+            size=[m, n],
+            stride=[n, 1],
+            dtype=torch.bfloat16,
+            device=torch.device("cuda", 0),
+            offset=0,
+        )
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(
+                statically_known_multiple_of=lambda value, multiple: (
+                    value % multiple == 0
+                )
+            )
+        )
+        with V.set_graph_handler(graph), mock.patch.object(
+            mm, "use_flydsl_gemm_template", return_value=True
+        ):
+            configs = mm.get_flydsl_mxfp_template_kwargs(
+                mxfp_format,
+                layout,
+                args["mat_a"],
+                args["mat_b"],
+                args["scale_a"][0],
+                args["scale_b"][0],
+            )
+        if not expected:
+            self.assertFalse(configs)
+            return
+        self.assertTrue(configs)
+        names = (
+            "GEMM_M",
+            "GEMM_N",
+            "GEMM_K",
+            "A_IS_TRANSPOSED",
+            "B_IS_TRANSPOSED",
+        )
+        expected_fields = (m, n, k, a_is_transposed, b_is_transposed)
+        for config_ in configs:
+            self.assertEqual(
+                tuple(config_[name] for name in names), expected_fields
+            )
+
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    @parametrize("k,tile_k", ((384, 256), (640, 512)))
+    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
+    def test_runtime_block_k_tail(self, mxfp_format, k, tile_k):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            make_mxfp_param_and_validate,
+        )
+
+        config_ = asdict(FlyDSLMXFPConfig(32, 32, tile_k, 2, 1, 1, 0, 0))
+        param = make_mxfp_param_and_validate(
+            mxfp_format, 65, 97, k, "bfloat16", config_
+        )
+        self.assertIsNotNone(param)
+        self.assertTrue(param.has_k_tail)
+        self.assertIsNone(
+            make_mxfp_param_and_validate(
+                mxfp_format, 65, 97, 160, "bfloat16", config_
+            )
+        )
+
+class TestFlyDSLMXFPDevice(TestCase):
+    def _skip_unless_supported(self, device):
+        if torch.version.hip is None:
+            self.skipTest("requires ROCm")
+        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+        if arch != "gfx950":
+            self.skipTest(f"requires gfx950, got {arch}")
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+    def _assert_close(self, actual, reference, out_dtype):
+        self.assertEqual(actual, reference.to(out_dtype), rtol=2e-2, atol=5e-1)
+
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    @parametrize(
+        "a_is_transposed,b_is_transposed",
+        ((False, False), (False, True), (True, False), (True, True)),
+    )
+    def test_all_operand_layouts(
+        self, device, mxfp_format, a_is_transposed, b_is_transposed
+    ):
+        self._skip_unless_supported(device)
+        shape = (64, 96, 256)
+        inputs, reference = _mxfp_case(
+            mxfp_format, shape, device, a_is_transposed, b_is_transposed
+        )
+        actual = _run_mxfp_tile(
+            mxfp_format,
+            shape,
+            (32, 32, 128, 2, 1, 1, 0, 0),
+            torch.bfloat16,
+            inputs,
+            a_is_transposed=a_is_transposed,
+            b_is_transposed=b_is_transposed,
+        )
+        self._assert_close(actual, reference, torch.bfloat16)
+
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    def test_compiled_flydsl_route(self, device, mxfp_format):
+        self._skip_unless_supported(device)
+        inputs, reference = _mxfp_case(mxfp_format, (64, 4096, 4096), device)
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="FLYDSL",
+            flydsl_enable_autotuning=False,
+        ):
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                _scaled_mm_mxfp, backend="inductor", fullgraph=True
+            )
+            actual, code = run_and_get_code(
+                compiled, *inputs, torch.bfloat16
+            )
+        self._assert_close(actual, reference, torch.bfloat16)
+        self.assertIn("async_compile.flydsl", "\n".join(code))
+
+    @parametrize(
+        "mxfp_format,shape,tile,out_dtype",
+        (
+            ("mxfp8", (64, 96, 256), (32, 32, 128, 2, 1, 1, 0, 0), torch.bfloat16),
+            ("mxfp8", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0, 1), torch.bfloat16),
+            ("mxfp8", (256, 256, 1024), (128, 128, 128, 4, 2, 2, 4, 0), torch.bfloat16),
+            ("mxfp8", (256, 256, 512), (256, 256, 128, 2, 2, 2, 0, 0), torch.float16),
+            ("mxfp4", (32, 32, 256), (16, 16, 128, 2, 1, 1, 0, 0), torch.bfloat16),
+            ("mxfp4", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0, 1), torch.bfloat16),
+            ("mxfp4", (256, 256, 1024), (64, 64, 128, 4, 2, 2, 4, 0), torch.bfloat16),
+            ("mxfp4", (256, 256, 512), (256, 256, 256, 2, 4, 2, 0, 0), torch.float16),
+            ("mxfp8", (65, 97, 384), (32, 32, 256, 2, 1, 1, 0, 0), torch.bfloat16),
+            ("mxfp4", (65, 97, 384), (32, 32, 256, 2, 1, 1, 0, 0), torch.bfloat16),
+        ),
+    )
+    def test_tile_paths_match_reference(
+        self, device, mxfp_format, shape, tile, out_dtype
+    ):
+        self._skip_unless_supported(device)
+        inputs, reference = _mxfp_case(mxfp_format, shape, device)
+        actual = _run_mxfp_tile(mxfp_format, shape, tile, out_dtype, inputs)
+        self._assert_close(actual, reference, out_dtype)
+
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    def test_eager_candidate(self, device, mxfp_format):
+        self._skip_unless_supported(device)
+        inputs, reference = _mxfp_case(mxfp_format, (64, 96, 256), device)
+        actual = mm._scaled_mm_v2_mxfp(*inputs, out_dtype=torch.bfloat16)
+        self._assert_close(actual, reference, torch.bfloat16)
+
+    def test_unsupported_signature_falls_back(self, device):
+        self._skip_unless_supported(device)
+        m, n, k = 64, 64, 128
+        a = torch.randn(m, k, device=device).to(torch.float8_e4m3fn)
+        b = torch.randn(n, k, device=device).to(torch.float8_e4m3fn).t()
+        scale_a = torch.ones((), device=device)
+        scale_b = torch.ones((), device=device)
+
+        def tensorwise(a, b, scale_a, scale_b):
+            return _scaled_mm_mxfp(
+                a,
+                b,
+                scale_a,
+                scale_b,
+                torch.bfloat16,
+                ScalingType.TensorWise,
+            )
+
+        with config.patch(max_autotune=True, max_autotune_gemm_backends="ATEN,FLYDSL"):
+            _, code = run_and_get_code(
+                torch.compile(tensorwise, dynamic=False), a, b, scale_a, scale_b
+            )
+        self.assertNotIn("async_compile.flydsl", "\n".join(code))
+
+
+instantiate_parametrized_tests(TestFlyDSLMXFPMetadata)
+instantiate_device_type_tests(TestFlyDSLMXFPDevice, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
