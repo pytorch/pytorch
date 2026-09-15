@@ -15,6 +15,8 @@ from torch.types import IntLikeType
 from torch.utils._ordered_set import OrderedSet
 
 
+INDEXED_OUTPUT_INDICES_ARG_NAME: Final = "indexed_output_indices"
+INDEXED_OUTPUT_STORE_ARG_NAME: Final = "indexed_output"
 LOCAL_REDUCE_FEED_MAIN_ARG_NAME: Final = "local_reduce0"
 LOCAL_REDUCE_PREPASS_FN_SUFFIX: Final = "_local_reduce_prepass"
 LOCAL_REDUCE_STORE_ARG_NAME: Final = "local_reduce_store"
@@ -102,6 +104,11 @@ FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
 FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: main output shape must equal the physical "
     "GEMM output shape"
+)
+FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR = (
+    "FlexGEMM indexed outputs must gather from the returned main output (or the "
+    "value whose dtype conversion is the main output) and keep its dtype: write "
+    "main.gather(1, indices[:, None]).squeeze(1)"
 )
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
 LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor nodes"
