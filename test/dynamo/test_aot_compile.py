@@ -573,6 +573,10 @@ class CountedKey:
     # comparisons a lookup of `name` makes against it, so a guard on `name`
     # misses the global that many times and finds it after: one way a live guard
     # tree can reject a call in the dispatch scan and accept it on the re-check.
+    # Which operand the dict puts on the left does not matter: str.__eq__
+    # returns NotImplemented for a non-str, so this __eq__ runs either way. A
+    # lookup that misses fails the tree wherever it sits, so each check() the
+    # tree makes consumes exactly one miss however many guards read `name`.
     def __init__(self, name, misses):
         self.name = name
         self.compares, self.misses = 0, misses
@@ -581,6 +585,8 @@ class CountedKey:
         return hash(self.name)
 
     def __eq__(self, other):
+        if other is self:
+            return True
         self.compares += 1
         return self.compares > self.misses
 
@@ -598,6 +604,8 @@ class ModeBranchGlobalModule(torch.nn.Module):
 
 
 def aot_compile_forward(mod, forward, *args):
+    # Compiles `mod` for `forward` bound in place of its class's, so one module
+    # can be compiled for several forwards; a class forward rebinds to itself.
     mod.forward = types.MethodType(forward, mod)
     model = torch.compile(mod, fullgraph=True, backend="eager")
     model._aot_compile([ModelInput(args=args, kwargs={}, contexts=[])])
@@ -1981,16 +1989,18 @@ from user code:
         self.assertEqual(reloaded(x), ReturnsBuiltinModule()(x))
 
     def _install_global_probe(self, name, misses):
-        # Re-keys this module's global `name` under a CountedKey. Restored by
-        # cleanups, not a finally: nothing between the pop and the insert may
-        # leave this dict without the name. addCleanup is LIFO, so the probe is
-        # registered second to be removed first; reversed, the re-insert would
+        # Re-keys this module's global `name` under a CountedKey. Both cleanups
+        # are registered before the dict is touched, so an interrupt anywhere
+        # leaves the name restored. addCleanup is LIFO, so the probe is popped
+        # first and the name re-inserted second; reversed, the re-insert would
         # find the probe by __eq__ and store under it, and the pop would then
-        # drop the name for good.
+        # drop the name for good. Call _hide_leaked_dynamo_globals before this,
+        # never after: its sweep calls str methods on every key of this dict.
         g = globals()
-        probe, saved = CountedKey(name, misses), g.pop(name)
+        probe, saved = CountedKey(name, misses), g[name]
         self.addCleanup(g.__setitem__, name, saved)
         self.addCleanup(g.pop, probe, None)
+        del g[name]
         g[probe] = saved
         return saved
 
@@ -2031,6 +2041,7 @@ from user code:
         self.assertEqual(combined(x.double()), x.double() * 2)
 
     def _aot_compile_mode_branches(self):
+        self._hide_leaked_dynamo_globals()
         mod = ModeBranchGlobalModule()
         model = torch.compile(
             mod,
@@ -2085,6 +2096,25 @@ from user code:
         model, x = self._aot_compile_mode_branches()
         model.forward.compiled_results[0].disable_guard_check()
         self._rescued_by_the_recheck(model, x)
+
+    @parametrize("leading_opt_outs", [0, 1, 2])
+    def test_module_dispatch_no_match_falls_through_to_the_first_result(
+        self, leading_opt_outs
+    ):
+        # Nothing mocked: a call neither result guards is handed to
+        # compiled_results[0], which raises unless it opted out, in which case
+        # its graph runs; opting [1] out as well changes nothing. The graphs
+        # differ (x * 2 and x * 3), so the number says which result answered.
+        # The fourth row, [1] opted out alone, raises here like the first and
+        # is pinned by the commit that changes it.
+        model, x = self._aot_compile_mode_branches()
+        for result in model.forward.compiled_results[:leading_opt_outs]:
+            result.disable_guard_check()
+        if leading_opt_outs:
+            self.assertEqual(model(x, 2), x * 2)
+        else:
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                model(x, 2)
 
     def test_aot_compile_module_disable_guard_check(self):
         # disable_guard_check() is the escape hatch for an artifact whose guards
