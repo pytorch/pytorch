@@ -1748,7 +1748,6 @@ TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
-TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
@@ -1918,7 +1917,23 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 TEST_CUDA_CUDSS = TEST_CUDA and torch.version.cuda is not None
 TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and torch.version.cuda is not None
 
-TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and torch.version.cuda is not None
+def _cuda_python_bindings_usable() -> bool:
+    if not _check_module_exists("cuda.bindings"):
+        return False
+    if torch.version.cuda is not None:
+        return True
+    if torch.version.hip is not None:
+        # NVIDIA's cuda-bindings installs and imports fine on a ROCm box but
+        # fails at the first call. hip-python's interop package (PyPI:
+        # hip-python-interop) provides a HIP-backed cuda.bindings and marks
+        # itself with HIP_PYTHON = True; only that flavor is usable here.
+        import cuda.bindings.runtime  # type: ignore[import]
+
+        return bool(getattr(cuda.bindings.runtime, "HIP_PYTHON", False))
+    return False
+
+
+TEST_CUDA_PYTHON_BINDINGS = _cuda_python_bindings_usable()
 TEST_NVMATH = _check_module_exists("nvmath.bindings") and torch.version.cuda is not None
 skipIfNoNvmath = unittest.skipIf(not TEST_NVMATH, "nvmath-python not available")
 
@@ -2896,11 +2911,14 @@ def skipIfCachingAllocatorDisabled(fn):
     )(fn)
 
 def periodic(fn):
-    """Marks a test to run only when periodic test mode is enabled.
+    """Marks a test that CI runs only in periodic test mode.
 
     The periodic test configuration selects the corresponding pytest marker
     and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run.
+    Python test sweep (e.g. distributed or quantization) never run in CI.
+
+    Gated only in CI and on Sandcastle (which has no periodic config);
+    elsewhere the marker is attached and the test runs normally.
 
     Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
     slow gating (static or dynamic) does not block @periodic tests there,
@@ -2908,11 +2926,12 @@ def periodic(fn):
     it runs only in periodic-strict.
     """
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
+    skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
 
     if isinstance(fn, type):
         if has_pytest:
             fn = pytest.mark.periodic(fn)
-        return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(fn)
+        return unittest.skipIf(skip, reason)(fn)
 
     # Isolate decorator metadata when parameter variants share the original
     # test function.
@@ -2923,7 +2942,7 @@ def periodic(fn):
     if has_pytest:
         wrapper = pytest.mark.periodic(wrapper)
 
-    return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(wrapper)
+    return unittest.skipIf(skip, reason)(wrapper)
 
 
 def slowTest(fn):
