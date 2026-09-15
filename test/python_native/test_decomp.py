@@ -74,9 +74,10 @@ class TestNativeDecompTable(TestCase):
             ),
         }
 
-        # Destroy live aten overrides and _native IMPL libs so the test's
-        # own registrations see pristine aten kernels. These are rebuilt
-        # from the snapshotted `_graphs` on tearDown.
+        # Destroy live overrides -- every namespace, not just the aten ones
+        # this class registers -- and _native IMPL libs, so the test's own
+        # registrations see pristine kernels. These are rebuilt from the
+        # snapshotted `_graphs` on tearDown.
         self._destroy_live_libs()
 
         # Clear dicts that won't corrupt process-wide state.
@@ -90,9 +91,11 @@ class TestNativeDecompTable(TestCase):
         self.registry._filter_state._dispatch_keys.clear()
 
     def _destroy_live_libs(self):
-        """Tear down every live aten override + _native IMPL library and
-        clear their dicts. The C++ dispatcher has no per-kernel removal,
-        so Library._destroy() is the only way to unregister."""
+        """Tear down every live override + _native IMPL library and clear
+        their dicts. `_override_libs` is keyed by (namespace, op, dispatch
+        key), so this covers all namespaces. The C++ dispatcher has no
+        per-kernel removal, so Library._destroy() is the only way to
+        unregister."""
         for lib in list(self.registry._override_libs.values()):
             lib._destroy()
         self.registry._override_libs.clear()

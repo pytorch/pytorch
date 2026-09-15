@@ -46,13 +46,13 @@ def _rocm_major_minor():
 
 ROCM_VERSION = LazyVal(_rocm_major_minor)
 
-# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+# Cuspy needs both the cupti-python bindings and the build-generated
 # _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
     _check_module_exists("cupti")
-    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and _check_module_exists("torch.profiler._cuspy._cupti_stubs")
     and not TEST_WITH_ROCM
 )
 
@@ -60,7 +60,7 @@ def _cupti_version():
     if not TEST_CUPTI:
         return 0
     try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
+        from torch.profiler._cuspy.cupti_python import pylibcupti
         return pylibcupti().get_version()
     except Exception:
         return 0
@@ -92,6 +92,15 @@ SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
+BF16X9_API_SUPPORTED = LazyVal(
+    lambda: TEST_CUDA
+    and not TEST_WITH_ROCM
+    and _get_torch_cuda_version() >= (12, 9)
+)
+BF16X9_SUPPORTED = LazyVal(
+    lambda: BF16X9_API_SUPPORTED
+    and torch.cuda.get_device_capability() in ((10, 0), (10, 3))
+)
 
 IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
@@ -547,6 +556,13 @@ def _get_torch_rocm_version():
         return (0, 0)
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
+
+def rocm_mx_swizzle(mat_dtype):
+    """Whether this device takes MX block scales for `mat_dtype` in the swizzled layout."""
+    if not torch.version.hip or not evaluate_gfx_arch_within(["gfx950"]):
+        return False
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    return _get_torch_rocm_version() >= min_version
 
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:

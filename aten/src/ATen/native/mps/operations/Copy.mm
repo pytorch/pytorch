@@ -3,6 +3,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Copy.h>
@@ -479,5 +480,11 @@ Tensor _copy_from_and_resize_mps(const at::Tensor& self, const at::Tensor& dst) 
 Tensor _copy_from_mps(const at::Tensor& self, const at::Tensor& dst, bool non_blocking) {
   return mps::mps_copy_(const_cast<Tensor&>(dst), self, non_blocking);
 }
+
+static void conj_physical_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "copy_conj");
+}
+
+REGISTER_DISPATCH(conj_physical_stub, &conj_physical_kernel_mps)
 
 } // namespace at::native

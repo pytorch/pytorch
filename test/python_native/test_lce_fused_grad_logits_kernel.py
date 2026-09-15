@@ -210,6 +210,68 @@ class TestFusedGradLogitsKernel(TestCase):
             rtol=0,
         )
 
+    def test_masked_class_does_not_poison_the_row(self):
+        """A -inf logit is a masked class: its probability is 0 and the rest of
+        the row is an ordinary softmax. The online pass sees it with m = -inf
+        when it is the first column a thread touches, where `exp(z - m)` would
+        be `exp(nan)`."""
+        num_rows, V = 8, 1024
+        logits, row_scale, target = _inputs(num_rows, V)
+        # Column 0 is thread 0's first column, and the block is wider than one
+        # warp, so this is exactly the first-touch case.
+        logits[:, 0] = float("-inf")
+        g, lse, target_logit = self._run(logits, row_scale, target, torch.float32)
+        want_g, want_lse, want_target_logit = _reference(
+            logits, row_scale, target, torch.float32
+        )
+        self.assertTrue(torch.isfinite(g).all())
+        self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
+        self.assertEqual(lse, want_lse, atol=1e-4, rtol=1e-5)
+        self.assertEqual(target_logit, want_target_logit)
+
+    def test_every_class_masked_is_nan_like_eager(self):
+        """A fully masked row has no valid class: eager's shifted softmax is
+        `-inf - -inf`, so the row is NaN there too. Pinned so the fix for the
+        mixed case above cannot quietly turn this into a number."""
+        num_rows, V = 4, 512
+        logits, row_scale, target = _inputs(num_rows, V)
+        logits[1] = float("-inf")
+        g, lse, target_logit = self._run(logits, row_scale, target, torch.float32)
+        self.assertTrue(torch.isnan(g[1]).all())
+        # The loss the caller builds from the two statistics, whether the NaN
+        # arrives in `lse` or as `-inf - -inf`.
+        self.assertTrue(torch.isnan(lse[1] - target_logit[1]))
+        self.assertTrue(torch.isfinite(g[0]).all())
+
+    def test_nan_logit_poisons_its_row(self):
+        """NaN must reach the output rather than be skipped: the -inf guard in
+        the online pass tests `!= -inf`, not `> -inf`, precisely so a NaN still
+        takes the accumulate branch."""
+        num_rows, V = 4, 512
+        logits, row_scale, target = _inputs(num_rows, V)
+        logits[2, 7] = float("nan")
+        g, lse, _ = self._run(logits, row_scale, target, torch.float32)
+        self.assertTrue(torch.isnan(g[2]).all())
+        self.assertTrue(torch.isnan(lse[2]))
+        self.assertTrue(torch.isfinite(g[0]).all())
+
+    @parametrize("bad_target", [-1, 1 << 20])
+    def test_out_of_range_target_poisons_its_row(self, bad_target):
+        """Out of range is a caller error. Eager reports it through an index
+        assert; this kernel indexes nothing through the dispatcher, so it
+        clamps the read and returns NaN for the row instead of a gradient that
+        merely lacks its one-hot term. See the note in the LCE docs."""
+        num_rows, V = 6, 256
+        logits, row_scale, target = _inputs(num_rows, V)
+        target[3] = bad_target
+        g, _, target_logit = self._run(logits, row_scale, target, torch.float32)
+        self.assertTrue(torch.isnan(g[3]).all())
+        self.assertTrue(torch.isnan(target_logit[3]))
+        # Only the offending row: the rest of the chunk is still usable.
+        self.assertTrue(torch.isfinite(g[:3]).all())
+        self.assertTrue(torch.isfinite(g[4:]).all())
+        self.assertTrue(torch.isfinite(target_logit[[0, 1, 2, 4, 5]]).all())
+
     def test_zero_row_scale_gives_a_zero_gradient(self):
         """An ignored row carries scale 0, and its whole gradient row -- target
         column included -- must be exactly zero."""
