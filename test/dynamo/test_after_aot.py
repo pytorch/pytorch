@@ -5,6 +5,7 @@ import io
 import os
 import pickle
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch._dynamo.test_case
+from torch._dynamo.repro import after_aot
 from torch._dynamo.repro.after_aot import (
     _extract_distributed_info,
     _get_compile_args,
@@ -28,7 +30,12 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
+)
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
 
@@ -37,6 +44,16 @@ def strip_trailing_whitespace(r):
     return "\n".join([l.rstrip() for l in r.split("\n")])
 
 
+def _make_test_graph():
+    args = [torch.randn(4)]
+
+    def f(x):
+        return (x.sin(),)
+
+    return make_fx(f)(*args), args
+
+
+@instantiate_parametrized_tests
 class TestAfterAot(torch._dynamo.test_case.TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_save_args_dynamic_shapes(self):
@@ -143,6 +160,7 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
         options = SimpleNamespace(
             accuracy="accuracy",
             check_str=None,
+            is_inference=False,
             isolate=False,
             save_dir=None,
             tracing_mode="real",
@@ -163,6 +181,226 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             repro_minify(options, torch.nn.Identity(), lambda reader: None)
 
         self.assertIsNone(seen_repro_after)
+
+    @parametrize("is_inference", (False, True))
+    def test_save_graph_repro_preserves_is_inference(self, is_inference):
+        gm, args = _make_test_graph()
+        buf = io.StringIO()
+        save_graph_repro(
+            buf,
+            gm,
+            args,
+            "inductor",
+            save_dir=None,
+            is_inference=is_inference,
+        )
+        self.assertIn(
+            f"is_inference={is_inference!r}",
+            buf.getvalue(),
+        )
+
+    @parametrize("is_inference", (False, True))
+    @parametrize("deferred", (False, True))
+    def test_wrap_compiler_debug_preserves_is_inference_for_failures(
+        self, is_inference, deferred
+    ):
+        gm, args = _make_test_graph()
+
+        def fake_compiler(gm, example_inputs, **kwargs):
+            if not deferred:
+                raise RuntimeError("compiler failure")
+
+            def compiled(real_args):
+                raise RuntimeError("deferred failure")
+
+            return compiled
+
+        with (
+            torch._dynamo.config.patch(repro_after="aot", repro_level=1),
+            patch.object(after_aot, "dump_compiler_graph_state") as dump,
+            self.assertRaisesRegex(RuntimeError, "failure"),
+        ):
+            compiled = after_aot.wrap_compiler_debug(fake_compiler, "inductor")(
+                gm, args, is_inference=is_inference
+            )
+            compiled(args)
+
+        dump.assert_called_once()
+        self.assertIs(
+            dump.call_args.kwargs["is_inference"],
+            is_inference,
+        )
+
+    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode")
+    def test_after_aot_inference_repro_e2e(self):
+        gm, args = _make_test_graph()
+
+        def failing_compiler(gm, example_inputs, **kwargs):
+            raise RuntimeError("intentional compiler failure")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoints = os.path.join(tmpdir, "checkpoints")
+            with (
+                torch._dynamo.config.patch(repro_after="aot", repro_level=1),
+                patch.object(after_aot, "minifier_dir", return_value=tmpdir),
+                patch.object(after_aot.os, "getcwd", return_value=tmpdir),
+                self.assertRaisesRegex(RuntimeError, "intentional compiler failure"),
+            ):
+                after_aot.wrap_compiler_debug(failing_compiler, "inductor")(
+                    gm, args, is_inference=True
+                )
+
+            repro_path = os.path.join(checkpoints, f"{len(gm.graph.nodes)}.py")
+            with open(repro_path) as fd:
+                self.assertIn("is_inference=True", fd.read())
+
+            res = subprocess.run(
+                [sys.executable, repro_path],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(
+                res.returncode,
+                0,
+                lambda msg: f"{msg}\nRepro failed:\nSTDERR:\n{res.stderr[-1000:]}",
+            )
+
+    @parametrize(
+        "passed_is_inference,cli_flag,expected",
+        (
+            (None, None, False),
+            (False, None, False),
+            (True, None, True),
+            (False, "--is-inference", True),
+            (True, "--no-is-inference", False),
+        ),
+    )
+    def test_run_repro_preserves_is_inference_in_options(
+        self, passed_is_inference, cli_flag, expected
+    ):
+        seen = []
+
+        def fake_repro_run(options, mod, load_args):
+            seen.append(options.is_inference)
+
+        kwargs = {}
+        if passed_is_inference is not None:
+            kwargs["is_inference"] = passed_is_inference
+        argv = ["repro.py"]
+        if cli_flag is not None:
+            argv.extend(["run", cli_flag])
+
+        with (
+            patch.object(after_aot, "repro_run", fake_repro_run),
+            patch.object(sys, "argv", argv),
+        ):
+            after_aot.run_repro(
+                torch.nn.Identity(),
+                lambda reader: None,
+                **kwargs,
+            )
+
+        self.assertEqual(seen, [expected])
+
+    @parametrize("is_inference", (False, True))
+    def test_repro_run_preserves_is_inference(self, is_inference):
+        gm, args = _make_test_graph()
+
+        seen = []
+
+        def fake_compile_fx_inner(gm, compile_args, **kwargs):
+            seen.append(kwargs["is_inference"])
+
+            def compiled(real_args):
+                return gm(*real_args)
+
+            return compiled
+
+        options = SimpleNamespace(
+            accuracy="",
+            is_inference=is_inference,
+            save_dir=None,
+            tracing_mode="real",
+        )
+        with (
+            patch.object(after_aot, "repro_common", return_value=(gm, args)),
+            patch(
+                "torch._inductor.compile_fx.compile_fx_inner",
+                fake_compile_fx_inner,
+            ),
+        ):
+            repro_run(options, torch.nn.Identity(), lambda reader: None)
+
+        self.assertEqual(seen, [is_inference])
+
+    @parametrize("is_inference", (False, True))
+    @parametrize("isolate", (False, True))
+    def test_repro_minify_preserves_is_inference(self, is_inference, isolate):
+        gm, args = _make_test_graph()
+
+        seen = []
+
+        def fake_fails(gm, args, **kwargs):
+            seen.append(kwargs["is_inference"])
+            return False
+
+        def fake_minifier(mod, args, *, module_fails, dump_state, **kwargs):
+            module_fails(mod, args)
+            self.assertIs(
+                dump_state.keywords["is_inference"],
+                is_inference,
+            )
+
+        options = SimpleNamespace(
+            accuracy="",
+            check_str=None,
+            is_inference=is_inference,
+            isolate=isolate,
+            save_dir=None,
+            tracing_mode="real",
+            offload_to_disk=False,
+            skip_saving_eager_intermediates=False,
+            skip_sanity=False,
+            max_granularity=None,
+        )
+
+        with (
+            patch.object(after_aot, "repro_common", return_value=(gm, args)),
+            patch.object(after_aot, "isolate_fails", fake_fails),
+            patch.dict(after_aot.ACCURACY_FAILS, {"": fake_fails}),
+            patch("functorch.compile.minifier", fake_minifier),
+        ):
+            repro_minify(options, torch.nn.Identity(), lambda reader: None)
+
+        self.assertEqual(seen, [is_inference])
+
+    @parametrize("is_inference", (False, True))
+    def test_repro_analyze_preserves_is_inference(self, is_inference):
+        gm, args = _make_test_graph()
+
+        seen = []
+
+        def fake_compile_fx_inner(gm, compile_args, **kwargs):
+            seen.append(kwargs["is_inference"])
+            raise RuntimeError("stop after compile")
+
+        options = SimpleNamespace(
+            is_inference=is_inference,
+            save_dir=None,
+            tracing_mode="real",
+        )
+        with (
+            patch.object(after_aot, "repro_common", return_value=(gm, args)),
+            patch(
+                "torch._inductor.compile_fx.compile_fx_inner",
+                fake_compile_fx_inner,
+            ),
+            self.assertRaisesRegex(RuntimeError, "stop after compile"),
+        ):
+            after_aot.repro_analyze(options, torch.nn.Identity(), lambda reader: None)
+
+        self.assertEqual(seen, [is_inference])
 
     @unittest.skipIf(IS_FBCODE, "NotImplementedError")
     def test_save_graph_repro(self):
@@ -351,7 +589,10 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
         load_args._version = 0
         options = SimpleNamespace(
-            accuracy="accuracy", save_dir=None, tracing_mode="real"
+            accuracy="accuracy",
+            is_inference=False,
+            save_dir=None,
+            tracing_mode="real",
         )
         repro_run(options, Repro(), load_args)
 
@@ -541,9 +782,6 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
     def test_symint_expr_e2e_repro(self):
         """End-to-end: generate a repro from a symbolically-traced graph
         with SymInt args, verify expr= appears, and run the repro."""
-        import subprocess
-        import tempfile
-
         from torch._dynamo.source import ConstantSource
         from torch.fx.experimental.sym_node import SymNode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -568,11 +806,13 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
             "inductor",
             save_dir=None,
             tracing_mode="symbolic",
+            is_inference=True,
         )
         repro_src = buf.getvalue()
 
         # Verify expr= is serialized for the SymInt arg
         self.assertIn("expr=", repro_src)
+        self.assertIn("is_inference=True", repro_src)
 
         # Run the generated repro in a subprocess
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
@@ -759,7 +999,9 @@ class TestWrapCompilerDebugSync(torch._dynamo.test_case.TestCase):
                     "torch.accelerator.synchronize",
                     side_effect=lambda: called.append(1),
                 ):
-                    repro_run(argparse.Namespace(accuracy=""), None, None)
+                    repro_run(
+                        argparse.Namespace(accuracy="", is_inference=False), None, None
+                    )
 
         self.assertGreater(len(called), 0)
 

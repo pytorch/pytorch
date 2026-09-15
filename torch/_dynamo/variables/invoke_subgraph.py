@@ -644,6 +644,20 @@ def build_source_replacement(
     }
 
 
+def _treespecs_identical(a: pytree.TreeSpec, b: pytree.TreeSpec, /) -> bool:
+    if a is b:
+        return True
+    return (
+        a.__class__ is b.__class__
+        and str(a.type) == str(b.type)
+        and constants_identical(a.context, b.context)
+        and a.num_children == b.num_children
+        and all(
+            _treespecs_identical(a.child(i), b.child(i)) for i in range(a.num_children)
+        )
+    )
+
+
 def is_reusable(
     tx: "InstructionTranslatorBase",
     condition: "InvokeSubgraphReuseCondition",
@@ -663,7 +677,10 @@ def is_reusable(
         re-evaluate the snapshotted guards under the new sources.
     """
     # Structural check: treespec must match first.
-    if condition.treespec is not None and fingerprint.treespec != condition.treespec:
+    if condition.treespec is not None and (
+        fingerprint.treespec is None
+        or not _treespecs_identical(fingerprint.treespec, condition.treespec)
+    ):
         hc_log.debug(
             "subgraph_reuse: reuse failed -- treespec mismatch",
         )
