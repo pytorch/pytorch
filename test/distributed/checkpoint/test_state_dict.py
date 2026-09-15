@@ -387,6 +387,54 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._test_single_gpu(torch.optim.Adam)
         self._test_single_gpu(torch.optim.AdamW)
 
+    @skip_if_lt_x_gpu(1)
+    def test_submodule_prefixes(self) -> None:
+        # Filtering by ``submodules`` derives a set of FQN prefixes and keeps
+        # (or strips) the parameters under them. Exercise the prefix matching
+        # with many prefixes and with overlapping prefixes to guard the
+        # trie-based lookup against regressions vs. the naive nested scan.
+        deprecated = "Getting submodules only model/optim state_dict is deprecated"
+        device = torch.device(device_type)
+
+        # Many sibling prefixes ("0.".."31."). This also guards the boundary
+        # case where prefix "1." must not match FQN "10.weight".
+        seq = nn.Sequential(*[nn.Linear(4, 4, device=device) for _ in range(32)])
+        full_msd = get_model_state_dict(seq)
+        with self.assertWarnsRegex(FutureWarning, deprecated):
+            kept = get_model_state_dict(seq, submodules=set(seq.children()))
+        self.assertEqual(set(kept.keys()), set(full_msd.keys()))
+        for key, value in kept.items():
+            self.assertEqual(value, full_msd[key])
+
+        with self.assertWarnsRegex(FutureWarning, deprecated):
+            stripped = get_model_state_dict(
+                seq,
+                submodules={seq[3]},
+                options=StateDictOptions(keep_submodule_prefixes=False),
+            )
+        expected = {
+            key[len("3.") :]: value
+            for key, value in full_msd.items()
+            if key.startswith("3.")
+        }
+        self.assertEqual(set(stripped.keys()), set(expected.keys()))
+        for key, value in expected.items():
+            self.assertEqual(stripped[key], value)
+
+        # Overlapping prefixes: "u1." and "u1.seq." both match "u1.seq.*" FQNs.
+        model = CompositeParamModel(device=device)
+        full_msd = get_model_state_dict(model)
+        prefixes = {"l.", "u1.", "u2.", "u1.seq.", "u2.seq."}
+        with self.assertWarnsRegex(FutureWarning, deprecated):
+            kept = get_model_state_dict(
+                model,
+                submodules={model.l, model.u1, model.u2, model.u1.seq, model.u2.seq},
+            )
+        expected_keys = {
+            key for key in full_msd if any(key.startswith(p) for p in prefixes)
+        }
+        self.assertEqual(set(kept.keys()), expected_keys)
+
     def _test_strict(self, parallelism: str) -> None:
         model = CompositeParamModel(device=torch.device(device_type))
         if parallelism == "DDP":
