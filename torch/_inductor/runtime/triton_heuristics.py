@@ -47,6 +47,7 @@ from ..utils import (
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
+    tlx_only_hip_options,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_FORMAT,
@@ -5100,6 +5101,7 @@ def template(
         "num_stages": num_stages,
         "num_warps": num_warps,
     }
+    config_kwargs = {}
 
     # Conditionally add arguments based on HAS_WARP_SPEC
     if HAS_WARP_SPEC:
@@ -5110,13 +5112,18 @@ def template(
             }
         )
 
+    if torch.version.hip:
+        for k in tlx_only_hip_options():
+            if k in triton_meta:
+                config_kwargs[k] = triton_meta[k]
+
     for k in tlx_only_cuda_options():
         if v := triton_meta.get(k, None):
             config_args[k] = v
 
     return cached_autotune(
         None,
-        [triton.Config({}, **config_args)],
+        [triton.Config(config_kwargs, **config_args)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,

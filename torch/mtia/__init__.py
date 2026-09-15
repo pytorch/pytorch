@@ -581,4 +581,5 @@ __all__ = [
     "MTIAGraph",
     "graph",
     "graph_pool_handle",
+    "is_current_stream_capturing",
 ]
