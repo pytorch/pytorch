@@ -371,6 +371,9 @@ class HuggingfaceRunner(BenchmarkRunner):
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in [
             "GPT2ForSequenceClassification",
+            # Scalar-loss training output; the fp64 RMSE ratio is noise-dominated
+            # and drifts just past the 3x multiplier on CUDA 13.2 (passes on 13.0).
+            "BertForMaskedLM",
         ]
 
     def _get_model_cls_and_config(self, model_name):
@@ -443,12 +446,13 @@ class HuggingfaceRunner(BenchmarkRunner):
             model, example_inputs = benchmark_cls.get_model_and_inputs(
                 model_name, device
             )
+            model.generation_config.disable_compile = True
 
             # Set this flag so that when we test for speedup, we use
             # model.generate instead of using model.forward
             self.hf_llm = True
 
-            def generate(self, _, example_inputs, collect_outputs=True):
+            def generate(self, model, example_inputs, collect_outputs=True):
                 return model.generate(**example_inputs)
 
             self.generate = types.MethodType(generate, self)

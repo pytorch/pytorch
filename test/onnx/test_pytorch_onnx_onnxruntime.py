@@ -3737,6 +3737,29 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
 
+    @common_utils.parametrize(
+        "dtype", [torch.int8, torch.int16, torch.int32, torch.int64]
+    )
+    def test_bitshift_signed(self, dtype):
+        class RightShiftModel(torch.nn.Module):
+            def forward(self, input):
+                return input >> 1, input >> 3
+
+        input = torch.tensor([-128, -7, -4, -1, 0, 1, 3, 127], dtype=dtype)
+        self.run_test(RightShiftModel(), input)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @common_utils.parametrize(
+        "dtype", [torch.int8, torch.int16, torch.int32, torch.int64]
+    )
+    def test_bitwise_right_shift_signed(self, dtype):
+        class BitwiseRightShiftModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.bitwise_right_shift(input, 2)
+
+        input = torch.tensor([-128, -7, -4, -1, 0, 1, 3, 127], dtype=dtype)
+        self.run_test(BitwiseRightShiftModel(), input)
+
     @skipIfUnsupportedMinOpsetVersion(18)
     def test_bitwise_and(self):
         class BitwiseAndModel(torch.nn.Module):

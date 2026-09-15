@@ -1503,6 +1503,36 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(result.stride(), dtensor.stride())
         self.assertEqual(result.to_local(), dtensor.to_local())
 
+    @with_comms
+    def test_as_strided_permutation(self):
+        # AOTAutograd regenerates an output aliasing an input with as_strided,
+        # so a compiled function returning a transposed view lands here.
+        device_mesh = self.build_device_mesh()
+        dtensor = distribute_tensor(
+            torch.randn(4, 6, 8, device=self.device_type), device_mesh, [Shard(0)]
+        )
+
+        for dims in ((1, 0, 2), (2, 1, 0), (0, 2, 1)):
+            expected = dtensor.permute(dims)
+            result = dtensor.as_strided(
+                expected.size(), expected.stride(), expected.storage_offset()
+            )
+            self.assertEqual(result.placements, expected.placements)
+            self.assertEqual(result.full_tensor(), expected.full_tensor())
+
+    @with_comms
+    def test_as_strided_non_permutation_errors(self):
+        device_mesh = self.build_device_mesh()
+        dtensor = distribute_tensor(
+            torch.randn(4, 6, device=self.device_type), device_mesh, [Shard(0)]
+        )
+
+        # Not reachable by permuting the base dims.
+        with self.assertRaisesRegex(RuntimeError, "as_strided not supported"):
+            dtensor.as_strided((4, 3), (6, 1), 0)
+        with self.assertRaisesRegex(RuntimeError, "as_strided not supported"):
+            dtensor.as_strided((4, 6), (6, 1), 1)
+
 
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
     DTensorMeshTest,
@@ -1871,8 +1901,8 @@ class TestMixedPartialTypes(TestCase):
             api()
 
         # Test redistribute_local_tensor separately (different call pattern)
-        # Note: public DTensor.redistribute() doesn't allow Partial targets at all,
-        # so we test the internal redistribute_local_tensor directly
+        # Public DTensor.redistribute() only allows Shard -> Partial(sum), so
+        # test mixed Partial targets through redistribute_local_tensor directly.
         current_spec = DTensorSpec(
             mesh,
             (Replicate(), Replicate()),

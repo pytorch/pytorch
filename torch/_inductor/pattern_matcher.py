@@ -191,6 +191,46 @@ def _transfer_meta(
         new_meta["tensor_meta"] = old_node.meta["tensor_meta"]
 
 
+def _common_custom_context(nodes: Sequence[torch.fx.Node]) -> dict[str, Any]:
+    if not nodes:
+        return {}
+
+    stream = nodes[0].meta.get("custom", {}).get("stream", 0)
+    mempool = nodes[0].meta.get("custom", {}).get("mempool")
+    mempool_device = nodes[0].meta.get("custom", {}).get("mempool_device")
+    if any(
+        (
+            node.meta.get("custom", {}).get("stream", 0),
+            node.meta.get("custom", {}).get("mempool"),
+            node.meta.get("custom", {}).get("mempool_device"),
+        )
+        != (stream, mempool, mempool_device)
+        for node in nodes[1:]
+    ):
+        return {}
+
+    context: dict[str, Any] = {}
+    if stream != 0 or any("stream" in node.meta.get("custom", {}) for node in nodes):
+        context["stream"] = stream
+    if mempool is not None:
+        context["mempool"] = mempool
+        context["mempool_device"] = mempool_device
+    return context
+
+
+def _merge_custom_context(
+    new_meta: dict[str, Any], custom_context: dict[str, Any]
+) -> None:
+    # Replacement nodes inherit user stream/mempool context only at explicit
+    # graph transform hooks. Other transforms must preserve meta["custom"] or
+    # avoid moving context-tagged values across boundaries.
+    if not custom_context:
+        return
+    custom = new_meta.setdefault("custom", {})
+    for key, value in custom_context.items():
+        custom.setdefault(key, value)
+
+
 class Match:
     """
     Represents a successfully matched pattern.
@@ -509,11 +549,16 @@ class PatternExpr(ABC):
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
 
-    def pattern_eq(self, other: Any) -> bool:
+    def pattern_eq(self, other: object) -> bool:
         """
         Compare two `PatternExpr`s and return true if they are the
         same. Note this is NOT matching a pattern - it is comparing the pattern
         structures (for debugging).
+
+        Overrides must call `super().pattern_eq(other)` and bail out before
+        touching any subclass attribute: this base check is the only thing that
+        establishes `other` is a `Self`, which is what makes their subsequent
+        `typing.cast(Self, other)` sound.
         """
         return isinstance(other, self.__class__)
 
@@ -561,7 +606,7 @@ def _tensor_values_equal(a: torch.Tensor, b: torch.Tensor) -> bool:
     return False
 
 
-def _constant_values_equal(a: Any, b: Any) -> bool:
+def _constant_values_equal(a: object, b: object) -> bool:
     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
         if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
             return False
@@ -594,7 +639,7 @@ def _constant_values_equal(a: Any, b: Any) -> bool:
     return result if isinstance(result, bool) else False
 
 
-def _python_constant_repr(value: Any) -> str:
+def _python_constant_repr(value: object) -> str:
     if isinstance(value, float):
         if math.isnan(value):
             return "float('nan')"
@@ -648,7 +693,7 @@ class GetAttr(PatternExpr):
     name, which is local to the traced GraphModule.
     """
 
-    def __init__(self, value: Any, users: Multiple | int = 1) -> None:
+    def __init__(self, value: object, users: Multiple | int = 1) -> None:
         super().__init__()
         self.value = value
         self.users = users
@@ -693,11 +738,12 @@ class GetAttr(PatternExpr):
             args.append(str(self.users))
         return f"{self.__class__.__name__}({', '.join(args)})"
 
-    def pattern_eq(self, other: Any) -> bool:
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
         other = typing.cast(Self, other)
         return (
-            super().pattern_eq(other)
-            and _constant_values_equal(self.value, other.value)
+            _constant_values_equal(self.value, other.value)
             and self.users == other.users
         )
 
@@ -717,9 +763,11 @@ class KeywordArg(PatternExpr):
     def _match(self, node: NodeOrConstant, ctx: MatchContext) -> MatchResult:
         return Match(ctx, self, kwargs={self.name: node})  # matches anything
 
-    def pattern_eq(self, other: Any) -> bool:
-        other = typing.cast(Self, other)  # super makes sure this is true
-        return super().pattern_eq(other) and self.name == other.name
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
+        other = typing.cast(Self, other)
+        return self.name == other.name
 
 
 class ExclusiveKeywordArg(PatternExpr):
@@ -743,9 +791,11 @@ class ExclusiveKeywordArg(PatternExpr):
         ctx.exclusive_node_set.append(node)
         return Match(ctx, self, kwargs={self.name: node})  # matches anything
 
-    def pattern_eq(self, other: Any) -> bool:
-        other = typing.cast(Self, other)  # super makes sure this is true
-        return super().pattern_eq(other) and self.name == other.name
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
+        other = typing.cast(Self, other)
+        return self.name == other.name
 
 
 class _TargetExpr(PatternExpr):
@@ -820,13 +870,12 @@ class _TargetExpr(PatternExpr):
             or len(node.users) == self.users
         )
 
-    def pattern_eq(self, other: Any) -> bool:
-        other = typing.cast(Self, other)  # super makes sure this is true
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
+        other = typing.cast(Self, other)
         return (
-            super().pattern_eq(other)
-            and self.op == other.op
-            and self.fns == other.fns
-            and self.users == other.users
+            self.op == other.op and self.fns == other.fns and self.users == other.users
         )
 
 
@@ -1003,15 +1052,13 @@ class _TargetArgsExpr(_TargetExpr):
                                 yield node
                                 searched.add(node)
 
-    def pattern_eq(self, other: Any) -> bool:
-        other = typing.cast(Self, other)  # super makes sure this is true
-        return (
-            super().pattern_eq(other)
-            and self.flat_args_kwargs[1] == other.flat_args_kwargs[1]
-            and all(
-                a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
-                for a, b in zip(self.flat_args_kwargs[0], other.flat_args_kwargs[0])
-            )
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
+        other = typing.cast(Self, other)
+        return self.flat_args_kwargs[1] == other.flat_args_kwargs[1] and all(
+            a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
+            for a, b in zip(self.flat_args_kwargs[0], other.flat_args_kwargs[0])
         )
 
 
@@ -1110,13 +1157,11 @@ class ListOf(PatternExpr):
             return FailedMatch("list: no_match")
         return m.bundle()
 
-    def pattern_eq(self, other: Any) -> bool:
-        other = typing.cast(Self, other)  # super makes sure this is true
-        return (
-            super().pattern_eq(other)
-            and self.pattern.pattern_eq(other.pattern)
-            and self.partial == other.partial
-        )
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
+        other = typing.cast(Self, other)
+        return self.pattern.pattern_eq(other.pattern) and self.partial == other.partial
 
 
 class MultiOutputPattern(PatternExpr):
@@ -1182,15 +1227,13 @@ class MultiOutputPattern(PatternExpr):
         except FailedMatch as e:
             return e
 
-    def pattern_eq(self, other: Any) -> bool:
-        other = typing.cast(Self, other)  # super makes sure this is true
-        return (
-            super().pattern_eq(other)
-            and len(self.outputs) == len(other.outputs)
-            and all(
-                a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
-                for a, b in zip(self.outputs, other.outputs)
-            )
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
+        other = typing.cast(Self, other)
+        return len(self.outputs) == len(other.outputs) and all(
+            a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
+            for a, b in zip(self.outputs, other.outputs)
         )
 
 
@@ -1227,11 +1270,11 @@ class RepeatedExpr(PatternExpr):
             m.extend(anchor_m)
         return m
 
-    def pattern_eq(self, other: Any) -> bool:
-        other = typing.cast(Self, other)  # super makes sure this is true
-        return super().pattern_eq(other) and self.inner_pattern.pattern_eq(
-            other.inner_pattern
-        )
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
+        other = typing.cast(Self, other)
+        return self.inner_pattern.pattern_eq(other.inner_pattern)
 
 
 class PatternPrettyPrinter:
@@ -1267,7 +1310,7 @@ class PatternPrettyPrinter:
 
         return "\n".join(output)
 
-    def pretty_print(self, obj: Any) -> str:
+    def pretty_print(self, obj: object) -> str:
         if isinstance(obj, _TargetArgsExpr):
             if memoized_name := self.memoized_objs_names.get(obj):
                 return memoized_name
@@ -1380,6 +1423,7 @@ class ReplacementPatternEntry(PatternEntry):
         """
 
         added_replacement_nodes: list[torch.fx.Node] = []
+        custom_context = _common_custom_context(match.nodes)
 
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
@@ -1401,6 +1445,7 @@ class ReplacementPatternEntry(PatternEntry):
                         old_node=node,
                         pass_name=pass_name or "",
                     )
+                    _merge_custom_context(result.meta, custom_context)
                     # This function copy-pastes the replacement graph into
                     # the graph. If the replacement graph had any eager_input_vals,
                     # we propagate those over (val/tensor_meta are handled by
@@ -1534,7 +1579,7 @@ class ReplacementPatternEntry(PatternEntry):
                     # many to many, there is no easy way to correctly map the
                     # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
-                    for tag_name in ["recompute", "ac_graph_id"]:
+                    for tag_name in ["recompute", "ac_graph_id", "custom"]:
                         if tag_name in old.meta:
                             percolate_tags(
                                 new, tag_name, old.meta[tag_name], OrderedSet(args_set)
@@ -2071,8 +2116,6 @@ def _serialize_pattern(
 
         file_template = textwrap.dedent(
             """\
-            # mypy: ignore-errors
-
             # noqa: F401, E501
             {msg}
             import torch
@@ -2135,18 +2178,20 @@ def _serialize_pattern(
 
 SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
 
+
 # This is the set of serialized patterns that we've registered.  Used by
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
 # to date.
-_known_precompiled_patterns: list[
-    tuple[
-        Any,
-        Iterable[Any],
-        Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
-        Any,
-        PatternExpr,
-    ]
-] = []
+@dataclasses.dataclass
+class _PrecompiledPattern:
+    search_fn: SearchFn
+    example_inputs: Sequence[Any]
+    trace_fn: TraceFn
+    scalar_workaround: dict[str, float | int] | None
+    search_fn_pattern: PatternExpr
+
+
+_known_precompiled_patterns: list[_PrecompiledPattern] = []
 
 
 def gen_register_replacement(
@@ -2191,7 +2236,7 @@ def gen_register_replacement(
             arg.constant = None
 
     _known_precompiled_patterns.append(
-        (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
+        _PrecompiledPattern(search_fn, example_inputs, trace_fn, scalar_workaround, pat)
     )
     register_replacement(
         search_fn,
@@ -2263,7 +2308,7 @@ def register_lowering_pattern(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Register an aten to inductor IR replacement pattern.  The decorated
-    function is saved and then called a lowering time allowing direct
+    function is saved and then called at lowering time allowing direct
     pattern to inductor IR conversion.
     """
 
@@ -2403,7 +2448,9 @@ class _GraphMutationTracker:
 @contextlib.contextmanager
 def _track_graph_mutation_ops(
     graph: torch.fx.Graph,
+    custom_context: dict[str, Any] | None = None,
 ) -> Generator[_GraphMutationTracker, None, None]:
+    custom_context = custom_context or {}
     tracker = _GraphMutationTracker()
     create_node = graph.create_node
     erase_node = graph.erase_node
@@ -2414,6 +2461,7 @@ def _track_graph_mutation_ops(
 
     def tracked_create_node(*args: Any, **kwargs: Any) -> torch.fx.Node:
         created_node = create_node(*args, **kwargs)
+        _merge_custom_context(created_node.meta, custom_context)
         tracker.created_nodes.append(created_node)
         return created_node
 
@@ -2623,7 +2671,11 @@ class PatternMatcherPass:
                         is_match(m)
                         and len(
                             OrderedSet(
-                                n.meta.get("custom", {}).get("stream", 0)
+                                (
+                                    n.meta.get("custom", {}).get("stream", 0),
+                                    n.meta.get("custom", {}).get("mempool"),
+                                    n.meta.get("custom", {}).get("mempool_device"),
+                                )
                                 for n in m.nodes
                             )
                         )
@@ -2648,7 +2700,9 @@ class PatternMatcherPass:
                                 graph, m.nodes
                             )
                         if isinstance(entry, GraphPatternEntry):
-                            with _track_graph_mutation_ops(graph) as mutation_tracker:
+                            with _track_graph_mutation_ops(
+                                graph, _common_custom_context(m.nodes)
+                            ) as mutation_tracker:
                                 entry.apply(m, graph, node)
                             if mutation_tracker.changed_mutation_regions():
                                 compute_mutation_region_ids(graph)
@@ -2678,7 +2732,7 @@ class PatternMatcherPass:
         self.patterns.clear()
 
 
-def _not_implemented(*args: Any, **kwargs: Any) -> NoReturn:
+def _not_implemented(*args: object, **kwargs: object) -> NoReturn:
     raise NotImplementedError
 
 
@@ -2717,9 +2771,7 @@ def fx_to_pattern(
     argnum = itertools.count()
 
     class Converter(torch.fx.Interpreter):
-        # pyrefly: ignore [bad-override]
         call_method = _not_implemented
-        # pyrefly: ignore [bad-override]
         call_module = _not_implemented
 
         # pyrefly: ignore [bad-override]
@@ -2817,8 +2869,18 @@ def fwd_only(
     get_decomp_fn: Callable[..., Any] = select_decomp_table,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
+    from torch.compiler import config as compiler_config
+
+    # Patterns are device-agnostic templates traced with fixed example tensors; keep the
+    # compile-on-one-rank device handling out of pattern tracing so make_fx's single-device
+    # check only validates real user graphs, not these internal fixed-device templates.
     # TODO - look into using aot autograd, asserting no mutating ops here
-    with enable_python_dispatcher(), preserve_node_meta():
+    with (
+        # pyrefly: ignore [missing-attribute]
+        compiler_config.patch(compile_on_one_rank=False),
+        enable_python_dispatcher(),
+        preserve_node_meta(),
+    ):
         gm = make_fx(fn, get_decomp_fn(), tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
@@ -2858,7 +2920,11 @@ def joint_fwd_bwd(
         gm = clone_graph(joint_graph)
         return default_partition(joint_graph, inputs, **kwargs)
 
-    with torch._guards.tracing(None):
+    from torch.compiler import config as compiler_config
+
+    # Keep compile-on-one-rank device handling out of pattern tracing (see fwd_only).
+    # pyrefly: ignore [missing-attribute]
+    with torch._guards.tracing(None), compiler_config.patch(compile_on_one_rank=False):
         aot_function(
             fn,
             # pyrefly: ignore[bad-argument-type]

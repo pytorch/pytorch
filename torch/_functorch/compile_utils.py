@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
 import operator
+import struct
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -20,6 +22,22 @@ if TYPE_CHECKING:
     from torch.utils._pytree import TreeSpec
 
 aten = torch.ops.aten
+
+
+@dataclasses.dataclass(frozen=True)
+class _ScalarKey:
+    tag: str
+    bits: bytes
+
+
+def _normalize_cse_arg(val: Any) -> Any:
+    # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
+    # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
+    if type(val) is float:
+        return _ScalarKey("float", struct.pack(">d", val))
+    if type(val) is complex:
+        return _ScalarKey("complex", struct.pack(">dd", val.real, val.imag))
+    return val
 
 
 def get_aten_target(node: fx.Node) -> OpOverloadPacket | Callable[..., Any] | str:
@@ -91,6 +109,14 @@ def fx_graph_cse(
 
         return True
 
+    def custom_context_key(node: fx.Node) -> tuple[int, int | None, int | None]:
+        custom = node.meta.get("custom", {})
+        return (
+            custom.get("stream", 0),
+            custom.get("mempool"),
+            custom.get("mempool_device"),
+        )
+
     output_storages = {
         StorageWeakRef(n.meta["val"].untyped_storage())
         for n in output_node.all_input_nodes
@@ -149,6 +175,7 @@ def fx_graph_cse(
             n.op == "placeholder"
             or n.op == "output"
             or n.op == "get_attr"
+            or n.is_impure()
             or get_aten_target(n) in rand_ops
             # aten.empty is non-deterministic, so don't CSE it.
             # Also, aten.empty is almost always fusible into its consumer,
@@ -187,6 +214,7 @@ def fx_graph_cse(
                         arg_list[i] = env[v]
                     if isinstance(v, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                         arg_list[i] = v.node
+                    arg_list[i] = _normalize_cse_arg(arg_list[i])
                 return tuple(arg_list), spec
 
             args, args_spec = substitute(n.args)
@@ -202,6 +230,7 @@ def fx_graph_cse(
                 "args_spec": args_spec,
                 "kwargs": kwargs,
                 "kwargs_spec": kwargs_spec,
+                "custom_context": custom_context_key(n),
             }
 
             # hash substituted args to a number, do not hash specs because specs are not hashable

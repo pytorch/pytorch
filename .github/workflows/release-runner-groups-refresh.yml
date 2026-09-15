@@ -1,0 +1,52 @@
+name: Refresh release runner groups
+
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply changes (otherwise dry-run)"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - .github/workflows/release-runner-groups-refresh.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  reconcile:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name != 'pull_request' && 'runner-group' || '' }}
+    steps:
+      - name: Checkout test-infra
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: pytorch/test-infra
+          ref: main
+          path: test-infra
+
+      - name: Install dependencies
+        run: python3 -m pip install requests==2.32.3 PyYAML==6.0.2
+
+      - name: Reconcile release runner groups
+        env:
+          RUNNER_GROUP_TOKEN: ${{ secrets.RUNNER_GROUP_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SHOULD_APPLY: ${{ github.event_name == 'push' || inputs.apply }}
+        run: |
+          SCRIPT=test-infra/tools/scripts/release_manage_runner_groups.py
+          if [ "${SHOULD_APPLY}" = "true" ]; then
+            python3 "${SCRIPT}" --apply
+          else
+            python3 "${SCRIPT}"
+          fi
