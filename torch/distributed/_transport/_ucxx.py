@@ -134,13 +134,13 @@ class UCXXTransport(Transport):
 
     def __init__(
         self,
-        device: torch.device | str,
+        device: torch.device | str | None = None,
         *,
         host: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         super().__init__(device)
-        if self.device.type not in ("cpu", "cuda"):
+        if self.device is not None and self.device.type not in ("cpu", "cuda"):
             raise ValueError("UCXX transport requires a CPU or CUDA device")
         if timeout <= 0:
             raise ValueError("timeout must be positive")
@@ -178,7 +178,7 @@ class UCXXTransport(Transport):
 
     def _thread_main(self) -> None:
         try:
-            if self.device.type == "cuda":
+            if self.device is not None and self.device.type == "cuda":
                 torch.cuda.set_device(self.device)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -328,10 +328,9 @@ class UCXXTransport(Transport):
             raise TypeError("tensor must be a torch.Tensor")
         if not tensor.is_contiguous():
             raise ValueError("UCXX transport requires a contiguous tensor")
-        if tensor.device.type != self.device.type or (
-            self.device.index is not None and tensor.device.index != self.device.index
-        ):
-            raise ValueError(f"expected a tensor on {self.device}, got {tensor.device}")
+        self._check_device(tensor.device)
+        if tensor.device.type not in ("cpu", "cuda"):
+            raise ValueError("UCXX transport requires CPU or CUDA tensors")
         length = tensor.numel() * tensor.element_size()
         registration_key = (tensor.data_ptr(), length, str(tensor.device))
         with self._state_lock:
@@ -377,7 +376,9 @@ class UCXXTransport(Transport):
             )
             await self._receive_response(endpoint, request_id, _READY)
             async with local._memory._registered.lock:
-                await endpoint.send(self._view_buffer(local, readonly=True))
+                await self._transfer_buffer(
+                    endpoint, self._view_buffer(local, readonly=True), read=False
+                )
             await self._receive_response(endpoint, request_id, _DONE)
 
     def read(self, local_buffer: MutableMemoryView, remote_buffer: RemoteBuffer) -> int:
@@ -407,7 +408,9 @@ class UCXXTransport(Transport):
             )
             await self._receive_response(endpoint, request_id, _DATA)
             async with local._memory._registered.lock:
-                await endpoint.recv(self._view_buffer(local, readonly=False))
+                await self._transfer_buffer(
+                    endpoint, self._view_buffer(local, readonly=False), read=True
+                )
 
     async def _serve(self, endpoint: Any) -> None:
         while not endpoint.closed:
@@ -461,7 +464,7 @@ class UCXXTransport(Transport):
                 registered.tensor, offset, length, readonly=False
             )
             await self._send_header(endpoint, _READY, request_id)
-            await endpoint.recv(buffer)
+            await self._transfer_buffer(endpoint, buffer, read=True)
         await self._send_header(endpoint, _DONE, request_id)
 
     async def _serve_read(
@@ -479,7 +482,16 @@ class UCXXTransport(Transport):
                 registered.tensor, offset, length, readonly=True
             )
             await self._send_header(endpoint, _DATA, request_id)
-            await endpoint.send(buffer)
+            await self._transfer_buffer(endpoint, buffer, read=False)
+
+    @staticmethod
+    async def _transfer_buffer(endpoint: Any, buffer: Any, *, read: bool) -> None:
+        if isinstance(buffer, _CudaBuffer):
+            torch.cuda.set_device(buffer._tensor.device)
+        if read:
+            await endpoint.recv(buffer)
+            return
+        await endpoint.send(buffer)
 
     async def _send_header(
         self,
