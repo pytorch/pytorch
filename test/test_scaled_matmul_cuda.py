@@ -734,8 +734,9 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
 
 class TestFP8Matmul(TestCase):
 
-    def _fp8_layout_supported(self, x_cm: bool, y_cm: bool) -> bool:
-        # hipBLASLt takes every permutation. On CUDA, SM 8.9/9 are TN-only,
+    def _tensorwise_layout_supported(self, x_cm: bool, y_cm: bool) -> bool:
+        # Must not be used for row-wise or block-wise: those stay TN-only on ROCm, while
+        # hipBLASLt takes every permutation for tensorwise. On CUDA, SM 8.9/9 are TN-only,
         # SM 10/11 take all layouts, and SM 12 depends on CUDA version.
         if torch.version.hip:
             return True
@@ -840,13 +841,85 @@ class TestFP8Matmul(TestCase):
     def test_float8_basics_layout_permutations(self, device) -> None:
         if "cuda" in device:
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                layouts_supported = self._fp8_layout_supported(x_cm, y_cm)
+                layouts_supported = self._tensorwise_layout_supported(x_cm, y_cm)
                 with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
                     self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
         else:
             # Non-CUDA: test basic TN layout as sanity check
             self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=True, y_cm=False)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(not torch.version.hip, "hipBLASLt non-tensorwise scaled_mm is TN-only")
+    @skipIfTorchDynamo("error message checks rely on eager exception types")
+    def test_rowwise_tn_only_on_rocm(self, device) -> None:
+        M, K, N = 16, 32, 16
+        x = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        y = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+        x_scale = tensor_to_scale(x, e4m3_type, dim=1).float()
+        y_scale = tensor_to_scale(y, e4m3_type, dim=1).float()
+        x_fp8 = to_fp8_saturated(x * x_scale, e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scale, e4m3_type)
+
+        out = scaled_mm_wrap(
+            x_fp8,
+            y_fp8.t(),
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.t().reciprocal(),
+            scale_recipe_a=ScalingType.RowWise,
+            scale_recipe_b=ScalingType.RowWise,
+            out_dtype=torch.bfloat16,
+        )
+        out_emulated = mm_float8_emulated(x_fp8, x_scale, y_fp8.t(), y_scale.t(), torch.bfloat16)
+        self.assertEqual(out, out_emulated, atol=7e-2, rtol=7e-2)
+
+        # Same operands without the transpose on B: hipBLASLt has no non-TN rowwise solution.
+        with self.assertRaisesRegex(RuntimeError, "hipBLASLt for non-tensorwise scaling"):
+            scaled_mm_wrap(
+                x_fp8,
+                y_fp8.t().contiguous(),
+                scale_a=x_scale.reciprocal(),
+                scale_b=y_scale.t().reciprocal(),
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
+                out_dtype=torch.bfloat16,
+            )
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(not torch.version.hip, "hipBLASLt non-tensorwise scaled_mm is TN-only")
+    @skipIfTorchDynamo("error message checks rely on eager exception types")
+    def test_mxfp8_tn_only_on_rocm(self, device) -> None:
+        M, K, N = 128, 128, 128
+        x = torch.randn(M, K, device=device).to(e4m3_type)
+        y = torch.randn(N, K, device=device).to(e4m3_type)
+        # Unit scales keep the reference exact: the only quantization is the fp8 cast above.
+        x_scale = torch.full((M, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
+        y_scale = torch.full((N, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
+
+        out = scaled_mm_wrap(
+            x,
+            y.t(),
+            scale_a=x_scale,
+            scale_b=y_scale,
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            out_dtype=torch.bfloat16,
+        )
+        out_ref = (x.float() @ y.t().float()).to(torch.bfloat16)
+        self.assertEqual(out, out_ref, atol=1e-2, rtol=1e-2)
+
+        # Same operands without the transpose on B: hipBLASLt has no non-TN MX solution.
+        with self.assertRaisesRegex(RuntimeError, "hipBLASLt for non-tensorwise scaling"):
+            scaled_mm_wrap(
+                x,
+                y.t().contiguous(),
+                scale_a=x_scale,
+                scale_b=y_scale,
+                scale_recipe_a=ScalingType.BlockWise1x32,
+                scale_recipe_b=ScalingType.BlockWise1x32,
+                out_dtype=torch.bfloat16,
+            )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
@@ -1156,7 +1229,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("x_cm", [True, False])
     @parametrize("y_cm", [True, False])
     def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device):
-        if "cuda" in device and not self._fp8_layout_supported(x_cm, y_cm):
+        if "cuda" in device and not self._tensorwise_layout_supported(x_cm, y_cm):
             raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
