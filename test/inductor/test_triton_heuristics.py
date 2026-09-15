@@ -16,6 +16,7 @@ import torch
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -1032,7 +1033,10 @@ class TestArgumentCloneAndRestore(TestCase):
         gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
 
         peak_mem_before = torch.get_device_module(GPU_TYPE).max_memory_allocated()
-        cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
+        with patch.object(
+            torch.get_device_module(GPU_TYPE), "mem_get_info", return_value=(0, 0)
+        ):
+            cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
         self.assertTrue(len(cpu_copies) == 1)
 
         # Mutate the arg
@@ -1079,6 +1083,103 @@ class TestArgumentCloneAndRestore(TestCase):
         self.assertTrue(arg.storage_offset() > 0)
 
         self._do_test(arg)
+
+
+@skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+class TestAutotuneMutationMemory(TestCase):
+    @parametrize(
+        "free,reserved,active,private,fraction,cpu_restore",
+        [
+            (1 << 30, 4096, 4096, 0, 1.0, False),
+            (0, 4096, 4096, 0, 1.0, True),
+            (0, 1 << 20, 4096, 0, 1.0, False),
+            (1 << 30, 4096, 4096, 0, 4096 / (2 << 30), True),
+            (4096, 4096, 4096, 0, 1.0, True),
+            (0, 1 << 20, 4096, 1 << 20, 1.0, True),
+            (0, 1 << 20, 1 << 20, 0, 1.0, True),
+            (0, 1 << 20, 4096, None, 1.0, True),
+        ],
+    )
+    @parametrize("peak", [4096, 1 << 30])
+    def test_clone_uses_available_memory(
+        self, device, free, reserved, active, private, fraction, cpu_restore, peak
+    ):
+        options = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        options["optimize_mem"] = True
+        options["mutated_arg_names"] = ["in_ptr0"]
+        autotuner = CachingAutotuner(**options)
+        x = torch.ones(1024, device=device)
+        expected = x.clone()
+        device_module = torch.get_device_module(device)
+        stats = {
+            "reserved_bytes": {"all": {"current": reserved}},
+            "active_bytes": {"all": {"current": active}},
+        }
+        if private is not None:
+            stats["reserved_bytes_by_private_pools"] = {
+                (0, 1): {"all": {"current": private}}
+            }
+        with (
+            patch.object(
+                device_module, "memory_stats_as_nested_dict", return_value=stats
+            ),
+            patch.object(device_module, "mem_get_info", return_value=(free, 2 << 30)),
+            patch.object(device_module, "memory_allocated", return_value=4096),
+            patch.object(device_module, "memory_reserved", return_value=reserved),
+            patch.object(
+                device_module, "get_per_process_memory_fraction", return_value=fraction
+            ),
+            patch.object(device_module, "max_memory_allocated", return_value=peak),
+            patch.object(torch.accelerator, "memory_allocated", return_value=4096),
+            patch.object(torch.accelerator, "max_memory_allocated", return_value=peak),
+        ):
+            copies = autotuner.copy_args_to_cpu_if_needed(x)
+        self.assertEqual(bool(copies), cpu_restore)
+        cloned_args, _ = autotuner.maybe_clone_args(copies, x)
+        self.assertEqual(cloned_args[0] is x, cpu_restore)
+        cloned_args[0].add_(1)
+        autotuner.restore_args_from_cpu(copies)
+        self.assertEqual(x, expected)
+
+    @skipUnless(GPU_TYPE == "cuda", "requires CUDA graphs")
+    @parametrize("free", [0, 1 << 30])
+    def test_cuda_graph_reservations(self, device, free):
+        options = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        options["optimize_mem"] = True
+        options["mutated_arg_names"] = ["in_ptr0"]
+        autotuner = CachingAutotuner(**options)
+        x = torch.ones(4 << 20, device=device)
+        expected = x.clone()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            temporary = torch.empty(16 << 20, device=device)
+            temporary.fill_(1)
+        del temporary
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        stats = torch.cuda.memory_stats_as_nested_dict(device)
+        private_reserved = sum(
+            pool["all"]["current"]
+            for pool in stats["reserved_bytes_by_private_pools"].values()
+        )
+        self.assertGreaterEqual(private_reserved, 64 << 20)
+        self.assertGreater(
+            torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device),
+            2 * x.numel() * x.element_size(),
+        )
+        _, total = torch.cuda.mem_get_info(device)
+        with patch.object(torch.cuda, "mem_get_info", return_value=(free, total)):
+            copies = autotuner.copy_args_to_cpu_if_needed(x)
+        self.assertEqual(bool(copies), free == 0)
+        cloned_args, _ = autotuner.maybe_clone_args(copies, x)
+        cloned_args[0].add_(1)
+        autotuner.restore_args_from_cpu(copies)
+        graph.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(x, expected)
+
+
+instantiate_device_type_tests(TestAutotuneMutationMemory, globals(), only_for=GPU_TYPE)
 
 
 class TestDumpLaunchTensors(TestCase):

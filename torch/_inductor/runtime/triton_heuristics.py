@@ -1587,22 +1587,37 @@ class CachingAutotuner(KernelInterface):
         """
         To support benchmarking in the presence of mutated args, we need to avoid
         autotuning contaminating them. We try to pass cloned args to the kernel.
-        If those clones would increase the peak memory usage, however, we instead
-        copy to cpu and restore them after each iteration. Figure out the args
-        to be copied and do the copying.
+        If there is insufficient device memory for those clones, we instead copy
+        to CPU and restore them after each iteration. Leave half the available
+        memory for benchmarking and other allocations.
         """
         if not self.optimize_mem:
             return {}
 
         copies = {}
         try:
-            if torch.accelerator.current_accelerator() is None:
-                # No initialized accelerator; skip memory-optimized path
+            if self.device_props.type not in ("cuda", "xpu"):
                 return {}
-            budget = (
-                torch.accelerator.max_memory_allocated()
-                - torch.accelerator.memory_allocated()
+            device = self.device_props.index
+            device_module = torch.get_device_module(self.device_props.type)
+            free, total = device_module.mem_get_info(device)
+            stats = device_module.memory_stats_as_nested_dict(device)
+            reserved = stats.get("reserved_bytes", {}).get("all", {}).get("current", 0)
+            active = (
+                stats.get("active_bytes", {}).get("all", {}).get("current", reserved)
             )
+            private_pools = stats.get("reserved_bytes_by_private_pools")
+            cached = 0
+            if private_pools is not None:
+                # Private-pool reservations and pending stream frees cannot be
+                # treated as reusable memory for ordinary input clones.
+                private_reserved = sum(
+                    pool["all"]["current"] for pool in private_pools.values()
+                )
+                cached = max(0, reserved - active - private_reserved)
+            limit = int(total * device_module.get_per_process_memory_fraction(device))
+            available = min(free, limit - reserved) + cached
+            budget = max(0, available) // 2
         except RuntimeError:
             # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
             return {}
