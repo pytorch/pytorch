@@ -817,9 +817,6 @@ def _call_while_loop(
         mutated_storages = subgraph_mutated_input_storages(graph, mutated_inputs)
         if any(idx < num_carried_inputs for idx in mutated_inputs):
             raise TorchRuntimeError(f"{fn_name} might be modifying a carried input!")
-        aliased_carries = parent_mutated_input_indices(operands_seq, mutated_storages)
-        if not aliased_carries:
-            return mutated_storages
 
         def byte_range(tensor):
             start = tensor.storage_offset() * tensor.element_size()
@@ -837,24 +834,23 @@ def _call_while_loop(
                     for module in subgraph.modules()
                     if isinstance(module, GraphModule)
                 )
-        # Views can escape a placeholder's span, including inside nested HOPs.
-        # Conservatively include read-only aliases of mutated storage as well.
-        aliases = [
+        writes = [
             tensor
             for subgraph in graphs
             for node in subgraph.nodes
-            for tensor in pytree.tree_leaves(
-                node.meta.get("example_value", node.meta.get("val"))
-            )
-            if isinstance(tensor, torch.Tensor)
+            for tensor in node.meta.get("dynamo_mutated_tensors", ())
         ]
+        for tensor in writes:
+            mutated_storages |= get_tensor_storages(tensor)
+        aliased_carries = parent_mutated_input_indices(operands_seq, mutated_storages)
         for carry_idx in aliased_carries:
             carried = operands_seq[carry_idx].as_proxy().node.meta["example_value"]
             if guard_or_false(carried.numel() == 0):
                 continue
             carry_start, carry_end = byte_range(carried)
-            for mutated in aliases:
-                if not get_tensor_storages(carried) & get_tensor_storages(mutated):
+            carried_storages = get_tensor_storages(carried)
+            for mutated in writes:
+                if not carried_storages & get_tensor_storages(mutated):
                     continue
                 if guard_or_false(mutated.numel() == 0):
                     continue
@@ -1044,9 +1040,13 @@ def _call_while_loop(
         + list(additional_inputs_seq)
         + list(additional_lifted_inputs)
     )
-    mutated_inputs = parent_mutated_input_indices(
-        all_while_loop_inputs, mutated_input_storages
-    )
+    # The checks above proved that writes do not overlap any carried input.
+    mutated_inputs = [
+        num_carried_inputs + idx
+        for idx in parent_mutated_input_indices(
+            all_while_loop_inputs[num_carried_inputs:], mutated_input_storages
+        )
+    ]
 
     mutated_arg_indices = ",".join(str(i) for i in mutated_inputs)
 
