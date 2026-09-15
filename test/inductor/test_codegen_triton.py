@@ -201,9 +201,7 @@ class TestCodegenTriton(InductorTestCase):
 
             self._graph.removed_buffers.add("removed_output")
             self.assertFalse(kernel.uses_tma)
-            self.assertNotIn(
-                "tma_min_block_sizes", kernel.inductor_meta_per_kernel()
-            )
+            self.assertNotIn("tma_min_block_sizes", kernel.inductor_meta_per_kernel())
             self.assertNotIn("uses_device_tma", kernel.inductor_meta_per_kernel())
 
     def test_importable_constexpr_types_nested_values(self):
