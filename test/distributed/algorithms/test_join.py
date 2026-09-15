@@ -38,10 +38,11 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-_accelerator_type = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
+_accelerator_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+)
 DEVICE_COUNT = torch.accelerator.device_count() if _accelerator_type != "cpu" else 1
 WORLD_SIZE = min(4, max(2, DEVICE_COUNT))
-BACKEND = dist.get_default_backend_for_device(_accelerator_type)
 
 # Constants used for testing post-hooks
 BEFORE_CONSTANT = 41
@@ -148,27 +149,19 @@ class AllReducer(Joinable):
 
 
 class TestJoin(MultiProcessTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     r"""Test cases for the generic join context."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
-        os.environ["BACKEND"] = BACKEND
+        os.environ["BACKEND"] = dist.get_default_backend_for_device(_accelerator_type)
         self._spawn_processes()
 
     @property
     def world_size(self):
         return WORLD_SIZE
-
-    @property
-    def device(self):
-        return (
-            torch.device(f"{_accelerator_type}:{self.rank}")
-            if _accelerator_type != "cpu"
-            else torch.device("cpu")
-        )
 
     @property
     def process_group(self):
@@ -184,8 +177,10 @@ class TestJoin(MultiProcessTestCase):
         except OSError:
             pass
 
-    def dist_init(self, rank, world_size, backend=BACKEND):
+    def dist_init(self, rank, world_size, backend=None):
         store = dist.FileStore(self.file_name, world_size)
+        if backend is None:
+            backend = dist.get_default_backend_for_device(_accelerator_type)
         return dist.init_process_group(
             backend=backend, store=store, rank=rank, world_size=world_size
         )
@@ -219,9 +214,9 @@ class TestJoin(MultiProcessTestCase):
         num_allreduces: int,
         run_post_hooks: bool,
         expected_total: int | None = None,
-        device=None,
+        *,
+        device: str,
     ):
-        device = self.device
         r"""
         Skeleton for all :class:`Join` tests.
 
@@ -240,7 +235,10 @@ class TestJoin(MultiProcessTestCase):
                 all-reduce total; otherwise, the expected total; default is
                 ``None``.
         """
-        self.dist_init(self.rank, self.world_size)
+        device_type = torch.device(device).type
+        device = torch.device(f"{device_type}:{self.rank}")
+        backend = dist.get_default_backend_for_device(device_type)
+        self.dist_init(self.rank, self.world_size, backend=backend)
 
         allreducers = [
             AllReducer(device, self.process_group) for _ in range(num_joinables)
@@ -525,10 +523,8 @@ class TestJoin(MultiProcessTestCase):
             device=device,
         )
 
-instantiate_device_type_tests(TestJoin, globals())
+
+instantiate_device_type_tests(TestJoin, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
-
-
-
