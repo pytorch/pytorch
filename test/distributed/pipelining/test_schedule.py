@@ -146,6 +146,43 @@ def _run_adjacency_validation(stage, num_stages):
     schedule.step()
 
 
+def _max_live_closed_intervals(intervals: list[tuple[int, int]]) -> int:
+    """Return peak overlap for inclusive integer intervals."""
+    events: list[tuple[int, int]] = []
+    for start, release in intervals:
+        events.extend(((start, 1), (release + 1, -1)))
+    live = peak = 0
+    for _, delta in sorted(events):
+        live += delta
+        peak = max(peak, live)
+    return peak
+
+
+def _resource_intervals(
+    actions: list[_Action], stage_indices: tuple[int, ...]
+) -> list[tuple[int, int]]:
+    """Independently derive stage/microbatch intervals from finalized actions."""
+    starts: dict[tuple[int, int], int] = {}
+    releases: dict[tuple[int, int], int] = {}
+
+    def visit(action: _Action, position: int) -> None:
+        if action.sub_actions is not None:
+            for sub_action in action.sub_actions:
+                visit(sub_action, position)
+            return
+        if action.stage_index not in stage_indices or action.microbatch_index is None:
+            return
+        key = (action.stage_index, action.microbatch_index)
+        if action.computation_type == F:
+            starts[key] = position
+        elif action.computation_type in (B, W):
+            releases[key] = position
+
+    for position, action in enumerate(actions):
+        visit(action, position)
+    return [(starts[key], releases[key]) for key in sorted(starts)]
+
+
 class ScheduleTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -184,6 +221,12 @@ class ScheduleTest(TestCase):
         ):
             info.set_buffer(torch.ones(2))
 
+        missing_grad = _RecvInfo("grad", source=2, tensor_meta=None)
+        with self.assertRaisesRegex(PipeliningMetadataError, "no tensor metadata"):
+            missing_grad.allocate_buffer(stage.device)
+        with self.assertRaisesRegex(PipeliningMetadataError, "expects no gradient"):
+            missing_grad.set_buffer(torch.ones(2))
+
     def test_pipeline_resource_liveness_reuses_completed_slots(self):
         stage = MockPipelineStage(group_size=1, num_stages=1)
         stage.stage_index = 0
@@ -211,8 +254,22 @@ class ScheduleTest(TestCase):
 
         self.assertEqual(plan.num_slots, 2)
         self.assertEqual([plan.slot_for(0, mb) for mb in range(3)], [0, 1, 0])
+        self.assertEqual(
+            plan.num_slots,
+            _max_live_closed_intervals([(0, 3), (1, 6), (4, 8)]),
+        )
 
-    def test_pipeline_resource_liveness_granularity_and_overlap(self):
+        microbatch_plan = _analyze_pipeline_resource_liveness(
+            schedule,
+            rank=0,
+            stage_indices=(0,),
+            granularity="microbatch",
+        )
+        self.assertEqual(
+            [microbatch_plan.slot_for(0, mb) for mb in range(3)], [0, 1, 0]
+        )
+
+    def test_pipeline_resource_liveness_granularity(self):
         stages = [MockPipelineStage(group_size=1, num_stages=3) for _ in range(2)]
         stages[0].stage_index = 0
         stages[1].stage_index = 2
@@ -245,6 +302,10 @@ class ScheduleTest(TestCase):
 
         self.assertEqual(stage_plan.num_slots, 3)
         self.assertEqual(
+            stage_plan.num_slots,
+            _max_live_closed_intervals([(0, 4), (1, 3), (2, 7), (5, 6)]),
+        )
+        self.assertEqual(
             [
                 stage_plan.slot_for(0, 0),
                 stage_plan.slot_for(2, 0),
@@ -259,38 +320,78 @@ class ScheduleTest(TestCase):
         self.assertEqual(microbatch_plan.slot_for(0, 1), 1)
         self.assertEqual(microbatch_plan.slot_for(2, 1), 1)
 
-        overlap_schedule = PipelineScheduleMulti([stages[0]], n_microbatches=1)
-        overlap_schedule.pipeline_order = {
-            0: [
-                _Action(0, F, 0),
-                _Action(
-                    -1,
-                    OVERLAP_F_B,
-                    None,
-                    (_Action(0, I, 0), _Action(0, W, 0)),
-                ),
-            ]
-        }
-        overlap_plan = _analyze_pipeline_resource_liveness(
-            overlap_schedule,
-            rank=0,
-            stage_indices=(0,),
-            granularity="stage_microbatch",
-        )
-        self.assertEqual(overlap_plan.num_slots, 1)
-        self.assertEqual(overlap_plan.slot_for(0, 0), 0)
+    def test_pipeline_resource_liveness_overlap_is_order_independent(self):
+        stage = MockPipelineStage(group_size=1, num_stages=1)
+        stage.stage_index = 0
+        for sub_actions in (
+            (_Action(0, I, 0), _Action(0, W, 0)),
+            (_Action(0, W, 0), _Action(0, I, 0)),
+        ):
+            schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+            schedule.pipeline_order = {
+                0: [
+                    _Action(0, F, 0),
+                    _Action(-1, OVERLAP_F_B, None, sub_actions),
+                ]
+            }
+
+            plan = _analyze_pipeline_resource_liveness(
+                schedule,
+                rank=0,
+                stage_indices=(0,),
+                granularity="stage_microbatch",
+            )
+            self.assertEqual(plan.num_slots, 1)
+            self.assertEqual(plan.slot_for(0, 0), 0)
+
+    def test_pipeline_resource_liveness_with_dual_pipe_v(self):
+        group_size, num_stages, num_microbatches = 2, 4, 4
+        stages = [
+            MockPipelineStage(group_size=group_size, num_stages=num_stages)
+            for _ in range(2)
+        ]
+        stages[0].stage_index = 0
+        stages[1].stage_index = 3
+        schedule = ScheduleDualPipeV(stages, num_microbatches)
+        plans = []
+        for rank in range(group_size):
+            stage_indices = tuple(
+                stage_index
+                for stage_index, stage_rank in schedule.stage_index_to_group_rank.items()
+                if stage_rank == rank
+            )
+            plan = _analyze_pipeline_resource_liveness(
+                schedule,
+                rank=rank,
+                stage_indices=stage_indices,
+                granularity="stage_microbatch",
+            )
+            intervals = _resource_intervals(
+                schedule.pipeline_order_with_comms[rank], stage_indices
+            )
+            self.assertEqual(plan.num_slots, _max_live_closed_intervals(intervals))
+            plans.append(plan)
+
+        self.assertNotEqual(plans[0].assignments, plans[1].assignments)
+        with self.assertRaisesRegex(ValueError, "not present"):
+            _analyze_pipeline_resource_liveness(
+                schedule,
+                rank=group_size,
+                stage_indices=(0,),
+                granularity="stage_microbatch",
+            )
 
     def test_pipeline_resource_liveness_rejects_incomplete_backward(self):
         stage = MockPipelineStage(group_size=1, num_stages=1)
         stage.stage_index = 0
-        schedule = PipelineScheduleMulti([stage], n_microbatches=1)
-        schedule.pipeline_order = {
+        overlap_schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+        overlap_schedule.pipeline_order = {
             0: [_Action(0, F, 0), _Action(0, I, 0)],
         }
 
         with self.assertRaisesRegex(ValueError, "Backward actions"):
             _analyze_pipeline_resource_liveness(
-                schedule,
+                overlap_schedule,
                 rank=0,
                 stage_indices=(0,),
                 granularity="stage_microbatch",
