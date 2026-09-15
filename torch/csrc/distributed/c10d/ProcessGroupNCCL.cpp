@@ -1375,6 +1375,9 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
     const int& size) {
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
+  // Unlike split(), merge creates an uninitialized communicator whose first
+  // collective may block in Store rendezvous, so preserve its independent
+  // connection.
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), rank, size, ncclOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);

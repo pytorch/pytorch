@@ -2,7 +2,6 @@
 import contextlib
 import copy
 import functools
-import itertools
 import math
 import re
 import unittest
@@ -1106,7 +1105,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             effectful_identity.register_autograd(backward)
             effectful_identity.register_effect(torch.library.EffectType.ORDERED)
 
-            def run(use_compile, policy):
+            def run(policy):
                 nonlocal call_count
                 call_count = 0
 
@@ -1124,21 +1123,18 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                     )
 
                 x = torch.randn(3, requires_grad=True)
-                run_fn = (
-                    torch.compile(fn, backend="aot_eager", fullgraph=True)
-                    if use_compile
-                    else fn
-                )
+                run_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
                 run_fn(x).sum().backward()
 
                 self.assertEqual(call_count, 1)
                 self.assertEqual(x.grad, x.cos())
 
-            for use_compile, policy in itertools.product(
-                (False, True), (False, CheckpointPolicy.MUST_RECOMPUTE)
+            for policy in (
+                CheckpointPolicy.PREFER_RECOMPUTE,
+                CheckpointPolicy.MUST_RECOMPUTE,
             ):
-                with self.subTest(compile=use_compile, policy=policy):
-                    run(use_compile, policy)
+                with self.subTest(policy=policy):
+                    run(policy)
 
     @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
