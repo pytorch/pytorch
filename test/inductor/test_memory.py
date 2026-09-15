@@ -1,15 +1,18 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
 from torch._C import FileCheck
 from torch._dynamo.utils import same
-from torch._inductor import config, memory
+from torch._inductor import config, ir, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -19,6 +22,195 @@ try:
     TRITON_AVAILABLE = True
 except ImportError:
     TRITON_AVAILABLE = False
+
+
+class TestMemoryPlanningAliases(TestCase):
+    def test_non_owning_layout_uses_owner_storage_and_lifetime(self):
+        class SizeVars:
+            @staticmethod
+            def optimization_hint(value, fallback=0):
+                return value
+
+        class Node:
+            def __init__(self, numel, layout):
+                self.numel = numel
+                self.layout = layout
+
+            def get_numel(self):
+                return self.numel
+
+            def get_dtype(self):
+                return torch.float32
+
+        class Buffer:
+            def __init__(self, name, numel, layout, aliases=()):
+                self.name = name
+                self.node = Node(numel, layout)
+                self.aliases = aliases
+
+            def get_name(self):
+                return self.name
+
+            def get_aliases(self):
+                return self.aliases
+
+        class Consumer:
+            unmet_dependencies = [
+                SimpleNamespace(name="slice2"),
+                SimpleNamespace(name="input_view"),
+            ]
+
+            @staticmethod
+            def get_outputs():
+                return []
+
+        class Producer:
+            def __init__(self, output):
+                self.output = output
+
+            def get_outputs(self):
+                return [self.output]
+
+        graph = SimpleNamespace(
+            sizevars=SizeVars(), scheduler=SimpleNamespace(mutation_real_name={})
+        )
+        consumer = Consumer()
+        owner = Buffer("owner", 1000, object())
+        alias1 = Buffer(
+            "slice1", 400, object.__new__(ir.NonOwningLayout), aliases=["owner"]
+        )
+        alias2 = Buffer(
+            "slice2", 100, object.__new__(ir.NonOwningLayout), aliases=["slice1"]
+        )
+        input_view = Buffer(
+            "input_view",
+            100,
+            object.__new__(ir.NonOwningLayout),
+            aliases=["graph_input"],
+        )
+        buffers = {
+            "owner": owner,
+            "slice1": alias1,
+            "slice2": alias2,
+            "input_view": input_view,
+        }
+        with V.set_graph_handler(graph):
+            memory.assign_memory_planning_info_for_scheduler_buffers(
+                [consumer], buffers
+            )
+
+        self.assertEqual(
+            (owner.mpi_buffer.size_alloc, owner.mpi_buffer.size_free), (4000, 4000)
+        )
+        self.assertEqual(
+            (alias1.mpi_buffer.size_alloc, alias1.mpi_buffer.size_free), (0, 0)
+        )
+        self.assertEqual(
+            (alias2.mpi_buffer.size_alloc, alias2.mpi_buffer.size_free), (0, 0)
+        )
+        self.assertEqual(
+            (input_view.mpi_buffer.size_alloc, input_view.mpi_buffer.size_free),
+            (400, 400),
+        )
+        self.assertEqual(owner.mpi_buffer.succ_nodes, {consumer})
+        self.assertEqual(input_view.mpi_buffer.succ_nodes, {consumer})
+        self.assertEqual(
+            memory._normalize_graph_outputs(OrderedSet(["slice2"]), buffers),
+            OrderedSet(["slice2", "owner"]),
+        )
+
+        # Direct timeline/peak-estimator callers must also retain the ultimate
+        # owner when only a transitive alias is a graph output.
+        graph_outputs = OrderedSet(["slice2"])
+        timeline_nodes = [
+            Producer(owner),
+            Producer(alias1),
+            Producer(alias2),
+            consumer,
+        ]
+        timeline, _, _ = memory.compute_memory_timeline(
+            timeline_nodes, {}, graph_outputs
+        )
+        self.assertEqual(graph_outputs, OrderedSet(["slice2", "owner"]))
+        owner_info = next(info for info in timeline if info.buffer is owner)
+        self.assertEqual(owner_info.end_step, -1)
+        peak, _ = memory.estimate_peak_memory(timeline_nodes, {}, graph_outputs)
+        self.assertEqual(peak, 4000)
+
+    def test_eager_free_preserves_baseline_except_for_memory_reducing_nodes(self):
+        class Node:
+            def __init__(self, name, index):
+                self.name = name
+                self.outputs = []
+                self.mpi_node = memory.MemoryPlanningInfoForNode(index=index)
+
+            def get_name(self):
+                return self.name
+
+            def get_outputs(self):
+                return self.outputs
+
+        class Buffer:
+            def __init__(self, name, producer, size, successors):
+                self.name = name
+                self.node = SimpleNamespace(layout=object())
+                self.mpi_buffer = memory.MemoryPlanningInfoForBuffer(
+                    size_alloc=size,
+                    size_free=size,
+                    succ_nodes=OrderedSet(successors),
+                    succ_nodes_for_ordering=OrderedSet(successors),
+                )
+                producer.outputs.append(self)
+
+            def get_name(self):
+                return self.name
+
+        start = Node("start", 0)
+        produce = Node("produce", 1)
+        consume_whole = Node("consume_whole", 2)
+        large_alloc = Node("large_alloc", 3)
+        compact_alias = Node("compact_alias", 4)
+
+        gate = Buffer("gate", start, 0, [produce])
+        owner = Buffer("owner", produce, 1664, [consume_whole, compact_alias])
+        competing = Buffer("competing", produce, 2000, [large_alloc])
+        Buffer("whole_result", consume_whole, 0, [])
+        Buffer("large_result", large_alloc, 1011, [])
+        Buffer("compact_result", compact_alias, 326, [])
+
+        start.mpi_node.succ_nodes = OrderedSet([produce])
+        produce.mpi_node.pred_buffers = OrderedSet([gate])
+        produce.mpi_node.pred_nodes = OrderedSet([start])
+        produce.mpi_node.succ_nodes = OrderedSet(
+            [consume_whole, large_alloc, compact_alias]
+        )
+        produce.mpi_node.size = 3664
+        consume_whole.mpi_node.pred_buffers = OrderedSet([owner])
+        consume_whole.mpi_node.pred_nodes = OrderedSet([produce])
+        consume_whole.mpi_node.succ_nodes = OrderedSet([large_alloc, compact_alias])
+        large_alloc.mpi_node.pred_buffers = OrderedSet([competing])
+        large_alloc.mpi_node.pred_nodes = OrderedSet([produce, consume_whole])
+        large_alloc.mpi_node.size = 1011
+        compact_alias.mpi_node.pred_buffers = OrderedSet([owner])
+        compact_alias.mpi_node.pred_nodes = OrderedSet([produce, consume_whole])
+        compact_alias.mpi_node.size = 326
+
+        nodes = [start, produce, consume_whole, large_alloc, compact_alias]
+        buffers = {
+            buf.get_name(): buf for node in nodes for buf in node.get_outputs()
+        }
+        graph_outputs = OrderedSet(["large_result", "compact_result"])
+        eager_order = memory.topological_sort_eager_free(
+            nodes, {}, buffers, graph_outputs
+        )
+
+        self.assertEqual(
+            [node.get_name() for node in eager_order],
+            ["start", "produce", "consume_whole", "compact_alias", "large_alloc"],
+        )
+        baseline_peak, _ = memory.estimate_peak_memory(nodes, {}, graph_outputs)
+        eager_peak, _ = memory.estimate_peak_memory(eager_order, {}, graph_outputs)
+        self.assertLess(eager_peak, baseline_peak)
 
 
 class Foo(torch.nn.Module):
