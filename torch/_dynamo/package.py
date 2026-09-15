@@ -325,7 +325,11 @@ class FunctionPicklerBase(pickle.Pickler):
         # not for a local function), so the caller prunes any it does not need.
         # `evaluate` asks for the VALUE format instead, for a caller that has to
         # serialize the values and cannot carry a proxy; that read raises for a
-        # name that does not resolve.
+        # name that does not resolve. Either format can raise -- FORWARDREF only
+        # when the annotation does real work outside a name lookup (formatting a
+        # proxy in an f-string, `()[0]`), which the guards.py caller explains --
+        # and both are left raising here: whether the set can be dropped is the
+        # caller's question, and each caller logs the drop it takes.
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -484,6 +488,9 @@ def load_guard_manager(
     target_code: types.CodeType,
     runtime_global_scope: Any,
 ) -> "GuardManagerWrapper":
+    # An EMPTY runtime_global_scope is a scope and not the absence of one: a
+    # global guard then fails on a name it lacks, rather than falling back to the
+    # globals serialized with the artifact, which only None selects.
     from .output_graph import OutputGraphCommon
 
     return torch._dynamo.guards.CheckFunctionManager(
@@ -1244,14 +1251,21 @@ class CompilePackage:
             )
 
     def _install_global(
-        self, module: types.ModuleType, name: str, value: object
+        self,
+        module: types.ModuleType,
+        name: str,
+        value: object,
+        *,
+        record_only_if_new: bool = False,
     ) -> None:
         # A pre-reset compile in this process may still own `name` via a
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
+        record = not (record_only_if_new and name in module.__dict__)
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        if record:
+            self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
@@ -1287,9 +1301,19 @@ class CompilePackage:
             )
             with context:
                 module = sys.modules[entry.python_module]
+                # An __import_* alias someone else bound first may be held BY
+                # REFERENCE by a loaded artifact's guards --
+                # AOTCompiledFunction._seed_guard_scope seeds those aliases into
+                # a live module scope and nothing re-seeds them -- so uninstall()
+                # must leave a binding this package did not create alone. The
+                # aliases are the only names install() records that are ever
+                # seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
-                        module, alias, importlib.import_module(module_name)
+                        module,
+                        alias,
+                        importlib.import_module(module_name),
+                        record_only_if_new=True,
                     )
                 target_code = code
                 if entry.install_to_global:
