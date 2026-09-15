@@ -1323,6 +1323,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/PaddingKernel.cpp",
     "aten/src/ATen/native/cpu/PixelShuffleKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/PointwiseOpsKernelBackward.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
     "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
     "aten/src/ATen/native/cpu/ReduceAllOpsKernel.cpp",
