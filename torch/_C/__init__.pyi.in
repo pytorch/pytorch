@@ -1394,6 +1394,16 @@ def _is_torch_function_all_disabled() -> (
     _bool
 ): ...  # THPModule_isAllDisabledTorchFunction
 def _peek_should_skip_torch_function() -> _bool: ...  # THPModule_peek_should_skip_torch_function
+
+# Defined in torch/csrc/Module.cpp
+class _TorchFunctionState(Enum):
+    ENABLED = 0
+    SUBCLASSES_DISABLED = 1
+    ALL_DISABLED = 2
+
+def _get_torch_function_state() -> _TorchFunctionState: ...
+def _set_torch_function_state(state: _TorchFunctionState) -> None: ...
+
 def _has_torch_function(
     args: Iterable[Any],
 ) -> _bool: ...  # THPModule_has_torch_function

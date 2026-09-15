@@ -2934,6 +2934,273 @@ from user code:
             combined(x.double())
         self.assertIn("Tried 2 compiled input(s)", str(ctx.exception))
 
+    def test_aot_compile_module_restores_torch_function_after_a_throw(self):
+        # A tree that THROWS out of C++ returns through
+        # RootGuardManager::check_nopybind_template's non-RAII restore and leaves
+        # TorchFunction disabled on this thread. TENSOR_MATCH on a strided nested
+        # tensor is one such tree: reading its strides fires a TORCH_CHECK.
+        # Dispatch propagates the throw and puts the state back on the way out.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        state = torch._C._get_torch_function_state()
+        self.addCleanup(torch._C._set_torch_function_state, state)
+        with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
+            model(nested)
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_no_match_report_restores_torch_function_after_a_throw(self):
+        # The report's re-check is the second place a tree can throw out of C++,
+        # and it runs on the way to raising, so a state left disabled there would
+        # travel out with the report. Stubbed rather than thrown for real: the
+        # trees that leak this way throw on the first check and never reach it.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        class LeaksThenRaises:
+            def check(self, f_locals):
+                # Leaked here too, so the state the report puts back is the one
+                # DISPATCH found and not one dispatch itself left behind.
+                torch._C._set_torch_function_state(
+                    torch._C._TorchFunctionState.ALL_DISABLED
+                )
+                return False
+
+            def check_verbose(self, f_locals):
+                raise RuntimeError("the re-check is unhappy")
+
+        model.forward.compiled_results[0]._artifacts.guard_manager = LeaksThenRaises()
+        state = torch._C._get_torch_function_state()
+        self.addCleanup(torch._C._set_torch_function_state, state)
+        with self.assertRaisesRegex(RuntimeError, "the re-check is unhappy"):
+            model(torch.randn(3, 3))
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_function_restores_torch_function_after_a_throw(self):
+        # load_compiled_function returns an AOTCompiledFunction, whose guard
+        # check runs the same non-RAII restore the module path repairs above, so
+        # a C++ throw leaves TorchFunction disabled on this thread and silently
+        # stops a __torch_function__ subclass from dispatching afterwards. This
+        # path propagates the throw rather than serving over it, so the state is
+        # put back on the way out.
+        self._hide_leaked_dynamo_globals()
+
+        def fn(x):
+            return x * 2
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        # The same tree the module test throws out of: TENSOR_MATCH reading a
+        # strided nested tensor's strides fires a TORCH_CHECK.
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        state = torch._C._get_torch_function_state()
+        self.addCleanup(torch._C._set_torch_function_state, state)
+        with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
+            loaded(nested)
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_function_restores_torch_function_after_a_verbose_throw(self):
+        # The function path's second evaluation, which runs only to explain a
+        # rejection, is the other place a tree can throw out of C++ there, and it
+        # throws on the way to raising, so a state left disabled would travel out
+        # with the message. Stubbed as in the report's counterpart: the trees that
+        # leak this way throw on the first check and never reach the second.
+        self._hide_leaked_dynamo_globals()
+
+        def fn(x):
+            return x * 2
+
+        x = torch.randn(3, 3)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+
+        class LeaksThenRaises:
+            def check(self, f_locals):
+                return False
+
+            def check_verbose(self, f_locals):
+                torch._C._set_torch_function_state(
+                    torch._C._TorchFunctionState.ALL_DISABLED
+                )
+                raise RuntimeError("the re-check is unhappy")
+
+        compiled_fn._artifacts.guard_manager = LeaksThenRaises()
+        state = torch._C._get_torch_function_state()
+        self.addCleanup(torch._C._set_torch_function_state, state)
+        with self.assertRaisesRegex(RuntimeError, "the re-check is unhappy"):
+            compiled_fn(x)
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_module_restores_torch_function_after_an_interrupt(self):
+        # A KeyboardInterrupt through the tree leaves the TLS disabled exactly as
+        # a C++ throw does, and `except Exception` catches neither it nor the
+        # SystemExit a guard could raise, so the restore has to sit under a
+        # handler that sees a BaseException. It is also not an answer about this
+        # call: dispatch puts the state back and lets it travel out rather than
+        # reading it as a non-match.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        class LeaksThenInterrupts:
+            def check(self, f_locals):
+                torch._C._set_torch_function_state(
+                    torch._C._TorchFunctionState.ALL_DISABLED
+                )
+                raise KeyboardInterrupt("ctrl-c inside the tree")
+
+        results = model.forward.compiled_results
+        results[0]._artifacts.guard_manager = LeaksThenInterrupts()
+        state = torch._C._get_torch_function_state()
+        self.addCleanup(torch._C._set_torch_function_state, state)
+        with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
+            model(torch.randn(3, 3))
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_no_match_report_restores_torch_function_after_an_interrupt(self):
+        # The report's re-check, same two obligations: an interrupt there must
+        # not leave the state disabled, and must not be turned into a report
+        # line -- the call is being interrupted, not explained.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        class LeaksThenInterrupts:
+            def check(self, f_locals):
+                return False
+
+            def check_verbose(self, f_locals):
+                torch._C._set_torch_function_state(
+                    torch._C._TorchFunctionState.ALL_DISABLED
+                )
+                raise KeyboardInterrupt("ctrl-c inside the tree")
+
+        results = model.forward.compiled_results
+        results[0]._artifacts.guard_manager = LeaksThenInterrupts()
+        state = torch._C._get_torch_function_state()
+        self.addCleanup(torch._C._set_torch_function_state, state)
+        with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
+            model(torch.randn(3, 3))
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_function_restores_torch_function_after_an_interrupt(self):
+        # The function path's guard check, which propagates whatever the tree
+        # produced: an interrupt travels out either way, so the state is all this
+        # pins.
+        self._hide_leaked_dynamo_globals()
+
+        def fn(x):
+            return x * 2
+
+        x = torch.randn(3, 3)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+
+        class LeaksThenInterrupts:
+            def check(self, f_locals):
+                torch._C._set_torch_function_state(
+                    torch._C._TorchFunctionState.ALL_DISABLED
+                )
+                raise KeyboardInterrupt("ctrl-c inside the tree")
+
+        compiled_fn._artifacts.guard_manager = LeaksThenInterrupts()
+        state = torch._C._get_torch_function_state()
+        self.addCleanup(torch._C._set_torch_function_state, state)
+        with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
+            compiled_fn(x)
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_function_restores_torch_function_after_a_verbose_interrupt(
+        self,
+    ):
+        # And its second evaluation, the one that runs only to explain a
+        # rejection.
+        self._hide_leaked_dynamo_globals()
+
+        def fn(x):
+            return x * 2
+
+        x = torch.randn(3, 3)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+
+        class LeaksThenInterrupts:
+            def check(self, f_locals):
+                return False
+
+            def check_verbose(self, f_locals):
+                torch._C._set_torch_function_state(
+                    torch._C._TorchFunctionState.ALL_DISABLED
+                )
+                raise KeyboardInterrupt("ctrl-c inside the tree")
+
+        compiled_fn._artifacts.guard_manager = LeaksThenInterrupts()
+        state = torch._C._get_torch_function_state()
+        self.addCleanup(torch._C._set_torch_function_state, state)
+        with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
+            compiled_fn(x)
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_module_binds_a_call_once_per_result(self):
+        # Results whose signatures differ cannot share a binding, so each binds
+        # on its own -- and still only once: the two dispatch passes and the
+        # report all ask about the same call, so a rebind per pass would leave
+        # the rest of this file green and pay for itself on every no-match.
+        # test_module_dispatch_binds_a_call_once_for_results_sharing_a_signature
+        # pins the shared case; this is the per-result count it cannot see.
+        mod = ScaleModule()
+        x = torch.randn(3, 3)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        doubled = model.forward.compiled_results
+
+        def triple(self, y):
+            return y * 3
+
+        mod.forward = types.MethodType(triple, mod)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x.double(),), kwargs={}, contexts=[])])
+        combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+        binds = []
+        bind = AOTCompiledFunction.prepare_f_locals
+
+        def counted(result, *args, **kwargs):
+            binds.append(result)
+            return bind(result, *args, **kwargs)
+
+        with patch.object(AOTCompiledFunction, "prepare_f_locals", counted):
+            with self.assertRaises(RuntimeError) as ctx:
+                combined(x.half())
+        # Both passes and the report ran on both results, each from its own one
+        # binding: one bind per result, in index order, and the same objects.
+        results = combined.compiled_results
+        self.assertEqual([id(b) for b in binds], [id(r) for r in results])
+        lines = str(ctx.exception).splitlines()
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
+
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
         # Module._wrapped_call_impl, whose globals are torch/nn/modules/module.py.

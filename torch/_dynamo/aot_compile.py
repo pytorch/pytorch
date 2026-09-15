@@ -646,7 +646,19 @@ class AOTCompiledFunction:
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals = self.prepare_f_locals(*args, **kwargs)
-        return self._live_guard_manager().check(f_locals)
+        # check_nopybind_template disables the TorchFunction TLS for its
+        # accessors and restores it without RAII, so a C++ throw leaves it
+        # disabled on this thread. This path propagates the throw instead of
+        # serving over it, so put the state back and let it travel out. Every
+        # exit that is not a raise restored the state itself, which is why this
+        # is a handler and not a finally: a finally would pay one more set per
+        # successful check on this dispatch path and repair nothing.
+        torch_function_state = torch._C._get_torch_function_state()
+        try:
+            return self._live_guard_manager().check(f_locals)
+        except BaseException:
+            torch._C._set_torch_function_state(torch_function_state)
+            raise
 
     def __post_init__(self) -> None:
         from .package import load_guard_manager, load_guards_state
@@ -895,7 +907,14 @@ class AOTCompiledFunction:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
-            debug_info = self._live_guard_manager().check_verbose(f_locals)
+            # Same non-RAII restore as in guard_check, on the tree's second
+            # evaluation.
+            torch_function_state = torch._C._get_torch_function_state()
+            try:
+                debug_info = self._live_guard_manager().check_verbose(f_locals)
+            except BaseException:
+                torch._C._set_torch_function_state(torch_function_state)
+                raise
             msg = f"GuardManager check failed, reason: {debug_info}"
             if any(
                 _names_a_missing_global(part) for part in debug_info.verbose_code_parts
@@ -1532,9 +1551,15 @@ class AOTCompiledModel:
         # compiled_results is public, so read it once: every stage below judges
         # the results this call began with, on the binding decided over them.
         results = tuple(self.compiled_results)
-        # Bound ahead of every guard, so a call the signature cannot bind still
-        # surfaces as bind_locals' TypeError, as the plain module call would; a
-        # bind costs more than a check(), so results that share one bind once.
+        # Read once per call, not once per check (measured 0.18us against a
+        # 0.93us check): every check that does not throw restores it itself.
+        torch_function_state = torch._C._get_torch_function_state()
+        # Binding this call costs more than a whole check() does, and the passes
+        # below and the report ask the same results about the same call, so it
+        # is bound once per call where the results share a binding, once per
+        # result where they do not, and reused. The shared bind happens ahead of
+        # every guard, so a call the signature cannot bind still surfaces as
+        # bind_locals' TypeError, as the plain module call would.
         shared = (
             results[0].prepare_f_locals(self.model, *args, **kwargs)
             if self._binds_alike(results)
@@ -1542,24 +1567,35 @@ class AOTCompiledModel:
         )
         # Per-result bindings, kept for the re-check and the report; a shared one
         # is reused as is.
-        bound: list[dict[str, object]] = []
-        # Guard evaluation ignores _guard_check_enabled, so scan every result.
-        for result in results:
-            if shared is not None:
-                f_locals = shared
-            else:
+        bound: dict[int, dict[str, object]] = {}
+
+        def accepts(i: int, result: AOTCompiledFunction) -> bool:
+            f_locals = shared if shared is not None else bound.get(i)
+            if f_locals is None:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
-                bound.append(f_locals)
-            if result._live_guard_manager().check(f_locals):
-                # The guards already passed; call fn directly so result() does
-                # not re-run the guard eval on this hot dispatch path.
+                bound[i] = f_locals
+            guard_manager = result._live_guard_manager()
+            try:
+                return guard_manager.check(f_locals)
+            except BaseException:
+                # check_nopybind_template disables the TorchFunction TLS for its
+                # accessors and restores it without RAII, so a C++ throw leaves it
+                # disabled on this thread. Put it back before anything runs under
+                # it, for an interrupt through the tree as much as for a throw.
+                torch._C._set_torch_function_state(torch_function_state)
+                raise
+
+        # Guard evaluation ignores _guard_check_enabled, so scan every result.
+        for i, result in enumerate(results):
+            if accepts(i, result):
+                # The guard manager already passed; call fn directly so result()
+                # does not re-run the guard eval on this hot dispatch path.
                 return result.fn(self.model, *args, **kwargs)
         # A check() can reject from the dict-tag fast path without running the
         # tree; a second check() then runs the tree the fast path skipped,
         # opted-out results too.
         for i, result in enumerate(results):
-            f_locals = shared if shared is not None else bound[i]
-            if result._live_guard_manager().check(f_locals):
+            if accepts(i, result):
                 return result.fn(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
         # only after both passes above have failed to find a real match.
@@ -1567,24 +1603,37 @@ class AOTCompiledModel:
             if not result._guard_check_enabled:
                 return result.fn(self.model, *args, **kwargs)
         if shared is not None:
-            bound = [shared] * len(results)
-        raise RuntimeError(self._no_match_report(results, bound))
+            bound = dict.fromkeys(range(len(results)), shared)
+        raise RuntimeError(self._no_match_report(results, bound, torch_function_state))
 
     def _no_match_report(
-        self, results: tuple[AOTCompiledFunction, ...], bound: list[dict[str, object]]
+        self,
+        results: tuple[AOTCompiledFunction, ...],
+        bound: dict[int, dict[str, object]],
+        torch_function_state: torch._C._TorchFunctionState,
+        /,
     ) -> str:
         """A report naming every compiled input and what its guards said.
 
         ``results`` and ``bound`` are the results the dispatch above judged and
         the f_locals it judged them on, one per result, so the report explains
-        the same call rather than a fresh one."""
+        the same call rather than a fresh one, and ``torch_function_state`` the
+        TLS state dispatch read before evaluating anything: a throw here skips
+        the same non-RAII restore, and what has to come back is the state the
+        CALLER had, not one this dispatch left."""
         lines = [
             "No AOT compiled graph matched this call. Tried "
             f"{len(results)} compiled input(s):"
         ]
         missing_at: int | None = None
         for i, result in enumerate(results):
-            reason = result._live_guard_manager().check_verbose(bound[i])
+            guard_manager = result._live_guard_manager()
+            f_locals = bound[i]
+            try:
+                reason = guard_manager.check_verbose(f_locals)
+            except BaseException:
+                torch._C._set_torch_function_state(torch_function_state)
+                raise
             if reason.result:
                 lines.append(
                     f"  [{i}] <guards rejected this call twice and then accepted "
