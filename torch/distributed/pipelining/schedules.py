@@ -28,6 +28,7 @@ from ._utils import (
     generate_rank_to_stage_mapping,
     generate_stage_to_rank_mapping,
     InferenceMode,
+    PipeliningMetadataError,
 )
 from .microbatch import (
     _split_tensor,
@@ -194,55 +195,6 @@ class _Action(NamedTuple):
         raise RuntimeError(
             f"Invalid action string: {action_string}, should be formatted as [stage][action type][(microbatch)] e.g. 2F0"
         )
-
-
-_PipelineResourceGranularity = Literal["microbatch", "stage_microbatch"]
-_PipelineResourceKey = int | tuple[int, int]
-
-
-@dataclass(frozen=True)
-class _PipelineResourceLiveness:
-    """Deterministic resource-slot assignments for one pipeline rank."""
-
-    rank: int
-    granularity: _PipelineResourceGranularity
-    stage_indices: tuple[int, ...]
-    num_microbatches: int
-    assignments: Mapping[tuple[int, int], int]
-    num_slots: int
-
-    def slot_for(self, stage_index: int, microbatch_index: int) -> int:
-        """Return the slot for a global stage and microbatch pair."""
-        try:
-            return self.assignments[(stage_index, microbatch_index)]
-        except KeyError as error:
-            raise ValueError(
-                f"No slot exists for stage {stage_index}, microbatch {microbatch_index}"
-            ) from error
-
-
-def _assign_pipeline_resource_slots(
-    intervals: Sequence[tuple[_PipelineResourceKey, int, int]],
-) -> tuple[dict[_PipelineResourceKey, int], int]:
-    """Assign the lowest free slot to each inclusive schedule interval."""
-    active: list[tuple[int, int]] = []
-    free_slots: list[int] = []
-    assignments: dict[_PipelineResourceKey, int] = {}
-    next_slot = 0
-
-    for key, start, release in sorted(intervals, key=lambda item: (item[1], item[2])):
-        while active and active[0][0] < start:
-            _, slot = heapq.heappop(active)
-            heapq.heappush(free_slots, slot)
-        if free_slots:
-            slot = heapq.heappop(free_slots)
-        else:
-            slot = next_slot
-            next_slot += 1
-        assignments[key] = slot
-        heapq.heappush(active, (release, slot))
-
-    return assignments, next_slot
 
 
 @lru_cache
@@ -448,16 +400,22 @@ class _PipelineSchedule(ABC):
             for stage in cast(list[PipelineStage], stages):
                 acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
             result: torch.Tensor | None = acc
-            determined_mode: InferenceMode | None = None
             for stage in reversed(cast(list[PipelineStage], stages)):
                 result = stage._warmup_backward_result(received_result=result)
-                if result is None:
-                    raise RuntimeError("P2P warm-up voting failed")
-                determined_mode = (
-                    InferenceMode.STATIC
-                    if result.item() == 1
-                    else InferenceMode.DYNAMIC
+            if result is None:
+                raise RuntimeError("P2P warm-up voting failed")
+            supports_static, permits_dynamic = (bool(value.item()) for value in result)
+            if not supports_static and not permits_dynamic:
+                raise PipeliningMetadataError(
+                    "pass_pipeline_metadata requires complete static metadata "
+                    "across the pipeline: provide input_args and output_args for "
+                    "every stage, plus input_grads and output_grads for DTensors "
+                    "with backward"
                 )
+            determined_mode = (
+                InferenceMode.STATIC if supports_static else InferenceMode.DYNAMIC
+            )
+            for stage in cast(list[PipelineStage], stages):
                 stage._inference_mode = determined_mode
             logger.debug(
                 "Rank determined inference_mode=%s for %d stage(s)",
@@ -3945,6 +3903,56 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         return actions
 
 
+_PipelineResourceGranularity = Literal["microbatch", "stage_microbatch"]
+
+
+@dataclass(frozen=True, eq=False)
+class _PipelineResourceLiveness:
+    """Deterministic resource-slot assignments for one pipeline rank."""
+
+    rank: int
+    granularity: _PipelineResourceGranularity
+    stage_indices: tuple[int, ...]
+    num_microbatches: int
+    assignments: Mapping[tuple[int, int], int]
+    num_slots: int
+
+    def slot_for(self, stage_index: int, microbatch_index: int) -> int:
+        """Return the slot for a global stage and microbatch pair."""
+        try:
+            return self.assignments[(stage_index, microbatch_index)]
+        except KeyError as error:
+            raise ValueError(
+                f"No slot exists for stage {stage_index}, microbatch {microbatch_index}"
+            ) from error
+
+
+def _assign_pipeline_resource_slots(
+    intervals: Sequence[tuple[int, int]],
+) -> tuple[list[int], int]:
+    """Assign the lowest free slot to each inclusive schedule interval."""
+    active: list[tuple[int, int]] = []
+    free_slots: list[int] = []
+    assignments = [-1] * len(intervals)
+    next_slot = 0
+
+    for index, (start, release) in sorted(
+        enumerate(intervals), key=lambda item: (*item[1], item[0])
+    ):
+        while active and active[0][0] < start:
+            _, slot = heapq.heappop(active)
+            heapq.heappush(free_slots, slot)
+        if free_slots:
+            slot = heapq.heappop(free_slots)
+        else:
+            slot = next_slot
+            next_slot += 1
+        assignments[index] = slot
+        heapq.heappush(active, (release, slot))
+
+    return assignments, next_slot
+
+
 def _analyze_pipeline_resource_liveness(
     schedule: PipelineScheduleMulti,
     *,
@@ -3960,7 +3968,9 @@ def _analyze_pipeline_resource_liveness(
 
     Args:
         schedule: Constructed multi-stage schedule that will execute the step.
-        rank: Pipeline rank whose local actions should be analyzed.
+        rank: Pipeline rank whose actions should be analyzed. This may differ
+            from the rank constructing the schedule because every rank owns the
+            complete finalized order.
         stage_indices: Global logical stages that use the planned resource.
         granularity: Share one lifetime across a microbatch or track each
             stage/microbatch pair independently.
@@ -3980,6 +3990,7 @@ def _analyze_pipeline_resource_liveness(
     if len(set(tracked_stages)) != len(tracked_stages):
         raise ValueError("stage_indices must be unique")
 
+    # A compute+comms CSV may populate only ``pipeline_order_with_comms``.
     pipeline_order = (
         schedule.pipeline_order_with_comms
         if isinstance(schedule, _PipelineScheduleRuntime)
@@ -3993,6 +4004,7 @@ def _analyze_pipeline_resource_liveness(
     starts: dict[tuple[int, int], int] = {}
     releases: dict[tuple[int, int], int] = {}
     input_backwards: set[tuple[int, int]] = set()
+    weight_backwards: set[tuple[int, int]] = set()
 
     def process(action: _Action, position: int) -> None:
         if action.sub_actions is not None:
@@ -4024,15 +4036,9 @@ def _analyze_pipeline_resource_liveness(
                 raise ValueError(
                     f"Resource lifetime {key} has multiple release actions"
                 )
-            if (
-                action.computation_type == BACKWARD_WEIGHT
-                and key not in input_backwards
-            ):
-                raise ValueError(
-                    f"Resource lifetime {key} has weight backward without "
-                    "input backward"
-                )
             releases[key] = position
+            if action.computation_type == BACKWARD_WEIGHT:
+                weight_backwards.add(key)
 
     for position, action in enumerate(pipeline_order[rank]):
         if action is None:
@@ -4057,15 +4063,18 @@ def _analyze_pipeline_resource_liveness(
         raise ValueError(
             f"Backward actions do not match tracked lifetimes; {missing=}, {extra=}"
         )
+    if missing_input_backwards := weight_backwards - input_backwards:
+        raise ValueError(
+            "Resource lifetimes have weight backward without input backward: "
+            f"{sorted(missing_input_backwards)}"
+        )
     for key in expected:
         if releases[key] <= starts[key]:
-            raise ValueError(f"Resource lifetime {key} ends before its forward")
+            raise ValueError(f"Resource lifetime {key} ends at or before its forward")
 
-    intervals: list[tuple[_PipelineResourceKey, int, int]]
     if granularity == "microbatch":
         intervals = [
             (
-                microbatch_index,
                 min(
                     starts[(stage_index, microbatch_index)]
                     for stage_index in tracked_stages
@@ -4077,21 +4086,16 @@ def _analyze_pipeline_resource_liveness(
             )
             for microbatch_index in range(num_microbatches)
         ]
+        microbatch_slots, num_slots = _assign_pipeline_resource_slots(intervals)
+        assignments = {
+            (stage_index, microbatch_index): microbatch_slots[microbatch_index]
+            for stage_index, microbatch_index in expected
+        }
     else:
-        intervals = [
-            (key, starts[key], releases[key])
-            for key in sorted(expected, key=lambda item: (starts[item], item))
-        ]
-
-    resource_assignments, num_slots = _assign_pipeline_resource_slots(intervals)
-    assignments = {
-        (stage_index, microbatch_index): resource_assignments[
-            microbatch_index
-            if granularity == "microbatch"
-            else (stage_index, microbatch_index)
-        ]
-        for stage_index, microbatch_index in expected
-    }
+        keys = sorted(expected, key=lambda item: (starts[item], releases[item], item))
+        intervals = [(starts[key], releases[key]) for key in keys]
+        slots, num_slots = _assign_pipeline_resource_slots(intervals)
+        assignments = dict(zip(keys, slots, strict=True))
     return _PipelineResourceLiveness(
         rank=rank,
         granularity=granularity,
