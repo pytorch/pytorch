@@ -90,6 +90,8 @@ FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
 
+_UnshardLookahead = Literal["full", "auto"] | tuple[int, ...]
+
 
 # Targets (e.g. labels) are always split along the batch dim (0). Use
 # _split_tensor so DTensor targets preserve their Shard placements instead of
@@ -1689,6 +1691,8 @@ def _add_reduce_grad(
 def _add_unshard_reshard(
     compute_actions: list[_Action | None],
     max_active_stages: int = 3,
+    *,
+    unshard_lookahead: int,
 ) -> list[_Action]:
     """Given a basic schedule involving only compute actions (F,B,W,OVERLAP_F_B), add UNSHARD/RESHARD actions for FSDP.
 
@@ -1697,9 +1701,11 @@ def _add_unshard_reshard(
 
     We abandon the "timestep lock"  during lowering
 
-    max_active_stages controls how many prefetches we allow. It should be measured in mb and tuneable but in practice
-    3 stages is probably the thing we want?
-    (to account for having one f and one b active, and something else prefetching?)
+    ``max_active_stages`` controls residency and eviction. The separately
+    resolved ``unshard_lookahead`` controls how many distinct stages are found
+    while scanning upcoming atomic actions. Every stage used by the current
+    ``OVERLAP_F_B`` action is included even if that exceeds the lookahead, but
+    never if it exceeds the residency bound.
     """
 
     def next_stage_indices(count: int, next_actions: list[_Action | None]) -> list[int]:
@@ -1708,45 +1714,51 @@ def _add_unshard_reshard(
         ret: list[int] = []
 
         for a in next_actions:
-            if a is not None:
-                # Handle OVERLAP_F_B actions by checking their sub_actions
-                if a.computation_type == OVERLAP_F_B and a.sub_actions is not None:
-                    for sub_action in a.sub_actions:
-                        if sub_action.stage_index not in seen:
-                            seen.add(sub_action.stage_index)
-                            ret.append(sub_action.stage_index)
-                    if len(ret) >= count:
-                        break
-                else:
-                    # Regular action
-                    if a.stage_index not in seen:
-                        seen.add(a.stage_index)
-                        ret.append(a.stage_index)
-                        if len(ret) == count:
-                            break
+            if a is None:
+                continue
+            candidates = a.sub_actions if a.sub_actions is not None else (a,)
+            for candidate in candidates:
+                if candidate.stage_index in seen:
+                    continue
+                seen.add(candidate.stage_index)
+                ret.append(candidate.stage_index)
+            # OVERLAP_F_B is one atomic compute action. All of its stages must
+            # be resident even when that exceeds the requested lookahead.
+            if len(ret) >= count:
+                return ret
         return ret
 
-    active_stages: set[int] = set()
+    active_stages: dict[int, None] = {}
     fsdp_aware_actions: list[_Action] = []
 
     def _unshard(stage_index: int):
-        active_stages.add(stage_index)
+        active_stages[stage_index] = None
         fsdp_aware_actions.append(_Action(stage_index, UNSHARD, None))
 
     def _reshard(stage_index: int):
-        active_stages.remove(stage_index)
+        active_stages.pop(stage_index)
         fsdp_aware_actions.append(_Action(stage_index, RESHARD, None))
 
     for i, action in enumerate(compute_actions):
         if action is None:
             continue
 
-        # We prefetch the next N stages we'll see, dropping existing stages to make room
-        next_n = next_stage_indices(max_active_stages, compute_actions[i:])
+        current_actions = (
+            action.sub_actions if action.sub_actions is not None else (action,)
+        )
+        current_stages = {current.stage_index for current in current_actions}
+        if len(current_stages) > max_active_stages:
+            raise ValueError(
+                f"Atomic action {action} requires {len(current_stages)} stages, "
+                f"exceeding max_active_stages={max_active_stages}"
+            )
+
+        resident = next_stage_indices(max_active_stages, compute_actions[i:])
+        prefetch = next_stage_indices(unshard_lookahead, compute_actions[i:])
         # Fetch needs to be ordered correctly, so don't use a set
-        fetch = list(filter(lambda s: s not in active_stages, next_n))
-        # Unclear what the best policy is for eviction, but we can maintain order so we do
-        evict = list(filter(lambda s: s not in next_n, active_stages))
+        fetch = list(filter(lambda s: s not in active_stages, prefetch))
+        # Lookahead does not evict stages that remain inside the residency window.
+        evict = list(filter(lambda s: s not in resident, active_stages))
 
         # logger.debug(
         #     "_add_unshard_reshard Step %d active: %s fetch %s, evict %s",
@@ -1767,6 +1779,46 @@ def _add_unshard_reshard(
         _reshard(stage)
 
     return fsdp_aware_actions
+
+
+def _resolve_unshard_lookahead(
+    unshard_lookahead: _UnshardLookahead,
+    num_pp_ranks: int,
+    max_active_stages: int,
+) -> tuple[int, ...]:
+    """Resolve one validated all-gather prefetch distance per pipeline rank.
+
+    ``"full"`` is the compatibility default and matches the residency window
+    on every rank. ``"auto"`` uses the tested fixed rank-indexed heuristic
+    ``min(rank + 2, max_active_stages)``; it is not derived from a schedule's
+    warmup and equals ``"full"`` when the residency window is at most two.
+    A tuple is the exact expert override, with one value per PP rank.
+    """
+    if unshard_lookahead == "full":
+        return (max_active_stages,) * num_pp_ranks
+    if unshard_lookahead == "auto":
+        return tuple(min(rank + 2, max_active_stages) for rank in range(num_pp_ranks))
+    if not isinstance(unshard_lookahead, tuple):
+        raise ValueError(
+            "unshard_lookahead must be 'full', 'auto', or a tuple of "
+            f"{num_pp_ranks} integers, got {unshard_lookahead!r}"
+        )
+    if len(unshard_lookahead) != num_pp_ranks:
+        raise ValueError(
+            "unshard_lookahead tuple length must equal the pipeline degree "
+            f"({num_pp_ranks}), got {len(unshard_lookahead)}"
+        )
+    for rank, lookahead in enumerate(unshard_lookahead):
+        if (
+            isinstance(lookahead, bool)
+            or not isinstance(lookahead, int)
+            or not (1 <= lookahead <= max_active_stages)
+        ):
+            raise ValueError(
+                f"unshard_lookahead[{rank}] must be an integer within "
+                f"[1, max_active_stages={max_active_stages}], got {lookahead!r}"
+            )
+    return unshard_lookahead
 
 
 def _merge_bw(
@@ -2665,22 +2717,20 @@ class _CustomFunctionProtocol(Protocol):
 
 
 class _PipelineScheduleRuntime(PipelineScheduleMulti):
-    """
-    Provides a simple runtime that requires a 'schedule IR' including specified communication operations.
+    """Run a multi-stage schedule lowered to explicit communication actions.
 
-    Can be instantiated directly by creating _PipelineScheduleRuntime and calling load_csv, or can be
-    subclassed and the subclass can be responsible for creating a schedule IR.
-
-    ``reuse_recv_buffers`` gives receive destinations stable addresses by
-    retaining a schedule-colored pool. Inference keeps each received input
-    alive until all sends complete because the runtime has no per-send wait
-    action. Switching between training and inference may therefore resize the
-    single pool for each direction.
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses. ``max_active_stages`` controls FSDP parameter residency, while
+    ``unshard_lookahead`` independently controls all-gather issue distance; see
+    :func:`_resolve_unshard_lookahead` for its policies.
     """
 
     def __init__(self, *args, **kwargs):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
         self._max_active_stages: int = kwargs.pop("max_active_stages", 3)
+        self._unshard_lookahead: _UnshardLookahead = kwargs.pop(
+            "unshard_lookahead", "full"
+        )
         self._reuse_recv_buffers: bool = kwargs.pop("reuse_recv_buffers", False)
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
@@ -2753,6 +2803,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
         self.pipeline_order_with_comms: dict[int, list[_Action]] = {}
         if format == "compute_comms":
+            unshard_lookahead = _resolve_unshard_lookahead(
+                self._unshard_lookahead,
+                num_pp_ranks=len(actions),
+                max_active_stages=self._max_active_stages,
+            )
+            if unshard_lookahead != (self._max_active_stages,) * len(actions):
+                raise ValueError(
+                    "unshard_lookahead cannot be applied to an already-lowered "
+                    "compute_comms schedule; use format='compute_only'"
+                )
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = []
                 for action in actions[rank]:
@@ -2776,9 +2836,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             )
 
             # Perform schedule lowering
+            unshard_lookahead = _resolve_unshard_lookahead(
+                self._unshard_lookahead,
+                num_pp_ranks=len(actions),
+                max_active_stages=self._max_active_stages,
+            )
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
-                    actions[rank], max_active_stages=self._max_active_stages
+                    actions[rank],
+                    max_active_stages=self._max_active_stages,
+                    unshard_lookahead=unshard_lookahead[rank],
                 )
                 self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
                     self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
@@ -3201,6 +3268,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         super().__init__(
             stages=stages,
@@ -3212,6 +3280,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -3427,6 +3496,14 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
 
     1. pp_group_size = 4, n_microbatches = 10. We will have num_rounds = 2 and n_microbatches % 2 is 0.
     2. pp_group_size = 4, n_microbatches = 3. We will have num_rounds = 1 and n_microbatches % 1 is 0.
+
+    Args:
+        max_active_stages: Maximum number of local FSDP stages whose unsharded
+            parameters may remain resident.
+        unshard_lookahead: Number of upcoming resident stages allowed to issue
+            asynchronous unshards. ``"full"`` matches ``max_active_stages``;
+            ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
+            supplies one integer per pipeline rank.
     """
 
     def __init__(
@@ -3442,6 +3519,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3456,6 +3534,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3555,6 +3634,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3571,6 +3651,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3756,6 +3837,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3772,6 +3854,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3946,6 +4029,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3962,6 +4046,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            unshard_lookahead=unshard_lookahead,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"

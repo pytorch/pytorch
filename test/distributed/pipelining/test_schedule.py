@@ -51,8 +51,10 @@ from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     RECV_B,
     RECV_F,
+    REDUCE_GRAD,
     RESHARD,
     SEND_B,
+    SEND_F,
     UNSHARD,
     W,
 )
@@ -1054,6 +1056,246 @@ class TestSchedulePlan(TestCase):
         self.assertEqual(count_stage_15_unshards(default_schedule), 4)
         self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
 
+    @staticmethod
+    def _interleaved_schedule(*, unshard_lookahead="full"):
+        stages = [
+            MockPipelineStage(group_size=4, group_rank=3, num_stages=16)
+            for _ in range(4)
+        ]
+        return ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+            max_active_stages=4,
+            unshard_lookahead=unshard_lookahead,
+        )
+
+    @staticmethod
+    def _unshards_before_first_compute(actions):
+        count = 0
+        for action in actions:
+            if action.computation_type == UNSHARD:
+                count += 1
+            elif action.is_compute_op:
+                break
+        return count
+
+    def test_unshard_lookahead_full_preserves_residency_window(self):
+        schedule = self._interleaved_schedule()
+        self.assertEqual(
+            [
+                self._unshards_before_first_compute(
+                    schedule.pipeline_order_with_comms[rank]
+                )
+                for rank in range(4)
+            ],
+            [4, 4, 4, 4],
+        )
+
+    def test_unshard_lookahead_tuple_selects_each_rank(self):
+        schedule = self._interleaved_schedule(unshard_lookahead=(1, 2, 3, 4))
+        self.assertEqual(
+            [
+                self._unshards_before_first_compute(
+                    schedule.pipeline_order_with_comms[rank]
+                )
+                for rank in range(4)
+            ],
+            [1, 2, 3, 4],
+        )
+
+    def test_unshard_lookahead_auto_is_rank_aware(self):
+        schedule = self._interleaved_schedule(unshard_lookahead="auto")
+        self.assertEqual(
+            [
+                self._unshards_before_first_compute(
+                    schedule.pipeline_order_with_comms[rank]
+                )
+                for rank in range(4)
+            ],
+            [2, 3, 4, 4],
+        )
+
+    def test_dual_pipe_overlap_keeps_atomic_stages_resident(self):
+        stages = [MockPipelineStage(group_size=4, num_stages=8) for _ in range(2)]
+        schedule = ScheduleDualPipeV(
+            stages,
+            n_microbatches=8,
+            max_active_stages=2,
+            unshard_lookahead=(1, 1, 1, 1),
+        )
+
+        for rank, actions in schedule.pipeline_order_with_comms.items():
+            active_stages = set()
+            for action in actions:
+                if action.computation_type == UNSHARD:
+                    active_stages.add(action.stage_index)
+                elif action.computation_type == RESHARD:
+                    active_stages.remove(action.stage_index)
+                elif action.computation_type == OVERLAP_F_B:
+                    self.assertIsNotNone(action.sub_actions)
+                    required_stages = {
+                        sub_action.stage_index for sub_action in action.sub_actions
+                    }
+                    self.assertTrue(
+                        required_stages <= active_stages,
+                        f"rank {rank} executes {action} with active stages "
+                        f"{active_stages}",
+                    )
+                    self.assertLessEqual(len(active_stages), 2)
+
+    @parametrize(
+        "lookahead,error",
+        [
+            (None, "must be 'full', 'auto', or a tuple"),
+            (True, "must be 'full', 'auto', or a tuple"),
+            (2, "must be 'full', 'auto', or a tuple"),
+            ("default", "must be 'full', 'auto', or a tuple"),
+            ("adaptive", "must be 'full', 'auto', or a tuple"),
+            ([1, 2, 3, 4], "must be 'full', 'auto', or a tuple"),
+            ((1, 2, 3), "tuple length must equal"),
+            ((1, 2, 3, 5), r"unshard_lookahead\[3\]"),
+            ((1, 2, 3, False), r"unshard_lookahead\[3\]"),
+        ],
+    )
+    def test_unshard_lookahead_rejects_invalid_values(self, lookahead, error):
+        with self.assertRaisesRegex(ValueError, error):
+            self._interleaved_schedule(unshard_lookahead=lookahead)
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleLoopedBFS,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_unshard_lookahead_preserves_non_prefetch_work(self, ScheduleClass):
+        num_local_stages = (
+            2 if ScheduleClass in (ScheduleZBVZeroBubble, ScheduleDualPipeV) else 4
+        )
+        group_size = 4
+        num_stages = num_local_stages * group_size
+
+        def build(lookahead):
+            stages = [
+                MockPipelineStage(group_size=group_size, num_stages=num_stages)
+                for _ in range(num_local_stages)
+            ]
+            return ScheduleClass(
+                stages,
+                n_microbatches=16,
+                max_active_stages=num_local_stages,
+                unshard_lookahead=lookahead,
+            )
+
+        full = build("full")
+        p2p = (SEND_F, SEND_B, RECV_F, RECV_B)
+
+        for lookahead in ((1,) * group_size, "auto"):
+            staggered = build(lookahead)
+            changed_positions = []
+            for rank in range(group_size):
+                with self.subTest(lookahead=lookahead, rank=rank):
+                    staggered_actions = staggered.pipeline_order_with_comms[rank]
+                    full_actions = full.pipeline_order_with_comms[rank]
+                    self.assertEqual(
+                        sum(a.computation_type == UNSHARD for a in staggered_actions),
+                        sum(a.computation_type == UNSHARD for a in full_actions),
+                    )
+                    self.assertEqual(
+                        sum(a.computation_type == RESHARD for a in staggered_actions),
+                        sum(a.computation_type == RESHARD for a in full_actions),
+                    )
+                    self.assertEqual(
+                        [
+                            a
+                            for a in staggered_actions
+                            if a.computation_type != UNSHARD
+                            and a.computation_type not in p2p
+                        ],
+                        [
+                            a
+                            for a in full_actions
+                            if a.computation_type != UNSHARD
+                            and a.computation_type not in p2p
+                        ],
+                    )
+                    self.assertEqual(
+                        {
+                            kind: sum(
+                                action.computation_type == kind
+                                for action in staggered_actions
+                            )
+                            for kind in p2p
+                        },
+                        {
+                            kind: sum(
+                                action.computation_type == kind
+                                for action in full_actions
+                            )
+                            for kind in p2p
+                        },
+                    )
+                    self.assertEqual(
+                        _assign_pipeline_recv_buffer_slots(
+                            staggered_actions, has_backward=True
+                        ),
+                        _assign_pipeline_recv_buffer_slots(
+                            full_actions, has_backward=True
+                        ),
+                    )
+                    staggered_positions = [
+                        index
+                        for index, action in enumerate(staggered_actions)
+                        if action.computation_type in p2p
+                    ]
+                    full_positions = [
+                        index
+                        for index, action in enumerate(full_actions)
+                        if action.computation_type in p2p
+                    ]
+                    changed_positions.append(staggered_positions != full_positions)
+            semantic_change = lookahead != "auto" or num_local_stages > 2
+            self.assertEqual(any(changed_positions), semantic_change)
+
+            def simulation_actions(actions):
+                result = []
+                for action in actions:
+                    if action.computation_type in (UNSHARD, RESHARD, REDUCE_GRAD):
+                        continue
+                    if action.computation_type == OVERLAP_F_B:
+                        self.assertIsNotNone(action.sub_actions)
+                        result.extend(action.sub_actions)
+                    else:
+                        result.append(action)
+                return result
+
+            _simulate_comms_compute(
+                {
+                    rank: simulation_actions(actions)
+                    for rank, actions in staggered.pipeline_order_with_comms.items()
+                },
+                lambda stage: staggered.stage_index_to_group_rank[stage],
+                num_stages,
+            )
+
+    def test_unshard_lookahead_rejects_prelowered_schedule(self):
+        schedule = self._interleaved_schedule(unshard_lookahead=(2, 2, 2, 2))
+        with self.assertRaisesRegex(ValueError, "already-lowered"):
+            schedule._prepare_schedule_with_comms(
+                schedule.pipeline_order_with_comms,
+                format="compute_comms",
+            )
+
+    def test_full_tuple_accepts_prelowered_schedule(self):
+        schedule = self._interleaved_schedule(unshard_lookahead=(4, 4, 4, 4))
+        schedule._prepare_schedule_with_comms(
+            schedule.pipeline_order_with_comms,
+            format="compute_comms",
+        )
+
     @parametrize(
         "ScheduleClass",
         [ScheduleInterleaved1F1B, ScheduleInterleavedZeroBubble],
@@ -1248,7 +1490,10 @@ class TestScheduleLowering(ScheduleLoweringTestBase):
         compute_sch = self._parse_actions(test_info["compute"])
         expected_comms_sch = self._parse_actions(test_info["comms"])
 
-        comms_sch = _add_unshard_reshard(compute_sch)
+        comms_sch = _add_unshard_reshard(
+            compute_sch,
+            unshard_lookahead=3,
+        )
         for expected, actual in zip(expected_comms_sch, comms_sch):
             self.assertEqual(
                 expected,
@@ -1258,6 +1503,54 @@ class TestScheduleLowering(ScheduleLoweringTestBase):
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
+
+    def test_unshard_lookahead_one_lowers_steady_state(self):
+        compute = self._parse_actions(["0F0", "1F0", "2F0", "0B0", "1B0", "2B0"])
+        expected = self._parse_actions(
+            [
+                "0UNSHARD",
+                "0F0",
+                "1UNSHARD",
+                "1F0",
+                "2UNSHARD",
+                "2F0",
+                "0B0",
+                "0RESHARD",
+                "1B0",
+                "1RESHARD",
+                "2B0",
+                "2RESHARD",
+            ]
+        )
+
+        self.assertEqual(
+            _add_unshard_reshard(compute, max_active_stages=3, unshard_lookahead=1),
+            expected,
+        )
+
+    def test_overlap_unshards_all_stages_in_atomic_action(self):
+        overlap = _Action(
+            -1,
+            OVERLAP_F_B,
+            None,
+            (_Action(0, F, 0), _Action(1, B, 0)),
+        )
+        lowered = _add_unshard_reshard(
+            [overlap], max_active_stages=2, unshard_lookahead=1
+        )
+
+        self.assertEqual(
+            lowered,
+            [
+                _Action(0, UNSHARD, None),
+                _Action(1, UNSHARD, None),
+                overlap,
+                _Action(0, RESHARD, None),
+                _Action(1, RESHARD, None),
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "exceeding max_active_stages=1"):
+            _add_unshard_reshard([overlap], max_active_stages=1, unshard_lookahead=1)
 
     @parametrize(
         "test_info",
