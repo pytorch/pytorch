@@ -3044,9 +3044,10 @@ class TMACompatibilityChecker:
         )
         if self.dtype not in supported_dtypes:
             log.debug(
-                "%s dtype %s is not supported by this descriptor backend.",
+                "%s dtype %s is not in %s.",
                 self.failed_debug_prefix,
                 self.dtype,
+                supported_dtypes,
             )
             return False
 

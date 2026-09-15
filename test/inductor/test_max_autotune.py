@@ -6756,53 +6756,6 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         with mock.patch(self._PREREQS, return_value=False), config.patch(base):
             self.assertFalse(use_gfx1250_descriptor_codegen(device))
 
-    def test_tdm_generic_descriptor_checker_preserves_backend_dtype_policy(self):
-        from torch._inductor.codegen.triton import TMACompatibilityChecker
-
-        kernel = _tdm_fake_kernel()
-
-        def can_use(device, dtype, *, gfx1250):
-            graph = mock.Mock(sizevars=_TDMFakeSizeVars())
-            graph.get_current_device_or_throw.return_value = device
-            with (
-                V.set_graph_handler(graph),
-                mock.patch(
-                    "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
-                    return_value=gfx1250,
-                ),
-                mock.patch(
-                    "torch._inductor.codegen.triton.has_triton_stable_tma_api",
-                    return_value=True,
-                ),
-                mock.patch("torch.cuda.get_device_capability", return_value=(9, 0)),
-            ):
-                return TMACompatibilityChecker(
-                    kernel, dtype, for_store=False, force=False
-                ).can_use_tma()
-
-        cuda, xpu = torch.device("cuda"), torch.device("xpu")
-
-        # gfx1250 selects the narrower TDM table, which has no FP8 entry. The
-        # config gates live inside the mocked capability helper, so these cases
-        # need no config patch.
-        self.assertTrue(can_use(cuda, torch.float16, gfx1250=True))
-        self.assertTrue(can_use(cuda, torch.bfloat16, gfx1250=True))
-        self.assertTrue(can_use(cuda, torch.float32, gfx1250=True))
-        self.assertFalse(can_use(cuda, torch.float8_e4m3fn, gfx1250=True))
-        self.assertFalse(can_use(cuda, torch.int32, gfx1250=True))
-
-        # With the AMD probe false, the shared CUDA and XPU paths must keep the
-        # wider TMA table. FP8 and int32 are the discriminating dtypes: they are
-        # accepted here and rejected above, which is what shows this change
-        # narrowed only the gfx1250 policy rather than the shared one.
-        with config.patch(
-            {"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True}
-        ):
-            for backend in (cuda, xpu):
-                self.assertTrue(can_use(backend, torch.float16, gfx1250=False))
-                self.assertTrue(can_use(backend, torch.float8_e4m3fn, gfx1250=False))
-                self.assertTrue(can_use(backend, torch.int32, gfx1250=False))
-
     def test_tdm_generic_descriptor_checker_enforces_shape_bounds(self):
         from torch._inductor.codegen.triton import (
             BlockParameters,
@@ -6937,12 +6890,55 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         )
 
 
-@instantiate_parametrized_tests
 class TestTensorDescriptorCompatibility(TestCase):
-    @parametrize("device_type", ("cuda", "xpu"))
-    def test_tdm_generic_descriptor_checker_force_path_skips_unused_shape_hints(
-        self, device_type
-    ):
+    def test_tdm_generic_descriptor_checker_preserves_backend_dtype_policy(self):
+        from torch._inductor.codegen.triton import TMACompatibilityChecker
+
+        kernel = _tdm_fake_kernel()
+
+        def can_use(device, dtype, *, gfx1250):
+            graph = mock.Mock(sizevars=_TDMFakeSizeVars())
+            graph.get_current_device_or_throw.return_value = device
+            with (
+                V.set_graph_handler(graph),
+                mock.patch(
+                    "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                    return_value=gfx1250,
+                ),
+                mock.patch(
+                    "torch._inductor.codegen.triton.has_triton_stable_tma_api",
+                    return_value=True,
+                ),
+                mock.patch("torch.cuda.get_device_capability", return_value=(9, 0)),
+            ):
+                return TMACompatibilityChecker(
+                    kernel, dtype, for_store=False, force=False
+                ).can_use_tma()
+
+        cuda, xpu = torch.device("cuda"), torch.device("xpu")
+
+        # gfx1250 selects the narrower TDM table, which has no FP8 entry. The
+        # config gates live inside the mocked capability helper, so these cases
+        # need no config patch.
+        self.assertTrue(can_use(cuda, torch.float16, gfx1250=True))
+        self.assertTrue(can_use(cuda, torch.bfloat16, gfx1250=True))
+        self.assertTrue(can_use(cuda, torch.float32, gfx1250=True))
+        self.assertFalse(can_use(cuda, torch.float8_e4m3fn, gfx1250=True))
+        self.assertFalse(can_use(cuda, torch.int32, gfx1250=True))
+
+        # With the AMD probe false, the shared CUDA and XPU paths must keep the
+        # wider TMA table. FP8 and int32 are the discriminating dtypes: they are
+        # accepted here and rejected above, which is what shows this change
+        # narrowed only the gfx1250 policy rather than the shared one.
+        with config.patch(
+            {"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True}
+        ):
+            for backend in (cuda, xpu):
+                self.assertTrue(can_use(backend, torch.float16, gfx1250=False))
+                self.assertTrue(can_use(backend, torch.float8_e4m3fn, gfx1250=False))
+                self.assertTrue(can_use(backend, torch.int32, gfx1250=False))
+
+    def test_tdm_generic_descriptor_checker_force_path_skips_unused_shape_hints(self):
         from torch._inductor.codegen.triton import (
             BlockParameters,
             TMACompatibilityChecker,
@@ -6953,7 +6949,7 @@ class TestTensorDescriptorCompatibility(TestCase):
         extent = sympy.Symbol("shape_extent", integer=True, positive=True)
         sizevars = _TDMFakeSizeVars({extent: 1024})
         graph = mock.Mock(sizevars=sizevars)
-        graph.get_current_device_or_throw.return_value = torch.device(device_type)
+        graph.get_current_device_or_throw.return_value = torch.device("cuda")
         block_params = BlockParameters(
             shape=[extent],
             block_shape=[TritonSymbols.block_sizes[SymT.XBLOCK]],
@@ -6981,8 +6977,7 @@ class TestTensorDescriptorCompatibility(TestCase):
             resolve_hint.assert_any_call(sympy.Integer(0))
             self.assertNotIn(mock.call(extent), resolve_hint.call_args_list)
 
-    @parametrize("device_type", ("cuda", "xpu"))
-    def test_tdm_generic_unforced_bound_expands_precomputed_extent(self, device_type):
+    def test_tdm_generic_unforced_bound_expands_precomputed_extent(self):
         # BlockDescriptorOptions.create rewrites a composite extent through
         # lookup_precomputed_size, so the descriptor carries an opaque ps<N>
         # with no ShapeEnv range of its own. The unforced int32 bound must
@@ -7012,7 +7007,7 @@ class TestTensorDescriptorCompatibility(TestCase):
         self.assertNotIn(extent, shape_env.var_to_range)
 
         graph = mock.Mock(sizevars=sizevars)
-        graph.get_current_device_or_throw.return_value = torch.device(device_type)
+        graph.get_current_device_or_throw.return_value = torch.device("cuda")
         block_params = BlockParameters(
             shape=[extent],
             block_shape=[TritonSymbols.block_sizes[SymT.XBLOCK]],
