@@ -1,6 +1,8 @@
 import collections
 import contextlib
+import functools
 import logging
+import math
 import operator
 from collections import defaultdict
 from collections.abc import Callable
@@ -94,22 +96,20 @@ def _compute_foreach_groups(
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
 ) -> list[int] | None:
     """
-    Compute groups of indices that have the same src/dst dtype and shape.
+    Compute groups with the same dtypes and foreach fast-path eligibility.
 
-    Groups tensors by (src_dtype, dst_dtype, shape) to avoid falling back to the foreach slow path.
+    Tensor lengths may differ across pairs in a CUDA foreach operation. Keep
+    non-contiguous inputs separate so they do not put an otherwise contiguous
+    group on the slow path.
 
     Returns a flat list with -1 as group delimiter, or None if only one group exists.
     For example, groups [[0, 2], [1]] would be encoded as [0, 2, -1, 1].
     """
-    groups: defaultdict[tuple[torch.dtype, torch.dtype, tuple[int, ...]], list[int]] = (
-        defaultdict(list)
+    groups: defaultdict[tuple[torch.dtype, torch.dtype, bool], list[int]] = defaultdict(
+        list
     )
-    for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes)):
-        shape = tuple(
-            _hint_int_or_raise(s, context="all-gather foreach grouping")
-            for s in ag_in.shape
-        )
-        key = (ag_in.dtype, out_dtype, shape)
+    for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes, strict=True)):
+        key = (ag_in.dtype, out_dtype, ag_in.is_contiguous())
         groups[key].append(i)
 
     if len(groups) <= 1:
@@ -683,7 +683,7 @@ def bucket_all_gather_by_mb(
         gm (torch.fx.GraphModule): GraphModule where to bucket all_gathers.
         bucket_cap_mb_by_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
             in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
-            to specify different sizes of the buckets at the start,
+            specifying different sizes of the buckets at the start,
             as first all_gather is usually exposed.  Interface of bucket_cap_mb_by_bucket_idx
             is `bucket_cap_mb_by_bucket_idx_default` function that is default value for `bucket_cap_mb_by_bucket_idx`.
         filter_wait_node (Callable[[torch.fx.Node], bool] | None): If specified,
@@ -721,7 +721,7 @@ def bucket_reduce_scatter_by_mb(
         gm (torch.fx.GraphModule): GraphModule where to bucket reduce_scatters.
         bucket_cap_mb_by_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
             in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
-            to specify different sizes of the buckets.
+            specifying different sizes of the buckets.
         filter_wait_node (Callable[[torch.fx.Node], bool] | None): If specified,
             only reduce_scatter nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
 
@@ -778,21 +778,265 @@ def bucket_all_reduce(
 def _pre_bucket_reduce_scatter(
     rs_ins: list[torch.Tensor],
     group_size: int,
+    unpadded_input_indices: list[int] | None = None,
 ) -> torch.Tensor:
-    rs_ins_flattened = [x.reshape(group_size, -1) for x in rs_ins]
-    new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
-    return new_rs_in
+    # ``unpadded_input_indices`` identifies logical inputs whose right-zero-padding
+    # was removed. The fake implementation uses it to infer the packed output size.
+    nonempty_rs_ins = [rs_in for rs_in in rs_ins if rs_in.numel() != 0]
+    if not nonempty_rs_ins:
+        return rs_ins[0].new_empty(0)
+    return torch._chunk_cat(nonempty_rs_ins, 0, group_size).flatten()
 
 
 def _pre_bucket_reduce_scatter_fake(
     rs_ins: list[torch.Tensor],
     group_size: int,
+    unpadded_input_indices: list[int] | None = None,
 ) -> torch.Tensor:
-    out_numel = sum(rs_in.numel() for rs_in in rs_ins)
+    # Round only logical inputs whose right-zero-padding was removed. Other inputs
+    # are already packed and may have dimensions whose divisibility is symbolic.
+    unpadded_input_index_set = OrderedSet(unpadded_input_indices or ())
+    out_numel = sum(
+        (
+            ((rs_in.shape[0] + group_size - 1) // group_size)
+            * group_size
+            * math.prod(rs_in.shape[1:])
+            if index in unpadded_input_index_set
+            else rs_in.numel()
+        )
+        for index, rs_in in enumerate(rs_ins)
+    )
     return torch.empty((out_numel,), device=rs_ins[0].device, dtype=rs_ins[0].dtype)
 
 
 _pre_bucket_reduce_scatter.register_fake(_pre_bucket_reduce_scatter_fake)
+
+
+def _match_dim0_padded_cat(
+    node: torch.fx.Node,
+    group_size: int,
+) -> tuple[torch.fx.Node, OrderedSet[torch.fx.Node]] | None:
+    """Match rank-major dim-0 chunking with right-zero-padding::
+
+        src -> aten.split(src, chunk_size, dim=0)
+            -> getitem(rank) -> right-zero-pad to chunk_size --+
+            -> ...                                             +-> cat(dim=0)
+
+    Missing chunks may be represented by zero-sized ``new_zeros`` tensors
+    before padding. The matcher verifies the complete static packing semantics
+    and does not depend on which frontend produced the subgraph.
+    """
+    if (
+        node.op != "call_function"
+        or node.target != torch.ops.aten.cat.default
+        or type(group_size) is not int
+        or group_size <= 0
+        or len(node.users) != 1
+    ):
+        return None
+
+    cat_inputs = node.args[0] if node.args else node.kwargs.get("tensors")
+    cat_dim = _meta_arg(
+        node.args[1] if len(node.args) > 1 else node.kwargs.get("dim", 0)
+    )
+    if (
+        type(cat_dim) is not int
+        or not isinstance(cat_inputs, (list, tuple))
+        or len(cat_inputs) != group_size
+    ):
+        return None
+
+    def static_shape(n: torch.fx.Node) -> tuple[int, ...] | None:
+        value = n.meta.get("val")
+        if not isinstance(value, torch.Tensor):
+            return None
+        shape = tuple(value.shape)
+        if not all(type(size) is int for size in shape):
+            return None
+        return shape  # pyrefly: ignore[bad-return]
+
+    def tensor_metadata(
+        n: torch.fx.Node,
+    ) -> tuple[torch.dtype, torch.device, torch.layout] | None:
+        value = n.meta.get("val")
+        if not isinstance(value, torch.Tensor):
+            return None
+        return value.dtype, value.device, value.layout
+
+    def unwrap_pad(
+        n: torch.fx.Node,
+    ) -> tuple[torch.fx.Node, tuple[int, ...] | None] | None:
+        if (
+            n.op != "call_function"
+            or n.target != torch.ops.aten.constant_pad_nd.default
+        ):
+            return n, None
+        src = n.args[0] if n.args else n.kwargs.get("self")
+        padding = n.args[1] if len(n.args) > 1 else n.kwargs.get("pad")
+        value = n.args[2] if len(n.args) > 2 else n.kwargs.get("value", 0)
+        if not isinstance(src, torch.fx.Node) or not isinstance(padding, (list, tuple)):
+            return None
+        padding = tuple(_meta_arg(size) for size in padding)
+        if not all(type(size) is int for size in padding) or _meta_arg(value) != 0:
+            return None
+        return src, padding  # pyrefly: ignore[bad-return]
+
+    split_node: torch.fx.Node | None = None
+    chunks: list[tuple[torch.fx.Node, tuple[int, ...] | None]] = []
+    for cat_input in cat_inputs:
+        if not isinstance(cat_input, torch.fx.Node):
+            return None
+        unwrapped = unwrap_pad(cat_input)
+        if unwrapped is None:
+            return None
+        chunks.append(unwrapped)
+        chunk, _ = unwrapped
+        getitem = (
+            chunk
+            if chunk.op == "call_function" and chunk.target == operator.getitem
+            else chunk.args[0]
+            if (
+                chunk.op == "call_function"
+                and chunk.target == torch.ops.aten.new_zeros.default
+                and chunk.args
+                and isinstance(chunk.args[0], torch.fx.Node)
+                and chunk.args[0].op == "call_function"
+                and chunk.args[0].target == operator.getitem
+            )
+            else None
+        )
+        if not isinstance(getitem, torch.fx.Node):
+            return None
+        candidate = getitem.args[0]
+        if not isinstance(candidate, torch.fx.Node):
+            return None
+        if split_node is None:
+            split_node = candidate
+        elif split_node is not candidate:
+            return None
+
+    if (
+        split_node is None
+        or split_node.op != "call_function"
+        or split_node.target != torch.ops.aten.split.Tensor
+        or len(split_node.args) < 2
+        or not isinstance(split_node.args[0], torch.fx.Node)
+    ):
+        return None
+
+    split_dim = _meta_arg(
+        split_node.args[2]
+        if len(split_node.args) > 2
+        else split_node.kwargs.get("dim", 0)
+    )
+    split_size = _meta_arg(split_node.args[1])
+    src = split_node.args[0]
+    src_shape = static_shape(src)
+    cat_shape = static_shape(node)
+    src_metadata = tensor_metadata(src)
+    if (
+        type(split_dim) is not int
+        or type(split_size) is not int
+        or split_size <= 0
+        or src_shape is None
+        or not src_shape
+        or src_shape[0] <= 0
+        or cat_shape is None
+        or cat_dim not in (0, -len(cat_shape))
+        or split_dim not in (0, -len(src_shape))
+        or src_metadata is None
+        or src_metadata[2] != torch.strided
+        or tensor_metadata(node) != src_metadata
+        or not src.meta["val"].is_contiguous()
+        or not node.meta["val"].is_contiguous()
+        or len(src.users) != 1
+        or split_node not in src.users
+    ):
+        return None
+
+    expected_split_size = (src_shape[0] + group_size - 1) // group_size
+    if split_size != expected_split_size:
+        return None
+    num_nonempty_chunks = (src_shape[0] + split_size - 1) // split_size
+    chunk_shape = (split_size,) + src_shape[1:]
+    if cat_shape != (split_size * group_size,) + src_shape[1:]:
+        return None
+
+    packing_nodes: OrderedSet[torch.fx.Node] = OrderedSet([node, split_node])
+    first_getitem: torch.fx.Node | None = None
+    for index, (cat_input, (chunk, padding)) in enumerate(
+        zip(cat_inputs, chunks, strict=True)
+    ):
+        if (
+            not isinstance(cat_input, torch.fx.Node)
+            or static_shape(cat_input) != chunk_shape
+            or tensor_metadata(cat_input) != src_metadata
+            or not cat_input.meta["val"].is_contiguous()
+        ):
+            return None
+        if padding is not None:
+            packing_nodes.add(cat_input)
+
+        if index < num_nonempty_chunks:
+            actual_chunk_size = min(
+                split_size,
+                src_shape[0] - index * split_size,
+            )
+            expected_padding = (0, 0) * (len(src_shape) - 1) + (
+                0,
+                split_size - actual_chunk_size,
+            )
+            if (
+                chunk.op != "call_function"
+                or chunk.target != operator.getitem
+                or chunk.args != (split_node, index)
+                or (padding or (0,) * len(expected_padding)) != expected_padding
+            ):
+                return None
+            if first_getitem is None:
+                first_getitem = chunk
+            packing_nodes.add(chunk)
+            continue
+
+        expected_padding = (0, 0) * (len(src_shape) - 1) + (0, split_size)
+        if (
+            padding != expected_padding
+            or chunk.op != "call_function"
+            or chunk.target != torch.ops.aten.new_zeros.default
+            or len(chunk.args) < 2
+            or chunk.args[0] is not first_getitem
+            or not isinstance(chunk.args[1], (list, tuple))
+            or tuple(chunk.args[1]) != (0,) + src_shape[1:]
+            or tensor_metadata(chunk) != src_metadata
+            or chunk.kwargs.get("dtype") not in (None, src_metadata[0])
+            or chunk.kwargs.get("layout") not in (None, src_metadata[2])
+            or chunk.kwargs.get("pin_memory") not in (None, False)
+            or any(
+                key not in ("dtype", "layout", "device", "pin_memory")
+                for key in chunk.kwargs
+            )
+        ):
+            return None
+        new_zeros_device = chunk.kwargs.get("device")
+        if new_zeros_device is not None and (
+            not isinstance(new_zeros_device, (str, torch.device))
+            or torch.device(new_zeros_device) != src_metadata[1]
+        ):
+            return None
+        packing_nodes.add(chunk)
+
+    return src, packing_nodes
+
+
+def _erase_dead_packing_nodes(
+    graph: torch.fx.Graph,
+    packing_nodes: OrderedSet[torch.fx.Node],
+) -> None:
+    for packing_node in reversed(
+        [graph_node for graph_node in graph.nodes if graph_node in packing_nodes]
+    ):
+        if not packing_node.users:
+            graph.erase_node(packing_node)
 
 
 def reduce_scatter_merge_fn_to_trace_custom_ops(
@@ -802,11 +1046,23 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
     device: torch.device,  # type: ignore[name-defined]
+    rs_input_shapes: list[torch.Size] | None = None,
+    unpadded_input_indices: list[int] | None = None,
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
-    new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
-    new_out_numels = [x.numel() // group_size for x in rs_ins]
+    if rs_input_shapes is None:
+        new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
+        new_out_numels = [x.numel() // group_size for x in rs_ins]
+    else:
+        new_out_sizes = [
+            (shape[0] // group_size,) + shape[1:] for shape in rs_input_shapes
+        ]
+        new_out_numels = [math.prod(shape) // group_size for shape in rs_input_shapes]
 
-    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(rs_ins, group_size)
+    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(
+        rs_ins,
+        group_size,
+        unpadded_input_indices,
+    )
 
     # TODO - either use torch.cat or make sure inductor foreach codegen
     # fires more reliably
@@ -995,6 +1251,62 @@ def _pre_bucket_all_gather_fake(
 _pre_bucket_all_gather.register_fake(_pre_bucket_all_gather_fake)
 
 
+def _unpack_bucketed_all_gather_output(
+    wait_tensor: torch.Tensor,
+    ins_sizes: list[torch.Size],
+    ins_split_sizes: list[int | torch.SymInt],
+    out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
+    group_size: int,
+    bucket_dtype: torch.dtype,  # type: ignore[name-defined]
+) -> list[torch.Tensor]:
+    new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
+    static_split_sizes = [size for size in ins_split_sizes if isinstance(size, int)]
+    has_symbolic_split_size = len(static_split_sizes) != len(ins_split_sizes)
+    if not has_symbolic_split_size and sum(static_split_sizes) == 0:
+        return [
+            torch.empty(
+                (shape[0] * group_size,) + shape[1:],
+                dtype=out_dtype,
+                device=wait_tensor.device,
+            )
+            for shape, out_dtype in zip(ins_sizes, out_dtypes, strict=True)
+        ]
+    if group_size == 1 or len(ins_sizes) == 1 or has_symbolic_split_size:
+        outs_bucket_dtype = torch.split_with_sizes(
+            new_ag_out_reshaped,
+            ins_split_sizes,
+            dim=1,
+        )
+        return [
+            output.view(out_dtype).reshape((shape[0] * group_size,) + shape[1:])
+            for output, shape, out_dtype in zip(
+                outs_bucket_dtype, ins_sizes, out_dtypes, strict=True
+            )
+        ]
+
+    outputs = [
+        torch.empty(
+            math.prod(shape) * group_size,
+            dtype=out_dtype,
+            device=wait_tensor.device,
+        )
+        for shape, out_dtype in zip(ins_sizes, out_dtypes, strict=True)
+    ]
+    outputs_bucket_dtype = [
+        output.view(group_size, -1).view(bucket_dtype) for output in outputs
+    ]
+    torch.split_with_sizes_copy(
+        new_ag_out_reshaped,
+        ins_split_sizes,
+        dim=1,
+        out=outputs_bucket_dtype,
+    )
+    return [
+        output.reshape((shape[0] * group_size,) + shape[1:])
+        for output, shape in zip(outputs, ins_sizes, strict=True)
+    ]
+
+
 def all_gather_merge_fn_to_trace_custom_ops(
     _ag_ins: list[torch.Tensor],
     group_name: Any,
@@ -1012,7 +1324,7 @@ def all_gather_merge_fn_to_trace_custom_ops(
         for ag_in, out_dtype in zip(ag_ins, out_dtypes)
     ]
     bucket_dtype_size_bytes = dtype.itemsize
-    ins_split_sizes = [
+    ins_split_sizes: list[int | torch.SymInt] = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
     ]
     ag_input_numel = sum(ins_split_sizes)
@@ -1038,17 +1350,14 @@ def all_gather_merge_fn_to_trace_custom_ops(
             new_ag_in, group_size, group_name, out=new_ag_out
         )
     )
-    new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
-    outs_bucket_dtype = torch.split_with_sizes(
-        new_ag_out_reshaped,
+    return _unpack_bucketed_all_gather_output(
+        wait_tensor,
+        ins_sizes,
         ins_split_sizes,
-        dim=1,
+        out_dtypes,
+        group_size,
+        dtype,
     )
-    outs_reshaped = [
-        o.view(out_dtype).reshape((shape[0] * group_size,) + shape[1:])
-        for o, shape, out_dtype in zip(outs_bucket_dtype, ins_sizes, out_dtypes)
-    ]
-    return outs_reshaped
 
 
 def all_gather_merge_fn_to_trace(
@@ -1299,6 +1608,7 @@ def process_collective_bucket(
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
     extra_graph_inps: list[torch.fx.Node] | None = None,
+    input_transform: Callable[[torch.fx.Node], torch.fx.Node] | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     """
     Process a single bucket of collective operation nodes with flexible insertion control.
@@ -1314,6 +1624,8 @@ def process_collective_bucket(
             inputs (appended after tensor inputs). Used for compile-on-one-rank
             graphs where group_name is a Node reference that make_fx proxies
             as an opaque input.
+        input_transform: Optional mapping from each collective input to the
+            tensor that the merged collective should consume.
 
     Returns:
         new_nodes: List of all newly inserted nodes
@@ -1339,6 +1651,8 @@ def process_collective_bucket(
 
         if not isinstance(node_in, torch.fx.Node):  # Ensure node_in is a Node
             raise AssertionError(f"expected node_in to be a Node, got {type(node_in)}")
+        if input_transform is not None:
+            node_in = input_transform(node_in)
         bucket_ins.append(node_in)
         bucket_waits.append(wait_n)
 
@@ -1405,11 +1719,14 @@ def merge_reduce_scatter_bucket(
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
+    """Merge a bucket of compatible reduce-scatter nodes."""
     mode = mode or _default_bucket_mode()
     # Validate bucket consistency
     rs0 = rs_nodes[0]
     rs0_val = rs0.meta["val"]
     _, reduce_op, group_size, group_name = rs0.args
+    if type(group_size) is not int:
+        raise AssertionError(f"expected group size to be int, got {type(group_size)}")
     group_name_str = _resolve_group_name(group_name)
     reduce_dtype = rs0_val.dtype
     device = rs0_val.device
@@ -1427,12 +1744,35 @@ def merge_reduce_scatter_bucket(
                 f"reduce_scatter node {n} does not match bucket parameters"
             )
 
+    input_replacements: dict[torch.fx.Node, torch.fx.Node] = {}
+    unpadded_input_indices: list[int] = []
+    packing_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+    rs_input_shapes: list[torch.Size] = []
+    for index, rs_node in enumerate(rs_nodes):
+        rs_input = rs_node.args[0]
+        if not isinstance(rs_input, torch.fx.Node):
+            raise AssertionError(
+                f"expected reduce_scatter input to be a Node, got {type(rs_input)}"
+            )
+        rs_input_shapes.append(rs_input.meta["val"].shape)
+        if mode and "custom_ops" in mode:
+            match = _match_dim0_padded_cat(rs_input, group_size)
+            if match is not None:
+                src, matched_nodes = match
+                input_replacements[rs_input] = src
+                unpadded_input_indices.append(index)
+                packing_nodes |= matched_nodes
+
     # Choose merge function based on mode
     rs_merge_fn = reduce_scatter_merge_fn_to_trace
     if mode == "coalesced":
         rs_merge_fn = reduce_scatter_merge_fn_coalesced
     elif mode and "custom_ops" in mode:
-        rs_merge_fn = reduce_scatter_merge_fn_to_trace_custom_ops
+        rs_merge_fn = functools.partial(
+            reduce_scatter_merge_fn_to_trace_custom_ops,
+            rs_input_shapes=rs_input_shapes if input_replacements else None,
+            unpadded_input_indices=unpadded_input_indices or None,
+        )
 
     group_name_val = (
         group_name.meta["val"] if isinstance(group_name, torch.fx.Node) else group_name
@@ -1448,7 +1788,7 @@ def merge_reduce_scatter_bucket(
             device,
         )
 
-    return process_collective_bucket(
+    result = process_collective_bucket(
         g,
         rs_nodes,
         rs_merge_fn,
@@ -1458,7 +1798,17 @@ def merge_reduce_scatter_bucket(
         extra_graph_inps=(
             [group_name] if isinstance(group_name, torch.fx.Node) else None
         ),
+        # Feed the unpadded source to the new bucket pack instead of the
+        # materialized padded input consumed by the original reduce-scatter.
+        input_transform=(
+            (lambda node: input_replacements.get(node, node))
+            if input_replacements
+            else None
+        ),
     )
+    # Replacing padded inputs may leave the split/pad/cat packing chain dead.
+    _erase_dead_packing_nodes(g, packing_nodes)
+    return result
 
 
 def merge_all_reduce_bucket(

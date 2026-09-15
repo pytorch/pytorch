@@ -147,6 +147,7 @@ jobs:
     name: cuda13.0-py3.12-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
+    if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}

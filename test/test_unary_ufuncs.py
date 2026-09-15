@@ -18,9 +18,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCPU,
-    onlyCUDA,
-    onlyNativeDeviceTypes,
     ops,
     precisionOverride,
 )
@@ -41,6 +38,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     is_iterable_of_tensors,
     numpy_to_torch_dtype_dict,
     parametrize,
@@ -81,6 +79,7 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs
 # TODO: port test_unary_out_op_mem_overlap
 # TODO: add test for inplace variants erroring on broadcasted inputs
 class TestUnaryUfuncs(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     @ops(
@@ -511,7 +510,6 @@ class TestUnaryUfuncs(TestCase):
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
 
-    @onlyCPU
     def test_nan_to_num_bfloat16(self, device):
         def test_dtype(fn, input, dtype):
             input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
@@ -713,22 +711,6 @@ class TestUnaryUfuncs(TestCase):
         ):
             torch.polygamma(-1, torch.tensor([1.0, 2.0], device=device))
 
-    # TODO resolve with opinfos
-    @onlyCPU
-    def test_op_invert(self, device):
-        res = 0xFFFF - torch.arange(127, dtype=torch.int8)
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.arange(127, dtype=dtype)
-            self.assertEqual(res.to(dtype), ~a)
-
-        self.assertEqual(torch.tensor([True, False]), ~torch.tensor([False, True]))
-
-        # test exceptions
-        for dtype in (torch.half, torch.float, torch.double):
-            a = torch.zeros(10, dtype=dtype)
-            with self.assertRaises(TypeError):
-                ~a
-
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):
         # Constructs random complex values
@@ -803,10 +785,9 @@ class TestUnaryUfuncs(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
-    @onlyCUDA
     @dtypes(torch.complex64)
-    def test_tan_complex_cuda_matches_numpy(self, device, dtype):
-        # Focused accuracy check for complex tan on CUDA against NumPy reference
+    def test_tan_complex_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tan against NumPy reference
         # Includes values near tan singularities on the real axis
         eps = 1e-3
         specials = torch.tensor(
@@ -836,10 +817,9 @@ class TestUnaryUfuncs(TestCase):
         z = torch.complex(real, imag).to(dtype)
         self.compare_with_numpy(torch.tan, np.tan, z)
 
-    @onlyCUDA
     @dtypes(torch.complex64)
-    def test_tanh_complex_cuda_matches_numpy(self, device, dtype):
-        # Focused accuracy check for complex tanh on CUDA against NumPy reference
+    def test_tanh_complex_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tanh against NumPy reference
         real = torch.randn(2048, device=device, dtype=torch.float32) * (2 * math.pi)
         imag = torch.randn(2048, device=device, dtype=torch.float32) * 5.0
         z = torch.complex(real, imag).to(dtype)
@@ -881,7 +861,6 @@ class TestUnaryUfuncs(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
                     _test(op, data[0:sz], data[1 : sz + 1])
 
-    # TODO: run on non-native device types
     # https://github.com/pytorch/pytorch/issues/126474
     @xfailIfTorchDynamo
     @dtypes(torch.double)
@@ -891,79 +870,43 @@ class TestUnaryUfuncs(TestCase):
         positives = torch.randint(1, 100, (2 * sz,), device=device).double()
         ints = torch.randint(-100, 100, (2 * sz,), device=device)
         unary_mem_overlap_cases = [
-            ("abs", doubles, True, True, "cpu"),
-            ("abs", doubles, True, True, "cuda"),
-            ("acos", doubles, True, True, "cpu"),
-            ("acos", doubles, True, True, "cuda"),
-            ("asin", doubles, True, True, "cpu"),
-            ("asin", doubles, True, True, "cuda"),
-            ("atan", doubles, True, True, "cpu"),
-            ("atan", doubles, True, True, "cuda"),
-            ("acosh", doubles, True, True, "cpu"),
-            ("acosh", doubles, True, True, "cuda"),
-            ("asinh", doubles, True, True, "cpu"),
-            ("asinh", doubles, True, True, "cuda"),
-            ("atanh", doubles, True, True, "cpu"),
-            ("atanh", doubles, True, True, "cuda"),
-            ("bitwise_not", ints, True, True, "cpu"),
-            ("bitwise_not", ints, True, True, "cuda"),
-            ("ceil", doubles, True, True, "cpu"),
-            ("ceil", doubles, True, True, "cuda"),
-            ("cos", doubles, True, True, "cpu"),
-            ("cos", doubles, True, True, "cuda"),
-            ("cosh", doubles, True, True, "cpu"),
-            ("cosh", doubles, True, True, "cuda"),
-            ("digamma", doubles, True, True, "cpu"),
-            ("erf", doubles, True, True, "cpu"),
-            ("erf", doubles, True, True, "cuda"),
-            ("erfc", doubles, True, True, "cpu"),
-            ("erfc", doubles, True, True, "cuda"),
-            ("erfinv", doubles, True, True, "cpu"),
-            ("erfinv", doubles, True, True, "cuda"),
-            ("exp", doubles, True, True, "cpu"),
-            ("exp", doubles, True, True, "cuda"),
-            ("exp2", doubles, True, True, "cpu"),
-            ("exp2", doubles, True, True, "cuda"),
-            ("expm1", doubles, True, True, "cpu"),
-            ("expm1", doubles, True, True, "cuda"),
-            ("floor", doubles, True, True, "cpu"),
-            ("floor", doubles, True, True, "cuda"),
-            ("frac", doubles, True, True, "cpu"),
-            ("frac", doubles, True, True, "cuda"),
-            ("i0", doubles, True, True, "cpu"),
-            ("i0", doubles, True, True, "cuda"),
-            ("log", positives, True, True, "cpu"),
-            ("log", positives, True, True, "cuda"),
-            ("log10", positives, True, True, "cpu"),
-            ("log10", positives, True, True, "cuda"),
-            ("log1p", positives, True, True, "cpu"),
-            ("log1p", positives, True, True, "cuda"),
-            ("log2", positives, True, True, "cpu"),
-            ("log2", positives, True, True, "cuda"),
-            ("neg", doubles, True, True, "cpu"),
-            ("neg", doubles, True, True, "cuda"),
-            ("reciprocal", doubles, True, True, "cpu"),
-            ("reciprocal", doubles, True, True, "cuda"),
-            ("round", doubles, True, True, "cpu"),
-            ("round", doubles, True, True, "cuda"),
-            ("rsqrt", positives, True, True, "cpu"),
-            ("rsqrt", positives, True, True, "cuda"),
-            ("sin", doubles, True, True, "cpu"),
-            ("sin", doubles, True, True, "cuda"),
-            ("sinh", doubles, True, True, "cpu"),
-            ("sinh", doubles, True, True, "cuda"),
-            ("sigmoid", doubles, True, True, "cpu"),
-            ("sigmoid", doubles, True, True, "cuda"),
-            ("logit", doubles, True, True, "cpu"),
-            ("logit", doubles, True, True, "cuda"),
-            ("sqrt", doubles, True, True, "cpu"),
-            ("sqrt", doubles, True, True, "cuda"),
-            ("tan", doubles, True, True, "cpu"),
-            ("tan", doubles, True, True, "cuda"),
-            ("tanh", doubles, True, True, "cpu"),
-            ("tanh", doubles, True, True, "cuda"),
-            ("trunc", doubles, True, True, "cpu"),
-            ("trunc", doubles, True, True, "cuda"),
+            ("abs", doubles, True, True),
+            ("acos", doubles, True, True),
+            ("asin", doubles, True, True),
+            ("atan", doubles, True, True),
+            ("acosh", doubles, True, True),
+            ("asinh", doubles, True, True),
+            ("atanh", doubles, True, True),
+            ("bitwise_not", ints, True, True),
+            ("ceil", doubles, True, True),
+            ("cos", doubles, True, True),
+            ("cosh", doubles, True, True),
+            ("digamma", doubles, True, True),
+            ("erf", doubles, True, True),
+            ("erfc", doubles, True, True),
+            ("erfinv", doubles, True, True),
+            ("exp", doubles, True, True),
+            ("exp2", doubles, True, True),
+            ("expm1", doubles, True, True),
+            ("floor", doubles, True, True),
+            ("frac", doubles, True, True),
+            ("i0", doubles, True, True),
+            ("log", positives, True, True),
+            ("log10", positives, True, True),
+            ("log1p", positives, True, True),
+            ("log2", positives, True, True),
+            ("neg", doubles, True, True),
+            ("reciprocal", doubles, True, True),
+            ("round", doubles, True, True),
+            ("rsqrt", positives, True, True),
+            ("sin", doubles, True, True),
+            ("sinh", doubles, True, True),
+            ("sigmoid", doubles, True, True),
+            ("logit", doubles, True, True),
+            ("sqrt", doubles, True, True),
+            ("tan", doubles, True, True),
+            ("tanh", doubles, True, True),
+            ("trunc", doubles, True, True),
         ]
 
         for (
@@ -971,10 +914,7 @@ class TestUnaryUfuncs(TestCase):
             inputs,
             has_input_output_mem_overlap_check,
             has_internal_mem_overlap_check,
-            dev,
         ) in unary_mem_overlap_cases:
-            if dev != self.device_type:
-                continue
             out_fn = getattr(torch, fn)
             in_fn = getattr(torch.Tensor, fn + "_")
 
@@ -989,12 +929,11 @@ class TestUnaryUfuncs(TestCase):
                 in_fn,
                 1,
                 dtype,
-                dev,
+                device,
                 expected_failure=not has_internal_mem_overlap_check,
             )
 
     # TODO: opinfo hardshrink
-    @onlyCPU
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardshrink(self, device, dtype):
         data = torch.tensor([1, 0.5, 0.3, 0.6], dtype=dtype, device=device).view(2, 2)
@@ -1016,7 +955,6 @@ class TestUnaryUfuncs(TestCase):
             data.t().hardshrink(0.3),
         )
 
-    @onlyCPU
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardshrink_edge_cases(self, device, dtype) -> None:
         def h(values, l_expected):
@@ -1047,7 +985,6 @@ class TestUnaryUfuncs(TestCase):
 
         test_helper(torch.finfo(dtype).tiny, torch.finfo(dtype).max)
 
-    @onlyCPU
     @slowTest
     @dtypes(torch.float)
     @unittest.skipIf(True, "Insufficient memory on linux.(2|4)xlarge")
@@ -1207,6 +1144,40 @@ class TestUnaryUfuncs(TestCase):
         )
         gradcheck(torch.sinc, a)
 
+    # The order-1 Bessel gradients are indeterminate at x = 0 as written: 0/0 for
+    # j1/i1 (limit 1/2) and (-inf) - (-inf) for y1 (limit +inf). OpInfo sample
+    # generation does not reliably emit exact zeros, and y1's domain floors samples
+    # away from 0, so these special-cased values are only covered here.
+    # The half-precision counterpart lives in test_mps.py: only MPS has fp16/bf16
+    # kernels for these forwards, and this class is not instantiated for MPS.
+    @dtypes(torch.float32, torch.double)
+    @parametrize(
+        "name, expected",
+        (
+            ("bessel_j1", 0.5),
+            ("modified_bessel_i1", 0.5),
+            ("bessel_y1", float("inf")),
+        ),
+    )
+    def test_bessel_zero_limit_gradient(self, device, dtype, name, expected):
+        op = getattr(torch.special, name)
+        x = torch.zeros(4, dtype=dtype, device=device, requires_grad=True)
+        (grad,) = torch.autograd.grad(op(x).sum(), x)
+        self.assertEqual(grad, torch.full_like(grad, expected))
+
+    # The x = 0 special casing must not swallow NaN: a NaN input has to keep
+    # producing a NaN gradient rather than the finite limit at the origin.
+    @dtypes(torch.float32, torch.double)
+    @parametrize(
+        "name",
+        ("bessel_j1", "modified_bessel_i1", "i1", "i1e"),
+    )
+    def test_bessel_nan_input_gradient(self, device, dtype, name):
+        op = getattr(torch.special, name)
+        x = torch.full((4,), float("nan"), dtype=dtype, device=device).requires_grad_()
+        (grad,) = torch.autograd.grad(op(x).sum(), x)
+        self.assertTrue(torch.isnan(grad).all())
+
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_mish(self, device, dtype):
@@ -1304,20 +1275,6 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(res_tens.real, out_tens.real, atol=0.0, rtol=1e-6)
         self.assertEqual(res_tens.imag, out_tens.imag, atol=0.0, rtol=1e-6)
 
-    # do ops like threshold need a test_unary(_nonufunc) test suite?
-    @onlyCPU
-    @dtypes(*get_all_math_dtypes("cpu"))
-    def test_threshold(self, device, dtype):
-        if dtype != torch.uint8 and dtype != torch.float16 and not dtype.is_complex:
-            # 100 is wide enough to use AVX2 instructions for all types
-            x = (
-                torch.randn(100, dtype=torch.float, device=device)
-                .sign()
-                .to(dtype=dtype)
-            )
-            y = torch.threshold(x, 0, 0)
-            self.assertTrue(y.le(0).any())
-
     def _helper_test_igamma(self, loglo, loghi, device, dtype, torch_fcn, scipy_fcn):
         exp1 = 2.71828182846
         vec1 = torch.logspace(
@@ -1346,7 +1303,6 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @onlyNativeDeviceTypes
     def test_igamma_common(self, device, dtype):
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
@@ -1358,7 +1314,6 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @onlyNativeDeviceTypes
     def test_igammac_common(self, device, dtype):
         # test igammac for reasonable range of values
         loglo = -4  # approx 0.018
@@ -1369,7 +1324,6 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @onlyNativeDeviceTypes
     def test_igamma_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
@@ -1398,7 +1352,6 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @onlyNativeDeviceTypes
     def test_igammac_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
@@ -1799,37 +1752,6 @@ class TestUnaryUfuncs(TestCase):
             ),
         )
 
-    @onlyCUDA
-    def test_nonzero_static_large(self, device):
-        # large enough to have multiple iters per SM even on H100
-        # with 132 sms
-        size_inp = 1024 * 16 * 132 + 1024 * 16
-        x = torch.zeros(size_inp, device=device)
-        # unique indices
-        indices = torch.randperm(size_inp, device=device)[: size_inp // 2]
-        sorted, _ = torch.sort(indices)
-        x[sorted] = 1
-        res = torch.nonzero_static(x, size=size_inp // 2).view(-1)
-        self.assertEqual(res, sorted)
-        # no oob writes
-        out = torch.full((size_inp,), 10, device=device, dtype=torch.int64)
-        res = torch.nonzero_static(x, size=size_inp // 4, out=out[: size_inp // 2])
-        self.assertEqual(out[: size_inp // 4], sorted[: size_inp // 4])
-        self.assertEqual(
-            out[size_inp // 4 :],
-            torch.tensor(10, device="cuda").expand_as(out[size_inp // 4 :]),
-        )
-        # correct fill for 2d
-        x = x.view(2, size_inp // 2)
-        ref = x.nonzero()
-        res = x.nonzero_static(size=size_inp // 2 + 2)
-        self.assertEqual(res.shape, [size_inp // 2 + 2, 2])
-        self.assertEqual(ref, res[: size_inp // 2])
-        self.assertEqual(
-            res[size_inp // 2 :],
-            torch.tensor(-1, device="cuda").expand_as(res[size_inp // 2 :]),
-        )
-
     # TODO: rationalize with exp OpInfo
 
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
@@ -1919,7 +1841,6 @@ class TestUnaryUfuncs(TestCase):
     # test for issue #161871 where mvlgamma_ should handle integer input gracefully
     # with a clear error message on all architectures (not crash with FPE on x86)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int32, torch.int64)
     def test_mvlgamma_inplace_integer_error(self, device, dtype):
         tensor = torch.randint(low=1, high=10, size=(5,), device=device, dtype=dtype)
@@ -1930,7 +1851,6 @@ class TestUnaryUfuncs(TestCase):
         ):
             tensor.mvlgamma_(2)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int32, torch.int64)
     def test_mvlgamma_integer_promotion(self, device, dtype):
         tensor = torch.tensor([5, 6, 7], device=device, dtype=dtype)
@@ -1939,37 +1859,40 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
 
-    @onlyCUDA
-    @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    def test_fp8_e4m3fn_conversion_subnormals(self, device, dtype):
-        # Regression test for ptxas codegen bug on sm_100 where FADD in the
-        # subnormal conversion path gets wrong source register for odd elements
-        # in the 8-wide unrolled vectorized_elementwise_kernel.
-        # e4m3fn subnormals: |x| < 2^-6
-        torch.manual_seed(0)
-        N = 2**20
-        x = (torch.randn(N, dtype=dtype, device=device) * 1e-3).clamp(-448, 448)
-        y = x.to(torch.float8_e4m3fn)
-        ref = x.cpu().float().to(torch.float8_e4m3fn)
-        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
-    @onlyCUDA
-    @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    def test_fp8_e5m2_conversion_subnormals(self, device, dtype):
-        # Same regression test for e5m2.
-        # e5m2 subnormals: |x| < 2^-14
-        torch.manual_seed(0)
-        N = 2**20
-        x = (torch.randn(N, dtype=dtype, device=device) * 1e-4).clamp(-57344, 57344)
-        y = x.to(torch.float8_e5m2)
-        ref = x.cpu().float().to(torch.float8_e5m2)
-        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+class TestUnaryUfuncsCpuOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_op_invert(self, device):
+        res = 0xFFFF - torch.arange(127, dtype=torch.int8)
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.arange(127, dtype=dtype)
+            self.assertEqual(res.to(dtype), ~a)
+
+        self.assertEqual(torch.tensor([True, False]), ~torch.tensor([False, True]))
+
+        # test exceptions
+        for dtype in (torch.half, torch.float, torch.double):
+            a = torch.zeros(10, dtype=dtype)
+            with self.assertRaises(TypeError):
+                ~a
+
+    @dtypes(*get_all_math_dtypes("cpu"))
+    def test_threshold(self, device, dtype):
+        if dtype != torch.uint8 and dtype != torch.float16 and not dtype.is_complex:
+            # 100 is wide enough to use AVX2 instructions for all types
+            x = (
+                torch.randn(100, dtype=torch.float, device=device)
+                .sign()
+                .to(dtype=dtype)
+            )
+            y = torch.threshold(x, 0, 0)
+            self.assertTrue(y.le(0).any())
 
     # Regression for https://github.com/pytorch/pytorch/issues/177839:
     # when eps > 0.5 the scalar kernel clamps via `x < eps ? eps : ...` (so
     # the lower bound wins over the upper bound when eps > 1 - eps), and the
     # vectorized kernel must match.
-    @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
     @parametrize("eps", [0.49, 0.51, 0.6, 0.9])
     @parametrize("shape", [(2, 16), (4, 32), (8, 64)])
@@ -1995,7 +1918,67 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(got, ref)
 
 
+class TestUnaryUfuncsCUDADevice(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_nonzero_static_large(self, device):
+        # large enough to have multiple iters per SM even on H100
+        # with 132 sms
+        size_inp = 1024 * 16 * 132 + 1024 * 16
+        x = torch.zeros(size_inp, device=device)
+        # unique indices
+        indices = torch.randperm(size_inp, device=device)[: size_inp // 2]
+        sorted, _ = torch.sort(indices)
+        x[sorted] = 1
+        res = torch.nonzero_static(x, size=size_inp // 2).view(-1)
+        self.assertEqual(res, sorted)
+        # no oob writes
+        out = torch.full((size_inp,), 10, device=device, dtype=torch.int64)
+        res = torch.nonzero_static(x, size=size_inp // 4, out=out[: size_inp // 2])
+        self.assertEqual(out[: size_inp // 4], sorted[: size_inp // 4])
+        self.assertEqual(
+            out[size_inp // 4 :],
+            torch.tensor(10, device=device).expand_as(out[size_inp // 4 :]),
+        )
+        # correct fill for 2d
+        x = x.view(2, size_inp // 2)
+        ref = x.nonzero()
+        res = x.nonzero_static(size=size_inp // 2 + 2)
+        self.assertEqual(res.shape, [size_inp // 2 + 2, 2])
+        self.assertEqual(ref, res[: size_inp // 2])
+        self.assertEqual(
+            res[size_inp // 2 :],
+            torch.tensor(-1, device=device).expand_as(res[size_inp // 2 :]),
+        )
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_fp8_e4m3fn_conversion_subnormals(self, device, dtype):
+        # Regression test for ptxas codegen bug on sm_100 where FADD in the
+        # subnormal conversion path gets wrong source register for odd elements
+        # in the 8-wide unrolled vectorized_elementwise_kernel.
+        # e4m3fn subnormals: |x| < 2^-6
+        torch.manual_seed(0)
+        N = 2**20
+        x = (torch.randn(N, dtype=dtype, device=device) * 1e-3).clamp(-448, 448)
+        y = x.to(torch.float8_e4m3fn)
+        ref = x.cpu().float().to(torch.float8_e4m3fn)
+        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_fp8_e5m2_conversion_subnormals(self, device, dtype):
+        # Same regression test for e5m2.
+        # e5m2 subnormals: |x| < 2^-14
+        torch.manual_seed(0)
+        N = 2**20
+        x = (torch.randn(N, dtype=dtype, device=device) * 1e-4).clamp(-57344, 57344)
+        y = x.to(torch.float8_e5m2)
+        ref = x.cpu().float().to(torch.float8_e5m2)
+        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
+instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
+instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
