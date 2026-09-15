@@ -2234,6 +2234,22 @@ from user code:
         # last resort would have served [0] without one.
         self.assertEqual(compares, 2)
 
+    def test_module_dispatch_serves_an_opted_out_result_from_any_position(self):
+        # With [0] still checked and [1] opted out, a call neither guards is
+        # served by [1]: the fall-through this dispatch replaced re-entered
+        # compiled_results[0] alone and raised its guard error.
+        mod = ModeBranchGlobalModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile(
+            [
+                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
+                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
+            ]
+        )
+        model.forward.compiled_results[1].disable_guard_check()
+        self.assertEqual(model(x, 2), x * AOT_BRANCH_SCALE)
+
     def test_module_dispatch_rechecks_before_honouring_an_opt_out(self):
         # [0] opted out, [1] checked and falsely rejected once: the re-check
         # finds [1]'s real match before the last resort can hand the call to [0].
