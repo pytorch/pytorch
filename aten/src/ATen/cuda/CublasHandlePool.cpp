@@ -597,6 +597,37 @@ CUDABlasHandleWithWorkspace getCurrentCUDABlasHandleWithWorkspace() {
   return scoped_handle;
 }
 
+#ifdef USE_ROCM
+static std::shared_ptr<CuBlasLtPoolType> getCuBlasLtPool() {
+  // Use a leaky singleton for the pool following standard practice around
+  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
+  static auto pool = std::shared_ptr<CuBlasLtPoolType>(
+      new CuBlasLtPoolType(), [](CuBlasLtPoolType* p) {
+        // Leak the memory.
+      });
+  return pool;
+}
+
+void ensureCublasLtHandlesAvailable(size_t n) {
+  // Pre-create hipblaslt handles into the shared free list so that a later
+  // reserve() from another thread can hand one out without running
+  // hipblasLtCreate. Called before graph capture begins: creation does raw
+  // hipMalloc/hipMemset calls that fail once capture is active, and the
+  // backward half of a whole-graph capture issues its first gemm on the
+  // capture stream from an autograd worker thread, which cannot have a
+  // handle for that (device, stream) key yet.
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  auto pool = getCuBlasLtPool();
+  std::lock_guard<std::mutex> guard(pool->mutex);
+  while (pool->available_handles[device].size() < n) {
+    pool->created_handles[device].emplace_back(true /*create*/);
+    pool->available_handles[device].push_back(
+        pool->created_handles[device].back().handle);
+  }
+}
+#endif
+
 cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
   c10::DeviceIndex device = 0;
@@ -607,15 +638,8 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
   // See: https://github.com/pytorch/pytorch/pull/22405
   // This thread local unique_ptrs will be destroyed when the thread terminates,
   // releasing its reserved handles back to the pool.
-
-  // Use a leaky singleton for the pool following standard practice around
-  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
-  static auto pool = std::shared_ptr<CuBlasLtPoolType>(
-      new CuBlasLtPoolType(), [](CuBlasLtPoolType* p) {
-        // Leak the memory.
-      });
   thread_local std::unique_ptr<CuBlasLtPoolType::PoolWindow> myPoolWindow(
-      pool->newPoolWindow());
+      getCuBlasLtPool()->newPoolWindow());
 
   // hipblaslt cannot share a single handle across multiple streams,
   // so reserve a handle unique to each (device, stream) pair.
