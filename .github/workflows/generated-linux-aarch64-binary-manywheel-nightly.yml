@@ -62,6 +62,7 @@ jobs:
   #   - otherwise (nightly branch, etc.): skipped; outputs read blank -> Docker
   #     Hub floating tag, unchanged.
   get-docker-tag:
+    needs: get-label-type
     # Runs on tag pushes only (release candidates + ciflow/binaries). On branch
     # (nightly) runs it is skipped and its outputs read blank, so the floating
     # Docker Hub tag is used.
@@ -182,7 +183,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
@@ -271,7 +272,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
@@ -360,7 +361,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
@@ -449,7 +450,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
