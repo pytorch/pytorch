@@ -24,11 +24,15 @@ from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     validate_non_overlapping_shards_metadata,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_device_type import onlyAccelerator
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
     TestCase,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
@@ -40,14 +44,24 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
 )
 
 
+DEVICE_TYPE = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
+
+
 class TestShardingSpec(TestCase):
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "2 CUDA GPUs are needed")
+    device_type = DEVICE_TYPE
+
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "2 accelerator devices are needed"
+    )
     def test_device_placement(self):
         # valid devices
-        DevicePlacementSpec("cuda:0")
+        DevicePlacementSpec(f"{DEVICE_TYPE}:0")
         DevicePlacementSpec(torch.device(0))
-        DevicePlacementSpec(torch.device("cuda:0"))
-        DevicePlacementSpec("rank:0/cuda:0")
+        DevicePlacementSpec(torch.device(f"{DEVICE_TYPE}:0"))
+        DevicePlacementSpec(f"rank:0/{DEVICE_TYPE}:0")
         DevicePlacementSpec("rank:0/cpu")
         DevicePlacementSpec("rank:0")
 
@@ -61,40 +75,50 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "2 CUDA GPUs are needed")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "2 accelerator devices are needed"
+    )
     def test_chunked_sharding_spec(self):
         # Test valid specs.
         ChunkShardingSpec(0, [torch.device(0), torch.device(1)])
-        ChunkShardingSpec(0, [torch.device("cuda:0"), torch.device("cuda:1")])
-        ChunkShardingSpec(-1, ["cuda:0", "cuda:1"])
-        ChunkShardingSpec(0, ["rank:0/cuda:0", "rank:0/cuda:1"])
+        ChunkShardingSpec(
+            0,
+            [
+                torch.device(f"{DEVICE_TYPE}:0"),
+                torch.device(f"{DEVICE_TYPE}:1"),
+            ],
+        )
+        ChunkShardingSpec(-1, [f"{DEVICE_TYPE}:0", f"{DEVICE_TYPE}:1"])
+        ChunkShardingSpec(0, [f"rank:0/{DEVICE_TYPE}:0", f"rank:0/{DEVICE_TYPE}:1"])
         ChunkShardingSpec(0, ["rank:0", "rank:1"])
         ChunkShardingSpec(0, ["rank:0/cpu", "rank:1/cpu"])
 
         # Test unimplemented error
         with self.assertRaisesRegex(NotImplementedError, "not support named dimension"):
             # Named dimension.
-            ChunkShardingSpec("N", ["cuda:0", "cuda:1"])
+            ChunkShardingSpec("N", [f"{DEVICE_TYPE}:0", f"{DEVICE_TYPE}:1"])
 
         # Test invalid specs
         with self.assertRaisesRegex(ValueError, "needs to be an integer"):
-            ChunkShardingSpec(None, ["cuda:0", "cuda:1"])
+            ChunkShardingSpec(None, [f"{DEVICE_TYPE}:0", f"{DEVICE_TYPE}:1"])
         with self.assertRaisesRegex(ValueError, "needs to be an integer"):
-            ChunkShardingSpec({}, ["cuda:0", "cuda:1"])
+            ChunkShardingSpec({}, [f"{DEVICE_TYPE}:0", f"{DEVICE_TYPE}:1"])
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
-            ChunkShardingSpec(0, ["random:0", "cuda:1"])
+            ChunkShardingSpec(0, ["random:0", f"{DEVICE_TYPE}:1"])
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
-            ChunkShardingSpec(0, ["cuda:foo", "cuda:1"])
+            ChunkShardingSpec(0, [f"{DEVICE_TYPE}:foo", f"{DEVICE_TYPE}:1"])
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
-            ChunkShardingSpec(0, ["rank:foo", "cuda:1"])
+            ChunkShardingSpec(0, ["rank:foo", f"{DEVICE_TYPE}:1"])
         with self.assertRaisesRegex(RuntimeError, "Expected one of"):
-            ChunkShardingSpec(0, ["rank:0/foo", "cuda:1"])
+            ChunkShardingSpec(0, ["rank:0/foo", f"{DEVICE_TYPE}:1"])
         with self.assertRaisesRegex(RuntimeError, "Expected one of"):
-            ChunkShardingSpec(0, ["rank:0/random:0", "cuda:1"])
+            ChunkShardingSpec(0, ["rank:0/random:0", f"{DEVICE_TYPE}:1"])
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
-            ChunkShardingSpec(0, ["rank:0/cuda:foo", "cuda:1"])
+            ChunkShardingSpec(0, [f"rank:0/{DEVICE_TYPE}:foo", f"{DEVICE_TYPE}:1"])
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "2 CUDA GPUs are needed")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "2 accelerator devices are needed"
+    )
     def test_enumerable_sharding_spec(self):
         # test valid specs
 
@@ -104,12 +128,12 @@ class TestShardingSpec(TestCase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="cuda:0",
+                    placement=f"{DEVICE_TYPE}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="cuda:1",
+                    placement=f"{DEVICE_TYPE}:1",
                 ),
             ]
         )
@@ -121,22 +145,22 @@ class TestShardingSpec(TestCase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[3, 3],
-                    placement="cuda:0",
+                    placement=f"{DEVICE_TYPE}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 3],
                     shard_sizes=[3, 3],
-                    placement="cuda:1",
+                    placement=f"{DEVICE_TYPE}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[3, 0],
                     shard_sizes=[3, 3],
-                    placement="cuda:2",
+                    placement=f"{DEVICE_TYPE}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[3, 3],
                     shard_sizes=[3, 3],
-                    placement="cuda:3",
+                    placement=f"{DEVICE_TYPE}:3",
                 ),
             ]
         )
@@ -148,22 +172,22 @@ class TestShardingSpec(TestCase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[2, 4],
-                    placement="cuda:0",
+                    placement=f"{DEVICE_TYPE}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 4],
                     shard_sizes=[4, 2],
-                    placement="cuda:1",
+                    placement=f"{DEVICE_TYPE}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[2, 0],
                     shard_sizes=[4, 4],
-                    placement="cuda:2",
+                    placement=f"{DEVICE_TYPE}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[4, 4],
                     shard_sizes=[2, 2],
-                    placement="cuda:3",
+                    placement=f"{DEVICE_TYPE}:3",
                 ),
             ]
         )
@@ -171,16 +195,28 @@ class TestShardingSpec(TestCase):
 
         # test invalid sharding
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
-            ShardMetadata(shard_offsets=[0], shard_sizes=[1], placement="cuda:foo")
+            ShardMetadata(
+                shard_offsets=[0], shard_sizes=[1], placement=f"{DEVICE_TYPE}:foo"
+            )
 
         with self.assertRaisesRegex(ValueError, "same number of elements"):
-            ShardMetadata(shard_offsets=[0, 0], shard_sizes=[1], placement="cuda:0")
+            ShardMetadata(
+                shard_offsets=[0, 0], shard_sizes=[1], placement=f"{DEVICE_TYPE}:0"
+            )
 
         with self.assertRaisesRegex(ValueError, "shard_offsets should be >=0"):
-            ShardMetadata(shard_offsets=[-1, 0], shard_sizes=[1, 1], placement="cuda:0")
+            ShardMetadata(
+                shard_offsets=[-1, 0],
+                shard_sizes=[1, 1],
+                placement=f"{DEVICE_TYPE}:0",
+            )
 
         with self.assertRaisesRegex(ValueError, "shard_sizes should be >= 0"):
-            ShardMetadata(shard_offsets=[0, 0], shard_sizes=[-1, 1], placement="cuda:0")
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_sizes=[-1, 1],
+                placement=f"{DEVICE_TYPE}:0",
+            )
 
         with self.assertRaisesRegex(ValueError, "Empty shard list provided"):
             EnumerableShardingSpec([])
@@ -214,12 +250,12 @@ class TestShardingSpec(TestCase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="cuda:0",
+                    placement=f"{DEVICE_TYPE}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="cuda:1",
+                    placement=f"{DEVICE_TYPE}:1",
                 ),
             ]
         )
@@ -232,12 +268,12 @@ class TestShardingSpec(TestCase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="cuda:0",
+                    placement=f"{DEVICE_TYPE}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="cuda:1",
+                    placement=f"{DEVICE_TYPE}:1",
                 ),
             ]
         )
@@ -250,12 +286,12 @@ class TestShardingSpec(TestCase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="cuda:0",
+                    placement=f"{DEVICE_TYPE}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="cuda:1",
+                    placement=f"{DEVICE_TYPE}:1",
                 ),
             ]
         )
@@ -263,6 +299,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, "does not match tensor volume"):
             check_tensor(spec.shards, torch.Size([10, 10]))
 
+    @onlyAccelerator
     def test_get_split_size(self):
         self.assertEqual(3, get_split_size(11, 4))
         self.assertEqual(3, get_split_size(12, 4))
@@ -272,6 +309,7 @@ class TestShardingSpec(TestCase):
         self.assertEqual(11, get_split_size(11, 1))
         self.assertEqual(1, get_split_size(11, 11))
 
+    @onlyAccelerator
     def test_get_chunked_dim_size(self):
         self.assertEqual(3, get_chunked_dim_size(11, 3, 0))
         self.assertEqual(2, get_chunked_dim_size(11, 3, 3))
@@ -279,12 +317,13 @@ class TestShardingSpec(TestCase):
         self.assertEqual(1, get_chunked_dim_size(13, 4, 3))
         self.assertEqual(0, get_chunked_dim_size(5, 2, 3))
 
+    @onlyAccelerator
     def test_get_chunk_sharding_params(self):
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{DEVICE_TYPE}:0",
+            f"rank:1/{DEVICE_TYPE}:1",
+            f"rank:2/{DEVICE_TYPE}:2",
+            f"rank:3/{DEVICE_TYPE}:3",
         ]
         spec = ChunkShardingSpec(
             dim=0,
@@ -311,12 +350,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:0",
+                placement=f"{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[10, 5],
-                placement="cuda:1",
+                placement=f"{DEVICE_TYPE}:1",
             ),
         ]
         spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
@@ -327,12 +366,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0],
                 shard_sizes=[16],
-                placement="cuda:0",
+                placement=f"{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[16],
                 shard_sizes=[9],
-                placement="cuda:1",
+                placement=f"{DEVICE_TYPE}:0",
             ),
         ]
         spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
@@ -343,22 +382,22 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement="rank:0/cuda:0",
+                placement=f"rank:0/{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[5, 5],
-                placement="rank:1/cuda:1",
+                placement=f"rank:1/{DEVICE_TYPE}:1",
             ),
             ShardMetadata(
                 shard_offsets=[0, 5],
                 shard_sizes=[5, 5],
-                placement="rank:2/cuda:2",
+                placement=f"rank:2/{DEVICE_TYPE}:2",
             ),
             ShardMetadata(
                 shard_offsets=[5, 5],
                 shard_sizes=[5, 5],
-                placement="rank:3/cuda:3",
+                placement=f"rank:3/{DEVICE_TYPE}:3",
             ),
         ]
         spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
@@ -387,6 +426,7 @@ class TestShardingSpec(TestCase):
         self.assertEqual(spec.dim, sharding_dim)
         self.assertEqual(spec.placements, placements)
 
+    @onlyAccelerator
     def test_infer_sharding_spec_from_shards_metadata(self):
         self._infer_enum_sharding_spec_case()
         chunk_specs = _chunk_sharding_specs_list_for_test([0, 0, 1, 1], seed=31)
@@ -400,17 +440,18 @@ class TestShardingSpec(TestCase):
                 spec.placements, 4, [50, 4, 18, 15, 77]
             )
 
+    @onlyAccelerator
     def test_check_overlapping(self):
         shards = [
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:0",
+                placement=f"{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:1",
+                placement=f"{DEVICE_TYPE}:1",
             ),
         ]
         validate_non_overlapping_shards_metadata(shards)
@@ -419,12 +460,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:0",
+                placement=f"{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[4, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:1",
+                placement=f"{DEVICE_TYPE}:1",
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -434,12 +475,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:0",
+                placement=f"{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[0, 4],
                 shard_sizes=[5, 5],
-                placement="cuda:1",
+                placement=f"{DEVICE_TYPE}:1",
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -449,12 +490,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[5, 0, 5],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:0",
+                placement=f"{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 5, 5],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:1",
+                placement=f"{DEVICE_TYPE}:1",
             ),
         ]
         validate_non_overlapping_shards_metadata(shards)
@@ -463,12 +504,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[5, 0, 5],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:0",
+                placement=f"{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 4, 5],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:1",
+                placement=f"{DEVICE_TYPE}:1",
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -478,12 +519,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[5, 0, 5],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:0",
+                placement=f"{DEVICE_TYPE}:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 4, 9],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:1",
+                placement=f"{DEVICE_TYPE}:1",
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -612,12 +653,15 @@ class GridShardingSpec(ShardingSpec):
 
 
 class TestCustomShardingSpec(ShardedTensorTestBase):
+    device_type = DEVICE_TYPE
+
+    @onlyAccelerator
     def test_custom_sharding_spec(self):
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{DEVICE_TYPE}:0",
+            f"rank:1/{DEVICE_TYPE}:1",
+            f"rank:2/{DEVICE_TYPE}:2",
+            f"rank:3/{DEVICE_TYPE}:3",
         ]
 
         grid_spec = GridShardingSpec(grid_size=4, placements=ranks)
@@ -633,19 +677,19 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         meta = grid_spec.build_metadata(torch.Size((8, 8)), tensor_properties)
         check_tensor(meta.shards_metadata, torch.Size((8, 8)))
 
-    @with_comms
+    @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_sharding_spec_tensor_ctor(self):
         """Test sharded_tensor.ones(...) with the custom
         grid sharding spec.
         """
 
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{DEVICE_TYPE}:0",
+            f"rank:1/{DEVICE_TYPE}:1",
+            f"rank:2/{DEVICE_TYPE}:2",
+            f"rank:3/{DEVICE_TYPE}:3",
         ]
 
         grid_spec = GridShardingSpec(grid_size=2, placements=ranks)
@@ -656,23 +700,23 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         local_shards = st.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
         self.assertEqual((2, 2), local_shard.size())
         self.assertEqual(local_shard, torch.ones(2, 2))
 
-    @with_comms
+    @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_sharding_spec_shard_tensor(self):
         """Test custom spec can be invoked from the
         _shard_tensor callsite.
         """
 
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{DEVICE_TYPE}:0",
+            f"rank:1/{DEVICE_TYPE}:1",
+            f"rank:2/{DEVICE_TYPE}:2",
+            f"rank:3/{DEVICE_TYPE}:3",
         ]
 
         grid_spec = GridShardingSpec(grid_size=2, placements=ranks)
