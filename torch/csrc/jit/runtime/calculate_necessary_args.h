@@ -8,7 +8,7 @@ namespace torch::jit {
 
 // Calculates the number of args that need to be passed in.
 // Less args may be needed if defaults are provided.
-// Returns: {number args needed, number of out args}
+// Returns: {number of args needed, number of out args}
 inline std::pair<int64_t, int64_t> CalculateNecessaryArgs(
     const std::vector<Argument>& schema_args,
     at::ArrayRef<Value*> actual_inputs,

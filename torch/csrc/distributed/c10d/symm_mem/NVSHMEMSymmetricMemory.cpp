@@ -457,8 +457,14 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto alloc_base = nvshmem_malloc(total_size);
     TORCH_CHECK(alloc_base != nullptr, "nvshmem_malloc failed");
     // Zero the signal pad (at the front, [0, buffer_offset)) for the signaling
-    // protocol.
-    AT_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
+    // protocol. Sync the memset, then barrier: nvshmem_malloc publishes the
+    // allocation before any rank has zeroed its pad, so peers must not signal
+    // into it until every rank's zeroing has landed.
+    auto stream = at::cuda::getCurrentCUDAStream(
+        static_cast<c10::DeviceIndex>(device_idx));
+    AT_CUDA_CHECK(cudaMemsetAsync(alloc_base, 0, buffer_offset, stream));
+    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+    nvshmem_barrier_all();
     // Hand back the data buffer pointer, not alloc_base; the signal pad stays
     // hidden in front. Returning the data ptr is safe for free(): the whole
     // block is owned by the NVSHMEMAllocation keyed below, which nvshmem_free's
