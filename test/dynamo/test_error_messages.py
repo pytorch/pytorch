@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     IS_FBCODE,
     munge_exc,
+    skipIfCppFakeTensor,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -943,6 +944,7 @@ User code traceback:
 """,
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has a different repr")
     def test_faketensor_nyi(self):
         op_name = "mylib::error_messages_faketensor"
 
@@ -981,6 +983,7 @@ from user code:
             expected,
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has a different repr")
     def test_fx_node_error_bad_user_code(self):
         def fn(x, y):
             return x + y
@@ -1010,6 +1013,7 @@ from user code:
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @skipIfCppFakeTensor("C++ FakeTensor has different device mismatch formatting")
     def test_fx_node_error_cross_device(self):
         linear = torch.nn.Linear(10, 20, device="cuda").eval()
 
@@ -2142,6 +2146,7 @@ from user code:
                 post_munge=post_munge,
             )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has a different repr")
     def test_runtime_error_readable_shape_mismatch(self):
         def fn(x, y):
             return x + y
