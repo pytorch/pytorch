@@ -121,7 +121,14 @@
         idx_m = rcm[:, None]
         idx_n = rcn[None, :]
         mask = (idx_m < M) & (idx_n < N)
-        {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"))}}
+        {{store_output(
+            ("idx_m", "idx_n"), "acc", "mask", indent_width=8,
+            val_shape=("BLOCK_M", "BLOCK_N"), tile_origin=("rm", "rn")
+        )}}
         {%- else %}
-        {{store_output(("rm", "rn"), "acc", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
+        {{store_output(
+            ("rm", "rn"), "acc", indent_width=8,
+            val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True,
+            tile_origin=("rm", "rn")
+        )}}
         {%- endif %}
