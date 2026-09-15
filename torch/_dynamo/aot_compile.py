@@ -1605,8 +1605,10 @@ class AOTCompiledModel:
         # resort and the report read, so scan every result.
         raised: dict[int, Exception] = {}
         # `unanswered` holds the indices whose LAST evaluation reached no answer,
-        # the only ones with no guard to quote.
+        # the only ones with no guard to quote, and `answered` those that reached
+        # one at least once, which is what a ModelInput could have covered.
         unanswered: set[int] = set()
+        answered: set[int] = set()
         # Read once per call, not once per check (measured 0.18us against a
         # 0.93us check): every check that does not throw restores it itself.
         torch_function_state = torch._C._get_torch_function_state()
@@ -1646,11 +1648,13 @@ class AOTCompiledModel:
                     # An interrupt is not an answer about this call, and not
                     # dispatch's to swallow.
                     raise
-                # Keep going so another result can still match.
+                # Keep going so another result can still match; what this tree
+                # last did and what it ever did decide different things.
                 raised[i] = e
                 unanswered.add(i)
                 return False
             unanswered.discard(i)
+            answered.add(i)
             return answer
 
         def warn_swallowed(served: int) -> None:
@@ -1725,7 +1729,7 @@ class AOTCompiledModel:
         if shared is not None:
             bound = dict.fromkeys(range(len(results)), shared)
         report = self._no_match_report(
-            results, raised, unanswered, bound, torch_function_state
+            results, raised, unanswered, answered, bound, torch_function_state
         )
         if raised:
             # `raised` is in recording order, so this chains the first index that
@@ -1741,6 +1745,7 @@ class AOTCompiledModel:
         results: tuple[AOTCompiledFunction, ...],
         raised: dict[int, Exception],
         unanswered: set[int],
+        answered: set[int],
         bound: dict[int, dict[str, object]],
         torch_function_state: torch._C._TorchFunctionState,
         /,
@@ -1763,6 +1768,18 @@ class AOTCompiledModel:
         raiser = next(
             (i for i in raised if results[i]._guard_check_enabled),
             None,
+        )
+        # An entry that answered in EITHER dispatch pass rejected this call, so
+        # an input covering it is on the table even where its LAST evaluation
+        # raised and the line below is that raise.
+        covered = any(results[i]._guard_check_enabled for i in answered)
+        # A rejection that FOLLOWED a throw from the same tree is the answer the
+        # veto above refuses to trust, so when no enabled entry rejected the call
+        # before it raised, the advice below says so beside the ModelInput line.
+        answered_first = any(
+            results[i]._guard_check_enabled
+            for i in answered
+            if i not in raised or i in unanswered
         )
         missing_at: int | None = None
         withheld = False
@@ -1851,12 +1868,37 @@ class AOTCompiledModel:
                 f"[{raiser}]'s guard check raised while checking this call; fix "
                 "or drop that artifact."
             )
-        lines.append(
-            "Add a ModelInput covering this call, or check whether "
-            "guard_filter_fn kept a guard this call cannot satisfy -- both "
-            "belong to the process that compiles the artifacts, which need not "
-            "be the one that loaded them."
-        )
+        # An artifact holding no inputs at all -- which deserialize() accepts --
+        # has no entry to answer, and adding an input is exactly the advice for it.
+        if covered or not results:
+            lines.append(
+                "Add a ModelInput covering this call, or check whether "
+                "guard_filter_fn kept a guard this call cannot satisfy -- both "
+                "belong to the process that compiles the artifacts, which need "
+                "not be the one that loaded them."
+            )
+        if covered and not answered_first:
+            # Every rejection dispatch got out of an enabled tree followed a throw
+            # from the same tree -- the answer the veto above declines to act on
+            # -- so the ModelInput line stands on those alone. Keyed on what
+            # dispatch recorded, not on the entry lines: the re-check is a third
+            # evaluation and may have printed a raise or an accept instead, and a
+            # withheld line says only why the opt-out was withheld.
+            lines.append(
+                "The ModelInput advice above rests only on rejections dispatch "
+                "took after the same tree had raised, so they can be about the "
+                "relational guard state a C++ throw leaves stale rather than "
+                "about this call."
+            )
+        elif raised and not withheld and not covered:
+            # No tree whose guards were asked about ever got as far as rejecting
+            # the call, so adding a ModelInput cannot help. Not with an opted-out
+            # entry reported, whose withheld line has already said what happened,
+            # and not for the empty artifact above, which has no raise to describe.
+            lines.append(
+                "Every guard tree raised while checking this call; the reasons "
+                "above are those raises, not guards this call failed."
+            )
         return "\n".join(lines)
 
     def serialize(self) -> bytes:

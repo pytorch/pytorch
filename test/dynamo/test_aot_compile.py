@@ -2273,17 +2273,51 @@ from user code:
         # and [1] rejected the call, which an input covering it would fix.
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
+        # [1]'s rejection followed no raise, so the advice rests on a trusted
+        # answer and carries no post-throw caveat.
+        self.assertNotIn("advice above rests only on rejections", message)
         # One line per input, not a multi-line GuardDebugInfo repr per input.
         # Counted rather than read off the report's total, which an advice line
         # moves without changing what an entry looks like.
         self.assertEqual(sum(ln.startswith("  [") for ln in message.splitlines()), 2)
+
+    def test_no_match_message_when_every_guard_tree_raised(self):
+        # Nothing here rejected the call, so the usual "add a ModelInput" advice
+        # is wrong: an input covering this call would guard the same dict and
+        # raise the same way.
+        model = torch.compile(DictBranchModule(), fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile([ModelInput(args=(x, {}), kwargs={}, contexts=[])])
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, {RaisesOnCompare(): 1})
+        message = str(ctx.exception)
+        self.assertIn("Every guard tree raised", message)
+        self.assertNotIn("Add a ModelInput", message)
+
+    def test_no_match_report_claims_no_raise_for_an_artifact_with_no_inputs(self):
+        # deserialize() takes a list of any length, the empty one included, where
+        # aot_compile_module refuses it -- so the line above has to stand on the
+        # raises on record and not on the absence of an entry that answered,
+        # which is vacuously true of a report with no entries at all. The one
+        # advice that fits an artifact holding no inputs is to add one, which a
+        # gate on an entry that answered drops for the same vacuous reason.
+        model = ScaleModule()
+        compiled = AOTCompiledModel.deserialize(model, pickle.dumps([]))
+        self.assertEqual(compiled.compiled_results, [])
+        with self.assertRaises(RuntimeError) as ctx:
+            compiled(torch.randn(3, 3))
+        message = str(ctx.exception)
+        self.assertIn("Tried 0 compiled input(s):", message)
+        self.assertNotIn("Every guard tree raised", message)
+        self.assertIn("Add a ModelInput", message)
 
     def test_no_match_message_when_only_the_report_raises(self):
         # The other half of the same handler: here both dispatch passes got a
         # clean answer out of the tree -- the DICT_NOT_CONTAINS guard found the
         # key and rejected the call -- and only the re-check that explains why
         # raised. That is an ordinary mismatch missing its reason, so the advice a
-        # new ModelInput would satisfy still applies.
+        # new ModelInput would satisfy still applies and "every guard tree raised"
+        # would be the opposite of what happened.
         model = torch.compile(DictBranchModule(), fullgraph=True, backend="eager")
         x = torch.randn(3, 3)
         model._aot_compile([ModelInput(args=(x, {}), kwargs={}, contexts=[])])
@@ -2303,6 +2337,7 @@ from user code:
         # has to carry what it was raised from in the line itself.
         raised = "[0] <guard check raised ValueError: boom on compare 3 (through the guard tree's pybind boundary)>"
         self.assertIn(raised, message)
+        self.assertNotIn("Every guard tree raised", message)
         self.assertIn("Add a ModelInput", message)
 
     def test_no_match_message_when_a_raise_did_not_cross_the_pybind_boundary(self):
@@ -2329,6 +2364,7 @@ from user code:
         raised = "[0] <guard check raised RuntimeError: guard tree is unhappy>"
         self.assertIn(raised, message)
         self.assertNotIn("pybind boundary", message)
+        self.assertIn("Every guard tree raised", message)
 
     def test_no_match_message_reads_the_cause_not_the_handled_exception(self):
         # The SystemError CPython raises for a tree that returned with an
@@ -3064,7 +3100,11 @@ from user code:
         # The same line is reachable with ONE rejection on record once a raise is
         # tolerated: pass 1 raised, pass 2 rejected, the report accepted. The
         # line has to describe what dispatch did without claiming a count it
-        # never took -- the raise itself survives only in the chain.
+        # never took -- the raise itself survives only in the chain. And the
+        # caveat beside the ModelInput advice keys on what dispatch recorded,
+        # not on the lines the report printed: the one rejection dispatch got
+        # followed the raise, so the advice carries it although this report
+        # quotes no rejection.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -3101,6 +3141,49 @@ from user code:
         self.assertNotIn("twice", message)
         self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
         self.assertIn("Add a ModelInput", message)
+        self.assertIn("advice above rests only on rejections", message)
+        self.assertNotIn("Every guard tree raised", message)
+
+    def test_no_match_message_qualifies_the_advice_when_the_re_check_raises(self):
+        # The other line the re-check can put where dispatch saw a rejection: it
+        # raised. The report's only entry line is then that raise, the re-check's
+        # own, and the caveat beside the ModelInput advice is still emitted: it
+        # is about the rejection dispatch acted on, not about that line.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        class RaisesThenRejectsThenRaises:
+            def __init__(self):
+                self.checks = 0
+
+            def check(self, f_locals):
+                self.checks += 1
+                if self.checks == 1:
+                    raise RuntimeError("the first pass is unhappy")
+                return False
+
+            def check_verbose(self, f_locals):
+                raise RuntimeError("the re-check is unhappy")
+
+        stub = RaisesThenRejectsThenRaises()
+        model.forward.compiled_results[0]._artifacts.guard_manager = stub
+        with self.assertRaises(RuntimeError) as ctx:
+            served = model(torch.randn(3, 3))
+            self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual(stub.checks, 2)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
+        raised = "  [0] <guard check raised RuntimeError: the re-check is unhappy>"
+        self.assertIn(raised, lines)
+        self.assertIn("[0]'s guard check raised while checking this call", message)
+        self.assertIn("Add a ModelInput", message)
+        self.assertIn("advice above rests only on rejections", message)
+        self.assertNotIn("Every guard tree raised", message)
+        self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
 
     def test_no_match_message_advises_an_input_for_a_missing_global(self):
         # A report every entry of which names a missing global still has to
@@ -3398,6 +3481,11 @@ from user code:
         )
         self.assertIn(withheld, message)
         self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
+        self.assertNotIn("Add a ModelInput", message)
+        # The withheld line above has already said what happened to [1], so the
+        # every-tree-raised footer must not be emitted as well: with `not
+        # withheld` dropped from its gate the report contradicts itself.
+        self.assertNotIn("Every guard tree raised", message)
         chained = []
         # Start at the cause: the report itself quotes the raise in [0]'s line,
         # so a walk from ctx.exception would pass with no chaining at all.
@@ -3650,6 +3738,9 @@ from user code:
         self.assertIn(withheld, message)
         self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
         self.assertIn("Add a ModelInput", message)
+        # The withheld line says why [1] was withheld, not that [0]'s rejection
+        # followed its raise; the advice standing on that rejection says so.
+        self.assertIn("advice above rests only on rejections", message)
         self.assertEqual(str(ctx.exception.__cause__), "guard tree is unhappy")
         # One line per input: the opt-out is described once, and reaching the
         # re-check for it would add a second line about the guards nobody asked
@@ -3774,8 +3865,8 @@ from user code:
         # tensor is one such tree: reading its strides fires a TORCH_CHECK.
         # Dispatch puts the state back, so the report is about the raise and not
         # about what the raise left behind -- with the restore removed, [0]'s line
-        # reads "GLOBAL_STATE changed: torch_function", an artifact of our own
-        # leak.
+        # reads "GLOBAL_STATE changed: torch_function" and the advice is to add a
+        # ModelInput, both of them artifacts of our own leak.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -3801,6 +3892,7 @@ from user code:
         self.assertIn("[0] <guard check raised RuntimeError: ", entry)
         self.assertIn("doesn't support strides", entry)
         self.assertNotIn("GLOBAL_STATE changed", message)
+        self.assertNotIn("Add a ModelInput", message)
 
     def test_no_match_report_restores_torch_function_after_a_throw(self):
         # The report's re-check is the second place a tree can throw out of C++,
@@ -4012,6 +4104,92 @@ from user code:
         with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
             compiled_fn(x)
         self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_no_match_message_advises_an_input_after_an_answer_then_a_raise(self):
+        # This tree's LAST evaluation raised, so its line is that raise and it has
+        # no guard to quote -- but it did reject this call on the scan, so an
+        # input covering the call is still on the table and "every guard tree
+        # raised" would be false. The advice is keyed on whether a tree EVER
+        # answered, not on what it last did.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        class RejectsThenRaises(NeverReChecked):
+            def __init__(self):
+                self.checks = 0
+
+            def check(self, f_locals):
+                self.checks += 1
+                if self.checks == 1:
+                    return False
+                raise RuntimeError("the second pass is unhappy")
+
+        stub = RejectsThenRaises()
+        model.forward.compiled_results[0]._artifacts.guard_manager = stub
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3))
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual(stub.checks, 2)
+        raised = "[0] <guard check raised RuntimeError: the second pass is unhappy>"
+        self.assertIn(f"  {raised}", lines)
+        # One entry line: this tree's last evaluation raised, so the report must
+        # not re-check it, and NeverReChecked's line is what a re-check adds.
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
+        self.assertIn("Add a ModelInput", message)
+        # The rejection came BEFORE the raise, so the advice carries no caveat.
+        self.assertNotIn("advice above rests only on rejections", message)
+        self.assertNotIn("Every guard tree raised", message)
+
+    def test_no_match_message_qualifies_a_rejection_that_followed_a_raise(self):
+        # The mirror image: this tree raised in the scan and rejected the call on
+        # the second pass. That rejection is the one the veto refuses to release
+        # the last resort on, so the report says both things it knows -- an
+        # input covering the call is on the table, and the only rejection on
+        # record followed a throw -- rather than keeping one line by dropping the
+        # other. The rejection above, taken BEFORE its raise, earns no such line.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        class RaisesThenRejects:
+            def __init__(self):
+                self.checks = 0
+
+            def check(self, f_locals):
+                self.checks += 1
+                if self.checks == 1:
+                    raise RuntimeError("the scan is unhappy")
+                return False
+
+            def check_verbose(self, f_locals):
+                return types.SimpleNamespace(
+                    result=False, verbose_code_parts=["stub guard rejected"]
+                )
+
+        stub = RaisesThenRejects()
+        model.forward.compiled_results[0]._artifacts.guard_manager = stub
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3))
+        message = str(ctx.exception)
+        self.assertEqual(stub.checks, 2)
+        self.assertIn("  [0] stub guard rejected", message.splitlines())
+        self.assertIn("[0]'s guard check raised while checking this call", message)
+        self.assertIn("Add a ModelInput", message)
+        caveat = (
+            "The ModelInput advice above rests only on rejections dispatch took "
+            "after the same tree had raised, so they can be about the relational "
+            "guard state a C++ throw leaves stale rather than about this call."
+        )
+        self.assertIn(caveat, message.splitlines())
+        # Not the wording for a report whose every line IS a raise: this one
+        # quotes a guard.
+        self.assertNotIn("Every guard tree raised", message)
 
     def test_aot_compile_module_second_pass_warns_that_it_served_over_a_raise(self):
         # The second serving path that has to record a swallowed raise: nothing
