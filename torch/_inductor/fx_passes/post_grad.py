@@ -22,7 +22,12 @@ from torch._inductor.custom_graph_pass import (
 )
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
-from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch._prims_common import (
+    canonicalize_dim,
+    is_boolean_dtype,
+    is_expandable_to,
+    is_integer_dtype,
+)
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
@@ -1167,7 +1172,12 @@ def is_valid_splitwithsizes_cat(match):
         return False
     split_node, cat_node = split_nodes[0], cat_nodes[0]
     # The dim of split and cat should match for passthrough
-    if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
+    split_dim = get_arg_value(split_node, 2, "dim") or 0
+    cat_dim = get_arg_value(cat_node, 1, "dim") or 0
+    if "val" not in cat_node.meta:
+        return False
+    ndim = cat_node.meta["val"].dim()
+    if canonicalize_dim(ndim, split_dim) != canonicalize_dim(ndim, cat_dim):
         return False
     get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
@@ -1776,8 +1786,12 @@ def is_valid_cat_splitwithsizes(match):
         return False
 
     # the dim of the cat and split should match
-    dim = get_arg_value(split_node, 2, "dim")
-    if dim != get_arg_value(cat_node, 1, "dim"):
+    split_dim = get_arg_value(split_node, 2, "dim") or 0
+    cat_dim = get_arg_value(cat_node, 1, "dim") or 0
+    if "val" not in cat_node.meta:
+        return False
+    ndim = cat_node.meta["val"].dim()
+    if canonicalize_dim(ndim, split_dim) != canonicalize_dim(ndim, cat_dim):
         return False
 
     cat_inputs = list(get_arg_value(cat_node, 0))
@@ -1792,7 +1806,7 @@ def is_valid_cat_splitwithsizes(match):
         # should match the corresponding split size
         if "val" not in cat_input.meta:
             return False
-        cat_input_size = cat_input.meta["val"].size(dim)
+        cat_input_size = cat_input.meta["val"].size(split_dim)
         if cat_input_size != split_size:
             return False
 
