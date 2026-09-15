@@ -2148,6 +2148,10 @@ if TYPE_CHECKING:
 
 _use_implicit_mempool: bool | None = None  # type: ignore[assignment]
 
+# Device types whose accelerator module provides a SymmetricMemory-compatible
+# `MemPool` (i.e. one supporting `use_on_oom` and `no_split`).
+_MEMPOOL_DEVICE_TYPES = ("cuda", "xpu")
+
 
 def _should_use_implicit_mempool() -> bool:
     r"""
@@ -2226,12 +2230,10 @@ def empty(  # type: ignore[misc]
 
     stride = torch._prims_common.make_contiguous_strides_for(size)
 
-    if _should_use_implicit_mempool() and device.type == "cuda":
+    if _should_use_implicit_mempool() and device.type in _MEMPOOL_DEVICE_TYPES:
         # Allocate tensor from an implicit memory pool
         mempool = get_mem_pool(device)
-        # TODO: this path can be made device-agnostic if `use_mem_pool` is
-        # elevated from torch.cuda to torch accelerator.
-        with torch.cuda.use_mem_pool(mempool):
+        with torch.get_device_module(device).use_mem_pool(mempool):
             return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
     else:
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
@@ -2374,10 +2376,10 @@ def get_signal_pad_size() -> int:
 
 
 # An internal map from device to the symmetric memory pool for that device.
-_symm_mem_pools: dict[_device, torch.cuda.MemPool] = {}
+_symm_mem_pools: dict[_device, Any] = {}
 
 
-def get_mem_pool(device: _device) -> torch.cuda.MemPool:
+def get_mem_pool(device: _device) -> Any:
     """
     Get the symmetric memory pool for a given device. If not found, create a new
     pool.
@@ -2390,7 +2392,9 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
         device (`torch.device` or str): the device for which to get the symmetric memory pool.
 
     Returns:
-        `torch.cuda.MemPool`: the symmetric memory pool for the given device.
+        the symmetric memory pool for the given device, e.g. a
+        `torch.cuda.MemPool` for a CUDA device or a `torch.xpu.MemPool` for an
+        XPU device.
 
     Example::
 
@@ -2401,7 +2405,7 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
         >>> tensor = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
 
     """
-    # This function is a wrapper around the `torch.cuda.MemPool` constructor.
+    # This function is a wrapper around the accelerator's `MemPool` constructor.
     # Due to special requirements of SymmetricMemory, we preset certain options for the pool.
     # - use_on_oom=False: we don't want to lend the space of the pool for
     # non-symmetric allocations because this could desync the allocation state
@@ -2415,7 +2419,7 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
     if device not in _symm_mem_pools:
         allocator = get_mempool_allocator(device)
         # Create a new pool with the given allocator and the preset options.
-        _symm_mem_pools[device] = torch.cuda.MemPool(
+        _symm_mem_pools[device] = torch.get_device_module(device).MemPool(
             allocator,
             use_on_oom=False,
             no_split=True,
