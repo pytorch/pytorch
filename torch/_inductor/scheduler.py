@@ -154,7 +154,6 @@ class PendingFusion:
     node1: BaseSchedulerNode
     node2: BaseSchedulerNode
     future: LambdaFuture | None = None
-    can_reorder: bool = False
 
     def get_fusion_nodes(self) -> tuple[BaseSchedulerNode, BaseSchedulerNode]:
         return (self.node1, self.node2)
@@ -245,16 +244,6 @@ class FusionMemoryState:
 
     def region_contains_peak(self, start: int, end: int) -> bool:
         return self.peak_prefix[end + 1] != self.peak_prefix[start]
-
-    def update_boundaries_match(self, update: FusionMemoryUpdate) -> bool:
-        start = update.region_start
-        end = update.region_end + 1
-        return (
-            len(update.live_after) == end - start
-            and len(update.live_before) == end - start + 1
-            and update.live_before[0] == self.baseline_live_before[start]
-            and update.live_before[-1] == self.baseline_live_before[end]
-        )
 
     def apply_accepted_fusion(
         self, update: FusionMemoryUpdate, fused_node: BaseSchedulerNode
@@ -7926,10 +7915,6 @@ class Scheduler:
                 return True, None
 
         update = self._fusion_memory_update(state, node1, node2)
-        if not state.update_boundaries_match(update):
-            raise AssertionError(
-                "fusion memory update must preserve the timeline boundary"
-            )
         if update.peak > state.peak_limit:
             fusion_log.debug(
                 "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
@@ -7946,10 +7931,8 @@ class Scheduler:
         node2: BaseSchedulerNode,
         speedup_fn: Callable[[], bool],
         fused_nodes: OrderedSet[BaseSchedulerNode],
-        *,
-        can_reorder: bool = False,
     ):
-        can_fuse = self.can_fuse(node1, node2, can_reorder=can_reorder)
+        can_fuse = self.can_fuse(node1, node2)
         state = self._fusion_memory_state
         memory_update = state.pending_update if state is not None else None
         if can_fuse and speedup_fn():
@@ -8026,7 +8009,6 @@ class Scheduler:
                         node2,
                         pending_fusion.callable_fn,
                         fused_nodes,
-                        can_reorder=pending_fusion.can_reorder,
                     ):
                         fusions_to_remove.add(candidate)
 
@@ -8038,7 +8020,6 @@ class Scheduler:
                     self.get_fused_node(pending_fusion.node2),
                     pending_fusion.callable_fn,
                     fused_nodes,
-                    can_reorder=pending_fusion.can_reorder,
                 ):
                     fusions_to_remove.add(cand)
 
@@ -8084,7 +8065,6 @@ class Scheduler:
                     node_key2,
                     is_speedup,
                     fused_nodes,
-                    can_reorder=pending_fusion.can_reorder,
                 )
 
         for node1, node2 in possible_fusion_pairs:
@@ -8111,7 +8091,6 @@ class Scheduler:
                         callable_fn=fusion_res.callable_fn,
                         node1=node1,
                         node2=node2,
-                        can_reorder=is_reorder_round,
                         future=fusion_res.future,
                     )
 
@@ -8167,7 +8146,6 @@ class Scheduler:
                 node_key2,
                 is_speedup_fn,
                 fused_nodes,
-                can_reorder=pending_fusion.can_reorder,
             )
 
     def _handle_template_overlap(
@@ -9190,6 +9168,12 @@ class Scheduler:
             graph_outputs=state.graph_outputs,
             cur_memory=state.baseline_live_before[region_start],
         )
+        expected_live_out = state.baseline_live_before[region_end + 1]
+        if live_before[-1] != expected_live_out:
+            raise AssertionError(
+                f"expected fusion memory region to end with {expected_live_out} "
+                f"live bytes, got {live_before[-1]}"
+            )
         return FusionMemoryUpdate(
             node1=node1,
             node2=node2,
