@@ -19,6 +19,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     TestCase,
+    HardwareClassification,
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
@@ -63,6 +64,7 @@ import re
 from collections import defaultdict
 from collections.abc import Iterable
 import unittest
+from unittest.mock import patch
 import warnings
 import weakref
 from functools import partial, wraps
@@ -2814,7 +2816,84 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
+class TestDeviceHint(TestCase):
+    # device_hint decides which backend the ~27 branches in _meta_registrations
+    # model, so its fallback needs coverage on every backend rather than on
+    # whichever one the author had.
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipIfTorchDynamo("tests device_hint directly, not through dynamo")
+    def test_device_hint_reports_tensor_device(self, device):
+        from torch._meta_registrations import device_hint
+
+        self.assertEqual(
+            device_hint(torch.empty(3, device=device)), torch.device(device).type
+        )
+
+    @skipIfTorchDynamo("tests device_hint directly, not through dynamo")
+    def test_device_hint_device_less_tensor_is_the_accelerator(self, device):
+        from torch._meta_registrations import device_hint
+
+        device_type = torch.device(device).type
+        acc = torch.accelerator.current_accelerator()
+        if acc is None or acc.type != device_type:
+            self.skipTest(f"{device} is not the accelerator in use")
+
+        self.assertEqual(device_hint(torch.empty(3, device="meta")), device_type)
+
+
+class TestDeviceHintFallback(TestCase):
+    # The cases no real machine can produce on demand: an accelerator other than
+    # the one this process has, and a build with no accelerator at all.
+    hw_classification = HardwareClassification.GENERIC
+
+    @skipIfTorchDynamo("tests device_hint directly, not through dynamo")
+    def test_device_hint_follows_current_accelerator(self):
+        from torch._meta_registrations import device_hint
+
+        for device_type in ("cuda", "xpu", "mps", "hpu", "privateuseone"):
+            with patch(
+                "torch.accelerator.current_accelerator",
+                return_value=torch.device(device_type),
+            ):
+                self.assertEqual(
+                    device_hint(torch.empty(3, device="meta")), device_type
+                )
+
+    @skipIfTorchDynamo("tests device_hint directly, not through dynamo")
+    def test_device_hint_without_accelerator_falls_back_to_cuda(self):
+        from torch._meta_registrations import device_hint
+
+        with patch("torch.accelerator.current_accelerator", return_value=None):
+            self.assertEqual(device_hint(torch.empty(3, device="meta")), "cuda")
+
+    @skipIfTorchDynamo("tests device_hint directly, not through dynamo")
+    def test_device_hint_prefers_the_tensor_over_the_accelerator(self):
+        from torch._meta_registrations import device_hint
+
+        with patch(
+            "torch.accelerator.current_accelerator",
+            return_value=torch.device("xpu"),
+        ):
+            self.assertEqual(device_hint(torch.empty(3)), "cpu")
+
+    @skipIfTorchDynamo("tests device_hint directly, not through dynamo")
+    def test_device_hint_prefers_the_fake_device_over_the_accelerator(self):
+        from torch._meta_registrations import device_hint
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with patch(
+            "torch.accelerator.current_accelerator",
+            return_value=torch.device("xpu"),
+        ):
+            with FakeTensorMode():
+                self.assertEqual(device_hint(torch.empty(3, device="cpu")), "cpu")
+
+
 instantiate_device_type_tests(TestMeta, globals())
+instantiate_device_type_tests(
+    TestDeviceHint, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 def print_op_str_if_not_supported(op_str):
