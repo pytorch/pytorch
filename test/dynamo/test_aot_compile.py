@@ -4430,10 +4430,11 @@ from user code:
     def test_aot_compile_module_interrupt_out_of_a_later_tree_propagates(self):
         # accepts() catches Exception, so an interrupt out of a later tree leaves
         # __call__ as itself -- neither read as a non-match nor wrapped in a
-        # report -- and the earlier raise on record goes with it: no graph was
-        # served and no report built, so nothing logs it on the way out. It is
-        # not lost to the process: the tree raises again on the next call that
-        # reaches it, and that call records it.
+        # report -- and the earlier raise on record goes with it, as on any exit
+        # that neither serves a graph nor builds a report. The second call pins
+        # where the dedup is judged: it warns about [0] again, so the aborted
+        # call consumed nothing. Deciding the (index, type) pair at the raise
+        # rather than at the serve leaves that call silent, and fails only here.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -4469,8 +4470,9 @@ from user code:
         # prepare_f_locals is outside accepts()' try for every result, not only
         # the first: a later result whose signature cannot take the call surfaces
         # as bind_locals' TypeError, as a plain module call would, with an earlier
-        # result's raise on record -- and, as with the interrupt above, nothing
-        # logs that raise, since no graph was served and no report built.
+        # result's raise on record and, as on the interrupt above, nothing to log
+        # it. Both premises are pinned first: the results cannot share a binding,
+        # so [1] binds inside the second accepts(), and [0]'s tree does raise.
         self._hide_leaked_dynamo_globals()
         mod = ScaleModule()
         x = torch.randn(3, 3)
@@ -4491,6 +4493,9 @@ from user code:
                 raise RuntimeError("zero is unhappy")
 
         combined.compiled_results[0]._artifacts.guard_manager = Raises()
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+        with self.assertRaisesRegex(RuntimeError, "zero is unhappy"):
+            combined.compiled_results[0].guard_check(mod, x)
         with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
             with self.assertRaisesRegex(TypeError, "missing a required argument: 'z'"):
                 combined(x)
