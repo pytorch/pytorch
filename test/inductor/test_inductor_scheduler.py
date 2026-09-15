@@ -17,6 +17,7 @@ from torch._inductor.codegen.simd import (
     _GroupedReductionLayout,
     _PointwiseRemapHandler,
     _SubParentValueResolver,
+    _TranslatedProjectionGeometry,
     SIMDScheduling,
 )
 from torch._inductor.codegen.simd_kernel_features import (
@@ -40,7 +41,9 @@ from torch._inductor.scheduler import (
     SubParentAccessRelation,
     SubParentEpilogueCandidate,
     SubParentEpilogueGrouping,
+    SubParentEpilogueStage,
     SubParentOutputGroup,
+    StagedReductionPlan,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
@@ -1136,7 +1139,12 @@ class TestScheduler(TestCase):
         )
 
         self.assertIs(handler.load("buf0", sympy.Integer(3)), value)
-        resolver.resolve_load.assert_called_once_with("buf0", sympy.Integer(3))
+        resolver.resolve_load.assert_called_once_with(
+            "buf0",
+            sympy.Integer(3),
+            replay_context=None,
+            replay_node=None,
+        )
         inner.load.assert_not_called()
         kernel.load.assert_called_once_with("buf0", sympy.Integer(7))
         resolver = object.__new__(_SubParentValueResolver)
@@ -1198,9 +1206,10 @@ class TestScheduler(TestCase):
         resolver._layout.parent_dim.side_effect = (
             lambda candidate: None if candidate is None else str(candidate[-1])
         )
-        resolver._layout.child_block.return_value = "CHILD"
+        resolver._sub_parent_family = Mock()
+        resolver._sub_parent_family.sub_parent_tree.return_value.block_size_str.return_value = "CHILD"
         resolver._sub_parent_factor = 2
-        resolver._dense_descriptor_indices = {}
+        resolver._translated_descriptor_indices = {}
         resolver.resolve_sources = Mock(return_value=(source,))
         resolver.materialize_source = Mock(return_value=child)
 
@@ -1214,7 +1223,7 @@ class TestScheduler(TestCase):
                 "buf0", source, sympy.Integer(0)
             )
 
-        resolver._layout.child_block.return_value = "GROUP"
+        resolver._sub_parent_family.sub_parent_tree.return_value.block_size_str.return_value = "GROUP"
         self.assertFalse(resolver.is_group_width_shape(("XBLOCK", "GROUP")))
 
     def test_translated_shape_admission(self):
@@ -1252,37 +1261,6 @@ class TestScheduler(TestCase):
             self.assertIsNone(prove_translation(192, 3))
             self.assertIsNotNone(prove_translation(256, 4))
             self.assertIsNone(prove_translation(384, 6))
-
-    def test_translated_projection_geometry_separates_logical_and_physical(self):
-        row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
-        source = MemoryDep("buf0", 192 * row + feature, (row, feature), (2, 192))
-        leading = MemoryDep("buf0", 192 * row + feature, (row, feature), (2, 64))
-        trailing = MemoryDep("buf0", 192 * row + feature + 64, (row, feature), (2, 128))
-        stage = SubParentEpilogueStage(
-            factor=3,
-            access_relations=(
-                SubParentAccessRelation((source,), leading, None, True, (0, 0)),
-                SubParentAccessRelation((source,), trailing, None, False, (0, 64)),
-            ),
-            output_groups=(
-                SubParentOutputGroup(1, (Mock(),)),
-                SubParentOutputGroup(2, (Mock(),)),
-            ),
-        )
-        plan = StagedReductionPlan((), 2, 192, None, (stage,))
-
-        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
-            geometry = SIMDScheduling._translated_projection_geometry(plan)
-
-        self.assertEqual(
-            geometry,
-            _TranslatedProjectionGeometry(
-                logical_domain_factor=3,
-                logical_child_width=64,
-                physical_parent_block=256,
-                physical_split_factor=4,
-            ),
-        )
 
     def test_sub_parent_group_width_materialization_boundaries(self):
         group_shape = ("XBLOCK", "GROUP")

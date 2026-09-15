@@ -6662,6 +6662,33 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
         self._emit_recursive_split(expr, part_names, reshape_shape, dtype)
 
+    def emit_contiguous_split_via_reshape(
+        self,
+        value: CSEVariable,
+        reshape_shape: Sequence[sympy.Expr | int | str],
+        part_names: Sequence[str],
+    ) -> None:
+        """Split contiguous trailing intervals without changing the split helper."""
+        dtype = value.dtype
+        if dtype is None:
+            raise AssertionError("split value must have a known dtype")
+        if len(reshape_shape) < 2 or reshape_shape[-2] != len(part_names):
+            raise AssertionError(
+                "contiguous split shape must expose the part count before the width"
+            )
+        factor = len(part_names)
+        if factor <= 1 or factor & (factor - 1) != 0:
+            raise AssertionError(f"split factor must be a power of two: {factor}")
+        expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        permute_dims = (*range(len(reshape_shape) - 2), len(reshape_shape) - 1, len(reshape_shape) - 2)
+        transposed_shape = (
+            *reshape_shape[:-2],
+            reshape_shape[-1],
+            reshape_shape[-2],
+        )
+        transposed = f"tl.trans({expr}, {permute_dims})"
+        self._emit_recursive_split(transposed, part_names, transposed_shape, dtype)
+
     def emit_broadcast_via_reshape(
         self,
         value: CSEVariable,
