@@ -26,20 +26,7 @@ requires_prepacked_linear = unittest.skipIf(
 )
 
 
-class TestConverter(TestCase):
-    def setUp(self):
-        super().setUp()
-        init_torchbind_implementations()
-
-        self.torch_bind_ops = [
-            torch.ops._TorchScriptTesting.queue_pop,
-            torch.ops._TorchScriptTesting.queue_push,
-            torch.ops._TorchScriptTesting.queue_size,
-        ]
-
-    def tearDown(self):
-        return
-
+class _ConverterTestMixin:
     def _check_equal_ts_ep_converter(
         self,
         M,
@@ -118,6 +105,21 @@ class TestConverter(TestCase):
             else:
                 self.assertEqual(type(x), type(y))
                 self.assertEqual(x, y)
+
+
+class TestConverter(_ConverterTestMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
+
+        self.torch_bind_ops = [
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
+
+    def tearDown(self):
+        return
 
     def test_ts2ep_converter_basic(self):
         class MSingle(torch.nn.Module):
