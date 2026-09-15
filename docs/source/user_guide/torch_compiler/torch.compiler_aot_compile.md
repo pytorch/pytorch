@@ -127,14 +127,12 @@ Ahead-of-time compiles the `torch.compile()`-wrapped function.
 original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
-- `disable_guard_check()` -- Disable runtime guard validation (advanced use).
-  On this function path the compiled function then runs whatever it is called
-  with, without evaluating its guards; module dispatch over several compiled
-  inputs still evaluates them, as described under
-  {ref}`Developer notes <aot-compile-developer-notes>`. The opt-out does not
-  stop the per-call re-read of the globals a kept guard is rooted at, so a
-  loaded artifact that opted out goes on serving whatever its guard scope
-  binds, unchecked.
+- `disable_guard_check()` -- Disable runtime guard validation (advanced use): the
+  compiled function then runs whatever it is called with, without evaluating its
+  guards. The opt-out does not stop the per-call re-read of a global that is
+  itself the source of a kept guard, so a loaded artifact that opted out goes on
+  serving whatever its guard scope binds -- or, for a name it no longer binds,
+  the last value read -- unchecked.
 
 **Requirements:**
 
@@ -171,17 +169,21 @@ Load a previously saved AOT-compiled function from a file.
   insert names of its own, never overwriting an existing key: the
   Dynamo-generated globals a kept guard is rooted at, and
   `__builtins__` when it has to build the builtins dict one of those names
-  holds. A global a kept guard is rooted at is re-read from this dict on every
-  call, so a rebind the guards accept is what the call computes with, and one
-  they reject raises instead. That re-read is not atomic with the guard check
-  before it, so a rebind landing between the two is served unchecked, exactly as
-  an eager compiled frame serves one landing between its guards and its globals.
+  holds. A global that is itself the source of a kept guard is re-read from
+  this dict on every call, so a rebind the guards accept is what the call
+  computes with, and one they reject raises instead -- but not a container a
+  guard reaches only through a sub-path such as `D['a']`, whose other members
+  nothing certifies: that container keeps its load-time value, so a rebind of
+  it is served stale even when the guard on `D['a']` passes. That re-read is
+  not atomic with the guard check before it, so a rebind landing between the two
+  is served unchecked, exactly as an eager compiled frame serves one landing
+  between its guards and its globals.
   The re-read writes into the loaded artifact's own globals dict, which every
   call of it shares, so two threads serving one loaded artifact race on that
   write; a caller who needs isolation loads the artifact once per thread.
-  Every other global is read once, at load time,
-  from this dict merged over the globals serialized with the artifact, which is
-  why a name the dict omits still resolves.
+  Every other global is read once, at load time, from this dict merged over the
+  globals serialized with the artifact, which is why a name the dict omits still
+  resolves.
   When omitted, global guards are resolved against the scope rebuilt from the
   artifact instead, where a rebinding in this process is invisible. Passing
   `{}` is not that: it installs a live but empty guard scope, so every kept
@@ -414,21 +416,3 @@ artifact can be loaded on every rank without per-rank compilation.
   explicitly disabled.
 - **Not all backends are supported.** Custom backends must implement the
   `SerializableCallable` interface to be compatible with save/load.
-
-(aot-compile-developer-notes)=
-
-## Developer notes
-
-**Private, unstable -- may change or disappear without notice.** A module can
-also be compiled for several calls at once:
-`torch.compile(model, fullgraph=True)._aot_compile(inputs)` takes a list of
-`torch._dynamo.aot_compile.ModelInput`, compiles one graph per input and
-replaces the wrapper's `forward` with a dispatcher over their guards. It needs
-`torch._dynamo.config.enable_aot_compile`, which is on by default, so only a
-caller who turned it off has to restore it. The dispatcher serves the first
-input whose guards match, and evaluates the guards of an input opted out
-through `model.forward.compiled_results[i].disable_guard_check()` as well:
-opting out here suppresses the failure, not the evaluation, so such an input is
-served on a match like any other, and on the strength of its opt-out alone only
-when nothing matched -- one opt-out replaces the
-`No AOT compiled graph matched this call` error for the whole model.
