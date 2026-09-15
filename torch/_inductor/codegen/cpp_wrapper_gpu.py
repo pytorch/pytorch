@@ -53,7 +53,13 @@ from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
-from .wrapper import PythonWrapperCodegen, SymbolicCallArg
+from .wrapper import (
+    EnterKernelProfileScopeLine,
+    ExitKernelProfileScopeLine,
+    kernel_profile_enabled,
+    PythonWrapperCodegen,
+    SymbolicCallArg,
+)
 
 
 _cpp_string_literal_escapes = {
@@ -2029,7 +2035,13 @@ static inline void ensure_triton_kernel_compiles_started() {{
             # JIT: call the extern "C" symbol directly (resolved at link time
             # via extra_flags pointing at the compiled .so).
             kernel_prefix = "kernels." if V.graph.aot_mode else ""
+            enable_kernel_profile = kernel_profile_enabled()
+            if enable_kernel_profile:
+                self.writeline(EnterKernelProfileScopeLine(self))
+                self.write_record_function_handle(kernel_name)
             self.writeline(f"{kernel_prefix}{kernel_name}({call_args_str}, {stream});")
+            if enable_kernel_profile:
+                self.writeline(ExitKernelProfileScopeLine(self))
 
     def prepare_triton_wrapper_args(
         self, call_args: list[Any], arg_types: list[Any]
