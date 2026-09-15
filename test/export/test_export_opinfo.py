@@ -123,7 +123,7 @@ def _test_export_helper(self, dtype, op):
                         )
 
 
-class TestExportOpInfo(TestCase):
+class TestExportOpInfoCPU(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @ops(op_db, allowed_dtypes=(torch.float,))
@@ -131,9 +131,6 @@ class TestExportOpInfo(TestCase):
     @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
     def test_fake_export(self, device, dtype, op):
         _test_export_helper(self, dtype, op)
-
-
-instantiate_device_type_tests(TestExportOpInfo, globals(), only_for="cpu")
 
 
 selected_ops = {
@@ -148,7 +145,7 @@ selected_ops = {
 selected_op_db = [op for op in op_db if op.name in selected_ops]
 
 
-class TestExportOnFakeCuda(TestCase):
+class TestExportOnFakeCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     # In CI, this test runs on a CUDA machine with cuda build
@@ -293,7 +290,8 @@ cuda_calls_behavior_unchanged()
         self.assertEqual(r, "")
 
 
-instantiate_device_type_tests(TestExportOnFakeCuda, globals(), only_for="cuda")
+instantiate_device_type_tests(TestExportOpInfoCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestExportOnFakeCUDA, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
