@@ -21,6 +21,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.symbolic_convert import _import_module
 from torch._dynamo.testing import CompileCounter, reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -1019,6 +1020,9 @@ def add(x, y):
                 torch.compile(fn, backend="eager", fullgraph=True)(*args)
         finally:
             sys.modules.pop(key, None)
+            # The memo outlives the sys.modules entry, and a same-process rerun
+            # would otherwise resolve this run's module.
+            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
@@ -1077,6 +1081,7 @@ def add(x, y):
                     self.assertIs(fn.__globals__[alias], module)
         finally:
             sys.modules.pop(name, None)
+            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
@@ -1123,6 +1128,7 @@ def add(x, y):
             self.assertIs(fn.__globals__[alias], foreign)
         finally:
             sys.modules.pop(name, None)
+            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
@@ -1152,6 +1158,7 @@ def add(x, y):
             self.assertIs(fn.__globals__[alias], live)
         finally:
             sys.modules.pop(name, None)
+            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
