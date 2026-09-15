@@ -2429,11 +2429,17 @@ class InstructionTranslatorBase(
             # the module body inside the trace; one still executing its body
             # is imported, which waits for it as an import statement would.
             value = sys.modules.get(module_name)
-            spec = getattr(value, "__spec__", None)
             if value is None and module_name in _import_source_cache:
                 value = _import_source_cache[module_name]
-            elif value is None or getattr(spec, "_initializing", False):
+            elif value is None:
                 value = importlib.import_module(module_name)
+            elif isinstance(value, types.ModuleType):
+                # Out of the instance dict, like the __name__ reads below: an
+                # attribute read runs a PEP 562 __getattr__ or a class-level
+                # __getattribute__ (importlib.util._LazyModule imports on any).
+                spec = object.__getattribute__(value, "__dict__").get("__spec__")
+                if getattr(spec, "_initializing", False):
+                    value = importlib.import_module(module_name)
             _import_source_cache[module_name] = value
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
@@ -2443,8 +2449,8 @@ class InstructionTranslatorBase(
         # seeding a guard scope -- can leave it bound to a module object of this
         # name that is not the one resolved here. That is not the name collision
         # this checks for (two module names still mangle to one alias).
-        bound = f_globals.get(alias, value)
-        if bound is not value:
+        if alias in f_globals and f_globals[alias] is not value:
+            bound = f_globals[alias]
             # __name__ is read out of the instance dict through
             # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
             # class-level __getattribute__ (importlib.util._LazyModule imports on
@@ -2498,7 +2504,9 @@ class InstructionTranslatorBase(
         # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
         # trace that graph-breaks or restarts, as does the write install makes
         # to this name. A writer's same-named module is replaced: value is the
-        # live entry whenever there is one.
+        # live entry whenever sys.modules holds a module under the name, and
+        # what this process's traces last bound when the name is gone or
+        # blocked with None, where the writer's module is no more live.
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
