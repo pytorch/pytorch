@@ -70,7 +70,7 @@ def patches(fn):
     return wrapped
 
 
-class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
+class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     hw_classification = HardwareClassification.ACCELERATOR
     common = check_model
 
@@ -208,7 +208,7 @@ class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
 
 
 instantiate_device_type_tests(
-    TestSelectAlgorithmGpu,
+    TestSelectAlgorithm,
     globals(),
     except_for="cpu",
     allow_xpu=True,
