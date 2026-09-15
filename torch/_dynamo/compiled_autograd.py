@@ -1048,6 +1048,7 @@ class AutogradCompilerInstance:
     ) -> tuple[list[int], torch.device | None]:
         to_move: dict[int, torch.fx.Node] = {}
         non_cpu_meta_devices: set[torch.device] = set()
+        has_cpu_non_scalar = False
         nodes = list(graph.nodes)
         if nodes[0].target != "inputs":
             raise AssertionError(
@@ -1072,6 +1073,8 @@ class AutogradCompilerInstance:
 
             is_cpu = device.type == "cpu"
             is_scalar = len(node.meta["val"].size()) == 0
+            if is_cpu and not is_scalar:
+                has_cpu_non_scalar = True
             if is_cpu and is_scalar:
                 node_users = list(node.users.keys())
                 # We can only move the cpu scalar if it is not exposed to user code.
@@ -1090,7 +1093,11 @@ class AutogradCompilerInstance:
                     to_move[i] = node
 
         # only move cpu scalars when the graph has exactly one non-cpu/meta device
-        # and it is cuda or renamed PrivateUse1; mixed-accelerator graphs skip
+        # and it is cuda or renamed PrivateUse1; mixed-accelerator graphs skip.
+        # If any CPU non-scalar input remains, moving scalars to the accelerator
+        # can break ops like aten.mul(cpu_vector, npu_scalar).
+        if has_cpu_non_scalar:
+            return [], None
         if len(non_cpu_meta_devices) == 1:
             target_device = next(iter(non_cpu_meta_devices))
             if not _is_compiled_autograd_accelerator_device(
