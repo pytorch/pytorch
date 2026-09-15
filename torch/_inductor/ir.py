@@ -1294,6 +1294,59 @@ class Scatter(Pointwise):
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class PaddedScatterPadding:
+    numel: Expr
+    index_var: Symbol
+    output_index: Expr
+    predicate: Expr
+    value: bool | float | int
+
+    def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
+        result = OrderedSet().union(
+            get_free_symbols(self.numel, unbacked_only),
+            get_free_symbols(self.output_index, unbacked_only),
+            get_free_symbols(self.predicate, unbacked_only),
+        )
+        result.discard(self.index_var)
+        return result
+
+
+@ir_dataclass
+class PaddedScatter(Scatter):
+    padding: PaddedScatterPadding
+
+    def store_output(
+        self,
+        output_name: str | None,
+        indexer: Callable[[Sequence[Expr]], Never],
+        vars: Sequence[Expr],
+    ) -> Any:
+        if output_name is None:
+            output_name = "unnamed"
+        result = super().store_output(output_name, indexer, vars)
+        ops.padded_scatter_padding(output_name)
+        return result
+
+    def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
+        return super().get_free_symbol_uses(
+            unbacked_only
+        ) | self.padding.get_free_symbol_uses(unbacked_only)
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return PaddedScatter(
+            device=device,
+            dtype=self.dtype,
+            inner_fn=loader,
+            ranges=self.ranges,
+            output_indexer=self.output_indexer,
+            scatter_mode=self.scatter_mode,
+            padding=self.padding,
+        )
+
+
 REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
@@ -5979,6 +6032,24 @@ class ComputedBuffer(OperationBuffer):
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         return self.data.constant_to_device(device)
+
+
+@ir_dataclass(frozen=False)
+class PaddedScatterBuffer(ComputedBuffer):
+    data: PaddedScatter
+
+    def get_padded_scatter_padding(self) -> PaddedScatterPadding:
+        padding = self.data.padding
+        indexer = self.get_layout().as_fixed().make_indexer()
+        return dataclasses.replace(
+            padding,
+            output_index=indexer([padding.output_index]),
+        )
+
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+        read_writes.writes.add(dependencies.StarDep(self.get_name()))
+        return read_writes
 
 
 @dataclasses.dataclass(frozen=True)
