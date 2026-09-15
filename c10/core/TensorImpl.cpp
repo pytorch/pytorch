@@ -4,7 +4,6 @@
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -220,16 +219,6 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   _change_backend_component_keys(fake_device);
 }
 
-void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
-  // normalize device index for indexed device types (not CPU or meta)
-  if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU &&
-      fake_device.type() != c10::DeviceType::Meta) {
-    fake_device = c10::Device(
-        fake_device.type(), c10::impl::normalizeFakeDevice(fake_device.type()));
-  }
-  set_fake_device(fake_device);
-}
-
 void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.
@@ -320,6 +309,11 @@ bool TensorImpl::try_incref_pyobject() const noexcept {
 }
 
 void TensorImpl::release_resources() {
+  if (extra_meta_ && extra_meta_->fake_constant_) {
+    auto mode = extra_meta_->fake_tensor_mode_;
+    TORCH_INTERNAL_ASSERT(mode);
+    mode->clear_constant(this);
+  }
   autograd_meta_.reset();
   if (storage_) {
     storage_ = {};
@@ -1093,35 +1087,12 @@ void FakeTensorMode::set_constant(
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
   if (!constant) {
-    auto old_constant = std::move(extra_meta->fake_constant_);
-    if (!old_constant) {
-      return;
-    }
-
-    TORCH_INTERNAL_ASSERT(old_constant->has_storage());
-    auto* old_key = old_constant->storage().unsafeGetStorageImpl();
-    auto old_it = constant_storage_mapping_.find(old_key);
-    if (old_it == constant_storage_mapping_.end()) {
-      return;
-    }
-
-    auto& tensors = old_it->second.tensors;
-    tensors.erase(
-        std::remove_if(
-            tensors.begin(),
-            tensors.end(),
-            [&](const c10::weak_intrusive_ptr<c10::TensorImpl>& weak_ref) {
-              auto impl = weak_ref.lock();
-              return !impl || impl.get() == fake_impl;
-            }),
-        tensors.end());
-    if (tensors.empty()) {
-      constant_storage_mapping_.erase(old_it);
-    }
+    clear_constant(fake_impl);
     return;
   }
 
   TORCH_INTERNAL_ASSERT(!extra_meta->fake_constant_);
+  TORCH_INTERNAL_ASSERT(!constant->is_fake());
   TORCH_INTERNAL_ASSERT(constant->has_storage());
   const auto& storage = constant->storage();
   auto* key = storage.unsafeGetStorageImpl();
@@ -1134,6 +1105,36 @@ void FakeTensorMode::set_constant(
   it->second.tensors.emplace_back(
       c10::weak_intrusive_ptr<c10::TensorImpl>::reclaim_copy(fake_impl));
   extra_meta->fake_constant_ = std::move(constant);
+}
+
+void FakeTensorMode::clear_constant(c10::TensorImpl* fake_impl) noexcept {
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+  auto old_constant = std::move(extra_meta->fake_constant_);
+  if (!old_constant) {
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(old_constant->has_storage());
+  auto* old_key = old_constant->storage().unsafeGetStorageImpl();
+  auto old_it = constant_storage_mapping_.find(old_key);
+  if (old_it == constant_storage_mapping_.end()) {
+    return;
+  }
+
+  auto& tensors = old_it->second.tensors;
+  tensors.erase(
+      std::remove_if(
+          tensors.begin(),
+          tensors.end(),
+          [&](const c10::weak_intrusive_ptr<c10::TensorImpl>& weak_ref) {
+            auto impl = weak_ref.lock();
+            return !impl || impl.get() == fake_impl;
+          }),
+      tensors.end());
+  if (tensors.empty()) {
+    constant_storage_mapping_.erase(old_it);
+  }
 }
 
 const c10::intrusive_ptr<c10::TensorImpl>& FakeTensorMode::get_constant(
