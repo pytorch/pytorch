@@ -16,7 +16,12 @@ import benchmarks.distributed.transport.benchmark as benchmark
 
 sys.path.remove(str(REPO_ROOT))
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class TestTransportBenchmark(TestCase):
@@ -121,11 +126,11 @@ class TestTransportBenchmark(TestCase):
             self.assertRaises(SystemExit),
         ):
             benchmark.parse_args(["--backend", "ibverbs", "--one-way-connect"])
-        self.assertTrue(
-            benchmark.parse_args(
-                ["--backend", "nixl", "--one-way-connect"]
-            ).one_way_connect
-        )
+
+    @parametrize("backend", ["mooncake", "nixl", "ucxx"])
+    def test_one_way_connect(self, backend):
+        args = benchmark.parse_args(["--backend", backend, "--one-way-connect"])
+        self.assertTrue(args.one_way_connect)
 
     def test_output_metadata(self):
         args = benchmark.parse_args(
@@ -149,6 +154,9 @@ class TestTransportBenchmark(TestCase):
         self.assertEqual(output["tensor_device"], "cpu")
         self.assertEqual(output["counter_source"], "netdev")
         self.assertEqual(output["minimum_line_rate"], 0.5)
+
+
+instantiate_parametrized_tests(TestTransportBenchmark)
 
 
 if __name__ == "__main__":

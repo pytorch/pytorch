@@ -316,7 +316,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--one-way-connect",
         action="store_true",
-        help="connect rank 0 only for same-host UCXX validation",
+        help="connect rank 0 only for one-sided validation",
     )
     parser.add_argument("--minimum-line-rate", type=float, default=0.8)
     parsed = parser.parse_args(args)
@@ -324,8 +324,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         parser.error("warmup must be nonnegative and iterations must be positive")
     if not 0 <= parsed.minimum_line_rate <= 1:
         parser.error("minimum-line-rate must be between zero and one")
-    if parsed.one_way_connect and parsed.backend.lower() not in ("nixl", "ucxx"):
-        parser.error("one-way-connect is supported only by NIXL and UCXX")
+    if parsed.one_way_connect and parsed.backend.lower() not in (
+        "mooncake",
+        "nixl",
+        "ucxx",
+    ):
+        parser.error("one-way-connect is supported only by Mooncake, NIXL, and UCXX")
     return parsed
 
 

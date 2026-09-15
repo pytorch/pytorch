@@ -4,6 +4,7 @@ Install the optional backend package matching the operation:
 
 ```bash
 uv pip install "ibverbs[gpunetio-triton]"
+uv pip install mooncake-transfer-engine
 uv pip install nixl
 uv pip install "ucxx-cu12==0.51.1"  # use ucxx-cu13 with CUDA 13
 ```
@@ -38,6 +39,31 @@ address, such as isolated network namespaces.
 Add `--cuda-graph` to capture one write and one read and benchmark graph
 replay. The `ibverbs` backend also needs `"cuda_graph":true` in each rank's
 options to select GPUNetIO.
+
+## Mooncake transport
+
+The Mooncake adapter uses Transfer Engine with P2P metadata exchange; no metadata
+server is required. Set each rank's reachable `host` and optional RDMA
+`device_name` through `--options`:
+
+```bash
+torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+  --master-addr="$MASTER_ADDR" --master-port=29500 \
+  benchmarks/distributed/transport/benchmark.py \
+  --backend mooncake --device cpu --interfaces "$INTERFACE" --rdma-counters \
+  --options="{\"host\":\"$LOCAL_IP\",\"device_name\":\"$HCA\"}"
+```
+
+Set `MC_USE_IPV6=1` on both ranks when `host` uses IPv6.
+
+Use `--device cuda` for GPU memory. Transfers synchronize the local CUDA stream
+and complete before returning; CUDA graph capture is unsupported. Peers must
+finish accessing exposed buffers before exchanging descriptors or starting
+transfers. Keep registered allocations unchanged until the transport closes.
+
+For CPU TCP testing, set `MC_FORCE_TCP=1`, pass `"protocol":"tcp"` in `--options`,
+and omit `--rdma-counters`. Mooncake may otherwise auto-select RDMA even when
+`protocol` is `"tcp"`. `MC_TRANSFER_TIMEOUT` controls Mooncake's transfer timeout.
 
 ## NIXL transport
 
