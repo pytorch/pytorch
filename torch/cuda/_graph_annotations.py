@@ -488,12 +488,7 @@ _sourceless_nodes: set[int] = set()
 def note_sourceless_node(tools_id: int) -> None:
     """Record that this node's type carries no source node id, so a source-keyed capture
     still aliases it into exec space. Called by whichever backend discovered the node (it
-    has the node type in hand; the registry does not).
-
-    Only under source keying, which is the only thing that consumes the set. Under "exec"
-    keying the entry would be keyed to the capture graph while the annotation is rekeyed to
-    an exec id, so the destroy purge -- which is handed exec ids -- could never name it and
-    the set would grow for the life of the process. Not a public API."""
+    has the node type in hand; the registry does not). Not a public API."""
     if not source_keyed():
         return
     _sourceless_nodes.add(tools_id)
