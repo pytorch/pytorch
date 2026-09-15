@@ -153,10 +153,14 @@ def with_temp_dir(
 
         try:
             func(self, *args, **kwargs)
+            # Every rank reads from the directory rank 0 created, so it must not be
+            # removed until all of them are done. Only synchronize on the success
+            # path: if the body raised, a peer may never reach this point and
+            # blocking here would turn a single-rank failure into a hang.
+            if dist.is_initialized():
+                dist.barrier()
         finally:
-            if dist.is_initialized() and dist.get_rank() == 0:
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
-            else:
+            if not dist.is_initialized() or dist.get_rank() == 0:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     return wrapper
