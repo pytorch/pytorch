@@ -7963,10 +7963,7 @@ class Scheduler:
                 else:
                     # Non AsyncCompile path, perform fusion
                     if self.fuse_if_speedup(
-                        node1,
-                        node2,
-                        pending_fusion.callable_fn,
-                        fused_nodes,
+                        node1, node2, pending_fusion.callable_fn, fused_nodes
                     ):
                         fusions_to_remove.add(candidate)
 
@@ -8018,12 +8015,7 @@ class Scheduler:
                 if self.get_fused_node(node_key2) is not node_key2:
                     raise AssertionError("expected node_key2 to be its own fused node")
 
-                self.fuse_if_speedup(
-                    node_key1,
-                    node_key2,
-                    is_speedup,
-                    fused_nodes,
-                )
+                self.fuse_if_speedup(node_key1, node_key2, is_speedup, fused_nodes)
 
         for node1, node2 in possible_fusion_pairs:
             # if either node is in a pending fusion, resolve it.
@@ -8099,12 +8091,7 @@ class Scheduler:
             if self.get_fused_node(node_key2) is not node_key2:
                 raise AssertionError("expected node_key2 to be its own fused node")
 
-            self.fuse_if_speedup(
-                node_key1,
-                node_key2,
-                is_speedup_fn,
-                fused_nodes,
-            )
+            self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
 
     def _handle_template_overlap(
         self,
