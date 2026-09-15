@@ -6040,8 +6040,11 @@ class _TDMFakeSizeVars:
     symbols the way the force path does.
     """
 
-    def __init__(self, hints=None):
+    def __init__(self, hints=None, precomputed=None):
         self.hints = dict(hints or {})
+        # ps<N> -> the composite extent it replaced, as SizeVarAllocator's
+        # inv_precomputed_replacements records it.
+        self.precomputed = dict(precomputed or {})
 
     def statically_known_true(self, expr):
         # A relational over a live symbol is not decidable without a shape
@@ -6054,7 +6057,10 @@ class _TDMFakeSizeVars:
         return sympy.sympify(lhs) == sympy.sympify(rhs)
 
     def replace_backed_symbols_with_hints(self, expr):
-        return sympy.sympify(expr).subs(self.hints)
+        return sympy.sympify(expr).subs(self.precomputed).subs(self.hints)
+
+    def remove_precomputed_replacements(self, expr):
+        return sympy.sympify(expr).subs(self.precomputed)
 
 
 def _tdm_fake_kernel(**overrides):
@@ -6975,6 +6981,57 @@ class TestTensorDescriptorCompatibility(TestCase):
             resolve_hint.assert_any_call(sympy.Integer(0))
             self.assertNotIn(mock.call(extent), resolve_hint.call_args_list)
 
+    @parametrize("device_type", ("cuda", "xpu"))
+    def test_tdm_generic_unforced_bound_expands_precomputed_extent(self, device_type):
+        # BlockDescriptorOptions.create rewrites a composite extent through
+        # lookup_precomputed_size, so the descriptor carries an opaque ps<N>
+        # with no ShapeEnv range of its own. The unforced int32 bound must
+        # expand it first, or a provably bounded extent is rejected. Uses a
+        # real SizeVarAllocator/ShapeEnv: the hand-written fake cannot
+        # reproduce this representation change.
+        from torch._inductor.codegen.triton import (
+            BlockParameters,
+            TMACompatibilityChecker,
+            TritonSymbols,
+        )
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.symbol import SymT
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        shape_env = ShapeEnv()
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        s1 = sympy.Symbol("s1", integer=True, positive=True)
+        for symbol in (s0, s1):
+            shape_env.var_to_range[symbol] = ValueRanges(2, 1024)
+        sizevars = SizeVarAllocator(shape_env)
+
+        extent = sizevars.lookup_precomputed_size(s0 * s1)
+        self.assertTrue(extent.name.startswith("ps"))
+        # The replacement symbol alone carries no bound.
+        self.assertNotIn(extent, shape_env.var_to_range)
+
+        graph = mock.Mock(sizevars=sizevars)
+        graph.get_current_device_or_throw.return_value = torch.device(device_type)
+        block_params = BlockParameters(
+            shape=[extent],
+            block_shape=[TritonSymbols.block_sizes[SymT.XBLOCK]],
+            strides=[1],
+            offsets=[0],
+        )
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=True,
+            ),
+        ):
+            checker = TMACompatibilityChecker(
+                _tdm_fake_kernel(), torch.float16, for_store=False, force=False
+            )
+            # 2 <= s0, s1 <= 1024 bounds s0*s1 by 2**20, well inside int32.
+            self.assertTrue(checker.are_block_parameters_compatible(block_params))
+
 
 def simple_fn():
     return 42
@@ -7291,6 +7348,23 @@ class TestTDMEndToEnd(TestCase):
         x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float32)
         result, code = self._compile_generic_and_get_code(fn, x)
         self.assertIn("tl.make_tensor_descriptor(in_ptr", "\n".join(code))
+        torch.testing.assert_close(result, fn(x), atol=1e-3, rtol=1e-3)
+
+    def test_tdm_generic_reduction_loop_partial_tail(self):
+        # The 1024-wide case above stays persistent: the inner-reduction
+        # threshold admits it whole, so it never builds a reduction loop.
+        # A wider, non-power-of-two extent forces a multi-iteration loop whose
+        # final tile is partial, which is the descriptor-reuse and
+        # changing-offset path the persistent form never reaches.
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randn(512, 1500, device=GPU_TYPE, dtype=torch.float32)
+        result, code = self._compile_generic_and_get_code(fn, x)
+        joined = "\n".join(code)
+        # triton_red_* is the looping reduction; triton_per_* is persistent.
+        self.assertIn("triton_red_", joined)
+        self.assertIn("tl.make_tensor_descriptor(in_ptr", joined)
         torch.testing.assert_close(result, fn(x), atol=1e-3, rtol=1e-3)
 
     @parametrize(

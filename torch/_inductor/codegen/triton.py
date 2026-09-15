@@ -2998,6 +2998,13 @@ class TMACompatibilityChecker:
 
         # Probe gfx1250 first: ROCm devices also have device_type == "cuda".
         # The cached result avoids an uncached CUDA capability query below.
+        # Capability skips the conjunct below, including use_tensor_descriptor
+        # and has_triton_stable_tma_api(). That is safe because
+        # use_gfx1250_descriptor_codegen establishes the same ground itself, not
+        # because those checks would have failed: it requires
+        # use_tensor_descriptor and assume_aligned_inputs, and its device probe
+        # requires ROCm >= 7.14, gfx1250, and has_triton_amd_tdm_device, which
+        # imports the same triton.language.make_tensor_descriptor.
         gfx1250_capable = self._gfx1250_capable(device)
         if not gfx1250_capable and not (
             (
@@ -3076,13 +3083,25 @@ class TMACompatibilityChecker:
         # in-range hint alone is not enough.
         if self._gfx1250_capable(device):
             # Resolve backed shape hints only where the TDM range check uses them.
+            # Without force, still expand precomputed sizes: BlockDescriptorOptions
+            # .create rewrites a composite extent such as s0*s1 into an opaque ps0
+            # that has no ShapeEnv range, so the bound below would fail to prove
+            # even when both factors are bounded. The force path already expands
+            # these inside replace_backed_symbols_with_hints.
             shape = (
                 [
                     V.graph.sizevars.replace_backed_symbols_with_hints(sz)
                     for sz in block_params.shape
                 ]
                 if self.force
-                else block_params.shape
+                else [
+                    (
+                        V.graph.sizevars.remove_precomputed_replacements(sz)
+                        if isinstance(sz, sympy.Expr)
+                        else sz
+                    )
+                    for sz in block_params.shape
+                ]
             )
             if not 1 <= len(shape) <= 5:
                 log.debug(
