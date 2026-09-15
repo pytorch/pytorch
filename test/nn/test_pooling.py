@@ -1167,6 +1167,22 @@ torch.{device_type}.synchronize()
         with self.assertRaisesRegex(ValueError, err):
             torch.nn.LPPool3d(norm_type=0, kernel_size=3)
 
+    @onlyNativeDeviceTypes
+    def test_lp_pool_noninteger_norm_no_nan(self, device):
+        torch.manual_seed(0)
+        x = torch.randn(2, 3, 8, device=device)
+        out1d = F.lp_pool1d(x, norm_type=2.5, kernel_size=2)
+        self.assertFalse(torch.isnan(out1d).any())
+
+        x = torch.randn(2, 3, 8, 8, device=device)
+        out2d = F.lp_pool2d(x, norm_type=2.5, kernel_size=2)
+        self.assertFalse(torch.isnan(out2d).any())
+
+        x = torch.randn(2, 3, 8, 8, 8, device=device)
+        out3d = F.lp_pool3d(x, norm_type=2.5, kernel_size=2)
+        self.assertFalse(torch.isnan(out3d).any())
+
+    @onlyNativeDeviceTypes
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
