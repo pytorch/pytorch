@@ -14184,7 +14184,7 @@ Arguments:
 
 .. warning::
 
-    Argument ``interprocess`` are not supported right now and are noops.
+    The ``interprocess`` argument is not honored right now and is a noop.
 
 Returns:
     Event: An torch.Event object.
