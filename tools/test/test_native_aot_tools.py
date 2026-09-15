@@ -15,11 +15,12 @@ import types
 import unittest
 import unittest.mock as mock
 import zipfile
+from pathlib import Path
 from typing import Any, cast
 
 # Ordinary package imports: these modules keep their scope torch-free so the
 # Test tools job, which runs in the linter image, can import them without torch.
-from tools.native_aot import build_stage2, export, gen_aot_lib, toolchains
+from tools.native_aot import build_stage2, dependencies, export, gen_aot_lib, toolchains
 
 from torchgen import native_aot_decl
 
@@ -127,7 +128,7 @@ def _manifest(artifacts_dir):
 
 _DECL_REL = os.path.relpath(
     os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"), export.REPO
-)
+).replace(os.sep, "/")
 
 
 def _current_sources():
@@ -4747,6 +4748,9 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             os.makedirs(libdir)
             # A generated source, so main() gets past the "nothing to embed" return.
             open(os.path.join(art, "fakeop", "aot_fakeop_cuda.cpp"), "w").close()
+            dependencies.write_manifest(
+                Path(art) / dependencies.MANIFEST, _current_sources()
+            )
             include = os.path.join(art, gen_aot_lib.CMAKE_INCLUDE)
             if stale_include:
                 # What a PREVIOUS run wired up. caffe2/CMakeLists.txt include()s this
@@ -4775,6 +4779,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
                 ) as f:
                     f.write(env_before)
             for obj, name, value in (
+                (build_stage2, "REPO", d),
                 (build_stage2, "BUILD_DIR", build),
                 (build_stage2, "NATIVE_AOT_ARTIFACTS_DIR", art),
                 (build_stage2, "should_run", lambda: verdict),
@@ -4822,6 +4827,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
                 kwargs=kwargs,
                 include=include,
                 reported=err.getvalue(),
+                dependency_manifest=Path(d) / dependencies.CI_MANIFEST,
             )
 
     def test_a_declined_verdict_does_nothing_at_all(self):
@@ -4860,15 +4866,16 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             self.assertEqual(run.content, self.OLD)
             self.assertNotIn("reconfigure", run.children)
 
-    def test_a_failing_reconfigure_shows_what_cmake_said(self):
+    def test_a_failing_reconfigure_shows_what_cmake_said(self) -> None:
         # CMake prints most of its failure context on stdout, so this arm captures both
         # streams and echoes them; DEVNULL leaves a failing configure unreadable.
-        with self._main(configure_rc=1) as run:
+        with self._main(configure_rc=1, wheel=True) as run:
             self.assertIn("reconfiguring", run.outcome)
             self.assertIn("exit 1", run.outcome)
             self.assertIn("embedding 1 object(s)", run.reported)
             self.assertIn("cmake said no", run.reported)
             self.assertEqual(run.content, self.OLD)
+            self.assertFalse(run.dependency_manifest.exists())
 
     def test_a_reconfigure_that_does_not_embed_is_refused_before_the_relink(self):
         # The STATUS line the generated CMake prints is the only pre-relink evidence that
@@ -4996,10 +5003,14 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         cmakes = [c[0] for c in run.commands if c[1].startswith("--")]
         self.assertEqual(cmakes, [sys.executable, sys.executable], run.commands)
 
-    def test_the_wheel_is_patched_with_the_relinked_library(self):
+    def test_the_wheel_is_patched_with_the_relinked_library(self) -> None:
         # Nothing downstream re-checks the wheel: the AOT tests skip without kernels.
         with self._main(wheel=True) as run:
             self.assertEqual(run.outcome, "returned 0")
+            self.assertEqual(
+                dependencies.read_manifest(run.dependency_manifest.read_bytes()),
+                _current_sources(),
+            )
             patched = [c for c in run.children if c.startswith("wheel:")]
         self.assertEqual(len(patched), 1, f"main() did not patch: {run.children}")
         whl, lib = patched[0][len("wheel:") :].split("|")

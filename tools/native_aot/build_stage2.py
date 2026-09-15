@@ -46,6 +46,7 @@ import subprocess
 import sys
 import sysconfig
 import zipfile
+from pathlib import Path
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +63,8 @@ NATIVE_AOT_ARTIFACTS_DIR = os.path.join(BUILD_DIR, "native_aot")
 # has to go on the path for `tools.native_aot` to import from any cwd. Appended,
 # not inserted, so the source torch/ tree never shadows the installed wheel.
 sys.path.append(REPO)
+
+from tools.native_aot import dependencies
 
 
 def _report(msg: str) -> None:
@@ -843,6 +846,11 @@ def _invalidate_stale_include() -> None:
     _report(f"a previous run left kernels wired up in {art}; disabled them")
 
 
+def _record_empty_dependencies(path: Path) -> None:
+    if _torch_value("torch._native._native_aot_embedded()") == "False":
+        dependencies.write_manifest(path, {})
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -864,6 +872,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.print_verdict:
         print("RUN" if should_run() else "SKIP", flush=True)
         return 0
+    dependency_manifest = Path(REPO) / dependencies.CI_MANIFEST
+    if args.wheel:
+        dependency_manifest.unlink(missing_ok=True)
     # The explicit opt-out first, and only that: it needs no torch, so
     # TORCH_NATIVE_AOT=0 is a kill switch even on the binary-build path.
     if _opted_out():
@@ -886,6 +897,8 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError(f"native-AOT stage 2: --wheel {args.wheel} does not exist")
     if not should_run():
         _invalidate_stale_include()
+        if args.wheel:
+            _record_empty_dependencies(dependency_manifest)
         return 0
     require_runtimes()
     py = sys.executable
@@ -919,7 +932,14 @@ def main(argv: list[str] | None = None) -> int:
     sources = glob.glob(os.path.join(art, "*", "aot_*.cpp"))
     if not sources:
         _report("no declaration ships kernels for this build; nothing embedded")
+        if args.wheel:
+            _record_empty_dependencies(dependency_manifest)
         return 0
+    kernel_sources = dependencies.read_manifest(
+        (Path(art) / dependencies.MANIFEST).read_bytes()
+    )
+    if not kernel_sources:
+        raise RuntimeError("native-AOT stage 2: generated kernels have no dependencies")
     # The count, and the size delta after the relink, rather than parsing the generated
     # CMake: these bytes scale with declarations x precompile points x arches.
     _report(f"embedding kernels from {len(sources)} generated source(s)")
@@ -1025,6 +1045,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.wheel:
         _report(f"embedding into {args.wheel}")
         patch_wheel(args.wheel, build_lib)
+        dependencies.write_manifest(dependency_manifest, kernel_sources)
     _report("done")
     return 0
 
