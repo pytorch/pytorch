@@ -58,7 +58,8 @@ enum class DeviceType : int8_t {
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in c10/core/DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 21,
+  CPU_TESTING = 21, // CPU_TESTING device
+  COMPILE_TIME_MAX_DEVICE_TYPES = 22,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
@@ -78,6 +79,7 @@ constexpr DeviceType kLazy = DeviceType::Lazy;
 constexpr DeviceType kIPU = DeviceType::IPU;
 constexpr DeviceType kMTIA = DeviceType::MTIA;
 constexpr DeviceType kPrivateUse1 = DeviceType::PrivateUse1;
+  constexpr DeviceType kCPU_TESTING = DeviceType::CPU_TESTING;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =

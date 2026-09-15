@@ -1,0 +1,22 @@
+name: Sync Upstream Main
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: One-time fix — reset main to match upstream exactly
+        if: false   # flip to true and run once manually, then flip back
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh repo sync Vinayak-Pawar/pytorch-test --source pytorch/pytorch --branch main --force
+
+      - name: Sync fork's main with pytorch/pytorch main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh repo sync Vinayak-Pawar/pytorch-test --source pytorch/pytorch --branch main
