@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
 
 
 class TestBiasCorrectionEager(QuantizationTestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     def compute_sqnr(self, x, y):
         Ps = torch.norm(x)
