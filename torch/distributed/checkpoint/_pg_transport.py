@@ -23,6 +23,8 @@ from torch.utils._pytree import (
     TreeSpec,
 )
 
+from torch.distributed.checkpoint.filesystem import _restricted_metadata_loads
+
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -298,7 +300,7 @@ class PGTransport:
         buf = torch.empty(length, dtype=torch.uint8, device=self._device)
         self._pg.recv([buf], src_rank, tag=2).wait()
 
-        meta: _StateDictMeta = pickle.loads(buf.cpu().numpy().tobytes())
+        meta: _StateDictMeta = _restricted_metadata_loads(buf.cpu().numpy().tobytes())
 
         i: int = 0
         works: list[Work] = []
