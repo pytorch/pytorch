@@ -249,10 +249,20 @@ class TORCH_API NCCLDevCommManager {
   // destructor cleanup remains a fallback.
   void register_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
-#ifdef USE_ROCM
     auto registered_comm = group_to_comm_.find(group_name);
     const bool is_new_registration = registered_comm == group_to_comm_.end() ||
         registered_comm->second != comm;
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    // Device communicators are built from a specific host comm, so a
+    // replacement invalidates every one of them. Drop them here or
+    // `get_devcomm` would hand a kernel a devcomm tied to a comm this registry
+    // no longer owns. Erasing without `ncclDevCommDestroy` is safe: the
+    // predecessor's own destroy reclaims what the devcomm holds.
+    if (is_new_registration && registered_comm != group_to_comm_.end()) {
+      devcomm_registry_.erase(group_name);
+    }
+#endif
+#ifdef USE_ROCM
     ncclCommProperties_t comm_props = NCCL_COMM_PROPERTIES_INITIALIZER;
     const bool device_api_support =
         ncclCommQueryProperties(comm, &comm_props) == ncclSuccess &&
@@ -297,6 +307,13 @@ class TORCH_API NCCLDevCommManager {
   // Unregister `group_name` on this manager's device. Safe to call when
   // nothing is registered. Does not destroy the host comm; lifetime stays
   // with the producer.
+  //
+  // Neither overload calls `ncclDevCommDestroy` on the entries it drops. That
+  // would be a collective call (it deregisters the devcomm's resource window),
+  // so it cannot run on the unilateral abort path. It is also unnecessary:
+  // destroying the host comm runs ncclDevrFinalize, which destroys every
+  // window the user did not deregister, and these devcomms request no GIN
+  // contexts. The resources therefore die with the comm, not with the process.
   //
   // This key-only form is retained for CUDA callers. ROCm teardown uses the
   // identity-safe overload below.

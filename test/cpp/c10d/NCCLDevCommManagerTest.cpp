@@ -268,6 +268,53 @@ TEST(NCCLDevCommManagerTest, ExamplePattern) {
   test_example_pattern();
 }
 
+// A device communicator is built from one specific host comm. When a successor
+// process group replaces the registered comm for a group name, every cached
+// devcomm under that name is tied to the predecessor and must not survive, or
+// a later kernel launch would be handed a devcomm this registry no longer owns.
+// Re-publishing the same comm pointer is not a replacement and must keep the
+// cache intact.
+TEST(NCCLDevCommManagerTest, ReplacementRegistrationEvictsDevComms) {
+  if (!at::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA not available, skipping test";
+  }
+
+  c10::cuda::CUDAGuard guard(0);
+  ncclUniqueId first_id;
+  ncclUniqueId successor_id;
+  ASSERT_EQ(ncclGetUniqueId(&first_id), ncclSuccess);
+  ASSERT_EQ(ncclGetUniqueId(&successor_id), ncclSuccess);
+
+  ncclComm_t first_comm = nullptr;
+  ncclComm_t successor_comm = nullptr;
+  ASSERT_EQ(ncclCommInitRank(&first_comm, 1, first_id, 0), ncclSuccess);
+  ASSERT_EQ(ncclCommInitRank(&successor_comm, 1, successor_id, 0), ncclSuccess);
+
+  const std::string group_name = "replacement_evicts_devcomms";
+  const std::string key = "evict_key";
+  c10::Device device(c10::DeviceType::CUDA, 0);
+  auto& manager = NCCLDevCommManager::get(device);
+
+  ncclDevComm devcomm = {};
+  manager.register_comm(group_name, first_comm);
+  ASSERT_TRUE(manager.register_devcomm(group_name, devcomm, key).has_value());
+  ASSERT_TRUE(manager.get_devcomm(group_name, key).has_value());
+
+  // Re-publishing the same comm is not a replacement.
+  manager.register_comm(group_name, first_comm);
+  EXPECT_TRUE(manager.get_devcomm(group_name, key).has_value());
+
+  manager.register_comm(group_name, successor_comm);
+  EXPECT_FALSE(manager.get_devcomm(group_name, key).has_value());
+
+  // The evicted key is free again, so the successor can rebuild its own.
+  EXPECT_TRUE(manager.register_devcomm(group_name, devcomm, key).has_value());
+
+  manager.unregister_comm(group_name, successor_comm);
+  EXPECT_EQ(ncclCommDestroy(first_comm), ncclSuccess);
+  EXPECT_EQ(ncclCommDestroy(successor_comm), ncclSuccess);
+}
+
 #ifdef USE_ROCM
 TEST(NCCLDevCommManagerTest, IdentitySafeUnregisterPreservesSuccessor) {
   if (!at::cuda::is_available()) {
