@@ -214,14 +214,19 @@ def skip_if_no_gpu(func):
     test is run, each rank has its own device via``torch.accelerator.set_device_index(rank)``."""
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not torch.accelerator.is_available():
-            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
+    def wrapper(self, *args, **kwargs):
+        device_type = getattr(self, "device_type", None)
+        if device_type is None:
+            acc = torch.accelerator.current_accelerator(check_available=True)
+            if acc is None:
+                sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
+            device_type = acc.type
+
         world_size = int(os.environ["WORLD_SIZE"])
-        if torch.accelerator.device_count() < world_size:
+        if torch.get_device_module(device_type).device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
-        return func(*args, **kwargs)
+        return func(self, *args, **kwargs)
 
     return wrapper
 
