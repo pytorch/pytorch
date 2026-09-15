@@ -1,8 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/cuda/CUDAArchList.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
@@ -72,14 +74,6 @@ struct Schedule {
     cute::conditional_t<PONGOr2SM, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
 
 };
-
-int ceildiv(int a, int b) {
-  return (a + b - 1) / b;
-}
-
-int round_up_to_nearest_multiple(int a, int b) {
-  return ceildiv(a, b) * b;
-}
 
 template <
     typename ArchTag,
@@ -206,7 +200,7 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
   // due to bug in cuda < 12.4 the pointers have to be aligned to 128 bits
   const int group_alignment = 16 / sizeof(void*);
   const int aligned_group_count =
-      round_up_to_nearest_multiple(group_count, group_alignment);
+      at::round_up(group_count, group_alignment);
   int64_t input_args_size = aligned_group_count * 3 * sizeof(void*) +
       problem_shape_size + stride_size;
 
@@ -344,21 +338,28 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   //        (K >= 2048 && N >= 2048));
   bool small = (M <= 128 || N <= 128);
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm10x = properties != nullptr && properties->major == 10;
-  const bool sm11x = properties != nullptr && properties->major == 11;
+  TORCH_CHECK(properties != nullptr, "Failed to query device properties");
+  const bool sm9x = properties->major == 9;
+  const bool sm10x = properties->major == 10;
+  const bool sm11x = properties->major == 11;
+  constexpr bool built_sm9x = c10::cuda::targets_any_arch_in(90, 99);
+  constexpr bool built_sm10x_11x = c10::cuda::targets_any_arch_in(100, 119);
 
+  // Guard inside the branch, not around it: an arch the build skipped must
+  // fail below, not fall through to another arch's kernel.
   if (sm10x || sm11x) {
-    if (small){
-      bf16bf16_grouped_gemm_impl_sm90_sm100<
-        cutlass::arch::Sm100,
-        a_row_major,
-        b_row_major,
-        /*PONGOr2SM*/ false,
-        cute::_128,
-        cute::_256,
-        cute::_64>(mat_a, mat_b, offs, bias, out); // Tile shape taken from CUTLASS examples, 64 = 128/sizeof(bfloat16)
-    } else {
-      bf16bf16_grouped_gemm_impl_sm90_sm100<
+    if constexpr (built_sm10x_11x) {
+      if (small) {
+        return bf16bf16_grouped_gemm_impl_sm90_sm100<
+          cutlass::arch::Sm100,
+          a_row_major,
+          b_row_major,
+          /*PONGOr2SM*/ false,
+          cute::_128,
+          cute::_256,
+          cute::_64>(mat_a, mat_b, offs, bias, out); // Tile shape taken from CUTLASS examples, 64 = 128/sizeof(bfloat16)
+      }
+      return bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
@@ -367,18 +368,19 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out); // Same as above ^
     }
-  } else {
-    if(small) {
-      bf16bf16_grouped_gemm_impl_sm90_sm100<
-        cutlass::arch::Sm90,
-        a_row_major,
-        b_row_major,
-        /*PONGOr2SM*/ true,
-        cute::_64,
-        cute::_128,
-        cute::_128>(mat_a, mat_b, offs, bias, out);
-    } else {
-      bf16bf16_grouped_gemm_impl_sm90_sm100<
+  } else if (sm9x) {
+    if constexpr (built_sm9x) {
+      if (small) {
+        return bf16bf16_grouped_gemm_impl_sm90_sm100<
+          cutlass::arch::Sm90,
+          a_row_major,
+          b_row_major,
+          /*PONGOr2SM*/ true,
+          cute::_64,
+          cute::_128,
+          cute::_128>(mat_a, mat_b, offs, bias, out);
+      }
+      return bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm90,
         a_row_major,
         b_row_major,
@@ -388,6 +390,11 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cute::_64>(mat_a, mat_b, offs, bias, out);
     }
   }
+  TORCH_CHECK(
+      false,
+      "Grouped GEMM was not built for sm",
+      properties->major,
+      properties->minor);
 }
 
 void dispatch_bf16_grouped_kernel_on_ab_transpose(
