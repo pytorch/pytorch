@@ -291,8 +291,39 @@ S390X_BLOCKLIST = [
 ]
 
 XPU_BLOCKLIST = [
-    "test_autograd",
-    "profiler/test_memory_profiler",
+    # Not applicable to XPU, tracked by
+    # https://github.com/intel/torch-xpu-ops/issues/5205
+    "benchmark_utils/test_benchmark_utils",
+    "functorch/test_control_flow_cuda_initialization",
+    "inductor/test_ck_backend",
+    "inductor/test_cudagraph_trees",
+    "inductor/test_cudagraph_trees_expandable_segments",
+    "inductor/test_custom_op_autotune",
+    "inductor/test_cutedsl_grouped_mm",
+    "inductor/test_cutedsl_template",
+    "inductor/test_cutlass_backend",
+    "inductor/test_cutlass_evt",
+    "inductor/test_cutlass_fallback",
+    "inductor/test_flex_flash",
+    "inductor/test_flex_gemm",
+    "inductor/test_halide",
+    "inductor/test_nv_universal_gemm",
+    "inductor/test_origami",
+    "inductor/test_utils",
+    "python_native/test_quack_vendor",
+    "python_native/test_topk_cutedsl",
+    "quantization/core/test_quantized_tensor",
+    "test_cpp_extensions_mtia_backend",
+    "test_cpp_extensions_stream_and_event",
+    "test_cuda",
+    "test_cuda_compatibility",
+    "test_cuda_expandable_segments",
+    "test_cuda_graph_debug",
+    "test_cuda_graph_utils",
+    "test_cuda_nvml_based_avail",
+    "test_cuda_primary_ctx",
+    "test_cuda_sanitizer",
+    "test_jiterator",
 ]
 
 XPU_TEST = [
