@@ -188,13 +188,36 @@ def _find_rocm_home() -> str | None:
     # Guess #1
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
-        # Guess #2: Support for ROCm distribution from TheRock
-        # rocm-sdk-core installs everything under <site-packages>/_rocm_sdk_core
-        # (include/, lib/, bin/, ...), so the module's own location is the
-        # ROCM_HOME we want. Use find_spec to locate it without importing.
-        spec = importlib.util.find_spec('_rocm_sdk_core')
-        if spec is not None and spec.origin is not None:
-            rocm_home = str(Path(spec.origin).parent.resolve())
+        # Guess #2: Support for ROCm distribution from TheRock.
+        # TheRock splits the SDK across wheels under site-packages:
+        #   _rocm_sdk_core  - HIP runtime, hipcc
+        #   _rocm_sdk_devel - the above plus math-library headers
+        #                     (hipblas, hipsparse, hipsolver, ...)
+        # Prefer devel when present so JIT extensions can include ATen CUDA
+        # headers that hipify to those libraries. Use find_spec to locate
+        # the package without importing it.
+        #
+        # pip install rocm[devel] only installs the unexpanded rocm_sdk_devel
+        # wheel (payload tar). The _rocm_sdk_devel package is created by
+        # `rocm-sdk init`. Do not expand here: it writes gigabytes into
+        # site-packages and this function runs at module import.
+        devel_spec = importlib.util.find_spec('_rocm_sdk_devel')
+        if (devel_spec is None or devel_spec.origin is None) and (
+            importlib.util.find_spec('rocm_sdk_devel') is not None
+        ):
+            logger.warning(
+                "The TheRock devel wheel is installed (rocm_sdk_devel) but has "
+                "not been expanded, so ROCM_HOME will fall back to "
+                "_rocm_sdk_core. Math-library headers will be missing and JIT "
+                "extensions on ROCm may fail with "
+                "'hipblas/hipblas.h: No such file or directory'. "
+                "Run `rocm-sdk init` to expand the devel payload."
+            )
+        for modname in ('_rocm_sdk_devel', '_rocm_sdk_core'):
+            spec = importlib.util.find_spec(modname)
+            if spec is not None and spec.origin is not None:
+                rocm_home = str(Path(spec.origin).parent.resolve())
+                break
     if rocm_home is None:
         # Guess #3
         hipcc_path = shutil.which('hipcc')

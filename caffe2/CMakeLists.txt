@@ -1932,6 +1932,28 @@ if(USE_ROCM)
   # Add Caffe2 HIP include dirs (extended with ATen include dirs by this point).
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
 
+  if(BUILD_SHARED_LIBS AND UNIX AND ROCM_PATH MATCHES "[\\/]_rocm_sdk_")
+    # Source-built TheRock wheels bypass manywheel repair. Add flat and
+    # per-target package-relative LLVM paths so torch_hip can resolve libomp.so.
+    set(_torch_hip_rocm_rpaths
+      "${_rpath_portable_origin}/../../_rocm_sdk_core/lib/llvm/lib")
+    file(GLOB _rocm_libomp_candidates
+      "${ROCM_PATH}/lib/llvm/lib/*/libomp.so")
+    foreach(_rocm_libomp IN LISTS _rocm_libomp_candidates)
+      get_filename_component(_rocm_libomp_dir "${_rocm_libomp}" DIRECTORY)
+      get_filename_component(_rocm_libomp_triple "${_rocm_libomp_dir}" NAME)
+      list(APPEND _torch_hip_rocm_rpaths
+        "${_rpath_portable_origin}/../../_rocm_sdk_core/lib/llvm/lib/${_rocm_libomp_triple}")
+    endforeach()
+    set_property(TARGET torch_hip APPEND PROPERTY
+      INSTALL_RPATH ${_torch_hip_rocm_rpaths})
+    unset(_rocm_libomp_candidates)
+    unset(_rocm_libomp)
+    unset(_rocm_libomp_dir)
+    unset(_rocm_libomp_triple)
+    unset(_torch_hip_rocm_rpaths)
+  endif()
+
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
 

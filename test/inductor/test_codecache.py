@@ -84,7 +84,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -123,6 +122,34 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
+    @parametrize(
+        "backend_precision,expected,legacy_calls",
+        (("bfx9", "bfx9", 0), ("tf32", "high", 1)),
+    )
+    def test_precompile_cache_key_handles_bfx9(
+        self, backend_precision, expected, legacy_calls
+    ):
+        from torch._inductor.select_algorithm import create_precompile_key
+
+        choice = types.SimpleNamespace(kernel_hash_key=lambda: "choice")
+        with (
+            mock.patch.object(
+                torch._C,
+                "_get_fp32_precision_getter",
+                return_value=backend_precision,
+            ),
+            mock.patch.object(
+                torch,
+                "get_float32_matmul_precision",
+                return_value="high",
+            ) as legacy_getter,
+        ):
+            self.assertEqual(
+                create_precompile_key("op", "inputs", [choice]),
+                f"op:inputs:{expected}:choice",
+            )
+            self.assertEqual(legacy_getter.call_count, legacy_calls)
+
     def _compact_sha256(self, data: bytes) -> str:
         return (
             base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
@@ -817,8 +844,6 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(
                 "Static triton launcher requires cuda/xpu and triton bundling"
             )
-        if use_static_triton_launcher and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         grad_multiplier = 2 if grad else 1
 
@@ -2295,9 +2320,6 @@ class TestFxGraphCache(TestCase):
     @parametrize("bundle_triton", (False, True))
     @parametrize("use_static_triton_launcher", (False, True))
     def test_triton_op(self, bundle_triton, use_static_triton_launcher):
-        if use_static_triton_launcher and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
-
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 

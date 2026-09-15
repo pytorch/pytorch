@@ -22,7 +22,7 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
     __hip_bfloat162* address,
     __hip_bfloat162 value) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16)) {
-    typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
+    typedef short __attribute__((ext_vector_type(2))) vec_short2;
     static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
     union {
       __hip_bfloat162_raw bf162_raw;
