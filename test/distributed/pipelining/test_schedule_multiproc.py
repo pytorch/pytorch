@@ -239,6 +239,16 @@ def make_none_grad_flags(pattern: str, device: torch.device) -> torch.Tensor:
     )
 
 
+def assert_recv_buffers_drained(test_case, stages) -> None:
+    """Assert that a completed pipeline step transferred every recv buffer."""
+    stage_list = stages if isinstance(stages, (list, tuple)) else (stages,)
+    for stage in stage_list:
+        for recv_info_by_chunk in (stage.args_recv_info, stage.grad_recv_info):
+            for recv_infos in recv_info_by_chunk.values():
+                for info in recv_infos:
+                    test_case.assertIsNone(info.buffer)
+
+
 def setup_none_grad_model_and_data(config: PipelineTestConfig, n_layers: int):
     torch.manual_seed(0)
     mod = ConditionalGradStack(none_grad_d_hid, n_layers).to(config.device)
@@ -539,6 +549,8 @@ class ScheduleTest(MultiProcContinuousTest):
             else:
                 schedule.step()
 
+            assert_recv_buffers_drained(self, stage)
+
         dist.barrier(device_ids=[self.rank])
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -805,6 +817,7 @@ class ScheduleTest(MultiProcContinuousTest):
             0,
             "Found leaked tensors, check logs above for debug info",
         )
+        assert_recv_buffers_drained(self, stages)
         dist.barrier()
 
         # Verify results

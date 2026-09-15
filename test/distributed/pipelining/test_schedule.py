@@ -20,8 +20,10 @@ from torch.distributed.pipelining import (
     ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining._utils import (
+    _TensorMeta,
     generate_stage_to_rank_mapping,
     InferenceMode,
+    PipeliningMetadataError,
 )
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -145,6 +147,41 @@ def _run_adjacency_validation(stage, num_stages):
 class ScheduleTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_stage_recv_buffers_allocated_just_in_time(self):
+        stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
+        stage.stage_index = 1
+        stage.device = torch.device("cpu")
+        stage._downstream_group = None
+        info = _RecvInfo(
+            "activation", source=0, tensor_meta=_TensorMeta.from_tensor(torch.ones(2))
+        )
+
+        with (
+            patch.object(stage, "_resolve_peer_global_rank", return_value=0),
+            patch("torch.distributed.pipelining.stage.dist.P2POp") as p2p,
+        ):
+            ops = stage._get_recv_ops((info,), stage._downstream_group)
+
+        self.assertEqual(len(ops), 1)
+        self.assertIsNotNone(info.buffer)
+        self.assertIs(p2p.call_args.args[1], info.buffer)
+        with self.assertRaisesRegex(
+            PipeliningMetadataError, "incomplete pipeline step"
+        ):
+            info.allocate_buffer(stage.device)
+
+        allocated = info.take_buffer()
+        self.assertIsNotNone(allocated)
+        self.assertIsNone(info.buffer)
+        with self.assertRaisesRegex(PipeliningMetadataError, "has not been set"):
+            info.take_buffer()
+
+        info.set_buffer(torch.ones(2))
+        with self.assertRaisesRegex(
+            PipeliningMetadataError, "incomplete pipeline step"
+        ):
+            info.set_buffer(torch.ones(2))
+
     def test_get_schedule_class(self):
         # List of all expected schedule names
         schedule_names = [
@@ -189,7 +226,7 @@ class ScheduleTest(TestCase):
             3,
             4,
             3,
-            {0: (_RecvInfo("x", source=0, buffer=None, tensor_meta=None),)},
+            {0: (_RecvInfo("x", source=0, tensor_meta=None),)},
             {},
         )
         with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
