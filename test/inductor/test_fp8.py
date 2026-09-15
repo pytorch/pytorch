@@ -12,7 +12,7 @@ from torch._C import FileCheck
 from torch._inductor import config, inductor_prims, ir, utils
 from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
 from torch._inductor.graph import GraphLowering
-from torch._inductor.kernel.mm import scaled_mm_v2_constraint
+from torch._inductor.kernel.mm import scaled_mm_v2_choice, scaled_mm_v2_constraint
 from torch._inductor.lowering import clone as lowering_clone, register_lowering
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
@@ -112,17 +112,13 @@ def _prepare_blockwise_scale(
     inverse_scale: torch.Tensor,
     block_outer: int,
     block_inner: int,
-    transposed: bool,
 ) -> torch.Tensor:
     # The cuBLAS blockwise kernels expect outer-dim-major scales for 1x128 blocks
     # and shape (round_up(K/128, 4), {M,N}/128) for 128x128 blocks (inner dim
-    # padded to a multiple of 4 before the transpose). `transposed` indicates
-    # whether the corresponding data tensor was transposed (e.g. weight passed
-    # as w.t()): if so we apply one additional transpose to keep the scale
-    # aligned with the data layout.
+    # padded to a multiple of 4 before the transpose).
     if (block_outer, block_inner) == (1, 128):
         out = inverse_scale.t().contiguous().t()
-        return out.t() if transposed else out
+        return out
     pad_amount = (-inverse_scale.shape[-1]) % 4
     if pad_amount:
         inverse_scale = torch.nn.functional.pad(
@@ -625,6 +621,40 @@ class TestFP8Types(TestCase):
         self.assertEqual(expected, actual, rtol=5e-2, atol=0.07)
 
 
+class TestScaledMMNativeChoice(TestCase):
+    def test_v2_native_choice_schema(self):
+        a, b, sa, sb, out = (object() for _ in range(5))
+        kernel = mock.Mock(return_value=out)
+        result = scaled_mm_v2_choice(
+            a,
+            b,
+            sa,
+            sb,
+            recipe_a=4,
+            recipe_b=5,
+            out_dtype=torch.float32,
+            use_fast_accum=False,
+            kernel=kernel,
+            out=out,
+        )
+        self.assertIs(result, out)
+        kernel.assert_called_once_with(
+            a,
+            b,
+            [sa],
+            [4],
+            [0],
+            [sb],
+            [5],
+            [0],
+            None,
+            torch.float32,
+            [],
+            False,
+            out=out,
+        )
+
+
 class TestScaledMMLayoutConstraint(TestCase):
     @parametrize("device_type", ["cpu", "cuda", "xpu"])
     @parametrize(
@@ -638,9 +668,9 @@ class TestScaledMMLayoutConstraint(TestCase):
             (ScalingType.BlockWise128x128, [1, 4], [3, 1]),
         ],
     )
-    @parametrize("keyword_args", [False, True])
+    @parametrize("num_positional", [0, 10])
     def test_operand_layouts(
-        self, device_type, recipe, cuda_strides, other_strides, keyword_args
+        self, device_type, recipe, cuda_strides, other_strides, num_positional
     ):
         graph = torch.fx.Graph()
         graph.output(())
@@ -677,13 +707,14 @@ class TestScaledMMLayoutConstraint(TestCase):
             torch.bfloat16,
         )
         names = [arg.name for arg in op._schema.arguments][: len(args)]
-        kwargs = dict(zip(names, args)) if keyword_args else {}
+        kwargs = dict(zip(names[num_positional:], args[num_positional:]))
         node = graph.call_function(op)
         with V.set_graph_handler(lowering):
             new_args, new_kwargs = scaled_mm_v2_constraint(
-                node, *(() if keyword_args else args), **kwargs
+                node, *args[:num_positional], **kwargs
             )
-            result = new_kwargs if keyword_args else dict(zip(names, new_args))
+            result = dict(zip(names, new_args))
+            result.update(new_kwargs)
             self.assertEqual(result["self"].get_stride(), [64, 1])
             self.assertEqual(result["mat2"].get_stride(), [1, 64])
             self.assertEqual(result["bias"].get_stride(), [1])
@@ -698,7 +729,7 @@ class TestScaledMMLayoutConstraint(TestCase):
                 self.assertEqual(scales[0].get_stride(), expected_strides)
                 if recipe == ScalingType.TensorWise:
                     self.assertIs(scales[0], scale)
-            self.assertEqual(len(new_args), 0 if keyword_args else len(args))
+            self.assertEqual(len(new_args), num_positional)
             self.assertEqual(new_kwargs.keys(), kwargs.keys())
 
     def test_compatible_leading_dimensions(self):
@@ -750,6 +781,145 @@ instantiate_parametrized_tests(TestScaledMMLayoutConstraint)
 
 
 class TestFP8Lowering(TestCase):
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not has_triton_tma_device(), "Requires device-side TMA")
+    @parametrize("scale_side", ["a", "b"])
+    @parametrize("native_layout", [False, True])
+    @parametrize("scale_producer", [False, True])
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+            "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
+            "test_configs.max_mm_configs": 1,
+            "force_disable_caches": True,
+        }
+    )
+    def test_deepseek_v2_square_scale_orientation(
+        self, device, scale_side, native_layout, scale_producer
+    ):
+        m, n, k = (512, 80, 512) if scale_side == "a" else (80, 512, 512)
+        a = (torch.randint(-4, 5, (m, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        b = (torch.randint(-4, 5, (n, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        square = torch.arange(1, 17, device=device, dtype=torch.float32).reshape(4, 4)
+        other = torch.randint(1, 5, (80, 4), device=device).float()
+        other = _prepare_blockwise_scale(other, 1, 128)
+        sa, sb = (square, other) if scale_side == "a" else (other, square)
+        sa_expanded = sa.double().repeat_interleave(128, 1)
+        sb_expanded = sb.double().repeat_interleave(128, 1)
+        if scale_side == "a":
+            sa_expanded = sa_expanded.repeat_interleave(128, 0)
+            ra, rb = ScalingType.BlockWise128x128, ScalingType.BlockWise1x128
+        else:
+            sb_expanded = sb_expanded.repeat_interleave(128, 0)
+            ra, rb = ScalingType.BlockWise1x128, ScalingType.BlockWise128x128
+        # Dyadic inputs keep FP32 accumulation exact against this FP64 reference.
+        reference = (a.double() * sa_expanded) @ (b.double() * sb_expanded).t()
+        if scale_producer:
+            reference *= 6
+        square = square.t() if native_layout else square
+        sa, sb = (square, other) if scale_side == "a" else (other, square)
+
+        def fn(a, b, sa, sb):
+            if scale_producer:
+                sa, sb = sa * 2, sb * 3
+            return scaled_mm(a, b, sa, ra, sb, rb, output_dtype=torch.float32)
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), a, b.t(), sa, sb
+        )
+        self.assertEqual(actual.double(), reference, atol=0, rtol=0)
+        self.assertIn("def blockwise128x128_scaling", code[0])
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not has_triton_tma_device(), "Requires device-side TMA")
+    @parametrize(
+        "scale_a_size,scale_b_size",
+        [((11, 3), (128, 10)), ((384, 10), (128, 10)), ((12, 3), (10, 128))],
+    )
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+        }
+    )
+    def test_deepseek_v2_invalid_scale_extents(
+        self, device, scale_a_size, scale_b_size
+    ):
+        a = torch.empty(384, 1280, device=device, dtype=torch.float8_e4m3fn)
+        b = torch.empty(128, 1280, device=device, dtype=torch.float8_e4m3fn).t()
+        sa = torch.empty(scale_a_size, device=device)
+        sb = torch.empty(scale_b_size, device=device)
+
+        def fn(a, b, sa, sb):
+            return scaled_mm(
+                a,
+                b,
+                sa,
+                ScalingType.BlockWise128x128,
+                sb,
+                ScalingType.BlockWise1x128,
+                output_dtype=torch.float32,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "DeepSeek scale|expect_true"):
+            torch.compile(fn, fullgraph=True, dynamic=False)(a, b, sa, sb)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not IS_SM90, "cuBLAS DeepSeek scaling requires SM90")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 9),
+        "cuBLAS blockwise scaling added in CUDA 12.9",
+    )
+    @config.patch({"max_autotune": True, "max_autotune_gemm_backends": "ATEN"})
+    def test_deepseek_v2_aten_routing(self, device):
+        m, n, k = 384, 128, 1280
+        # Dyadic inputs and integer scales make this product exact in FP32.
+        a = (torch.randint(-4, 5, (m, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        b = (torch.randint(-4, 5, (n, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        sa = torch.randint(1, 5, (m // 128, k // 128), device=device).float()
+        sb = torch.randint(1, 5, (n, k // 128), device=device).float()
+        reference = (
+            a.double() * sa.double().repeat_interleave(128, 0).repeat_interleave(128, 1)
+        ) @ (b.double() * sb.double().repeat_interleave(128, 1)).t()
+        sa = _prepare_blockwise_scale(sa, 128, 128)
+        # V2 RHS scales are [N, K/128], unlike v1's [K/128, N].
+        sb = _prepare_blockwise_scale(sb, 1, 128)
+
+        def fn(a, b, sa, sb):
+            return scaled_mm(
+                a,
+                b,
+                sa,
+                ScalingType.BlockWise128x128,
+                sb,
+                ScalingType.BlockWise1x128,
+                output_dtype=torch.float32,
+            )
+
+        expected = fn(a, b.t(), sa, sb)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), a, b.t(), sa, sb
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(actual.double(), reference, atol=0, rtol=0)
+        FileCheck().check("torch.ops.aten._scaled_mm_v2.default(").check_not(
+            "extern_kernels._scaled_mm("
+        ).run(code[0])
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm(msg="FP8 tensorwise eager path is not supported by hipBLAS")
     @onlyOn(["cpu", "cuda", "xpu"])
@@ -1367,129 +1537,6 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(not IS_SM90, "cuBLAS DeepSeek scaling requires SM90")
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 9),
-        "cuBLAS blockwise scaling added in CUDA 12.9",
-    )
-    @config.patch({"max_autotune": True, "max_autotune_gemm_backends": "ATEN"})
-    def test_deepseek_v2_aten_routing(self, device):
-        m, n, k = 384, 128, 1280
-        # Dyadic inputs and integer scales make this product exact in FP32.
-        a = (torch.randint(-4, 5, (m, k), device=device).float() / 8).to(
-            torch.float8_e4m3fn
-        )
-        b = (torch.randint(-4, 5, (n, k), device=device).float() / 8).to(
-            torch.float8_e4m3fn
-        )
-        sa = torch.randint(1, 5, (m // 128, k // 128), device=device).float()
-        sb = torch.randint(1, 5, (n, k // 128), device=device).float()
-        reference = (
-            a.double() * sa.double().repeat_interleave(128, 0).repeat_interleave(128, 1)
-        ) @ (b.double() * sb.double().repeat_interleave(128, 1)).t()
-        sa = _prepare_blockwise_scale(sa, 128, 128, transposed=False)
-        # V2 RHS scales are [N, K/128], unlike v1's [K/128, N].
-        sb = sb.t().contiguous().t()
-
-        def fn(a, b, sa, sb):
-            return scaled_mm(
-                a,
-                b,
-                sa,
-                ScalingType.BlockWise128x128,
-                sb,
-                ScalingType.BlockWise1x128,
-                output_dtype=torch.float32,
-            )
-
-        expected = fn(a, b.t(), sa, sb)
-        actual, code = run_and_get_code(
-            torch.compile(fn, fullgraph=True), a, b.t(), sa, sb
-        )
-        self.assertEqual(actual, expected, atol=0, rtol=0)
-        self.assertEqual(actual.double(), reference, atol=0, rtol=0)
-        FileCheck().check("torch.ops.aten._scaled_mm_v2.default(").check_not(
-            "extern_kernels._scaled_mm("
-        ).run(code[0])
-
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(not has_triton_tma_device(), "Requires device-side TMA")
-    @parametrize("api", ["v1", "v2"])
-    @parametrize("outer_a,outer_b", [(1, 1), (1, 128), (128, 1)])
-    @parametrize("block_k", [64, 256])
-    def test_deepseek_tma_scale_layouts(self, device, api, outer_a, outer_b, block_k):
-        m, n = (16, 16) if block_k == 64 else (160, 144)
-        k = 512 if api == "v1" else 384
-        a = (torch.randn(m, k, device=device) / 8).to(torch.float8_e4m3fn)
-        b_rows = (torch.randn(n, k, device=device) / 8).to(torch.float8_e4m3fn)
-        sa = torch.randint(
-            1, 5, (ceil_div(m, outer_a), ceil_div(k, 128)), device=device
-        ).float()
-        sb = torch.randint(
-            1, 5, (ceil_div(n, outer_b), ceil_div(k, 128)), device=device
-        ).float()
-        reference = (
-            a.double()
-            * sa.double()
-            .repeat_interleave(outer_a, 0)[:m]
-            .repeat_interleave(128, 1)[:, :k]
-        ) @ (
-            b_rows.double()
-            * sb.double()
-            .repeat_interleave(outer_b, 0)[:n]
-            .repeat_interleave(128, 1)[:, :k]
-        ).t()
-
-        def scale_layout(scale, outer, rhs):
-            if api == "v2":
-                if outer == 128:
-                    # Unused padded scale slots must never enter the product.
-                    return torch.nn.functional.pad(
-                        scale, (0, (-scale.size(1)) % 4), value=float("nan")
-                    ).t()
-                return scale.t().contiguous().t()
-            scale = scale.t().contiguous().t() if outer == 1 else scale
-            return scale.t() if rhs else scale
-
-        sa = scale_layout(sa, outer_a, False)
-        sb = scale_layout(sb, outer_b, True)
-        recipe_a = (
-            ScalingType.BlockWise1x128 if outer_a == 1 else ScalingType.BlockWise128x128
-        )
-        recipe_b = (
-            ScalingType.BlockWise1x128 if outer_b == 1 else ScalingType.BlockWise128x128
-        )
-
-        def fn(a, b, sa, sb):
-            if api == "v1":
-                return torch._scaled_mm(a, b, sa, sb, out_dtype=torch.float32)
-            return scaled_mm(
-                a, b, sa, recipe_a, sb, recipe_b, output_dtype=torch.float32
-            )
-
-        block_m, block_n = (16, 16) if block_k == 64 else (64, 32)
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "triton.enable_persistent_tma_matmul": True,
-                "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
-                "test_configs.autotune_choice_desc_regex": f"BLOCK_K={block_k}, BLOCK_M={block_m}, BLOCK_N={block_n}",
-            }
-        ):
-            compiled = torch.compile(fn, fullgraph=True)
-            actual, code = run_and_get_code(compiled, a, b_rows.t(), sa, sb)
-            if api == "v2":
-                with self.assertRaisesRegex(RuntimeError, "expect_true|sizevars"):
-                    compiled(a, b_rows.t(), sa[:-1], sb)
-        self.assertTrue(torch.isfinite(actual).all())
-        self.assertEqual(actual.double(), reference, atol=1e-5, rtol=1e-4)
-        self.assertIn("blockwise1xTILESIZE_scaling", code[0])
-        self.assertNotIn("extern_kernels._scaled_mm", code[0])
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -1502,7 +1549,18 @@ class TestFP8Lowering(TestCase):
     @xfailIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
     )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
-    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
+    @parametrize(
+        "shape",
+        (
+            # New shapes go on the end: the DISABLED bot skips by index.
+            (16, 256, 256),
+            (1024, 512, 1024),
+            (2048, 4096, 4096),
+            (16, 256, 640),  # K padding with a degenerate 128x128 row block
+            (256, 384, 640),  # non-square 128x128 block grid with K padding
+            (256, 32, 4096),  # N == ceil(K/128): v1 and v2 scale_b shapes collide
+        ),
+    )
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
         "scaling_block_sizes",
@@ -1515,26 +1573,6 @@ class TestFP8Lowering(TestCase):
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
-        # (shape, use_fast_accum, scaling_block_sizes) combos disabled due to CI
-        # failures; other combos still run. See the referenced issues.
-        _disabled_combos = {
-            ((16, 256, 256), False, (1, 128, 128, 128)),
-            ((16, 256, 256), False, (1, 128, 1, 128)),
-            ((16, 256, 256), False, (128, 128, 1, 128)),
-            ((16, 256, 256), True, (1, 128, 128, 128)),
-            ((16, 256, 256), True, (1, 128, 1, 128)),
-            ((16, 256, 256), True, (128, 128, 1, 128)),
-            ((1024, 512, 1024), False, (1, 128, 1, 128)),
-            ((1024, 512, 1024), False, (128, 128, 1, 128)),
-            ((1024, 512, 1024), True, (1, 128, 1, 128)),
-            ((1024, 512, 1024), True, (128, 128, 1, 128)),
-            ((32768, 4096, 4096), False, (1, 128, 1, 128)),
-            ((32768, 4096, 4096), False, (128, 128, 1, 128)),
-            ((32768, 4096, 4096), True, (1, 128, 1, 128)),
-            ((32768, 4096, 4096), True, (128, 128, 1, 128)),
-        }
-        if (shape, use_fast_accum, scaling_block_sizes) in _disabled_combos:
-            self.skipTest("disabled due to CI failures; see #190236")
         if "xpu" in device and use_fast_accum:
             self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
@@ -1554,17 +1592,13 @@ class TestFP8Lowering(TestCase):
             w, dtype_float8, block_outer=bn, block_inner=bk
         )
         w_t_fp8 = w_fp8.t()
-        w_inverse_scale = _prepare_blockwise_scale(
-            w_inverse_scale, bn, bk, transposed=True
-        )
+        w_inverse_scale = _prepare_blockwise_scale(w_inverse_scale, bn, bk)
 
         # quantize input x
         x_fp8, x_inverse_scale = _quantize_blockwise(
             x, dtype_float8, block_outer=am, block_inner=ak
         )
-        x_inverse_scale = _prepare_blockwise_scale(
-            x_inverse_scale, am, ak, transposed=False
-        )
+        x_inverse_scale = _prepare_blockwise_scale(x_inverse_scale, am, ak)
 
         recipe_x = (
             ScalingType.BlockWise1x128
@@ -1656,6 +1690,88 @@ class TestFP8Lowering(TestCase):
         if not use_fast_accum:
             self.assertEqual(y_eager.dtype, dtype)
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyCUDA
+    @unittest.skipIf(
+        torch.version.hip is not None
+        or (torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0)),
+        "main loop scaling template is registered for CUDA CC 9.0+ only",
+    )
+    @parametrize(
+        "shape",
+        (
+            (256, 256, 256),  # ceil(K/128) == ceil(N/128): scale_b is square
+            (256, 256, 640),  # ceil(K/128) % 4 != 0 and not square
+            (1024, 512, 1024),
+        ),
+    )
+    @parametrize(
+        "scaling_block_sizes",
+        ((1, 128, 128, 128), (1, 128, 1, 128), (128, 128, 1, 128)),
+    )
+    def test_scaled_mm_v1_blockwise(
+        self,
+        shape: tuple[int, int, int],
+        scaling_block_sizes: tuple[int, int, int, int],
+        device,
+    ):
+        # torch._scaled_mm takes scale_b in the transposed, unpadded layout, which
+        # the Triton template has to convert. Checked against a dequantized fp32
+        # matmul rather than against eager: ATen accepts a scale_b whose row stride
+        # is ceil(K/128) floats, but cuBLAS needs that stride 16-byte aligned, so
+        # eager returns garbage whenever ceil(K/128) % 4 != 0.
+        M, N, K = shape
+        am, ak, bn, bk = scaling_block_sizes
+        dtype_float8 = torch.float8_e4m3fn
+
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=device)
+        w = torch.randn(N, K, dtype=torch.bfloat16, device=device)
+        # Give each scale block a distinct magnitude. With uniform input every
+        # block's amax is nearly equal, so a transposed scale read is invisible.
+        for i in range((N + bn - 1) // bn):
+            for j in range((K + bk - 1) // bk):
+                w[i * bn : (i + 1) * bn, j * bk : (j + 1) * bk] *= 2.0 ** (
+                    (i + 2 * j) % 7
+                )
+
+        x_fp8, x_scale = _quantize_blockwise(x, dtype_float8, am, ak)
+        w_fp8, w_scale = _quantize_blockwise(w, dtype_float8, bn, bk)
+
+        def expand(scale, rows, cols, outer, inner):
+            return (
+                scale.float()
+                .repeat_interleave(outer, 0)[:rows]
+                .repeat_interleave(inner, 1)[:, :cols]
+            )
+
+        ref = (x_fp8.float() * expand(x_scale, M, K, am, ak)) @ (
+            w_fp8.float() * expand(w_scale, N, K, bn, bk)
+        ).t()
+
+        # v1 layouts: scale_a outer-dim-major, scale_b the transpose of scale_w.
+        x_scale_v1 = x_scale.t().contiguous().t() if (am, ak) == (1, 128) else x_scale
+        w_scale_v1 = w_scale.t().contiguous() if (bn, bk) == (1, 128) else w_scale.t()
+
+        def linear(x_fp8, w_t_fp8, x_scale, w_scale):
+            return torch._scaled_mm(
+                x_fp8, w_t_fp8, x_scale, w_scale, out_dtype=torch.float32
+            )
+
+        with config.patch(
+            {
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune": True,
+            }
+        ):
+            y_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")(
+                x_fp8, w_fp8.t(), x_scale_v1, w_scale_v1
+            )
+
+        rel = ((y_compiled - ref).abs().sum() / ref.abs().sum()).item()
+        self.assertLess(rel, 1e-3, f"relative error {rel} against fp32 reference")
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu", "cpu"])
