@@ -239,6 +239,16 @@ def make_none_grad_flags(pattern: str, device: torch.device) -> torch.Tensor:
     )
 
 
+def assert_recv_buffers_drained(test_case, stages) -> None:
+    """Assert that a completed pipeline step transferred every recv buffer."""
+    stage_list = stages if isinstance(stages, (list, tuple)) else (stages,)
+    for stage in stage_list:
+        for recv_info_by_chunk in (stage.args_recv_info, stage.grad_recv_info):
+            for recv_infos in recv_info_by_chunk.values():
+                for info in recv_infos:
+                    test_case.assertIsNone(info.buffer)
+
+
 def setup_none_grad_model_and_data(config: PipelineTestConfig, n_layers: int):
     torch.manual_seed(0)
     mod = ConditionalGradStack(none_grad_d_hid, n_layers).to(config.device)
@@ -379,17 +389,20 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize(
-        "ScheduleClass",
+        "ScheduleClass,reuse_recv_buffers",
         [
-            ScheduleGPipe,
-            Schedule1F1B,
-            ScheduleInterleaved1F1B,
-            ScheduleLoopedBFS,
-            ScheduleInterleavedZeroBubble,
+            (ScheduleGPipe, False),
+            (Schedule1F1B, False),
+            (ScheduleInterleaved1F1B, False),
+            (ScheduleInterleaved1F1B, True),
+            (ScheduleLoopedBFS, False),
+            (ScheduleLoopedBFS, True),
+            (ScheduleInterleavedZeroBubble, False),
+            (ScheduleInterleavedZeroBubble, True),
         ],
     )
     @skip_if_lt_x_gpu(4)
-    def test_eval_inference_mode(self, ScheduleClass):
+    def test_eval_inference_mode(self, ScheduleClass, reuse_recv_buffers):
         num_microbatches = 4
         if ScheduleClass in [
             ScheduleInterleaved1F1B,
@@ -412,7 +425,7 @@ class ScheduleTest(MultiProcContinuousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 scale_grads=False,
-                reuse_recv_buffers=True,
+                reuse_recv_buffers=reuse_recv_buffers,
             )
         else:
             # Single-stage schedules
@@ -543,13 +556,7 @@ class ScheduleTest(MultiProcContinuousTest):
             else:
                 schedule.step()
 
-            for recv_info_by_chunk in (
-                stage.args_recv_info,
-                stage.grad_recv_info,
-            ):
-                for recv_infos in recv_info_by_chunk.values():
-                    for info in recv_infos:
-                        self.assertIsNone(info.buffer)
+            assert_recv_buffers_drained(self, stage)
 
         dist.barrier(device_ids=[self.rank])
 
@@ -756,8 +763,11 @@ class ScheduleTest(MultiProcContinuousTest):
         ],
     )
     @parametrize("pre_split", [False, True])
+    @parametrize("reuse_recv_buffers", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_interleaved(self, ScheduleClass, pre_split):
+    def test_grad_with_manual_interleaved(
+        self, ScheduleClass, pre_split, reuse_recv_buffers
+    ):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -785,13 +795,14 @@ class ScheduleTest(MultiProcContinuousTest):
             num_microbatches,
             loss_fn=loss_fn,
             scale_grads=False,
-            reuse_recv_buffers=True,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
 
         # Run pipeline with tensor leak checking
         out = None
         losses = []
         with check_leaked_tensors() as garbage_tensors:
+            recv_pool_ptrs = None
             for _ in range(2):
                 zero_gradients(stage_modules)
                 if self.rank == 0:
@@ -815,12 +826,26 @@ class ScheduleTest(MultiProcContinuousTest):
                         num_microbatches,
                         pre_split=pre_split,
                     )
+                if reuse_recv_buffers:
+                    current_ptrs = tuple(
+                        buffer.data_ptr()
+                        for stage in stages
+                        for pool in (stage._fwd_recv_pool, stage._bwd_recv_pool)
+                        for slot in pool._buffers
+                        for buffer in slot
+                        if buffer is not None
+                    )
+                    if recv_pool_ptrs is None:
+                        recv_pool_ptrs = current_ptrs
+                    else:
+                        self.assertEqual(current_ptrs, recv_pool_ptrs)
 
         self.assertEqual(
             len(garbage_tensors),
             0,
             "Found leaked tensors, check logs above for debug info",
         )
+        assert_recv_buffers_drained(self, stages)
         dist.barrier()
 
         # Verify results

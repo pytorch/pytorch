@@ -5,7 +5,7 @@ import operator
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import torch
@@ -122,11 +122,13 @@ class _RecvInfo:
 
     def allocate_buffer(self, device: torch.device | str) -> torch.Tensor | None:
         """Allocate and retain this receive's runtime buffer."""
-        if self.is_root_arg or self.tensor_meta is None:
+        if self.tensor_meta is None:
             return None
         if self.buffer is not None:
             raise PipeliningMetadataError(
-                f"Receive buffer for '{self.input_name}' is already set"
+                f"Receive buffer for '{self.input_name}' is still owned by an "
+                "incomplete pipeline step; recreate the schedule and process "
+                "group before retrying"
             )
         self.buffer = _make_tensor_from_meta(self.tensor_meta, device)
         return self.buffer
@@ -139,22 +141,23 @@ class _RecvInfo:
             )
         if self.buffer is not None:
             raise PipeliningMetadataError(
-                f"Receive buffer for '{self.input_name}' is already set"
+                f"Receive buffer for '{self.input_name}' is still owned by an "
+                "incomplete pipeline step; recreate the schedule and process "
+                "group before retrying"
             )
         self.buffer = buffer
 
     def take_buffer(self) -> torch.Tensor | None:
         """Transfer this descriptor's buffer reference to stage computation."""
-        buffer = self.buffer
-        self.buffer = None
-        if buffer is None and self.tensor_meta is not None:
+        if self.tensor_meta is None:
+            return None
+        if self.buffer is None:
             raise PipeliningMetadataError(
                 f"Receive buffer for '{self.input_name}' has not been set"
             )
-        if buffer is not None and self.tensor_meta is None:
-            raise PipeliningMetadataError(
-                f"Receive buffer for '{self.input_name}' is not expected"
-            )
+        buffer = self.buffer
+        # Consumption transfers storage ownership to compute/autograd.
+        self.buffer = None
         return buffer
 
     def __repr__(self):
@@ -187,7 +190,9 @@ class _RecvBufferPool:
         """Allocate the requested stable slots if their metadata changed."""
         if self._owners:
             raise PipeliningMetadataError(
-                f"Cannot resize active {self._direction} receive buffer pool"
+                f"The {self._direction} receive buffer pool still has storage "
+                "owned by an incomplete pipeline step; recreate the schedule "
+                "and process group before retrying"
             )
 
         metas = tuple(
@@ -227,15 +232,7 @@ class _RecvBufferPool:
                 f"{self._direction} receive buffer slot {slot} has "
                 f"{len(buffers)} tensors, expected {len(recv_infos)}"
             )
-        for info, expected_meta, buffer in zip(
-            recv_infos, self._metas, buffers, strict=True
-        ):
-            actual_meta = None if info.is_root_arg else info.tensor_meta
-            if actual_meta != expected_meta:
-                raise PipeliningMetadataError(
-                    f"Receive metadata changed for '{info.input_name}' in the "
-                    f"{self._direction} buffer pool"
-                )
+        for info, buffer in zip(recv_infos, buffers, strict=True):
             if buffer is not None:
                 info.set_buffer(buffer)
         self._owners[slot] = microbatch_index
@@ -255,10 +252,20 @@ class _RecvBufferPool:
 
         for buffer in self._buffers[slot]:
             if buffer is not None:
+                # Autograd writes leaf grads onto received activations. A pool
+                # slot must return to the same neutral state before reuse.
                 buffer.grad = None
                 if buffer.requires_grad:
                     buffer.requires_grad_(False)
         del self._owners[slot]
+
+    def aliases(self, tensor: torch.Tensor) -> bool:
+        """Return whether ``tensor`` shares storage with any pooled buffer."""
+        return any(
+            buffer is not None and torch._C._is_alias_of(buffer, tensor)
+            for slot_buffers in self._buffers
+            for buffer in slot_buffers
+        )
 
     def release_all(self) -> None:
         """Release every active slot after outstanding communication completes."""
@@ -351,6 +358,7 @@ class _PipelineStageBase(ABC):
         device: torch.device,
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
+        *,
         pass_pipeline_metadata: bool = False,
     ):
         """
@@ -365,8 +373,8 @@ class _PipelineStageBase(ABC):
                 for deferred weight updates in F/I/W zero-bubble
                 schedules. If ``None``, a runner is generated
                 automatically via autograd graph traversal.
-            pass_pipeline_metadata: Add the global stage index and microbatch
-                index to every executed forward.
+            pass_pipeline_metadata: Pass the global stage and microbatch indices
+                as reserved keyword arguments to each manual stage forward.
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -379,7 +387,7 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
-        self.pass_pipeline_metadata = pass_pipeline_metadata
+        self._pass_pipeline_metadata = pass_pipeline_metadata
 
         _warn_if_eager_nccl(group)
 
@@ -442,7 +450,10 @@ class _PipelineStageBase(ABC):
         # Backward infra will be created lazily
         self.grad_recv_info: dict = {}
         self.grad_send_info: list | None = None
-        self._init_recv_buffer_pools()
+        self._fwd_recv_slots: Mapping[int, int] = {}
+        self._bwd_recv_slots: Mapping[int, int] = {}
+        self._fwd_recv_pool = _RecvBufferPool("forward")
+        self._bwd_recv_pool = _RecvBufferPool("backward")
 
         # To be populated later by the Schedule
         self.chunks: int | None = None
@@ -460,13 +471,6 @@ class _PipelineStageBase(ABC):
         # DTensor support: consolidated stage metadata container
         # Contains inputs, outputs, input_grads, output_grads metadata
         self._stage_meta = _StageMeta()
-
-    def _init_recv_buffer_pools(self) -> None:
-        """Initialize the optional static receive-buffer state."""
-        self._fwd_recv_slots: dict[int, int] = {}
-        self._bwd_recv_slots: dict[int, int] = {}
-        self._fwd_recv_pool = _RecvBufferPool("forward")
-        self._bwd_recv_pool = _RecvBufferPool("backward")
 
     @property
     def has_backward(self) -> bool:
@@ -624,31 +628,56 @@ class _PipelineStageBase(ABC):
 
     def _prepare_recv_buffer_pools(
         self,
-        fwd_slots: dict[int, int],
-        bwd_slots: dict[int, int],
+        fwd_slots: Mapping[int, int],
+        num_fwd_slots: int,
+        bwd_slots: Mapping[int, int],
+        num_bwd_slots: int,
     ) -> None:
         """Allocate stable receive pools for a finalized runtime schedule."""
         self._fwd_recv_slots = fwd_slots
         self._bwd_recv_slots = bwd_slots
 
-        fwd_infos = self.args_recv_info[min(fwd_slots)] if fwd_slots else ()
+        fwd_infos = self._validate_uniform_recv_metadata(self.args_recv_info, fwd_slots)
         self._fwd_recv_pool.prepare(
-            max(fwd_slots.values(), default=-1) + 1,
+            num_fwd_slots,
             fwd_infos,
             self.device,
         )
-        bwd_infos = self.grad_recv_info[min(bwd_slots)] if bwd_slots else ()
+        bwd_infos = self._validate_uniform_recv_metadata(self.grad_recv_info, bwd_slots)
         self._bwd_recv_pool.prepare(
-            max(bwd_slots.values(), default=-1) + 1,
+            num_bwd_slots,
             bwd_infos,
             self.device,
         )
+
+    @staticmethod
+    def _validate_uniform_recv_metadata(
+        recv_info_by_microbatch: dict[int, tuple[_RecvInfo, ...]],
+        slots: Mapping[int, int],
+    ) -> tuple[_RecvInfo, ...]:
+        """Validate the metadata contract once before allocating a pool."""
+        if not slots:
+            return ()
+        first_infos = recv_info_by_microbatch[min(slots)]
+        expected = tuple(
+            None if info.is_root_arg else info.tensor_meta for info in first_infos
+        )
+        for microbatch_index in slots:
+            actual = tuple(
+                None if info.is_root_arg else info.tensor_meta
+                for info in recv_info_by_microbatch[microbatch_index]
+            )
+            if actual != expected:
+                raise PipeliningMetadataError(
+                    "Receive metadata must be uniform across pooled microbatches"
+                )
+        return first_infos
 
     def _acquire_recv_buffers(
         self,
         microbatch_index: int,
         recv_infos: tuple[_RecvInfo, ...],
-        slots: dict[int, int],
+        slots: Mapping[int, int],
         pool: _RecvBufferPool,
     ) -> None:
         """Acquire a static slot or allocate this receive just in time."""
@@ -657,7 +686,8 @@ class _PipelineStageBase(ABC):
             pool.acquire(slot, microbatch_index, recv_infos)
             return
         for info in recv_infos:
-            info.allocate_buffer(self.device)
+            if not info.is_root_arg:
+                info.allocate_buffer(self.device)
 
     def _release_fwd_recv_buffers(self, microbatch_index: int) -> None:
         """Release the forward receive slot for one microbatch, if pooled."""
@@ -675,6 +705,12 @@ class _PipelineStageBase(ABC):
         """Release receive slots retained through the end of the step."""
         self._fwd_recv_pool.release_all()
         self._bwd_recv_pool.release_all()
+
+    def _ensure_owned_send(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Materialize sends that alias storage managed by either recv pool."""
+        if self._fwd_recv_pool.aliases(tensor) or self._bwd_recv_pool.aliases(tensor):
+            return tensor.clone()
+        return tensor
 
     """[Note: V-schedule special case]
 
@@ -898,7 +934,7 @@ class _PipelineStageBase(ABC):
 
             if isinstance(grad, torch.Tensor):
                 # Extract local tensor if DTensor
-                send_tensor = to_local_if_dtensor(grad)
+                send_tensor = self._ensure_owned_send(to_local_if_dtensor(grad))
                 logger.debug(
                     "%s Sending gradient to Stage %s: %s",
                     self.log_prefix,
@@ -954,8 +990,6 @@ class _PipelineStageBase(ABC):
                         f"Non-root arg '{info.input_name}' has no tensor metadata"
                     )
                 buffer = info.take_buffer()
-                if buffer is None:
-                    raise AssertionError("expected receive buffer to be not None")
                 # Effective requires_grad: metadata captures what the model
                 # produced, but the runtime context (has_backward, grad mode)
                 # determines whether we actually need gradients.
@@ -1024,10 +1058,6 @@ class _PipelineStageBase(ABC):
                 if buffer is None:
                     grads.append(None)
                     continue
-                if info.tensor_meta is None:
-                    raise PipeliningMetadataError(
-                        f"Grad recv '{info.input_name}' has no tensor metadata"
-                    )
                 if isinstance(info.tensor_meta, _DTensorMeta):
                     # Reconstruct DTensor gradient from local tensor + metadata
                     mesh = self._mesh_cache.get_mesh(info.tensor_meta.mesh_cache_key)
@@ -1175,19 +1205,20 @@ class _PipelineStageBase(ABC):
             # Activations only come in args form
             composite_args = self._retrieve_recv_activations(fwd_chunk_id)
 
-        composite_kwargs = kwargs or {}
-        if self.pass_pipeline_metadata:
+        user_kwargs = kwargs or {}
+        composite_kwargs = user_kwargs
+        if self._pass_pipeline_metadata:
             metadata = {
                 "pipeline_stage_index": self.stage_index,
                 "pipeline_microbatch_index": fwd_chunk_id,
             }
-            collisions = metadata.keys() & composite_kwargs.keys()
+            collisions = metadata.keys() & user_kwargs.keys()
             if collisions:
                 names = ", ".join(sorted(collisions))
                 raise ValueError(
                     f"Pipeline forward kwargs contain reserved name(s): {names}"
                 )
-            composite_kwargs = {**composite_kwargs, **metadata}
+            composite_kwargs = {**user_kwargs, **metadata}
 
         if self._runtime_validate:
             self._validate_stage_tensors(
@@ -1217,7 +1248,8 @@ class _PipelineStageBase(ABC):
             self.output_chunks.append(output)
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)
-        flat_kwargs = flatten_args(composite_kwargs)
+        # Pipeline metadata is execution context, not an autograd input.
+        flat_kwargs = flatten_args(user_kwargs)
         flatten_input_tensors = flat_args + flat_kwargs
         self.fwd_cache[fwd_chunk_id] = (
             output_tuple,  # stage_output
@@ -1518,8 +1550,6 @@ class _PipelineStage(_PipelineStageBase):
         pipe_info: PipeInfo,
         device: torch.device,
         group: dist.ProcessGroup | None = None,
-        *,
-        pass_pipeline_metadata: bool = False,
     ):
         """
         Create a pipeline stage given a stage_module to be wrapped by this stage
@@ -1531,8 +1561,6 @@ class _PipelineStage(_PipelineStageBase):
             pipe_info (PipeInfo): information about the pipeline, can be retrieved by `pipe.info()`
             device (torch.device): the device to be used by this stage
             group (Optional[dist.ProcessGroup]): the process group to be used by this stage
-            pass_pipeline_metadata: Add the global stage index and microbatch
-                index to every executed forward.
         """
         _PipelineStageBase.__init__(
             self,
@@ -1541,7 +1569,6 @@ class _PipelineStage(_PipelineStageBase):
             pipe_info.num_stages,
             device,
             group,
-            pass_pipeline_metadata=pass_pipeline_metadata,
         )
         self.pipe_info = pipe_info
 
@@ -1924,8 +1951,6 @@ def build_stage(
     pipe_info: PipeInfo,
     device: torch.device,
     group: dist.ProcessGroup | None = None,
-    *,
-    pass_pipeline_metadata: bool = False,
 ) -> _PipelineStage:
     """
     Create a pipeline stage given a stage_module to be wrapped by this stage
@@ -1937,8 +1962,6 @@ def build_stage(
         pipe_info (PipeInfo): information about the pipeline, can be retrieved by `pipe.info()`
         device (torch.device): the device to be used by this stage
         group (Optional[dist.ProcessGroup]): the process group to be used by this stage
-        pass_pipeline_metadata: Add the global stage index and microbatch index
-            to every executed forward.
 
     Returns:
         _PipelineStage: a pipeline stage that can run with `PipelineSchedules`.
@@ -1949,7 +1972,6 @@ def build_stage(
         pipe_info,
         device,
         group,
-        pass_pipeline_metadata=pass_pipeline_metadata,
     )
 
 
@@ -1981,8 +2003,11 @@ class PipelineStage(_PipelineStageBase):
             zero-bubble (F/I/W) schedules.
         get_mesh: `GetMeshCallback` used during
             dynamic DTensor inference. Ignored in fully static DTensor mode.
-        pass_pipeline_metadata: Add the global stage index and microbatch index
-            to every executed forward.
+        pass_pipeline_metadata: Pass ``pipeline_stage_index`` and
+            ``pipeline_microbatch_index`` to each forward. This requires
+            complete static metadata. The wrapped module may accept the
+            reserved keywords directly or consume them in a ``with_kwargs``
+            forward pre-hook.
     """
 
     def __init__(
@@ -2032,6 +2057,14 @@ class PipelineStage(_PipelineStageBase):
             input_grads=extract_tensor_metas(in_grads, allow_none=True),
             output_grads=extract_tensor_metas(out_grads, allow_none=True),
         )
+        if (
+            self._pass_pipeline_metadata
+            and not self._user_meta.is_complete_for_forward()
+        ):
+            raise PipeliningMetadataError(
+                "pass_pipeline_metadata requires static input_args and output_args; "
+                "dynamic metadata inference has no real microbatch identity"
+            )
 
         # Cache meshes from user-provided DTensors
         for args in (inputs, outputs, in_grads, out_grads):
@@ -2587,6 +2620,10 @@ class PipelineStage(_PipelineStageBase):
         fwd_meta_output: _StageForwardMeta | None = None
 
         if self._inference_mode == InferenceMode.DYNAMIC:
+            if self._pass_pipeline_metadata:
+                raise PipeliningMetadataError(
+                    "pass_pipeline_metadata requires complete static metadata"
+                )
             # DYNAMIC mode: run forward metadata inference
             # args may be _StageForwardMeta for same-rank V-schedule stages
             fwd_meta_output = self._forward_metadata_inference(
