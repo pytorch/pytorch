@@ -399,6 +399,7 @@ xccl = "torch.distributed.distributed_c10d:_register_builtin_xccl_backend"
 
 [project.entry-points."torch.distributed.transports"]
 ibverbs = "torch.distributed._transport._rdma4py:IBVerbsTransport"
+nixl = "torch.distributed._transport._nixl:NIXLTransport"
 tcp = "torch.distributed._transport._tcp:TCPTransport"
 torchcomms = "torch.distributed._transport._torchcomms:TorchCommsTransport"
 ucxx = "torch.distributed._transport._ucxx:UCXXTransport"
