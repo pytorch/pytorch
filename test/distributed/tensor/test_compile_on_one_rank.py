@@ -17,7 +17,9 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -44,6 +46,8 @@ def extract_graph(fx_g, _, graph_cell):
 
 
 class TestCompileOnOneRank(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _assert_graphs_identical_across_ranks(self, local_graph_code):
         """Gather compiled graph code from all ranks and assert they are identical."""
         self.assertIsNotNone(local_graph_code, "Graph was not captured")
@@ -280,6 +284,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     A device that is a different accelerator, or a different index of the current
     accelerator, is refused (it could not run SPMD).
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -852,6 +858,8 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
     Single process with a fake PG -- this is the failing precompile CI step.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.store = FakeStore()
@@ -919,6 +927,8 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         self.assertIn("c10d.allreduce_.default", _call_targets(gm))
         self.assertTrue(_baked_pg_constants(gm))
 
+
+instantiate_device_type_tests(TestCompileOnOneRank, globals())
 
 if __name__ == "__main__":
     run_tests()
