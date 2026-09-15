@@ -1316,12 +1316,7 @@ class FakeTensor(Tensor):
 
     # Similar to FunctionalTensor.tolist
     def tolist(self) -> Any:
-        if self.dim() == 0:
-            return self.item()
-        elif self.dim() == 1:
-            return [elem.item() for elem in self]
-        else:
-            return [elem.tolist() for elem in self]
+        return torch._C._fake_tensor_to_list(self)
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
