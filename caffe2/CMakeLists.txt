@@ -1668,6 +1668,11 @@ if(USE_DISTRIBUTED)
     endif()
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
   endif()
+  if(USE_TCCL AND USE_C10D_TCCL)
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_TCCL)
+    target_include_directories(torch_cpu PRIVATE ${LIBRDMA_INCLUDE_DIR})
+    target_link_libraries(torch_cpu PRIVATE ${LIBRDMA_LIBRARY})
+  endif()
   # Pass USE_RPC in order to reduce use of
   # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
   # need to be removed when RPC is supported
