@@ -1880,10 +1880,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     init_val=self.local_reduce_init,
                                     reduction_profile=((None, 1, None), 1, 1),
                                 )
-                            if cutlass.const_expr(
-                                group <= fragment_n
-                                and not self.tensor_epilogue_returns_local_reduce
-                            ):
+                            if cutlass.const_expr(group <= fragment_n):
                                 reduced = self.local_reduce_finalize(reduced, group)
                             reduced = reduced.reshape(((1, 1, repeats), 1, 1))
                             reduced = reduced.broadcast_to(grouped.shape)
@@ -1924,9 +1921,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 (self.mma_tiler[0], groups_per_cta),
                                 mma_tile_coord_mnl[:2],
                             )
-                            row_offset = (
-                                mma_tile_coord_v * self.cta_tile_shape_mnk[0]
-                            )
+                            row_offset = mma_tile_coord_v * self.cta_tile_shape_mnk[0]
                             limit_m = cute.size(local_reduce_tensor, mode=[1])
                             limit_groups = cute.size(local_reduce_tensor, mode=[2])
                             for i in cutlass.range(
