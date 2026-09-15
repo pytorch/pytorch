@@ -2943,6 +2943,121 @@ from user code:
         for x in xs:
             self.assertEqual(loaded(x), x * 3)
 
+    def test_aot_compile_module_disable_guard_check(self):
+        # disable_guard_check() is the escape hatch for an artifact whose guards
+        # fail on the serving machine; module dispatch has to honor it too, or
+        # a module artifact has no opt-out while a function artifact does.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="aot_eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        # requires_grad is part of TENSOR_MATCH, so the artifact recorded for
+        # requires_grad=False cannot match this call; opting out serves it
+        # anyway, which is exactly the escape hatch -- and what it serves is an
+        # inference graph that aot_autograd's runtime wrapper runs with grad
+        # disabled, so the result carries no grad history. That is what makes the
+        # aot_eager backend above load-bearing: an eager backend installs no such
+        # wrapper and would still record the grad history.
+        x = torch.randn(3, 3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "requires_grad mismatch"):
+            model(x)
+        model.forward.compiled_results[0].disable_guard_check()
+        out = model(x)
+        self.assertEqual(out, x.detach() * 2)
+        self.assertFalse(out.requires_grad)
+
+    def test_aot_compile_module_opted_out_result_keeps_its_place_in_the_scan(self):
+        self._hide_leaked_dynamo_globals()
+        # Opting out changes what a result accepts, not where it sits: the scan
+        # serves the first result whose check() accepts, in index order, and an
+        # opted-out result whose guards genuinely pass is served like any other.
+        # The default guard filter drops the global guard, so both results
+        # accept this call while computing different numbers, and only a mix of
+        # one opted-out and one checked result tells an index-ordered scan from
+        # one that consults the checked results first or holds the opted-out
+        # ones back for the passes below. The call is made under the mode [1]
+        # was traced for, so the graph such a scan serves is the one the process
+        # global would pick, and only the number says which result answered.
+        mod = GlobalConfigModule()
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        results = model.forward.compiled_results
+        with _set_pooling("mean"):
+            for result in results:
+                self.assertTrue(result.guard_check(mod, x))
+            results[0].disable_guard_check()
+            self.assertEqual(model(x), expected["sum"])
+
+    def test_aot_compile_module_opted_out_result_is_the_last_resort(self):
+        self._hide_leaked_dynamo_globals()
+        # An opted-out result accepts anything, so dispatch reaches it only after
+        # every real guard check has failed -- the scan, and then the second
+        # check() pass above. Two more wrong-answer bugs with no error raised
+        # hide in the rest of that ordering. Consulting the opt-out in the scan
+        # serves the first artifact for a call the second was compiled for --
+        # same shapes, same dtypes, different numbers. And the last resort is
+        # itself ordered: with every result opted out it serves the FIRST of
+        # them, so a call no artifact guards gets the graph the earliest
+        # opted-out ModelInput was traced for. A scan that skipped opted-out
+        # results is not pinned here, for two different reasons: in the first
+        # case the result that must serve is the CHECKED one, which the skip
+        # never applies to, so [1] is served by the scan itself; in the second
+        # both trees fail on "other" anyway and the answer this ordering demands
+        # is the first opted-out result, which the last resort serves either
+        # way. What tells a skipping scan apart is an opted-out result whose
+        # tree the scan would accept:
+        # test_aot_compile_module_opted_out_result_keeps_its_place_in_the_scan
+        # above pins that with honest guards, and
+        # test_module_dispatch_rechecks_an_opted_out_result_whose_tree_accepts
+        # covers the false-rejection variant.
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        results = model.forward.compiled_results
+        results[0].disable_guard_check()
+        with _set_pooling("mean"):
+            self.assertEqual(
+                model(x),
+                expected["mean"],
+                msg="the scan must outrank the opted-out result",
+            )
+        # Two opted-out results, so first and last are different results below.
+        results[1].disable_guard_check()
+        with _set_pooling("other"):
+            self.assertEqual(
+                model(x),
+                expected["sum"],
+                msg="with both opted out, the last resort must serve the first",
+            )
+
     def test_no_match_message_when_a_guard_answers_inconsistently(self):
         # Both dispatch passes ran [1]'s whole tree and both rejected the call,
         # so an accept while the report asks why contradicts them rather than
@@ -3156,7 +3271,8 @@ from user code:
             # HermeticModule.forward, the class attribute, is defined in this
             # module; a hint naming it would point here.
             g["AOT_HERMETIC_WEIGHT"] = saved
-            with self.assertRaises(RuntimeError):
+            missing = r"KeyError on G\['AOT_HERMETIC_WEIGHT'\]"
+            with self.assertRaisesRegex(RuntimeError, missing):
                 reloaded(x)
             # The dict the load actually resolved: the guards hold it by
             # reference, so defining the name here is what lets them resolve.
@@ -3164,69 +3280,6 @@ from user code:
             # equal to the serialized copy: a name absent at load is skipped by
             # the re-read, which is why it had to be bound here first.
             ns["AOT_HERMETIC_WEIGHT"] = saved
-            self.assertEqual(reloaded(x), x @ saved)
-        finally:
-            g["AOT_HERMETIC_WEIGHT"] = saved
-
-    @parametrize("wrapper", ("compile", "disable", "disable_nonrecursive"))
-    def test_no_match_message_hint_sees_through_a_wrapped_rebound_forward(
-        self, wrapper
-    ):
-        # mod.forward = torch.compile(mod.forward) rebinds forward to eval_frame's
-        # compile_wrapper, and torch._dynamo.disable(mod.forward) to eval_frame's
-        # or (non-recursive) external_utils' disable wrapper; the load resolves
-        # THROUGH each to the forward it wraps, so the scope is this module's
-        # dict and not the wrapper's. The hint's rebind clause has to send the
-        # reader through the wrapper the same way; the two assertions at the end
-        # measure that defining the name in the wrapper's namespace restores
-        # nothing and defining it here does.
-        self._hide_leaked_dynamo_globals()
-        x = torch.randn(3, 3)
-        model = torch.compile(
-            HermeticModule(),
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-
-        torch._dynamo.reset()
-        g = globals()
-        saved = g.pop("AOT_HERMETIC_WEIGHT")
-        try:
-            inst = HermeticModule()
-            wrapper_module = torch._dynamo.eval_frame
-            if wrapper == "compile":
-                inst.forward = torch.compile(inst.forward, backend="eager")
-            else:
-                recursive = wrapper == "disable"
-                inst.forward = torch._dynamo.disable(inst.forward, recursive=recursive)
-                if not recursive:
-                    wrapper_module = torch._dynamo.external_utils
-            wrapper_globals = vars(wrapper_module)
-            self.assertIs(inst.forward.__globals__, wrapper_globals)
-            reloaded = torch.compile(inst, fullgraph=True, backend="eager")
-            reloaded._load_aot_compiled_module(data)
-            with self.assertRaises(RuntimeError) as ctx:
-                reloaded(x)
-            message = str(ctx.exception)
-            self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
-            self.assertIn(
-                "this HermeticModule instance's forward resolves to, seen through any "
-                "Dynamo wrapper to the function it wraps, since that is the one the "
-                "load resolved",
-                message,
-            )
-            wrapper_globals["AOT_HERMETIC_WEIGHT"] = saved
-            try:
-                with self.assertRaisesRegex(
-                    RuntimeError, r"KeyError on G\['AOT_HERMETIC_WEIGHT'\]"
-                ):
-                    reloaded(x)
-            finally:
-                del wrapper_globals["AOT_HERMETIC_WEIGHT"]
-            g["AOT_HERMETIC_WEIGHT"] = saved
             self.assertEqual(reloaded(x), x @ saved)
         finally:
             g["AOT_HERMETIC_WEIGHT"] = saved
@@ -3392,120 +3445,6 @@ from user code:
             combined(x.double())
         self.assertIn("Tried 2 compiled input(s)", str(ctx.exception))
 
-    def test_aot_compile_module_disable_guard_check(self):
-        # disable_guard_check() is the escape hatch for an artifact whose guards
-        # fail on the serving machine; module dispatch has to honor it too, or
-        # a module artifact has no opt-out while a function artifact does.
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="aot_eager")
-        model._aot_compile(
-            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
-        )
-        # requires_grad is part of TENSOR_MATCH, so the artifact recorded for
-        # requires_grad=False cannot match this call; opting out serves it
-        # anyway, which is exactly the escape hatch -- and what it serves is an
-        # inference graph that aot_autograd's runtime wrapper runs with grad
-        # disabled, so the result carries no grad history. That is what makes the
-        # aot_eager backend above load-bearing: an eager backend installs no such
-        # wrapper and would still record the grad history.
-        x = torch.randn(3, 3, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "requires_grad mismatch"):
-            model(x)
-        model.forward.compiled_results[0].disable_guard_check()
-        out = model(x)
-        self.assertEqual(out, x.detach() * 2)
-        self.assertFalse(out.requires_grad)
-
-    def test_aot_compile_module_opted_out_result_keeps_its_place_in_the_scan(self):
-        self._hide_leaked_dynamo_globals()
-        # Opting out changes what a result accepts, not where it sits: the scan
-        # serves the first result whose guards pass, in index order, and an
-        # opted-out result whose guards genuinely pass is served like any other.
-        # The default guard filter drops the global guard, so both results
-        # accept this call while computing different numbers, and only a mix of
-        # one opted-out and one checked result tells an index-ordered scan from
-        # one that consults the checked results first or holds the opted-out
-        # ones back for the passes below. The call is made under the mode [1]
-        # was traced for, so the graph such a scan serves is the one the process
-        # global would pick, and only the number says which result answered.
-        mod = GlobalConfigModule()
-        model = torch.compile(mod, fullgraph=True, backend="eager")
-        x = torch.randn(4, 8)
-        expected = {}
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                expected[mode] = mod(x)
-        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
-        model._aot_compile(
-            [
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
-            ]
-        )
-        results = model.forward.compiled_results
-        with _set_pooling("mean"):
-            for result in results:
-                self.assertTrue(result.guard_check(mod, x))
-            results[0].disable_guard_check()
-            self.assertEqual(model(x), expected["sum"])
-
-    def test_aot_compile_module_opted_out_result_is_the_last_resort(self):
-        self._hide_leaked_dynamo_globals()
-        # An opted-out result accepts anything, so dispatch reaches it only after
-        # every real guard check has failed -- the scan, and then the second
-        # check() pass above. Two more wrong-answer bugs with no error raised
-        # hide in the rest of that ordering. Consulting the opt-out in the scan
-        # serves the first artifact for a call the second was compiled for --
-        # same shapes, same dtypes, different numbers. And the last resort is
-        # itself ordered: it serves the FIRST opted-out result, so a call no
-        # artifact guards gets the graph the earliest opted-out ModelInput was
-        # traced for. A scan that skipped opted-out results is not pinned here,
-        # for two different reasons: in the first case the result that must
-        # serve is the CHECKED one, which the skip never applies to, so [1] is
-        # served by the scan itself; in the second both trees fail on "other"
-        # anyway and the answer this ordering demands is the first opted-out
-        # result, which the last resort serves either way. What tells a
-        # skipping scan apart is an opted-out result whose tree the scan would
-        # accept: test_aot_compile_module_opted_out_result_keeps_its_place_in_the_scan
-        # below pins that with honest guards, and
-        # test_module_dispatch_rechecks_an_opted_out_result_whose_tree_accepts
-        # covers the false-rejection variant.
-        mod = GlobalConfigModule()
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        x = torch.randn(4, 8)
-        expected = {}
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                expected[mode] = mod(x)
-        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
-
-        model._aot_compile(
-            [
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
-            ]
-        )
-        results = model.forward.compiled_results
-        results[0].disable_guard_check()
-        with _set_pooling("mean"):
-            self.assertEqual(
-                model(x),
-                expected["mean"],
-                msg="the scan must outrank the opted-out result",
-            )
-        # Two opted-out results, so first and last are different results below.
-        results[1].disable_guard_check()
-        with _set_pooling("other"):
-            self.assertEqual(
-                model(x),
-                expected["sum"],
-                msg="the last resort must serve the first opted-out result",
-            )
-
     def test_aot_compile_module_raising_tree_does_not_reach_an_opted_out_result(self):
         # A tree that raised never returned False, so it never rejected the
         # call; letting an opted-out result answer on the strength of that
@@ -3559,11 +3498,14 @@ from user code:
 
     def test_no_match_message_quotes_a_tree_that_raised_then_answered(self):
         # A raise still withholds the opted-out last resort: dispatch cannot tell
-        # this flavour, which returns with an exception merely set and leaks
-        # nothing, from a C++ throw that skips the non-RAII TorchFunction TLS
-        # restore and makes a later check of a tree holding a GLOBAL_STATE guard
-        # reject on that guard, so it holds the opt-out back on any raise. But the
-        # raise is no longer all the report can say about that entry -- the tree
+        # this flavour, which returns with an exception merely set and leaves
+        # nothing stale, from a C++ throw that skips the
+        # _reset_relational_guard_state() call on check_nopybind_template's normal
+        # exits -- RelationalGuard::reset_state has no Python binding, so nothing
+        # here can clear that residue -- and lets a later rejection from the same
+        # tree stand on the residue rather than on this call, so it holds the
+        # opt-out back on any raise. But the raise is no longer all the report can
+        # say about that entry -- the tree
         # did reject this call on the second pass, and that rejection is a real
         # answer, so the report quotes the guard it rejected on and the advice
         # that rejection earns, and names the raise as what withheld the opt-out
@@ -3613,9 +3555,10 @@ from user code:
         # propagated [0]'s raise and served nothing. A raise is not a rejection
         # and says nothing about [1], so [1]'s graph is what dispatch owes the
         # caller. Refusing would not repair what the raise may already have done
-        # either -- a throw out of C++ leaves TorchFunction disabled on this
-        # thread whichever way dispatch answers -- so the raise is served over,
-        # and warned about, rather than becoming a second failure mode.
+        # either -- a throw out of C++ skips _reset_relational_guard_state(), and
+        # that residue stays whichever way dispatch answers -- so the raise is
+        # served over, and warned about, rather than becoming a second failure
+        # mode.
         self._hide_leaked_dynamo_globals()
         mod = GlobalConfigModule()
         model = torch.compile(
@@ -5181,105 +5124,6 @@ from user code:
             "\n".join(logs.output),
         )
 
-    def test_aot_compile_module_fallback_names_a_targetless_dynamo_wrapper(self):
-        # error_on_graph_break, patch_dynamo_config and disable_nested_graph_breaks
-        # bind through wrap_dunder_call_ctx_manager, whose inner deliberately
-        # skips functools.wraps: a plain function get_traced_fn does resolve, in
-        # external_utils' namespace, with no __wrapped__ to follow to the forward
-        # it wraps. Falling back is right; the reason has to name this shape and
-        # model.forward as given, not the cannot-resolve one over the unwrapped
-        # function, and external_utils' namespace, the one a resolution would
-        # have seeded, gains nothing.
-        mod = GlobalConfigModule()
-        mod.forward = torch._dynamo.error_on_graph_break(True)(mod.forward)
-        self.assertIs(mod.forward.__globals__, vars(torch._dynamo.external_utils))
-        self.assertFalse(hasattr(mod.forward, "__wrapped__"))
-        self._assert_forward_refused(
-            mod,
-            torch._dynamo.external_utils,
-            "GlobalConfigModule.forward (function named "
-            "wrap_dunder_call_ctx_manager.<locals>.inner) is a Dynamo wrapper "
-            "without a resolvable target, a torch._dynamo.external_utils function "
-            "carrying no __wrapped__; bind the forward it wraps as model.forward "
-            "instead",
-        )
-
-    def test_aot_compile_module_fallback_names_a_compiled_partial_forward(self):
-        # torch.compile over a partial wraps it in wrap_inline (no source file,
-        # not a function), so the unwrap follows __wrapped__ onto the partial
-        # and get_traced_fn fails THERE. Falling back is right (before the
-        # unwrap this shape resolved eval_frame's dict); the reason has to say
-        # what the wrapper reached, not tell the user to make model.forward a
-        # plain function -- the compile_wrapper already is one.
-        x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
-        mod = GlobalConfigModule()
-        mod.forward = torch.compile(
-            functools.partial(GlobalConfigModule.forward, mod), backend="eager"
-        )
-        eval_frame_globals = vars(torch._dynamo.eval_frame)
-        preexisting = frozenset(eval_frame_globals)
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            compiled = AOTCompiledModel.deserialize(mod, data)
-        for result in compiled.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
-        reason = (
-            "GlobalConfigModule.forward (function named wrap_inline.<locals>.inner) "
-            "resolves through a Dynamo wrapper to an instance of partial, which "
-            "get_traced_fn cannot resolve to a Python function"
-        )
-        self.assertIn(reason, "\n".join(logs.output))
-        with self.assertRaises(RuntimeError) as ctx:
-            compiled(x)
-        message = str(ctx.exception)
-        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']", message)
-        self.assertIn(f"rebuilt because {reason}", message)
-        self.assertIn("bind a plain function or bound method as model.forward", message)
-        self.assertNotIn("so its own globals are used", message)
-        self.assertEqual({k for k in eval_frame_globals if k not in preexisting}, set())
-
-    def test_aot_compile_module_fallback_names_a_compiled_builtin_forward(self):
-        # torch.compile over a C-implemented bound method (a tensor's sum) wraps
-        # it in wrap_inline like the partial, but get_traced_fn fails on it the
-        # other way: it has a __self__, so the __func__ read raises
-        # AttributeError rather than RuntimeError. The reason has to name what
-        # the wrapper reached all the same; only the un-hopped builtin, bound as
-        # forward directly, is the shape get_traced_fn cannot resolve as given.
-        x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
-        mod = GlobalConfigModule()
-        mod.forward = torch.compile(x.sum, backend="eager")
-        resolved = torch._dynamo.eval_frame.innermost_fn(mod.forward).__wrapped__
-        self.assertEqual(type(resolved).__name__, "builtin_function_or_method")
-        with self.assertRaises(AttributeError):
-            torch._dynamo.convert_frame.get_traced_fn(resolved)
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            compiled = AOTCompiledModel.deserialize(mod, data)
-        for result in compiled.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
-        reason = (
-            "GlobalConfigModule.forward (function named Tensor.sum) resolves "
-            "through a Dynamo wrapper to an instance of builtin_function_or_method, "
-            "which get_traced_fn cannot resolve to a Python function"
-        )
-        self.assertIn(reason, "\n".join(logs.output))
-        with self.assertRaises(RuntimeError) as ctx:
-            compiled(x)
-        message = str(ctx.exception)
-        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']", message)
-        self.assertIn(f"rebuilt because {reason}", message)
-        self.assertNotIn("so its own globals are used", message)
-        mod.forward = x.sum
-        scope, reason = _resolve_guard_scope(mod)
-        self.assertIsNone(scope)
-        self.assertEqual(
-            reason,
-            "get_traced_fn cannot resolve GlobalConfigModule.forward "
-            "(builtin_function_or_method named Tensor.sum) to a Python function; "
-            "make model.forward a plain function or bound method so its own "
-            "globals are used instead",
-        )
-
     def test_aot_compile_module_alias_only_globals_load_silently(self):
         # Dynamo's own __import_* aliases are the case neither half of the
         # fallback warning covers: the rebuilt scope carries every recorded one
@@ -6321,298 +6165,6 @@ from user code:
         self.assertIn("loaded against; define it there", message)
         self.assertNotIn("vars(", message)
 
-    @parametrize("wrap_top_frame", (False, True))
-    def test_aot_compile_module_deserialize_refuses_a_compiled_module_forward(
-        self, wrap_top_frame
-    ):
-        # inst.forward = torch.compile(inst).forward binds a wrapper over the
-        # module's DISPATCH, not its forward: OptimizedModule._initialize wraps
-        # the bound nn.Module.__call__, which resolves to _wrapped_call_impl in
-        # torch.nn.modules.module's namespace, or under config.wrap_top_frame
-        # (or a skip rule) the module itself, which the __wrapped__ hop reaches
-        # as an nn.Module. Neither is the forward the capture traced, so both
-        # fall back instead of seeding that namespace. ParentWithChildModule
-        # roots a kept guard at an __import_* alias, which is what a resolved
-        # nn.Module namespace would gain.
-        x = torch.randn(4, 4)
-        model = torch.compile(
-            ParentWithChildModule(),
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-        torch._dynamo.reset()
-        module_globals = vars(torch.nn.modules.module)
-        preexisting = frozenset(module_globals)
-        inst = ParentWithChildModule()
-        expected = inst(x)
-        with torch._dynamo.config.patch(wrap_top_frame=wrap_top_frame):
-            inst.forward = torch.compile(inst, backend="eager").forward
-        resolved = torch._dynamo.eval_frame.innermost_fn(inst.forward)
-        if wrap_top_frame:
-            # _initialize wraps the module, then __call__ wraps that inner again.
-            hops = 0
-            while getattr(resolved, "__globals__", None) is vars(
-                torch._dynamo.external_utils
-            ):
-                resolved = resolved.__wrapped__
-                hops += 1
-            self.assertEqual(hops, 2)
-            self.assertIs(resolved, inst)
-            reason = (
-                "ParentWithChildModule.forward (function named "
-                "wrap_inline.<locals>.inner) resolves through a Dynamo wrapper to "
-                "an nn.Module, the module's dispatch rather than its forward; bind "
-                "that module's forward, or a wrapper over the forward rather than "
-                "over the module, as model.forward instead"
-            )
-        else:
-            self.assertEqual(resolved, inst.__call__)
-            reason = (
-                "ParentWithChildModule.forward (function named "
-                "Module._wrapped_call_impl) resolves through a Dynamo wrapper to "
-                "Module._wrapped_call_impl, whose globals are "
-                "torch.nn.modules.module's namespace, a torch module a load "
-                "neither roots guards in nor seeds; bind the module's own forward, "
-                "defined outside torch, as model.forward instead"
-            )
-        # The kept guard is alias-rooted, which the fallback warning stays silent
-        # on, so the reason is read where the hint reads it.
-        compiled = AOTCompiledModel.deserialize(inst, data)
-        for result in compiled.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
-            self.assertEqual(result._forward_not_resolved_reason, reason)
-        self.assertEqual({k for k in module_globals if k not in preexisting}, set())
-        self.assertEqual(compiled(x), expected)
-
-    @parametrize("wrap_top_frame", (False, True))
-    def test_aot_compile_module_deserialize_refuses_a_lazy_module_forward(
-        self, wrap_top_frame
-    ):
-        # The third dispatch shape: for a module carrying _initialize_hook
-        # (LazyModuleMixin) OptimizedModule._initialize rebinds forward to the
-        # bound _call_lazy_check AFTER its wrap_top_frame branch, so on either
-        # setting torch.compile(lazy).forward is a bound method that innermost_fn
-        # and the __wrapped__ hop leave alone and get_traced_fn resolves to
-        # _call_lazy_check.__func__, whose globals are eval_frame's namespace --
-        # a torch module's, so the namespace test refuses it with no hop taken.
-        from torch._dynamo.eval_frame import OptimizedModule
-
-        mod = GlobalConfigModule()
-        with torch._dynamo.config.patch(wrap_top_frame=wrap_top_frame):
-            mod.forward = torch.compile(torch.nn.LazyLinear(8), backend="eager").forward
-        self.assertIs(mod.forward.__func__, OptimizedModule._call_lazy_check)
-        self.assertIs(torch._dynamo.eval_frame.innermost_fn(mod.forward), mod.forward)
-        self._assert_forward_refused(
-            mod,
-            torch._dynamo.eval_frame,
-            "GlobalConfigModule.forward (method named "
-            "OptimizedModule._call_lazy_check) resolves to "
-            "OptimizedModule._call_lazy_check, whose globals are "
-            "torch._dynamo.eval_frame's namespace, a torch module a load neither "
-            "roots guards in nor seeds; bind the module's own forward, defined "
-            "outside torch, as model.forward instead",
-        )
-
-    def test_aot_compile_module_deserialize_refuses_a_bound_module_call_forward(self):
-        # mod.forward = other.__call__ binds the dispatch with no Dynamo wrapper
-        # in front: a bound method survives nn.Module.__setattr__ (it is not a
-        # Module, so it lands in __dict__ and wins the lookup), innermost_fn and
-        # the hop leave it alone, and get_traced_fn resolves it to
-        # Module._wrapped_call_impl. A capture of this same shape records
-        # torch.nn.modules.module's namespace, so resolving it would agree with
-        # that capture; the namespace test trades that for not seeding a
-        # process-wide torch namespace, and the reason says the forward resolves
-        # to the dispatch itself rather than through a wrapper to it.
-        mod = GlobalConfigModule()
-        mod.forward = GlobalConfigModule().__call__
-        self.assertIn("forward", vars(mod))
-        self.assertIs(torch._dynamo.eval_frame.innermost_fn(mod.forward), mod.forward)
-        self._assert_forward_refused(
-            mod,
-            torch.nn.modules.module,
-            "GlobalConfigModule.forward (method named Module._wrapped_call_impl) "
-            "resolves to Module._wrapped_call_impl, whose globals are "
-            "torch.nn.modules.module's namespace, a torch module a load neither "
-            "roots guards in nor seeds; bind the module's own forward, defined "
-            "outside torch, as model.forward instead",
-        )
-
-    def test_aot_compile_module_deserialize_refuses_a_class_compiled_call_forward(
-        self,
-    ):
-        # torch.compile(Cls) rebinds Cls.__call__ to a compile_wrapper, so an
-        # instance's __call__ is a bound method whose __func__ owns eval_frame's
-        # namespace: innermost_fn stops on a bound method, the hop reads no
-        # __globals__ off one, and the namespace test refuses what get_traced_fn
-        # resolves. The dispatch is refused for the property, not for being one
-        # of an enumerated set of shapes.
-        class Compiled(torch.nn.Module):
-            def forward(self, x):
-                return x
-
-        torch.compile(Compiled, backend="eager")
-        mod = GlobalConfigModule()
-        mod.forward = Compiled().__call__
-        self.assertIs(mod.forward.__func__.__globals__, vars(torch._dynamo.eval_frame))
-        self.assertIs(torch._dynamo.eval_frame.innermost_fn(mod.forward), mod.forward)
-        self._assert_forward_refused(
-            mod,
-            torch._dynamo.eval_frame,
-            "GlobalConfigModule.forward (method named Module._wrapped_call_impl) "
-            "resolves to Module._wrapped_call_impl, whose globals are "
-            "torch._dynamo.eval_frame's namespace, a torch module a load neither "
-            "roots guards in nor seeds; bind the module's own forward, defined "
-            "outside torch, as model.forward instead",
-        )
-
-    def test_aot_compile_module_deserialize_unwraps_a_compiled_forward(self):
-        # torch.compile(mod.forward) bound back on the instance is a plain
-        # function, eval_frame's functools.wraps'd compile_wrapper, so neither the
-        # OptimizedModule unwrap nor the nn.Module refusal sees it, and its own
-        # __globals__ is eval_frame's namespace. The scope has to come from the
-        # forward it wraps: this module's dict, where the guarded global lives.
-        x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
-        mod = GlobalConfigModule()
-        expected = {}
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                expected[mode] = mod(x)
-        mod.forward = torch.compile(mod.forward, backend="eager")
-        eval_frame_globals = vars(torch._dynamo.eval_frame)
-        preexisting = frozenset(eval_frame_globals)
-        wrapper = torch.compile(mod, fullgraph=True, backend="eager")
-        wrapper._load_aot_compiled_module(data)
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                self.assertEqual(wrapper(x), expected[mode])
-        for result in wrapper.forward.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
-            self.assertIs(result._guard_globals, globals())
-        self.assertEqual({k for k in eval_frame_globals if k not in preexisting}, set())
-
-    @parametrize("depth", (1, 2))
-    def test_aot_compile_module_deserialize_unwraps_a_wrap_inline_forward(self, depth):
-        # Under config.wrap_top_frame torch.compile(mod.forward) wraps the bound
-        # method in external_utils.wrap_inline's inner before minting its own
-        # wrapper, so innermost_fn ends on inner: a functools.wraps copy of the
-        # bound method carrying none of the attributes innermost_fn follows,
-        # whose own __globals__ is external_utils' namespace. The capture traced
-        # the forward inner wraps, so the scope has to be that forward's dict,
-        # through as many stacked compiles (one inner each) as were applied; the
-        # chain pin is what makes depth 2 measure the second hop.
-        x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
-        mod = GlobalConfigModule()
-        expected = {}
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                expected[mode] = mod(x)
-        external_utils_globals = vars(torch._dynamo.external_utils)
-        preexisting = frozenset(external_utils_globals)
-        bound_forward = mod.forward
-        with torch._dynamo.config.patch(wrap_top_frame=True):
-            for _ in range(depth):
-                mod.forward = torch.compile(mod.forward, backend="eager")
-        chain = []
-        resolved = torch._dynamo.eval_frame.innermost_fn(mod.forward)
-        while hasattr(resolved, "__wrapped__"):
-            chain.append((resolved.__code__.co_name, resolved.__globals__))
-            resolved = resolved.__wrapped__
-        self.assertEqual(chain, [("inner", external_utils_globals)] * depth)
-        self.assertEqual(resolved, bound_forward)
-        wrapper = torch.compile(mod, fullgraph=True, backend="eager")
-        wrapper._load_aot_compiled_module(data)
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                self.assertEqual(wrapper(x), expected[mode])
-        for result in wrapper.forward.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
-            self.assertIs(result._guard_globals, globals())
-        self.assertEqual(
-            {k for k in external_utils_globals if k not in preexisting}, set()
-        )
-
-    def test_aot_compile_module_deserialize_hops_to_a_compiled_torch_forward(self):
-        # The other way into wrap_inline needs no config: dynamo wraps a forward
-        # DEFINED under torch/ (trace_rules.check), so nn.Linear's own forward
-        # is wrapped, inherited unoverridden or not. The hop lands on that
-        # forward and not on external_utils' inner, which the reason shows by
-        # naming the namespace it owns -- a torch module's, so the load refuses
-        # it as it refuses the unrebound module's, and seeds neither. The
-        # artifact roots no guard at a user global (Linear.forward reads torch's
-        # own), so the fallback is silent and the call answers.
-        x = torch.randn(4, 8)
-        model = torch.compile(torch.nn.Linear(8, 3), fullgraph=True, backend="eager")
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-        torch._dynamo.reset()
-        mod = torch.nn.Linear(8, 3)
-        expected = mod(x)
-        mod.forward = torch.compile(mod.forward, backend="eager")
-        external_utils_globals = vars(torch._dynamo.external_utils)
-        preexisting = frozenset(external_utils_globals)
-        wrapper = torch.compile(mod, fullgraph=True, backend="eager")
-        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
-            wrapper._load_aot_compiled_module(data)
-        self.assertEqual(wrapper(x), expected)
-        (result,) = wrapper.forward.compiled_results
-        self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
-        self.assertFalse(result._has_global_guards)
-        self.assertIn(
-            "Linear.forward (function named Linear.forward) resolves through a "
-            "Dynamo wrapper to Linear.forward, whose globals are "
-            "torch.nn.modules.linear's namespace",
-            result._forward_not_resolved_reason,
-        )
-        self.assertEqual(
-            {k for k in external_utils_globals if k not in preexisting}, set()
-        )
-
-    @parametrize("recursive", (True, False))
-    def test_aot_compile_module_deserialize_unwraps_a_disabled_forward(self, recursive):
-        # Both torch._dynamo.disable wrappers set the _torchdynamo_orig_callable
-        # pair innermost_fn follows; the recursive one is eval_frame's function,
-        # the non-recursive one external_utils' get_nonrecursive_disable_wrapper.
-        # Neither namespace is the scope, the bound method they wrap is. The
-        # non-recursive wrapper also satisfies the __wrapped__ hop's predicate,
-        # so the innermost_fn assertion is what pins that innermost_fn alone,
-        # not the hop, reaches the bound method.
-        x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
-        mod = GlobalConfigModule()
-        expected = {}
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                expected[mode] = mod(x)
-        eval_frame_globals = vars(torch._dynamo.eval_frame)
-        external_utils_globals = vars(torch._dynamo.external_utils)
-        internal = (eval_frame_globals, external_utils_globals)
-        preexisting = [frozenset(d) for d in internal]
-        bound_forward = mod.forward
-        mod.forward = torch._dynamo.disable(mod.forward, recursive=recursive)
-        self.assertIs(
-            mod.forward.__globals__,
-            eval_frame_globals if recursive else external_utils_globals,
-        )
-        self.assertEqual(mod.forward.__wrapped__, bound_forward)
-        self.assertEqual(
-            torch._dynamo.eval_frame.innermost_fn(mod.forward), bound_forward
-        )
-        wrapper = torch.compile(mod, fullgraph=True, backend="eager")
-        wrapper._load_aot_compiled_module(data)
-        for mode in ("sum", "mean"):
-            with _set_pooling(mode):
-                self.assertEqual(wrapper(x), expected[mode])
-        for result in wrapper.forward.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
-            self.assertIs(result._guard_globals, globals())
-        for d, pre in zip(internal, preexisting):
-            self.assertEqual({k for k in d if k not in pre}, set())
-
     def test_aot_compile_module_deserialize_takes_a_guard_globals_scope(self):
         # A caller who does not want the defining module's namespace read or
         # written to can pass its own dict. ParentWithChildModule roots a kept
@@ -7326,12 +6878,14 @@ from user code:
         # load takes no f_globals=: eval_frame's _load_aot_compiled_module takes
         # only the bytes, though deserialize still takes guard_globals=. The
         # hint names the instance's forward whenever the scope model.forward
-        # resolves to is the dict the guards hold, as it is for any load that
-        # passed no guard_globals= -- the rebound sibling's included -- so the
-        # substring asserted below fits that sibling too; what pins this
-        # non-rebound load is the recovery arm at the end -- defining the name in
-        # globals() serves the call here, where the same binding in
-        # test_no_match_message_hint_covers_a_rebound_forward still raises.
+        # resolves to is the dict the guards hold, as it is for a load that
+        # passed no guard_globals=, resolved forward, and is not rebound after
+        # the load -- the rebound sibling's included, since it rebinds BEFORE
+        # loading -- so the substring asserted below fits that sibling too;
+        # what pins this non-rebound load is the recovery arm at the end --
+        # defining the name in globals() serves the call here, where the same
+        # binding in test_no_match_message_hint_covers_a_rebound_forward still
+        # raises.
         x = torch.randn(3, 3)
         self._hide_leaked_dynamo_globals()
         model = torch.compile(
@@ -8035,9 +7589,9 @@ from user code:
             "the bytecode kept the snapshot under a caller-chosen guard scope",
         )
         self.assertEqual(loaded(x), fn(x))
-        # The per-call re-read of guarded globals must leave this key alone: it
-        # is excluded from _live_global_names, so the call cannot copy the guard
-        # scope's binding over the bytecode's.
+        # Re-checked after the call: the guard scope's binding is never copied
+        # over the bytecode's -- the load-time merge in __post_init__ excludes this
+        # key (`name != builtins_key`), and a call has nothing that copies it.
         self.assertTrue(
             loaded.fn.__globals__[builtins_key] is builtins.__dict__,
             "a call rewired the bytecode to the guard scope's binding",
@@ -8216,14 +7770,19 @@ from user code:
 
         # With a distinct guard_globals, f_globals is the bytecode's dict alone;
         # before the re-derive reached it this load succeeded off the recording.
+        # The refusal has to come before the aliases and the key are seeded into
+        # the guard scope, or a refused load would leave four names behind in a
+        # dict that may be a user module's namespace.
         torch._dynamo.reset()
+        guard_only: dict[str, object] = {}
         with self.assertRaisesRegex(
             TypeError,
             r"f_globals\['__builtins__'\] must be a dict or a module, got NoneType",
         ):
             AOTCompiledFunction.deserialize(
-                data, f_globals={"__builtins__": None}, guard_globals={}
+                data, f_globals={"__builtins__": None}, guard_globals=guard_only
             )
+        self.assertEqual(guard_only, {})
 
         torch._dynamo.reset()
         scope: dict[str, object] = {"__builtins__": builtins}
