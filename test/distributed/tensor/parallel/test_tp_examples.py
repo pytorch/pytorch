@@ -29,10 +29,15 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
-from torch.testing._internal.common_device_type import skipXPUIf
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+    skipXPUIf,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
 )
@@ -63,6 +68,8 @@ class ExpCommCounts(NamedTuple):
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -189,13 +196,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     # TODO: need to revisit input_reshard API about why it failed multi-gpu tests.
     # @parametrize("recompute_activation", [True, False])
     @parametrize("recompute_activation", [False])
-    def test_mlp_training(self, is_seq_parallel, recompute_activation):
+    def test_mlp_training(self, device, is_seq_parallel, recompute_activation):
         self._test_mlp_training_e2e(
             is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation
         )
 
     @with_comms
-    def test_mlp_inference(self):
+    def test_mlp_inference(self, device):
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, NUM_DEVICES),
@@ -282,12 +289,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 if n not in thaw_params:
                     p.requires_grad_(False)
 
+    @requires_capabilities(Capability.dtype.fp64)
     @with_comms
     @skip_unless_torch_gpu
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("dtype", [torch.float64, torch.float32])
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1555")
-    def test_transformer_training(self, is_seq_parallel, dtype: torch.dtype):
+    def test_transformer_training(self, device, is_seq_parallel, dtype: torch.dtype):
         EXP_BASE_CC = ExpCommCounts(
             fwd={all_reduce: 6, all_gather: 1}, bwd={all_reduce: 9}
         )
@@ -341,6 +349,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 model, model_tp, optim, optim_tp, expected_optim_comms
             )
 
+    @requires_capabilities(Capability.dtype.fp64)
     @with_comms
     @skip_unless_torch_gpu
     @parametrize(
@@ -422,7 +431,9 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         + f"thaw_{'__'.join(sorted({n.rpartition('.')[0].replace('.', '_') for n in thaw})) if thaw else 'all'}",
     )
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1555")
-    def test_transformer_req_grad(self, thaw_params, is_seq_parallel, dtype, exp_cnts):
+    def test_transformer_req_grad(
+        self, device, thaw_params, is_seq_parallel, dtype, exp_cnts
+    ):
         # Sample a subset of `requires_grad` patterns
 
         # disabling dropout to facilitate single gpu to multi-device comparison
@@ -460,7 +471,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_weight_tying(self):
+    def test_weight_tying(self, device):
         class TestModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -511,7 +522,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self.assertEqual(id(model.embedding.weight.grad), id(model.fc.weight.grad))
 
     @with_comms
-    def test_loss_parallel(self):
+    def test_loss_parallel(self, device):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -568,7 +579,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_loss_parallel_multi_dim_mesh(self):
+    def test_loss_parallel_multi_dim_mesh(self, device):
         """Test loss_parallel with multi-dimensional DeviceMesh (e.g. DP + TP)."""
         # Create a 2D mesh: (dp=2, tp=2) on 4 GPUs
         mesh_2d = DeviceMesh(
@@ -676,7 +687,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_loss_parallel_replicate_non_tp_dim(self):
+    def test_loss_parallel_replicate_non_tp_dim(self, device):
         """Non-TP mesh dim = Replicate (not Shard) must also work."""
         mesh_2d = DeviceMesh(
             self.device_type,
@@ -721,7 +732,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_loss_parallel_tp_not_last_dim(self):
+    def test_loss_parallel_tp_not_last_dim(self, device):
         """TP mesh dim need not be the last dim: (tp, dp) ordering must also work."""
         # Create a 2D mesh with TP as the FIRST dim: (tp=2, dp=2)
         mesh_2d = DeviceMesh(
@@ -753,7 +764,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_loss_parallel_3d_input_non_batch_shard(self):
+    def test_loss_parallel_3d_input_non_batch_shard(self, device):
         """3-D input (batch, class, seq) with the non-TP mesh dim sharding the
         seq dim (d=2 > channel_dim=1). This exercises the ``d > channel_dim``
         dim-shift in target/output placements (Shard(2) on input → Shard(1) on
@@ -815,7 +826,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_loss_parallel_invalid_non_tp_placement(self):
+    def test_loss_parallel_invalid_non_tp_placement(self, device):
         """Non-TP mesh dim with a placement that is neither Shard nor Replicate is rejected."""
         mesh_2d = DeviceMesh(
             self.device_type,
@@ -844,7 +855,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_loss_parallel_plain_tensor_target_rejected_on_multi_dim(self):
+    def test_loss_parallel_plain_tensor_target_rejected_on_multi_dim(self, device):
         """On multi-dim mesh with a batch-sharded non-TP dim, a plain torch.Tensor
         target is ambiguous (full global vs. local slice) and must be rejected.
         """
@@ -865,10 +876,17 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 F.cross_entropy(dist_x, target, reduction="sum")
 
 
-instantiate_parametrized_tests(DistTensorParallelExampleTest)
-
 DistTensorParallelExampleTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorParallelExampleTest,
+)
+instantiate_device_type_tests(
+    DistTensorParallelExampleTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    DistTensorParallelExampleTestWithLocalTensor,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
