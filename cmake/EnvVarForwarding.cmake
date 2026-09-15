@@ -49,6 +49,7 @@
 #   USE_GLOO=0                disables the gloo backend
 #   USE_MPI=0                 disables the MPI backend
 #   USE_SYSTEM_NCCL=0         use the submoduled nccl instead of system nccl
+#   USE_SYSTEM_NCCL_EP=0      build NCCL EP instead of using a system install
 #   USE_OPENMP=0              disables OpenMP parallelization
 #   USE_MKLDNN=0              disables MKLDNN
 #   USE_MKLDNN_ACL           enables Compute Library backend for MKLDNN on Arm
@@ -97,6 +98,8 @@
 #                            vars are no longer used.
 #   NCCL_ROOT / NCCL_LIB_DIR / NCCL_INCLUDE_DIR   nccl location (read from env in
 #                            cmake/Modules/FindNCCL.cmake)
+#   NCCL_EP_ROOT / NCCL_EP_LIB_DIR / NCCL_EP_INCLUDE_DIR   NCCL EP location (read
+#                            from env in cmake/Modules/FindNCCLEP.cmake)
 #   ACL_ROOT_DIR             Arm Compute Library location (read from env in
 #                            cmake/Modules/FindACL.cmake)
 #   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)
