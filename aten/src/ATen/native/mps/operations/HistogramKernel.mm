@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Dispatch_v2.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Histogram.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -29,7 +28,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/HistogramKernel_metallib.h>
 #endif
 
-template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
+template <BIN_SELECTION_ALGORITHM algorithm>
 void histogramdd_kernel_impl(Tensor& hist_output,
                              const TensorList& bin_edges,
                              const Tensor& input,
@@ -58,8 +57,6 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   }
 
   std::vector<int64_t> num_bin_edges(D);
-  std::vector<input_t> leftmost_edge(D);
-  std::vector<input_t> rightmost_edge(D);
 
   std::vector<Tensor> bin_edges_dev;
   bin_edges_dev.reserve(D);
@@ -67,8 +64,6 @@ void histogramdd_kernel_impl(Tensor& hist_output,
     const Tensor& dim_edges = bin_edges[dim];
     bin_edges_dev.push_back(dim_edges.to(input.device()));
     num_bin_edges[dim] = dim_edges.numel();
-    leftmost_edge[dim] = dim_edges[0].item().to<input_t>();
-    rightmost_edge[dim] = dim_edges[num_bin_edges[dim] - 1].item().to<input_t>();
   }
   // The kernel indexes the edges linearly, so they must be contiguous. cat already
   // returns a contiguous tensor; the single dimension case can be a view of the
@@ -134,8 +129,6 @@ void histogramdd_kernel_impl(Tensor& hist_output,
                   D,
                   bin_seq_t,
                   num_bin_edges,
-                  leftmost_edge,
-                  rightmost_edge,
                   thread_histograms.strides(),
                   bin_selection_algorithm,
                   weight_stride);
@@ -165,16 +158,11 @@ static void histogramdd_out_mps_template(const Tensor& self,
   const auto reshaped_weight =
       weight.has_value() ? std::optional<Tensor>(weight.value().reshape({M})) : std::optional<Tensor>();
 
-  AT_DISPATCH_V2(self.scalar_type(),
-                 "histogram_mps",
-                 AT_WRAP([&]() {
-                   mps::histogramdd_kernel_impl<scalar_t, bin_algorithm>(
-                       hist, bin_edges, reshaped_input, reshaped_weight);
-                 }),
-                 AT_EXPAND(AT_ALL_TYPES),
-                 kBFloat16,
-                 kHalf,
-                 AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "\"histogram_mps\" not implemented for '",
+                              self.scalar_type(),
+                              "'");
+  mps::histogramdd_kernel_impl<bin_algorithm>(hist, bin_edges, reshaped_input, reshaped_weight);
 
   /* Divides each bin's value by the total count/weight in all bins,
    * and by the bin's volume.
