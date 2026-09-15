@@ -10,7 +10,7 @@ from typing import Any, Protocol, TYPE_CHECKING
 
 import torch
 
-from ._api import Memory, MemoryView, MutableMemoryView, RemoteBuffer, Transport
+from ._api import Memory, MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
 
 
 if TYPE_CHECKING:
@@ -890,23 +890,44 @@ class IBVerbsTransport(Transport):
                     importlib.import_module("ibverbs.cuda").flush_gpudirect_writes()
         return 0
 
-    def write(self, local_buffer: MemoryView, remote_buffer: RemoteBuffer) -> int:
+    def write(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
         local, remote = self._validate_transfer(
             local_buffer, remote_buffer, mutable=False
         )
-        return self._transfer("write", local, remote)
+        return self._run_transfer(
+            lambda: self._transfer("write", local, remote),
+            local._registration.tensor.device,
+            async_op=async_op,
+        )
 
-    def read(self, local_buffer: MutableMemoryView, remote_buffer: RemoteBuffer) -> int:
+    def read(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
         local, remote = self._validate_transfer(
             local_buffer, remote_buffer, mutable=True
         )
-        return self._transfer("read", local, remote)
+        return self._run_transfer(
+            lambda: self._transfer("read", local, remote),
+            local._registration.tensor.device,
+            async_op=async_op,
+        )
 
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("ibverbs transport is closed")
 
     def close(self) -> None:
+        self._close_work()
         if self._closed:
             return
         self._connected = False
