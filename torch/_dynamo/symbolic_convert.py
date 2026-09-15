@@ -257,22 +257,9 @@ ExceptionTypes: TypeAlias = (
 )
 
 
-@functools.cache
-def _import_module(name: str) -> types.ModuleType:
-    """
-    Resolve the name once per process, at first use, and keep returning that
-    object: a sys.modules rebind before the first call is what gets cached, one
-    after it is never followed. The one caller, nn_modules_globals_vt, wants one
-    fixed module object for the process rather than the live entry
-    import_source follows.
-    """
-    return importlib.import_module(name)
-
-
-# What import_source last bound under each name: a name gone from sys.modules
-# since, or blocked there with None, is served from here rather than
-# re-imported inside a trace. Never cleared, not by torch._dynamo.reset()
-# either, so a module the process has dropped stays alive here.
+# What import_source last bound under each name, served when the name has since
+# left sys.modules or been blocked there with None. Never cleared, not by
+# torch._dynamo.reset() either.
 _import_source_cache: dict[str, types.ModuleType] = {}
 
 
@@ -2391,11 +2378,10 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self) -> VariableTracker:
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        # Deliberately the module memoized at first use, not the live
-        # sys.modules entry the alias binds: this stands in for the hook dicts
-        # nn.Module._call_impl reads through its own __globals__, which no
-        # sys.modules rebind moves either.
-        fglobals_value = _import_module(module_name)
+        # The attribute chain, not the live sys.modules entry the alias binds:
+        # it stands in for the hook dicts nn.Module._call_impl reads through its
+        # own __globals__, which a sys.modules rebind does not move either.
+        fglobals_value = torch.nn.modules.module
         return VariableTracker.build(self, fglobals_value, module_source)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
@@ -2438,15 +2424,9 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            # Not the memoized _import_module: the guards this alias roots
-            # read attributes off whatever IMPORT_NAME pushed, which is what
-            # __import__ returned, i.e. the live sys.modules entry, and a
-            # rebind can have replaced that since _import_module cached its
-            # answer. importlib.import_module returns the live entry and, like
-            # __import__, waits out a module another thread is still executing.
-            # A name removed from sys.modules since, or blocked there with None
-            # (which makes importing it raise), keeps the object it last
-            # resolved to: the program's objects came from that one, and
+            # The live sys.modules entry, which is what IMPORT_NAME pushed and
+            # so what the guards this alias roots must read. A name since
+            # removed or blocked with None keeps what it last resolved to:
             # re-importing here would run the module body inside the trace.
             live = sys.modules.get(module_name) is not None
             if live or module_name not in _import_source_cache:
