@@ -1230,7 +1230,11 @@ def ldexp_lowering(x: TensorBox, n: TensorBox):
         return make_pointwise(compute_ldexp)(x, n)
     else:
         # Fall back to decomposition: x * pow(2, n)
-        out_dtype = torch.float32 if is_integer_type(x) else x_dtype
+        # Match eager's mul(x, _pow2(x, n)): the output dtype is the type
+        # promotion of both operands, promoted to a floating dtype.
+        out_dtype = torch.promote_types(x_dtype, n_dtype)
+        if not out_dtype.is_floating_point:
+            out_dtype = torch.get_default_dtype()
 
         def compute_fallback(x, n):
             n_out_type = ops.to_dtype(n, out_dtype)
