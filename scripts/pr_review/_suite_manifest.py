@@ -59,7 +59,9 @@ HERE = Path(__file__).resolve().parent
 EXPECTED_MODULES = {
     "test_emit_row.py",
     "test_extract_verdict.py",
+    "test_symlink_scrub.py",
     "test_validate_findings.py",
+    "test_workflow_contract.py",
 }
 
 
