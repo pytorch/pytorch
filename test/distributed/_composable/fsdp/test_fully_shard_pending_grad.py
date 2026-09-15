@@ -55,6 +55,20 @@ class TestFullyShardPendingGrad(FSDPTest):
             consumer,
         )
 
+    @skip_if_lt_x_gpu(2)
+    @parametrize("replacement", ["clone", "shard", "replicate", "none"])
+    def test_pending_grad_replacement(self, device, replacement):
+        self.run_subtests(
+            {
+                "mesh_size": [1, self.world_size],
+                "reshard_after_backward": [False, True],
+                "reduce_op": ["avg", "sum"],
+            },
+            self._test_pending_grad_consumers,
+            torch.device(device).type,
+            f"replace_{replacement}",
+        )
+
     def _test_pending_grad_consumers(
         self, device, consumer, mesh_size, reduce_op, reshard_after_backward
     ):
@@ -110,6 +124,7 @@ class TestFullyShardPendingGrad(FSDPTest):
         check_grads(Partial(reduce_op))
         norms = []
         found_inf = []
+        replacement_refs = []
         for module, optim, scaler in zip(models, optims, scalers):
             if consumer.startswith("clip"):
                 norm = nn.utils.clip_grad_norm_(
@@ -121,22 +136,72 @@ class TestFullyShardPendingGrad(FSDPTest):
                 found_inf.append(scaler._found_inf_per_device(optim))
             elif consumer.startswith("zero"):
                 module.zero_grad(set_to_none=consumer == "zero_none")
-            else:
+            elif consumer == "mul":
                 for param in module.parameters():
                     param.grad.mul_(2)
+            else:
+                for param in module.parameters():
+                    grad = param.grad
+                    if consumer == "replace_none":
+                        param.grad = None
+                        continue
+                    if isinstance(grad, DTensor) and consumer != "replace_clone":
+                        placement = (
+                            Shard(0) if consumer == "replace_shard" else Replicate()
+                        )
+                        grad = grad.redistribute(placements=(placement,))
+                    param.grad = grad.clone().mul_(2)
+        if consumer == "replace_replicate":
+            replacement_refs = [
+                (p.grad, p.grad.full_tensor().clone()) for p in model.parameters()
+            ]
         if norms:
             self.assertEqual(norms[0], norms[1])
         if found_inf:
             self.assertEqual(found_inf[0], found_inf[1])
             for value in found_inf[1].values():
                 self.assertEqual(value.item(), float(consumer == "unscale_inf"))
-        check_grads(Partial(reduce_op))
+        replacement_placement = {
+            "replace_shard": Shard(0),
+            "replace_replicate": Replicate(),
+        }.get(consumer, Partial(reduce_op))
+        check_grads(replacement_placement)
+
+        final_step = 1
+        if consumer.startswith("replace_"):
+            with CommDebugMode() as comm_mode:
+                backward(1)
+            if consumer == "replace_clone" and not reshard_after_backward:
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+            check_grads(Partial(reduce_op))
+            final_step = 2
 
         # The unscale cases only check mutation preservation here. Normal
         # GradScaler use unscales after all gradient accumulation is complete.
         model.set_requires_gradient_sync(True)
-        backward(1)
+        backward(final_step)
         check_grads(Shard(0))
+        for grad, expected in replacement_refs:
+            self.assertEqual(grad.full_tensor(), expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_pending_grad_replacement_different_mesh(self, device):
+        device = torch.device(device).type
+        mesh = init_device_mesh(device, (self.world_size,))
+        other_mesh = init_device_mesh(device, (1, self.world_size))
+        model = nn.Linear(4, 2, bias=False, device=device)
+        fully_shard(model, mesh=mesh)
+        model.set_requires_gradient_sync(False)
+        inp = torch.ones(2, 4, device=device)
+        model(inp).sum().backward()
+        model.weight.grad = DTensor.from_local(
+            model.weight.grad.full_tensor(), other_mesh, (Replicate(), Replicate())
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "Replacing a pending gradient with a DTensor on a different mesh is not supported",
+        ):
+            model(inp)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -285,6 +350,20 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
         return 4
 
     @skip_if_lt_x_gpu(4)
+    def test_pending_grad_replacement_spmd(self, device):
+        device = torch.device(device).type
+        mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("dp", "tp"))
+        self.run_subtests(
+            {"reshard_after_backward": [False, True]},
+            self._test_reduced_to_pending_spmd_grad,
+            device,
+            torch.float32,
+            mesh=mesh,
+            reduce_op="avg",
+            mutation="replicate",
+        )
+
+    @skip_if_lt_x_gpu(4)
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     def test_reduced_to_pending_spmd_grad(self, device, dtype):
         device = torch.device(device).type
@@ -341,7 +420,7 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
                 + step / 4
             )
 
-        def check_grads(pending):
+        def check_grads(pending, replicated=False):
             for index, (ref_param, param) in enumerate(
                 zip(ref_model.parameters(), model.parameters())
             ):
@@ -349,17 +428,24 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
                     self.assertIsNone(param.grad)
                     continue
                 self.assertIsInstance(param.grad, DTensor)
-                tp_placement = Partial() if pending and index == 0 else Replicate()
-                if index == 1:
-                    tp_placement = Shard(0)
-                self.assertEqual(param.grad.placements[1], tp_placement)
-                if pending:
-                    self.assertEqual(param.grad.placements[0], Partial(reduce_op))
+                if replicated:
+                    self.assertEqual(param.grad.placements, (Replicate(), Replicate()))
                 else:
-                    self.assertEqual(param.grad.placements[0], param.placements[0])
+                    tp_placement = Partial() if pending and index == 0 else Replicate()
+                    if index == 1:
+                        tp_placement = Shard(0)
+                    self.assertEqual(param.grad.placements[1], tp_placement)
+                    if pending:
+                        self.assertEqual(param.grad.placements[0], Partial(reduce_op))
+                    else:
+                        self.assertEqual(param.grad.placements[0], param.placements[0])
                 self.assertEqual(ref_param.grad, param.grad.full_tensor())
 
-        for step, sync in enumerate((True, False, True)):
+        syncs = (True, False, True)
+        if mutation == "replicate":
+            syncs = (True, False, False, True)
+        replacement_refs = []
+        for step, sync in enumerate(syncs):
             model.set_requires_gradient_sync(sync)
             ref_loss = sum(
                 ref_model(torch.cat([make_input(rank, step) for rank in ranks])).sum()
@@ -380,14 +466,29 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
                 )
                 model(inp).backward()
             check_grads(pending=not sync)
-            if not sync:
+            for grad, expected in replacement_refs:
+                self.assertEqual(grad.full_tensor(), expected)
+            if step == 1:
                 for module in (ref_model, model):
                     if mutation == "mul":
                         for param in module.parameters():
                             param.grad.mul_(2)
+                    elif mutation == "replicate":
+                        for param in module.parameters():
+                            grad = param.grad
+                            if isinstance(grad, DTensor):
+                                grad = grad.redistribute(
+                                    placements=(Replicate(), Replicate())
+                                )
+                            param.grad = grad.clone().mul_(2)
                     else:
                         module.zero_grad(set_to_none=mutation == "zero_none")
-                check_grads(pending=True)
+                if mutation == "replicate":
+                    replacement_refs = [
+                        (p.grad, p.grad.full_tensor().clone())
+                        for p in model.parameters()
+                    ]
+                check_grads(pending=True, replicated=mutation == "replicate")
 
 
 instantiate_device_type_tests(
