@@ -104,7 +104,8 @@ except ImportError:
     warnings.warn("Couldn't import torchvision. Some of our tests use it, try "
                   "to install it with commands from pytorch.org, post-fixed with "
                   "`--no-deps` to avoid overwriting the pytorch installation",
-                  UserWarning)
+                  UserWarning,
+                  stacklevel=2)
 
 
 def _create_new_input(x):

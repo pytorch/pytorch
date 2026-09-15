@@ -277,9 +277,9 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
 
         def f(x):
             x1 = x + x
-            warnings.warn("moo")
+            warnings.warn("moo", stacklevel=2)
             x2 = x1 * x1
-            warnings.warn(f"{x2}")
+            warnings.warn(f"{x2}", stacklevel=2)
             x3 = x2 + x2
             return x3
 

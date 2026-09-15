@@ -169,5 +169,6 @@ def set_fusion_strategy(strategy: list[tuple[str, int]]):
     warnings.warn(
         "`torch.jit.set_fusion_strategy` is deprecated. Please use `torch.compile` instead.",
         DeprecationWarning,
+        stacklevel=2,
     )
     return torch._C._jit_set_fusion_strategy(strategy)
