@@ -64,11 +64,26 @@ def get_roofline_estimate(node: Node) -> float:
         for t in flat_outs
         if isinstance(t, torch.Tensor) and t.dtype in _FLOAT_TYPES
     }
+    device = next(
+        (
+            value.device
+            for value in [*flat_outs, *flat_args_kwargs]
+            if isinstance(value, torch.Tensor)
+        ),
+        None,
+    )
 
     return (
         max(
-            get_transfer_time(flat_args_kwargs, flat_outs),
-            get_compute_time(func, mapped_args, mapped_kwargs, out, out_dtypes),
+            get_transfer_time(flat_args_kwargs, flat_outs, device=device),
+            get_compute_time(
+                func,
+                mapped_args,
+                mapped_kwargs,
+                out,
+                out_dtypes,
+                device=device,
+            ),
         )
         / 1e6
     )
