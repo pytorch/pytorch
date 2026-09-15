@@ -160,10 +160,13 @@ def get_annotations(obj):
     # See https://docs.python.org/3.10/howto/annotations.html
     # But also, in 3.10 annotations from base class are not inherited
     # by unannotated derived one, so they must be manually extracted
-    annotations = inspect.get_annotations(obj)
-    if annotations:
-        return annotations
-
+    #
+    # Always resolve starting from the class. Asking an *instance* for its
+    # annotations picks whichever class in the MRO still exposes a literal
+    # `__annotations__` dict, which on 3.14+ (PEP 649) means a base whose module
+    # uses `from __future__ import annotations` wins over the derived class -
+    # yielding the base's stringified annotations instead of the derived
+    # class's own.
     def get_cls_annotations(cls):
         cls_annotations = inspect.get_annotations(cls)
         if cls_annotations:
