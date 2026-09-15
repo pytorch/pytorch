@@ -519,12 +519,8 @@ class TestSubgraphChoice(TestCase):
 @instantiate_parametrized_tests
 class TestBlackwellDecomposeKSubgraphChoice(TestCase):
     def test_small_output_uses_bounded_generic_config_set(self):
-        self.assertEqual(
-            get_blackwell_decompose_k_config_indices(128, 128), (6, 0, 3)
-        )
-        self.assertEqual(
-            get_blackwell_decompose_k_config_indices(64, 128), (6, 0, 3)
-        )
+        self.assertEqual(get_blackwell_decompose_k_config_indices(128, 128), (6, 0, 3))
+        self.assertEqual(get_blackwell_decompose_k_config_indices(64, 128), (6, 0, 3))
         self.assertEqual(
             get_blackwell_decompose_k_config_indices(256, 128), (0, 3, 1, 4)
         )
