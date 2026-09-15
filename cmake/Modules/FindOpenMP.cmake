@@ -119,6 +119,12 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     else()
       set(OMP_FLAG_Intel "-qopenmp")
     endif()
+    if(CMAKE_${LANG}_COMPILER_ID STREQUAL "IntelLLVM" AND
+      "x${CMAKE_${LANG}_COMPILER_FRONTEND_VARIANT}" STREQUAL "xMSVC")
+      set(OMP_FLAG_IntelLLVM "-Qiopenmp")
+    else()
+      set(OMP_FLAG_IntelLLVM "-fiopenmp")
+    endif()
     set(OMP_FLAG_MIPSpro "-mp")
     if(__header_dir MATCHES ".*Microsoft Visual Studio.*")
       # MSVC header. No need to pass it as additional include.
