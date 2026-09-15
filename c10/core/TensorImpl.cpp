@@ -320,6 +320,11 @@ bool TensorImpl::try_incref_pyobject() const noexcept {
 }
 
 void TensorImpl::release_resources() {
+  if (extra_meta_ && extra_meta_->fake_constant_) {
+    auto mode = extra_meta_->fake_tensor_mode_;
+    TORCH_INTERNAL_ASSERT(mode);
+    mode->clear_constant(this);
+  }
   autograd_meta_.reset();
   if (storage_) {
     storage_ = {};
@@ -1092,35 +1097,12 @@ void FakeTensorMode::set_constant(
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
   if (!constant) {
-    auto old_constant = std::move(extra_meta->fake_constant_);
-    if (!old_constant) {
-      return;
-    }
-
-    TORCH_INTERNAL_ASSERT(old_constant->has_storage());
-    auto* old_key = old_constant->storage().unsafeGetStorageImpl();
-    auto old_it = constant_storage_mapping_.find(old_key);
-    if (old_it == constant_storage_mapping_.end()) {
-      return;
-    }
-
-    auto& tensors = old_it->second.tensors;
-    tensors.erase(
-        std::remove_if(
-            tensors.begin(),
-            tensors.end(),
-            [&](const c10::weak_intrusive_ptr<c10::TensorImpl>& weak_ref) {
-              auto impl = weak_ref.lock();
-              return !impl || impl.get() == fake_impl;
-            }),
-        tensors.end());
-    if (tensors.empty()) {
-      constant_storage_mapping_.erase(old_it);
-    }
+    clear_constant(fake_impl);
     return;
   }
 
   TORCH_INTERNAL_ASSERT(!extra_meta->fake_constant_);
+  TORCH_INTERNAL_ASSERT(!constant->is_fake());
   TORCH_INTERNAL_ASSERT(constant->has_storage());
   const auto& storage = constant->storage();
   auto* key = storage.unsafeGetStorageImpl();
@@ -1133,6 +1115,36 @@ void FakeTensorMode::set_constant(
   it->second.tensors.emplace_back(
       c10::weak_intrusive_ptr<c10::TensorImpl>::reclaim_copy(fake_impl));
   extra_meta->fake_constant_ = std::move(constant);
+}
+
+void FakeTensorMode::clear_constant(c10::TensorImpl* fake_impl) noexcept {
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+  auto old_constant = std::move(extra_meta->fake_constant_);
+  if (!old_constant) {
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(old_constant->has_storage());
+  auto* old_key = old_constant->storage().unsafeGetStorageImpl();
+  auto old_it = constant_storage_mapping_.find(old_key);
+  if (old_it == constant_storage_mapping_.end()) {
+    return;
+  }
+
+  auto& tensors = old_it->second.tensors;
+  tensors.erase(
+      std::remove_if(
+          tensors.begin(),
+          tensors.end(),
+          [&](const c10::weak_intrusive_ptr<c10::TensorImpl>& weak_ref) {
+            auto impl = weak_ref.lock();
+            return !impl || impl.get() == fake_impl;
+          }),
+      tensors.end());
+  if (tensors.empty()) {
+    constant_storage_mapping_.erase(old_it);
+  }
 }
 
 const c10::intrusive_ptr<c10::TensorImpl>& FakeTensorMode::get_constant(
