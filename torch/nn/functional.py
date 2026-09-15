@@ -2975,8 +2975,10 @@ def layer_norm(
     weight: Tensor | None = None,
     bias: Tensor | None = None,
     eps: float = 1e-5,
+    dim: int | list[int] | None = None,
 ) -> Tensor:
-    r"""Apply Layer Normalization for last certain number of dimensions.
+    r"""Apply Layer Normalization over the last ``len(normalized_shape)`` dimensions,
+    or over the dimensions given by :attr:`dim`.
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
@@ -2989,10 +2991,25 @@ def layer_norm(
             weight=weight,
             bias=bias,
             eps=eps,
+            dim=dim,
         )
-    return torch.layer_norm(
-        input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled
+    if dim is None:
+        return torch.layer_norm(
+            input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled
+        )
+    dims: list[int] = [dim] if isinstance(dim, int) else list(dim)
+    n_norm = 1 if isinstance(normalized_shape, int) else len(normalized_shape)
+    if len(dims) != n_norm:
+        raise ValueError(
+            f"`dim` must name one dimension per entry of `normalized_shape`, "
+            f"got dim={dims} for normalized_shape={normalized_shape}"
+        )
+    tail = list(range(-len(dims), 0))
+    moved = input.movedim(dims, tail)
+    out = torch.layer_norm(
+        moved, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled
     )
+    return out.movedim(tail, dims)
 
 
 def rms_norm(

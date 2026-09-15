@@ -386,11 +386,19 @@ def layer_norm(
     weight: Tensor | None = None,
     bias: Tensor | None = None,
     eps: float = 1e-5,
+    dim: int | list[int] | None = None,
 ) -> Tensor:
     """
     Reference implementation of :func:`torch.nn.functional.layer_norm`.
     """
-    return torch.native_layer_norm(input, normalized_shape, weight, bias, eps)[0]
+    if dim is None:
+        return torch.native_layer_norm(input, normalized_shape, weight, bias, eps)[0]
+    dims = [dim] if isinstance(dim, int) else list(dim)
+    tail = list(range(-len(dims), 0))
+    out = torch.native_layer_norm(
+        input.movedim(dims, tail), normalized_shape, weight, bias, eps
+    )[0]
+    return out.movedim(tail, dims)
 
 
 @register_decomposition(aten.leaky_relu)
