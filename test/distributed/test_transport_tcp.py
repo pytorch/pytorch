@@ -11,20 +11,19 @@ from transport_test_utils import TransportTestMixin
 
 import torch
 from torch.distributed._transport._tcp import TCPRemoteBuffer, TCPTransport
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestTCPTransport(TransportTestMixin, TestCase):
     def connect(self, flows: int = 3, chunk_size: int = 257, timeout: float = 5.0):
         server = TCPTransport(
-            "cpu",
             num_flows=flows,
             host="127.0.0.1",
             chunk_size=chunk_size,
             timeout=timeout,
         )
         client = TCPTransport(
-            "cpu",
             num_flows=flows,
             host="127.0.0.1",
             chunk_size=chunk_size,
@@ -42,6 +41,11 @@ class TestTCPTransport(TransportTestMixin, TestCase):
 
     def make_transport_pair(self):
         return self.connect()
+
+    def test_explicit_device_constraint(self):
+        with TCPTransport("cpu") as transport:
+            with self.assertRaisesRegex(ValueError, "expected a tensor on cpu"):
+                transport.register_memory(torch.empty(1, device="meta"))
 
     def test_default_host_is_loopback_and_wildcard_is_rejected(self) -> None:
         transport = TCPTransport("cpu")
@@ -207,6 +211,31 @@ class TestTCPTransport(TransportTestMixin, TestCase):
         finally:
             client.close()
             server.close()
+
+
+class TestTCPTransportDevice(TestCase):
+    def test_mixed_devices(self, device):
+        with TCPTransport(num_flows=2) as first, TCPTransport(num_flows=2) as second:
+            first.connect(second.bind())
+            cpu = torch.arange(16, dtype=torch.uint8)
+            tensor = torch.zeros(16, dtype=torch.uint8, device=device)
+            source = first.register_memory(cpu)
+            target = second.register_memory(tensor)
+            first.write(source.to_view(), target.to_remote_buffer())
+            self.assertEqual(tensor, cpu.to(device))
+
+            read_target = torch.empty_like(tensor)
+            other = first.register_memory(read_target)
+            remote = second.register_memory(cpu)
+            first.read(other.to_mutable_view(), remote.to_remote_buffer())
+            self.assertEqual(read_target, tensor)
+            self.assertIsNone(first.device)
+            self.assertIsNone(second.device)
+
+
+instantiate_device_type_tests(
+    TestTCPTransportDevice, globals(), only_for=("cpu", "cuda")
+)
 
 
 if __name__ == "__main__":

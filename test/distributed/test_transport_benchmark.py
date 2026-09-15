@@ -8,6 +8,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import torch
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -67,17 +69,11 @@ class TestTransportBenchmark(TestCase):
                 self.assertEqual(benchmark._rdma_wire_bytes("eth0"), (44, 52))
 
     def test_rank_decisions(self):
-        source, destination, read_target = benchmark._buffers(
-            4, 2, benchmark.torch.device("cpu")
-        )
-        expected = benchmark.torch.full((4,), 3, dtype=benchmark.torch.uint8)
+        source, destination, read_target = benchmark._buffers(4, 2, torch.device("cpu"))
+        expected = torch.full((4,), 3, dtype=torch.uint8)
         self.assertEqual(source, expected)
-        self.assertEqual(
-            destination, benchmark.torch.zeros(4, dtype=benchmark.torch.uint8)
-        )
-        self.assertEqual(
-            read_target, benchmark.torch.zeros(4, dtype=benchmark.torch.uint8)
-        )
+        self.assertEqual(destination, torch.zeros(4, dtype=torch.uint8))
+        self.assertEqual(read_target, torch.zeros(4, dtype=torch.uint8))
         self.assertTrue(benchmark._connects(0, True))
         self.assertFalse(benchmark._connects(1, True))
         self.assertTrue(benchmark._connects(1, False))

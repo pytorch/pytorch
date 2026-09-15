@@ -147,8 +147,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
 
     def make_transport_pair(self):
         with patch.object(_nixl, "_load_backend", return_value=self.backend()):
-            first = _nixl.NIXLTransport("cpu", agent_name="first")
-            second = _nixl.NIXLTransport("cpu", agent_name="second")
+            first = _nixl.NIXLTransport(agent_name="first")
+            second = _nixl.NIXLTransport(agent_name="second")
         self.assertEqual(first.connect(second.bind()), 0)
         self.assertEqual(second.connect(first.bind()), 0)
         self.assertTrue(first._agent.config.enable_prog_thread)

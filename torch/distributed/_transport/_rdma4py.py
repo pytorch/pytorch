@@ -38,9 +38,9 @@ _GPUNETIO_SCALAR_ARGUMENTS = (
 
 
 def _select_rdma_device(
-    devices: list[Any], device: torch.device, sysfs_root: Path = Path("/sys")
+    devices: list[Any], device: torch.device | None, sysfs_root: Path = Path("/sys")
 ) -> Any:
-    if device.type != "cuda":
+    if device is None or device.type != "cuda":
         return devices[0]
     try:
         properties: Any = torch.cuda.get_device_properties(device)
@@ -533,7 +533,7 @@ class IBVerbsTransport(Transport):
 
     def __init__(
         self,
-        device: torch.device | str,
+        device: torch.device | str | None = None,
         *,
         hca: str | None = None,
         port: int = 1,
@@ -556,9 +556,13 @@ class IBVerbsTransport(Transport):
             raise ValueError("timeout must be positive")
         if gpunetio_provider is not None and not cuda_graph:
             raise ValueError("gpunetio_provider requires cuda_graph=True")
-        if cuda_graph and self.device.type != "cuda":
+        if cuda_graph and (self.device is None or self.device.type != "cuda"):
             raise ValueError("cuda_graph mode requires a CUDA device")
-        if self.device.type == "cuda" and self.device.index is None:
+        if (
+            self.device is not None
+            and self.device.type == "cuda"
+            and self.device.index is None
+        ):
             self.device = torch.device("cuda", torch.cuda.current_device())
 
         try:
@@ -730,12 +734,9 @@ class IBVerbsTransport(Transport):
             raise ValueError("tensor must be contiguous")
         if tensor.numel() == 0:
             raise ValueError("cannot register an empty tensor")
-        if tensor.device.type != self.device.type or (
-            self.device.index is not None and tensor.device.index != self.device.index
-        ):
-            raise ValueError(
-                f"tensor is on {tensor.device}; transport uses {self.device}"
-            )
+        self._check_device(tensor.device)
+        if tensor.device.type not in ("cpu", "cuda"):
+            raise ValueError("ibverbs transport requires CPU or CUDA tensors")
         length = tensor.numel() * tensor.element_size()
         key = (tensor.data_ptr(), length)
         if registration := self._registrations.get(key):
@@ -844,6 +845,7 @@ class IBVerbsTransport(Transport):
         remote: IBVerbsRemoteBuffer,
     ) -> int:
         length = local.size()
+        device = local._registration.tensor.device
         with self._transfer_lock:
             if self._cuda_graph and self._graph_provider is None:
                 if torch.cuda.is_current_stream_capturing():
@@ -854,7 +856,7 @@ class IBVerbsTransport(Transport):
                     self._ib,
                     self._qps,
                     self._pd,
-                    self.device,
+                    device,
                     queue_depth=self._queue_depth,
                     timeout=self._timeout,
                 )
@@ -869,21 +871,22 @@ class IBVerbsTransport(Transport):
                     self._lanes(length),
                 )
                 return 0
-            if self.device.type == "cuda":
-                if torch.cuda.is_current_stream_capturing():
-                    raise RuntimeError(
-                        "CUDA graph capture requires cuda_graph=True when creating "
-                        "the ibverbs transport"
-                    )
-                torch.cuda.current_stream(self.device).synchronize()
+            if device.type == "cuda":
+                with torch.cuda.device(device):
+                    if torch.cuda.is_current_stream_capturing():
+                        raise RuntimeError(
+                            "CUDA graph capture requires cuda_graph=True when creating "
+                            "the ibverbs transport"
+                        )
+                    torch.cuda.current_stream(device).synchronize()
             opcode = (
                 self._ib.WROpcode.RDMA_WRITE
                 if operation == "write"
                 else self._ib.WROpcode.RDMA_READ
             )
             self._host_transfer(opcode, local, remote)
-            if operation == "read" and self.device.type == "cuda":
-                with torch.cuda.device(self.device):
+            if operation == "read" and device.type == "cuda":
+                with torch.cuda.device(device):
                     importlib.import_module("ibverbs.cuda").flush_gpudirect_writes()
         return 0
 

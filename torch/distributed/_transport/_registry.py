@@ -93,10 +93,10 @@ def available_transports() -> tuple[str, ...]:
 
 def new_transport(
     backend: str,
-    device: torch.device | str,
+    device: torch.device | str | None = None,
     **kwargs: Any,
 ) -> Transport:
-    """Construct a transport registered under ``torch.distributed.transports``."""
+    """Construct a transport, optionally restricting it to ``device``."""
     name = backend.lower()
     factory = _find_factory(name)
     if (
@@ -106,7 +106,9 @@ def new_transport(
     ):
         raise RuntimeError(f"transport {name!r} is not supported")
     try:
-        transport = factory(device=device, **kwargs)
+        if device is not None:
+            kwargs["device"] = device
+        transport = factory(**kwargs)
     except Exception as error:
         raise RuntimeError(f"failed to create transport {name!r}") from error
     if not isinstance(transport, Transport):
