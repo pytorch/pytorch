@@ -209,6 +209,7 @@ class FSDPParam:
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
+    _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
     unsharded_grad_dtype: torch.dtype
 
@@ -279,6 +280,7 @@ class FSDPParam:
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
         # Snapshot before any rewrite of `param` (e.g. spmd_types -> DTensor).
+        self._has_sharded_grad_dtype_override = param._has_grad_dtype_override
         self.sharded_grad_dtype = param.grad_dtype
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
@@ -809,6 +811,8 @@ class FSDPParam:
     def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
         param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
         self.orig_dtype = self.sharded_param.dtype
+        if not self._has_sharded_grad_dtype_override:
+            self.sharded_grad_dtype = self.orig_dtype
         # Clamp `param_dtype` to `None` if no casting is required or if the
         # parameter is non-floating-point (mixed precision is only meaningful
         # for floating-point parameters)
@@ -1440,6 +1444,8 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
+        if not self._has_sharded_grad_dtype_override:
+            self.sharded_grad_dtype = new_param.dtype
         self.sharded_param.grad_dtype = (
             new_param.grad.dtype
             if self._grad_is_partial and new_param.grad is not None

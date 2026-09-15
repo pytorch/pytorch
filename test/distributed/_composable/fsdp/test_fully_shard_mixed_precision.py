@@ -827,6 +827,54 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 self.assertEqual(param.grad.to_local(), expected_grad)
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("grad_dtype", ["default", torch.float32, None])
+    def test_grad_dtype_after_to(self, grad_dtype: str | torch.dtype | None):
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        if not isinstance(grad_dtype, str):
+            model.weight.grad_dtype = grad_dtype
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+            ),
+        )
+        model.to(torch.bfloat16)
+        expected_dtype = torch.bfloat16 if isinstance(grad_dtype, str) else grad_dtype
+        self.assertEqual(model.weight.grad_dtype, expected_dtype)
+        inp = torch.ones(2, 8, device=device_type, dtype=torch.bfloat16)
+        for sync in (False, True):
+            model.set_requires_gradient_sync(sync)
+            model(inp).sum().backward()
+            if not sync:
+                self.assertEqual(model.weight.grad.placements, (Partial("avg"),))
+                self.assertEqual(model.weight.grad.dtype, torch.float32)
+        self.assertEqual(model.weight.grad_dtype, expected_dtype)
+        self.assertEqual(model.weight.grad.dtype, expected_dtype or torch.float32)
+        self.assertEqual(
+            model.weight.grad.to_local(),
+            torch.full_like(model.weight.grad.to_local(), 4),
+        )
+        if grad_dtype == "default":
+            torch.optim.Adam(model.parameters()).step()
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_to_with_existing_grad(self):
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model)
+        model.weight.grad = torch.ones_like(model.weight)
+        model.to(torch.bfloat16)
+        self.assertEqual(model.weight.grad_dtype, torch.bfloat16)
+        self.assertEqual(model.weight.grad.dtype, torch.bfloat16)
+        inp = torch.ones(2, 8, device=device_type, dtype=torch.bfloat16)
+        model(inp).sum().backward()
+        self.assertEqual(model.weight.grad.dtype, torch.bfloat16)
+        self.assertEqual(
+            model.weight.grad.to_local(),
+            torch.full_like(model.weight.grad.to_local(), 3),
+        )
+        torch.optim.Adam(model.parameters()).step()
+
+    @skip_if_lt_x_gpu(2)
     def test_grad_dtype_preserved_across_load_state_dict(self):
         """`load_state_dict` can install a replacement Parameter, which starts
         from the default grad_dtype and has to be re-stamped."""
