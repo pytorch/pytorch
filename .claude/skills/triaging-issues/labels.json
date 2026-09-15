@@ -1096,6 +1096,10 @@
       "description": "This tag is to mark Feature Tracked for PyTorch OSS Releases"
     },
     {
+      "name": "release triage",
+      "description": "Affects an upcoming release: fix before the next branch cut, or cherry-pick if the branch is already cut. For release-manager review; not itself a cherry-pick request."
+    },
+    {
       "name": "security",
       "description": ""
     },
