@@ -136,7 +136,6 @@ class TestLicense(TestCase):
             any("does not match SPDX manifest" in e for e in errors), msg=errors
         )
 
-
     def test_audit_not_discoverable(self) -> None:
         """inc - discovered: path in license-files not returned by git ls-files."""
         # Need >=90% of inc on disk so _checkout_looks_populated lets the check run.
@@ -165,9 +164,7 @@ class TestLicense(TestCase):
             [("third_party/dep/LICENSE", "MIT\n")],
         )
         self.assertIsNone(skip_reason)
-        self.assertTrue(
-            any("stale path" in e for e in errors), msg=errors
-        )
+        self.assertTrue(any("stale path" in e for e in errors), msg=errors)
 
     @unittest.skipIf(len(distinfo) == 0, "no installation in site-package to test")
     def test_distinfo_license(self):

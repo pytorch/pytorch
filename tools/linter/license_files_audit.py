@@ -178,15 +178,14 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
             if p.startswith("third_party/")
         }
         if stale_excluded := sorted(
-            p for p in excluded
-            if "/".join(p.split("/")[:2]) in populated_deps
-            and p not in discovered
+            p
+            for p in excluded
+            if "/".join(p.split("/")[:2]) in populated_deps and p not in discovered
         ):
             err.append(
                 f"{_MANIFEST_PATH.name} excluded list has stale path(s) whose "
                 "submodule is populated but the file is no longer tracked "
-                "(removed from submodule?): "
-                + ", ".join(stale_excluded)
+                "(removed from submodule?): " + ", ".join(stale_excluded)
             )
 
         if missing := sorted(p for p in inc if not (repo_root / p).is_file()):
