@@ -3,6 +3,7 @@
 import math
 from typing import NamedTuple
 
+import cutlass.cute as cute
 from cutlass import Int32
 
 import torch
@@ -46,6 +47,7 @@ _CHUNK_LADDER = ((65536, 32), (16384, 16), (4096, 6))
 # 7001 GB/s at N=16 versus 4584 at N=32. TMA with smem rotation gains 1.49-1.86x;
 # the rotation mask requires power-of-two fp32 N.
 _TMA_MIN_STRIDE = 128
+_TMA_ALIGNMENT = 16
 
 
 def narrow_row(N: int, itemsize: int, M: int) -> bool:
@@ -157,12 +159,22 @@ def reduce_row_tile(
     threads_per_block -= (
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
+    isz = x.element_size()
+    tma_base_aligned = _L.supported_alignment(x, _TMA_ALIGNMENT) == _TMA_ALIGNMENT
+    tma_stride_bytes = x.stride(0) * isz
+    tma_stride_aligned = tma_stride_bytes % _TMA_ALIGNMENT == 0
     if use_tma is None:
-        natural = tile.align_bytes(N, x.element_size())
         use_tma = (
             threads_per_row == 1
-            and _L.supported_alignment(x, natural) == natural
-            and tma_ok(N, x.element_size(), M, x.device)
+            and tma_base_aligned
+            and tma_stride_aligned
+            and tma_ok(N, isz, M, x.device)
+        )
+    elif use_tma and not tma_base_aligned:
+        raise ValueError("TMA requires a 16-byte aligned input")
+    elif use_tma and not tma_stride_aligned:
+        raise ValueError(
+            f"TMA requires a 16-byte aligned row stride, got {tma_stride_bytes} bytes"
         )
     dt = torch2cute[x.dtype]
     op = tile.TileReduce(
@@ -185,18 +197,33 @@ def reduce_row_tile(
     nwaves = Int32(math.ceil((N // op.vec) / threads_per_row))
     # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
     # outside TMA. Runtime folds share a vector class; TMA bakes its box width.
-    isz = x.element_size()
     align = (
-        op.tilemap.align_bytes(isz)
+        _TMA_ALIGNMENT
         if use_tma
         else _L.supported_alignment(x, tile.align_bytes(N, isz))
     )
 
     def _fake():
         # TMA bakes N; runtime folds share a vector class. None omits unused column args.
-        inner = N if use_tma else _L.sym(op.vec)
+        if use_tma:
+            fake_in = cute.runtime.make_fake_tensor(
+                dt,
+                (_L.sym(), N),
+                (
+                    cute.sym_int64(divisibility=_TMA_ALIGNMENT // isz),
+                    1,
+                ),
+                assumed_align=align,
+            )
+        else:
+            fake_in = _L.fake_compact(
+                dt,
+                (_L.sym(), _L.sym(op.vec)),
+                stride_order=(1, 0),
+                align=align,
+            )
         return (
-            [_L.fake_compact(dt, (_L.sym(), inner), stride_order=(1, 0), align=align)],
+            [fake_in],
             [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
             nchunks,
             nwaves,
