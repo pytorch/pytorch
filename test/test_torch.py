@@ -2332,15 +2332,24 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
-    @onlyCUDA
+    @parametrize("lam", (1, 1024))
     @dtypes(torch.half, torch.float)
-    def test_exponential_no_zero(self, device, dtype):
+    def test_exponential_no_zero(self, device, dtype, lam):
         # naively, 0 in exponential can be generated with probability 2^-24
         # so we need more samples to check if it's not generated
         # instead of doing one
-        # don't test CPU, that would be a long test
-        x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
+        # lam=1024 puts ~3e-5 of the samples under half's 2^-25 rounding
+        # threshold, where the narrowing cast used to produce exact zeros
+        x = torch.empty(50000000, device=device, dtype=dtype).exponential_(lam)
         self.assertTrue(x.min() > 0)
+
+    @dtypes(torch.half)
+    def test_exponential_half_underflow(self, device, dtype):
+        # On CPU this seed draws a double of 4.5e-9 at index 5833, below
+        # half's rounding threshold of 2^-25, which used to become an exact 0
+        torch.manual_seed(20)
+        x = torch.empty(10000, device=device, dtype=dtype).exponential_()
+        self.assertGreater(x.min(), 0)
 
     def _generate_correlation_tensors(self, device, dtype):
         yield make_tensor((0, 0), dtype=dtype, device=device)
@@ -5438,6 +5447,16 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(samples_1, samples_2)
             self.assertEqual(samples_1.dim(), 2, msg="wrong number of dimensions")
             self.assertEqual(samples_1.size(1), n_sample, msg="wrong number of samples")
+
+    @dtypes(torch.half)
+    def test_multinomial_zero_prob_half(self, device, dtype):
+        # A half exponential sample that rounds to 0 turns p / q into 0 / 0,
+        # and the NaN wins argmax; on CPU seed 0 first hits this in row 136
+        p = torch.zeros(151936, device=device, dtype=dtype)
+        p[0] = 1
+        torch.manual_seed(0)
+        samples = torch.multinomial(p.expand(200, -1), 1)
+        self.assertEqual(samples, torch.zeros_like(samples))
 
     # FIXME: move to test distributions
     @slowTest
