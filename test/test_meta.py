@@ -2337,6 +2337,35 @@ class TestMetaKernelRegistrations(TestCase):
                 inp, dim=-1, keepdim=False, min=out_min, max=out_max
             )
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("num_spatial_dims", [1, 2, 3])
+    @parametrize("exact", [False, True])
+    def test_upsample_nearest_meta_empty_input(self, num_spatial_dims, exact):
+        # The non-empty guard passed `torch._check` the product of the non-batch
+        # sizes, which is an int, so every zero-element input raised TypeError out
+        # of the check itself rather than the intended RuntimeError. A zero batch is
+        # not an error at all: eager upsamples it and returns a zero-batch output.
+        name = f"upsample_nearest{num_spatial_dims}d"
+        if exact:
+            name = f"_upsample_nearest_exact{num_spatial_dims}d"
+        op = getattr(torch.ops.aten, name).default
+        spatial = (4,) * num_spatial_dims
+        output_size = [8] * num_spatial_dims
+
+        empty_batch = torch.empty((0, 3, *spatial))
+        expected = op(empty_batch, output_size)
+        actual = op(empty_batch.to("meta"), output_size)
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(actual.dtype, expected.dtype)
+
+        # A zero non-batch dimension is still rejected, and eager rejects it too.
+        empty_channels = torch.empty((1, 0, *spatial))
+        with self.assertRaisesRegex(RuntimeError, "Non-empty"):
+            op(empty_channels, output_size)
+        with self.assertRaisesRegex(RuntimeError, "Non-empty"):
+            op(empty_channels.to("meta"), output_size)
+
     def test_grid_sampler_2d_cpu_fallback_meta(self):
         # The meta kernels' whole contract is output metadata, so compare
         # shape/stride/dtype against eager for the forward and both backward
