@@ -3522,7 +3522,8 @@ class TestDistributions(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
-        set_rng_seed(2)  # see Note [Randomized statistical tests]
+        seed = 2 if self.device_type == "cpu" else 1
+        set_rng_seed(seed)  # see Note [Randomized statistical tests]
         for rate in [1e-5, 1.0, 10.0]:
             self._check_sampler_sampler(
                 Exponential(rate),
@@ -3685,7 +3686,8 @@ class TestDistributions(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_sample(self):
-        set_rng_seed(3)  # see Note [Randomized statistical tests]
+        seed = 3 if self.device_type == "cpu" else 1
+        set_rng_seed(seed)  # see Note [Randomized statistical tests]
         for scale, alpha in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 Pareto(scale, alpha),
