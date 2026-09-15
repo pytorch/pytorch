@@ -42,16 +42,6 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 // Most likely we will do aarch32 support with inline asm.
 #if defined(__aarch64__)
 
-#ifndef __at_align__
-#if defined(__GNUC__)
-#define __at_align__ __attribute__((aligned(16)))
-#elif defined(_WIN32)
-#define __at_align__ __declspec(align(16))
-#else
-#define __at_align__
-#endif
-#endif
-
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
 #endif
@@ -98,9 +88,6 @@ static inline float32x4_t sve_to_neon(svfloat32_t v) {
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
-
-using torch::headeronly::_isinf;
-using torch::headeronly::_isnan;
 
 template <int index, bool mask_val>
 struct BlendRegs {
@@ -273,6 +260,9 @@ class Vectorized<float> {
         vshlq_u32(vandq_u32(is_zero_vec, vdupq_n_u32(1)), shift);
     return vaddvq_u32(bits_vec);
   }
+  float reduce_max() const {
+    return vmaxvq_f32(values);
+  }
   Vectorized<float> isnan() const {
     return vreinterpretq_f32_u32(vmvnq_u32(vceqq_f32(values, values)));
   }
@@ -280,7 +270,8 @@ class Vectorized<float> {
     __at_align__ float tmp[size()];
     store(tmp);
     for (const auto i : c10::irange(size())) {
-      if (_isnan(tmp[i]) || _isinf(tmp[i])) {
+      if (torch::headeronly::_isnan(tmp[i]) ||
+          torch::headeronly::_isinf(tmp[i])) {
         return true;
       }
     }
@@ -514,14 +505,18 @@ class Vectorized<float> {
       nextafter,
       Sleef_nextafterf4)
   Vectorized<float> frac() const;
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sin)
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+      sin,
+      Sleef_sinf4_u35)
   // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
   // return finite results, because Sleef uses float-range intermediates
   // internally while the scalar C library uses double precision.
   Vectorized<float> sinh() const {
     return map(std::sinh);
   }
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cos)
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+      cos,
+      Sleef_cosf4_u35)
   Vectorized<float> cosh() const {
     return map(std::cosh);
   }
@@ -835,3 +830,5 @@ inline Vectorized<float> Vectorized<float>::erf() const {
 #endif /* defined(aarch64) */
 
 C10_DIAGNOSTIC_POP()
+
+
