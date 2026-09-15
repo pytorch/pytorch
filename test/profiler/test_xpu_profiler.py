@@ -135,6 +135,46 @@ class XpuProfilerTest(TestCase):
         if Verbose:
             print(p.key_averages().table())
 
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_profiler_xpu_filter_excludes_driver(self):
+        # A fine-grained XPU request must be able to leave XPU_DRIVER out even
+        # when ProfilerActivity.CPU is requested alongside it: the CPU group is
+        # inserted unfiltered, so it must not carry the host-side XPU activity
+        # types itself.
+        a = torch.rand([8, 16], device="xpu")
+        b = torch.rand([16, 32], device="xpu")
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                {
+                    torch.profiler.ProfilerActivity.XPU: [
+                        "CONCURRENT_KERNEL",
+                        "XPU_RUNTIME",
+                    ]
+                },
+            ],
+        ) as p:
+            result = torch.matmul(a, b)
+
+        self.assertTrue(result.numel() > 0)
+
+        with tempfile.NamedTemporaryFile(mode="w+", delete=True) as tmp:
+            p.export_chrome_trace(tmp.name)
+            with open(tmp.name) as f:
+                data = json.load(f)
+
+        count_cats = defaultdict(int)
+        for event in data["traceEvents"]:
+            if event.get("ph") == "X":
+                count_cats[event.get("cat")] += 1
+
+        if Verbose:
+            print(f"{count_cats=}")
+
+        self.assertIn("kernel", count_cats)
+        self.assertIn("xpu_runtime", count_cats)
+        self.assertNotIn("xpu_driver", count_cats)
+
 
 if __name__ == "__main__":
     run_tests()
