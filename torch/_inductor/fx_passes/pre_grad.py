@@ -499,7 +499,9 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     graph = gm.graph
     work_done = False
-    for module_name, module in gm.named_modules():
+    # remove_duplicate=False so every attribute path to a shared Identity
+    # instance is visited, not just the first one.
+    for module_name, module in gm.named_modules(remove_duplicate=False):
         if type(module) is nn.Identity:
             for node in list(graph.find_nodes(op="call_module", target=module_name)):
                 if len(node.args) != 1:
