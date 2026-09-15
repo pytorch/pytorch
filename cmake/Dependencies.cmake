@@ -1149,7 +1149,7 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::host MIOpen hiprtc::hiprtc)
 
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0" AND amd_smi_FOUND)
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS amd_smi)
     endif()
 
