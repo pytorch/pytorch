@@ -1046,10 +1046,8 @@ def get_tensor_guard_code_part(
         dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
-    # Render the relaxed form as "current" rather than an index: this string is
-    # what gets serialized into a precompile artifact, so baking the compiling
-    # rank's index here would make the artifact rank-specific even though the
-    # runtime check no longer is.
+    # Render the relaxed form as "current" so diagnostics describe the
+    # rank-relative runtime check rather than the compiling rank's device index.
     device_index: int | str | None = (
         "current" if device_index_is_current else value.device.index
     )
