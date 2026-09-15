@@ -208,11 +208,15 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
 // still the inplace target (TensorIterator uses the same idiom).
 static void bernoulli_scalar_kernel_mps(const TensorBase& self, double p, std::optional<Generator> gen) {
   // 0 <= p <= 1 is already enforced by `bernoulli_impl_` before the stub is dispatched.
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "bernoulli is not implemented for complex types on MPS");
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   distribution_kernel_mps_impl(iter, p, 0.0, "bernoulli_scalar", 1, gen);
 }
 
 static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase& p_, std::optional<Generator> gen) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "bernoulli is not implemented for complex types on MPS");
   Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
   const Tensor& p_t = static_cast<const Tensor&>(p_);
   bernoulli_tensor_mps_impl(self_t, p_t, gen);
@@ -222,7 +226,14 @@ REGISTER_MPS_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel_mps)
 REGISTER_MPS_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel_mps)
 
 static void uniform_kernel_mps(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
-  distribution_kernel_mps_impl(iter, from, to, "uniform_dist", 1, gen);
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "uniform_kernel_mps", [&] {
+    // Narrow bounds on the host to avoid Metal miscompiling constant float-to-bfloat casts.
+    std::array<float, 4> params{static_cast<float>(from),
+                                static_cast<float>(to),
+                                static_cast<float>(static_cast<scalar_t>(from)),
+                                static_cast<float>(static_cast<scalar_t>(to))};
+    distribution_kernel_mps_impl(iter, params, "uniform_dist", 1, gen);
+  });
 }
 
 static void normal_kernel_mps(const TensorBase& self, double mean, double std, std::optional<Generator> gen) {
@@ -670,7 +681,7 @@ Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& 
   // to avoid an extra cast / copy.
   Tensor keys = at::empty({n}, result.options().dtype(kFloat));
   auto keys_iter = at::TensorIterator::borrowing_nullary_op(keys);
-  distribution_kernel_mps_impl(keys_iter, 0.0, 1.0, "uniform_dist", 1, generator);
+  uniform_kernel_mps(keys_iter, 0.0, 1.0, generator);
   if (stype == kLong && result.is_contiguous()) {
     Tensor values = at::empty_like(keys);
     at::sort_out(values, result, keys);

@@ -68,6 +68,34 @@ jobs:
         with:
           fetch-depth: 1
 
+      # The bot is limited to five GitHub MCP calls and cannot read the releases
+      # API, so the current release train has to be handed to it. Left to itself it
+      # would answer "what is the latest release" from training data, and a version
+      # written into the skill file would go stale at every release.
+      - name: Resolve the most recent released version
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          minor="unknown"
+          # /releases/latest excludes drafts and prereleases, so this is the newest GA.
+          if tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')"; then
+            candidate="${tag#v}"
+            candidate="${candidate%.*}"
+            if [[ "${candidate}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+              minor="${candidate}"
+            else
+              echo "::warning::Could not parse a minor version from release tag '${tag}'"
+            fi
+          else
+            echo "::warning::Could not read the latest release"
+          fi
+          # Never fail triage over this: the skill drops the version-dependent
+          # criteria when this is "unknown" rather than guessing.
+          echo "minor=${minor}" >> "${GITHUB_OUTPUT}"
+          echo "Most recent released minor: ${minor}"
+
       - name: Pre-pull GitHub MCP Server
         env:
           # claude-code-action v1.0.89 injects this image when GitHub MCP tools are allowed.
@@ -98,6 +126,11 @@ jobs:
             --allowedTools "mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__search_issues"
           prompt: |
             /triaging-issues #${{ steps.issue.outputs.number }}
+
+            RELEASE CONTEXT (authoritative -- use this and nothing else for the current
+            release version; ignore any version written in the skill files and do not rely
+            on your own knowledge of PyTorch releases):
+            - Most recent released minor version: ${{ steps.release.outputs.minor }}
 
             SECURITY:
             - ONLY modify issue #${{ steps.issue.outputs.number }} in ${{ github.repository }}
