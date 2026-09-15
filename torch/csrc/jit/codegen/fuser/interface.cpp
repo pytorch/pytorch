@@ -68,7 +68,7 @@ std::vector<at::Tensor> debugLaunchGraph(
   Stack stack = fmap<IValue>(inputs);
   const auto key = fuser::registerFusion(fusion_group);
   fuser::runFusion(key, stack);
-  return fmap(stack, [](const IValue& iv) { return iv.toTensor(); });
+  return fmap(std::move(stack), [](const IValue& iv) { return iv.toTensor(); });
 }
 
 std::string debugGetFusedKernelCode(

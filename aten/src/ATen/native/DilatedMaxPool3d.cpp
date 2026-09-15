@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
 #include <ATen/native/Pool.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -174,7 +173,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   const int64_t oheight = gradOutput.size(-2);
   const int64_t owidth = gradOutput.size(-1);
 
-  max_pool3d_backward_shape_check(
+  pool3d_backward_shape_check(
     input,
     gradOutput,
     indices,
