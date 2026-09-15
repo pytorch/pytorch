@@ -5912,8 +5912,8 @@ def disable_gc():
 
 
 def find_library_location(lib_name: str) -> Path:
-    # return the shared library file in the installed folder if exist,
-    # else the file in the build folder
+    # return the shared library file in the installed folder if it exists,
+    # otherwise the file in the build folder
     torch_root = Path(torch.__file__).resolve().parent
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
@@ -5922,7 +5922,7 @@ def find_library_location(lib_name: str) -> Path:
     path = torch_root.parent / 'build' / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    return torch_root / 'build' / 'lib' / lib_name
+    raise FileNotFoundError(f"Could not find library '{lib_name}' in installed or build paths")
 
 def skip_but_pass_in_sandcastle(reason):
     """
