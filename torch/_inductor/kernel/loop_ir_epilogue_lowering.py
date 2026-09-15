@@ -76,7 +76,7 @@ class GemmEpilogueIRFinalizer:
     materialize: bool
 
 
-def _expression_values(value: Any):
+def _expression_values(value: object):
     if isinstance(value, GemmEpilogueIRExpression):
         yield value
     elif isinstance(value, (tuple, list)):
@@ -170,7 +170,7 @@ class _GemmEpilogueIRHandler(DefaultHandler):
         self.stores[name] = GemmEpilogueIRStore(index, value)
 
 
-def _walk(expr: Any, *, follow_stored_values: bool = True):
+def _walk(expr: object, *, follow_stored_values: bool = True):
     if not isinstance(expr, GemmEpilogueIRExpression):
         return
     yield expr
@@ -181,7 +181,7 @@ def _walk(expr: Any, *, follow_stored_values: bool = True):
         yield from _walk(arg, follow_stored_values=follow_stored_values)
 
 
-def _loaded_names(expr: Any, *, follow_stored_values: bool = True) -> frozenset[str]:
+def _loaded_names(expr: object, *, follow_stored_values: bool = True) -> frozenset[str]:
     return frozenset(
         value.args[0]
         for value in _walk(expr, follow_stored_values=follow_stored_values)
@@ -189,7 +189,7 @@ def _loaded_names(expr: Any, *, follow_stored_values: bool = True) -> frozenset[
     )
 
 
-def _contains_reduction(expr: Any, *, follow_stored_values: bool = True) -> bool:
+def _contains_reduction(expr: object, *, follow_stored_values: bool = True) -> bool:
     return any(
         value.op == "reduction"
         for value in _walk(expr, follow_stored_values=follow_stored_values)
@@ -327,7 +327,7 @@ class GemmEpilogueIRAnalysis:
         return GemmEpilogueIRFinalizer(output_name, source_name, materialize)
 
 
-def _constant_value(expr: Any) -> Any | None:
+def _constant_value(expr: object) -> Any | None:
     if not isinstance(expr, GemmEpilogueIRExpression):
         return None
     if expr.op in ("constant", "index_expr") and expr.args:
@@ -337,7 +337,7 @@ def _constant_value(expr: Any) -> Any | None:
     return None
 
 
-def _strip_conversions(expr: Any) -> Any:
+def _strip_conversions(expr: object) -> Any:
     while (
         isinstance(expr, GemmEpilogueIRExpression)
         and expr.op in ("to_dtype", "to_dtype_bitcast", "identity")
@@ -397,7 +397,7 @@ def _supports_reduction_source_conversions(
     return True
 
 
-def _flatten_associative(expr: Any, op: str) -> list[Any]:
+def _flatten_associative(expr: object, op: str) -> list[Any]:
     stripped = _strip_conversions(expr)
     if isinstance(stripped, GemmEpilogueIRExpression) and stripped.op == op:
         return _flatten_associative(stripped.args[0], op) + _flatten_associative(
@@ -406,7 +406,7 @@ def _flatten_associative(expr: Any, op: str) -> list[Any]:
     return [expr]
 
 
-def _expression_pattern(expr: Any, source_name: str) -> Any:
+def _expression_pattern(expr: object, source_name: str) -> Any:
     """Canonicalize a pointwise expression while ignoring source load indices."""
     if isinstance(expr, GemmEpilogueIRExpression):
         if expr.op == "load" and expr.args[0] == source_name:
@@ -425,7 +425,7 @@ def _expression_pattern(expr: Any, source_name: str) -> Any:
 
 
 def _synthetic_reduction_element_ir(
-    expr: Any,
+    expr: object,
     source_name: str,
     group: int,
 ) -> tuple[GemmReductionType, GemmEpilogueIRExpression] | None:
@@ -506,7 +506,7 @@ def grouped_reduction_pattern_ir(
 
 
 def _synthetic_reductions_ir(
-    expr: Any,
+    expr: object,
     index: sympy.Expr,
     source_name: str,
     group: int,

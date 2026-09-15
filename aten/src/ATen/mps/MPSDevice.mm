@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
+#include <c10/util/env.h>
 
 namespace at::mps {
 
@@ -125,9 +126,52 @@ bool is_apple_family_or_newer(AppleGPUFamily family) {
   return [MPSDevice::getInstance()->device() supportsFamily:mtl_family];
 }
 
+// MetalLanguageVersion mirrors the SDK enum so that compileLibrary can hand it
+// straight to setLanguageVersion:; keep the two spellings from drifting apart
+static_assert(static_cast<uint32_t>(MetalLanguageVersion::METAL_3_1) == MTLLanguageVersion3_1);
+static_assert(static_cast<uint32_t>(MetalLanguageVersion::METAL_3_2) == MTLLanguageVersion3_2);
+static_assert(static_cast<uint32_t>(MetalLanguageVersion::METAL_4_0) == MTLLanguageVersion4_0);
+
+MetalLanguageVersion metal_language_version() {
+  static const MetalLanguageVersion rc = []() {
+    if (const auto env_val = c10::utils::get_env("PYTORCH_MPS_METAL_VERSION")) {
+      // MTLLanguageVersion is a closed enum, so match its spellings rather than
+      // parse an arbitrary major.minor. The request is honored as-is: asking for
+      // a version the host cannot compile should fail loudly, not fall back.
+      if (*env_val == "3.1") {
+        return MetalLanguageVersion::METAL_3_1;
+      }
+      if (*env_val == "3.2") {
+        return MetalLanguageVersion::METAL_3_2;
+      }
+      if (*env_val == "4.0") {
+        return MetalLanguageVersion::METAL_4_0;
+      }
+      TORCH_WARN("Ignoring PYTORCH_MPS_METAL_VERSION=", *env_val, ", expected 3.1, 3.2 or 4.0");
+    }
+    if (is_macos_at_least(MacOSVersion::MACOS_26_0)) {
+      return MetalLanguageVersion::METAL_4_0;
+    }
+    if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
+      return MetalLanguageVersion::METAL_3_2;
+    }
+    return MetalLanguageVersion::METAL_3_1;
+  }();
+  return rc;
+}
+
 bool has_mpp() {
-  // MetalPerformancePrimitives matmul2d (cooperative tensors) needs macOS 26.2+
-  return is_macos_at_least(MacOSVersion::MACOS_26_2);
+#if !defined(CAN_BUILD_METAL_4) && !defined(PYTORCH_JIT_COMPILE_SHADERS)
+  // Metal toolchain used to build this binary could not compile the Metal 4.0
+  // shaders, so kernels_40.metallib is not embedded into libtorch_cpu
+  return false;
+#endif
+  // MetalPerformancePrimitives needs macOS 26.2+ and shaders compiled with Metal 4.0
+  // Also check device family, it's older than M1 on virtualized Mac and it fails to
+  // JIT-compile MPP, even though rest of Metal 4 feature work fine
+  // https://github.com/pytorch/pytorch/issues/196582
+  return is_macos_at_least(MacOSVersion::MACOS_26_2) && metal_language_version() >= MetalLanguageVersion::METAL_4_0 &&
+      is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS);
 }
 
 } // namespace at::mps

@@ -71,11 +71,6 @@ struct TORCH_API VariableHooksInterface {
       torch::jit::Stack* stack) const = 0;
   virtual std::optional<c10::ScalarType> grad_dtype(const TensorBase&) const = 0;
   virtual void set_grad_dtype(const TensorBase&, const std::optional<c10::ScalarType>&) const = 0;
-  // Tell autograd this view is one output of an operation that returned
-  // several, so that mutating it in place is rejected. A no-op unless the
-  // tensor is a differentiable view whose creation reason is still the default
-  // one. See [Note: multi-output view replay].
-  virtual void mark_multi_output_view(const TensorBase&) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);

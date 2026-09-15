@@ -82,7 +82,7 @@ ncclDataType_t getNcclDataTypeInternal(const at::Tensor& tensor) {
     case at::ScalarType::Float4_e2m1fn_x2:
       return ncclUint8;
     default:
-      throw std::runtime_error("Unsupported tensor data type for NCCL");
+      TORCH_CHECK(false, "Unsupported tensor data type for NCCL");
   }
 }
 
@@ -142,8 +142,8 @@ ProcessGroupNCCL::RedOpRAII::RedOpRAII(
           &ncclRedOp_, factor, comm, nccl_api_.get());
       break;
     default:
-      throw std::runtime_error(
-          "PreMulSum Data type must be half, float, bfloat16 or double");
+      TORCH_CHECK(
+          false, "PreMulSum Data type must be half, float, bfloat16 or double");
   }
 }
 
@@ -186,8 +186,7 @@ size_t ProcessGroupNCCL::wordSize(ncclDataType_t type) const {
       // case ncclFloat64:
       return 8;
     default:
-      throw std::runtime_error(
-          "Unsupported ncclDataType_t in wordSize: " + std::to_string(type));
+      TORCH_CHECK(false, "Unsupported ncclDataType_t in wordSize: ", type);
   }
 }
 
@@ -371,18 +370,16 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   if (comm_state_ == CommState::TIMEOUT) {
     if (options_c10d_->enable_reconfigure) {
       revokeNcclComm();
-      throw std::runtime_error("NCCL operation timed out");
+      TORCH_CHECK(false, "NCCL operation timed out");
     } else {
       handleWatchdogFailure("timeout - collective operation timed out");
-      throw std::runtime_error("NCCL operation timed out");
+      TORCH_CHECK(false, "NCCL operation timed out");
     }
   } else if (comm_state_ == CommState::ERROR) {
     // CleanUpOnly may have already removed the communicator on the watchdog
     // thread, so a later collective cannot query the original NCCL error.
-    if (!nccl_comm_) {
-      throw std::runtime_error(
-          "NCCL communicator was aborted after a previous error");
-    }
+    TORCH_CHECK(
+        nccl_comm_, "NCCL communicator was aborted after a previous error");
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -395,9 +392,14 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       // In reconfigurable mode we never abort the process: revoke the comm so
       // it can be reconfigured and surface the error to the caller.
       revokeNcclComm();
+      // The constructor reads the communicator's last error, which the
+      // commRevoke() inside revokeNcclComm() overwrites, so the exception has
+      // to be built first. A check macro would raise before the revoke ran.
+      // @allow-raw-throw: the revoke above clobbers its last error
       throw std::move(ncclException);
     }
     handleWatchdogFailure(std::string("error - ") + ncclException.what());
+    // @allow-raw-throw: its what() is an argument to the call above
     throw std::move(ncclException);
   }
 }
@@ -488,9 +490,9 @@ void ProcessGroupNCCL::enqueueWork(
 // Static callback function for CUDA user object cleanup
 void ProcessGroupNCCL::graphCleanupCallback(void* userData) {
   auto* cleanup_data = static_cast<GraphCleanupData*>(userData);
-  if (cleanup_data == nullptr || cleanup_data->comm == nullptr) {
-    throw std::runtime_error("Invalid cleanup data");
-  }
+  TORCH_CHECK(
+      cleanup_data != nullptr && cleanup_data->comm != nullptr,
+      "Invalid cleanup data");
 
   // Clear the work references for this graph
   std::lock_guard<std::mutex> lock(
@@ -505,9 +507,9 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   c10::cuda::CUDAGuard gpuGuard(device_);
   if (async_op) {
     auto current_stream = at::cuda::getCurrentCUDAStream(device_.index());
-    if (!dependency_event_.has_value() || !internal_stream_.has_value()) {
-      throw std::runtime_error("NCCL stream resources are not initialized");
-    }
+    TORCH_CHECK(
+        dependency_event_.has_value() && internal_stream_.has_value(),
+        "NCCL stream resources are not initialized");
     auto& dependency_event = dependency_event_.value();
     auto& internal_stream = internal_stream_.value();
 
