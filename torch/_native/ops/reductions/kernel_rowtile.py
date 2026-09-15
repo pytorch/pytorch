@@ -1,8 +1,9 @@
-# Row-reduction launch policy and plan cache for tile.TileReduce. A runtime chunk
-# loop lets each compiled kernel cover one vector class.
+# Row-reduction launch policy and plan cache for tile.TileReduce. Runtime loops share
+# each kernel across a vector class; narrow rows may use one thread and TMA staging.
 import math
 from typing import NamedTuple
 
+import cutlass.cute as cute
 from cutlass import Int32
 
 import torch
@@ -31,6 +32,48 @@ _SMALL_THREADS_PER_BLOCK, _LARGE_THREADS_PER_BLOCK = 128, 256
 _THREADS_PER_BLOCK_GATE_N = 16 * 1024
 # Rows >=16 KB need 256 threads; the element ladder underthreads them by 1.1-1.4x.
 _WIDE_ROW_BYTES = 16 * 1024
+
+
+# Narrow rows: merged mappings floor threads_per_row at one warp, wasting lanes and measuring 4.0x
+# slower at (1048576, 32). threads_per_row=1 serves any trait without merging; MAX_UNROLL bounds
+# its whole-row unroll above the measured crossover.
+_MAX_NARROW_N = min(256, tile.MAX_UNROLL)
+# Measured (minimum rows, vector-chunk budget) ladder: threads_per_row=1 shrinks the grid and
+# needs more rows as rows widen. Tiers generalize across dtypes and measured 1.14-1.87x
+# at M=4096, up to 33.7x at M=262144.
+_CHUNK_LADDER = ((65536, 32), (16384, 16), (4096, 6))
+
+# Direct threads_per_row=1 loads over-fetch once adjacent rows no longer share a 128-byte line:
+# 7001 GB/s at N=16 versus 4584 at N=32. TMA with smem rotation gains 1.49-1.86x;
+# the rotation mask requires power-of-two fp32 N.
+_TMA_MIN_STRIDE = 128
+_TMA_ALIGNMENT = 16
+
+
+def narrow_row(N: int, itemsize: int, M: int) -> bool:
+    """Is this geometry in the regime where one thread per row beats the packed shape?"""
+    if N < 1 or N > _MAX_NARROW_N:
+        return False
+    chunks = N // tile.vec_size(N, itemsize)
+    for min_rows, budget in _CHUNK_LADDER:
+        if M >= min_rows:
+            return chunks <= budget
+    return False
+
+
+def tma_ok(N: int, itemsize: int, M: int, device=None) -> bool:
+    """Should this geometry stage its load through TMA rather than load direct?"""
+    if itemsize != 4 or N <= 0 or N & (N - 1) or N * itemsize < _TMA_MIN_STRIDE:
+        return False
+    if not narrow_row(N, itemsize, M):
+        return False
+    if device is not None:
+        # This runs before every plan lookup; memoize the ~1.3us device query.
+        from ...cutedsl import hw_caps as _hw
+
+        if _hw.caps(device).cc[0] < 9:
+            return False  # TMA is sm_90+
+    return True
 
 
 class _RowConfig(NamedTuple):
@@ -94,6 +137,7 @@ def reduce_row_tile(
     threads_per_block=None,
     final=True,
     unroll=None,
+    use_tma=None,
 ):
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`."""
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
@@ -115,6 +159,23 @@ def reduce_row_tile(
     threads_per_block -= (
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
+    isz = x.element_size()
+    tma_base_aligned = _L.supported_alignment(x, _TMA_ALIGNMENT) == _TMA_ALIGNMENT
+    tma_stride_bytes = x.stride(0) * isz
+    tma_stride_aligned = tma_stride_bytes % _TMA_ALIGNMENT == 0
+    if use_tma is None:
+        use_tma = (
+            threads_per_row == 1
+            and tma_base_aligned
+            and tma_stride_aligned
+            and tma_ok(N, isz, M, x.device)
+        )
+    elif use_tma and not tma_base_aligned:
+        raise ValueError("TMA requires a 16-byte aligned input")
+    elif use_tma and not tma_stride_aligned:
+        raise ValueError(
+            f"TMA requires a 16-byte aligned row stride, got {tma_stride_bytes} bytes"
+        )
     dt = torch2cute[x.dtype]
     op = tile.TileReduce(
         trait,
@@ -126,6 +187,7 @@ def reduce_row_tile(
         nouts=nouts,
         final=final,
         unroll=unroll,
+        use_tma=use_tma,
     )
 
     # Final projects nouts; stage 1 stores one raw buffer per field.
@@ -133,18 +195,35 @@ def reduce_row_tile(
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
     nchunks = Int32(N // op.vec)
     nwaves = Int32(math.ceil((N // op.vec) / threads_per_row))
-    # Declare alignment to retain wide loads (worth 3x), but narrow it for storage offsets.
-    # Dynamic extents let each kernel serve a vector class.
-    align = _L.supported_alignment(x, tile.align_bytes(N, x.element_size()))
+    # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
+    # outside TMA. Runtime folds share a vector class; TMA bakes its box width.
+    align = (
+        _TMA_ALIGNMENT
+        if use_tma
+        else _L.supported_alignment(x, tile.align_bytes(N, isz))
+    )
 
     def _fake():
-        # Dynamic row-major descriptors preserve vec/alignment; None omits costly column args.
+        # TMA bakes N; runtime folds share a vector class. None omits unused column args.
+        if use_tma:
+            fake_in = cute.runtime.make_fake_tensor(
+                dt,
+                (_L.sym(), N),
+                (
+                    cute.sym_int64(divisibility=_TMA_ALIGNMENT // isz),
+                    1,
+                ),
+                assumed_align=align,
+            )
+        else:
+            fake_in = _L.fake_compact(
+                dt,
+                (_L.sym(), _L.sym(op.vec)),
+                stride_order=(1, 0),
+                align=align,
+            )
         return (
-            [
-                _L.fake_compact(
-                    dt, (_L.sym(), _L.sym(op.vec)), stride_order=(1, 0), align=align
-                )
-            ],
+            [fake_in],
             [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
             nchunks,
             nwaves,
