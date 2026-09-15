@@ -193,15 +193,26 @@ def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
     return res.view(*shape[:-1], -1)
 
 
+_FP8_E4M3_DTYPES = (torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+
+
 def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
     # pull all args, excluding use_fast_accum flag if set.
     A, B, A_scale, B_scale, bias, scale_result, out_dtype = args[:7]
 
-    if A.dtype != torch.float8_e4m3fn:
-        raise AssertionError(f"expected A.dtype float8_e4m3fn, got {A.dtype}")
-    if B.dtype != torch.float8_e4m3fn:
-        raise AssertionError(f"expected B.dtype float8_e4m3fn, got {B.dtype}")
-    # only cuSPARSELt supports float8_e4m3fn currently
+    if A.dtype not in _FP8_E4M3_DTYPES:
+        raise AssertionError(
+            f"expected A.dtype float8_e4m3fn or float8_e4m3fnuz, got {A.dtype}"
+        )
+    if B.dtype not in _FP8_E4M3_DTYPES:
+        raise AssertionError(
+            f"expected B.dtype float8_e4m3fn or float8_e4m3fnuz, got {B.dtype}"
+        )
+    if A.dtype != B.dtype:
+        raise AssertionError(
+            f"expected A and B to have the same dtype, got {A.dtype} and {B.dtype}"
+        )
+    # only cuSPARSELt supports float8_e4m3fn/float8_e4m3fnuz currently
     if not isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT):
         raise AssertionError(
             f"expected SparseSemiStructuredTensorCUSPARSELT, got {type(A).__name__}"

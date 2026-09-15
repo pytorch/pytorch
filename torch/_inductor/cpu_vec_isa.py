@@ -85,6 +85,13 @@ extern "C" void __avx_chk_kernel() {
     # only: the parent puts torch's lib dir on LD_LIBRARY_PATH so the linker
     # resolves libtorch_cpu for the test .so on its own. macOS can't do this --
     # SIP strips DYLD_LIBRARY_PATH from the child -- so it falls back to import.
+    # Some wheels only resolve their native deps once `import torch` has run.
+    # ROCm wheels bundle ROCm libs under unversioned names but keep some
+    # DT_NEEDED refs on the versioned soname (e.g. libamd_comgr.so.3), which
+    # only resolves against the copy torch has already loaded; TheRock-based
+    # wheels preload ROCm libs from separate rocm-sdk packages with no rpath.
+    # So a cold dlopen can fail even though the ISA is fine; retry after
+    # importing torch before giving up (#189194).
     # TODO: extend the no-import path to Windows once its CI build is green
     # enough to validate it.
     _avx_py_load = """
@@ -92,7 +99,13 @@ import sys
 if sys.platform != "linux":
     import torch  # noqa: F401
 from ctypes import cdll
-cdll.LoadLibrary("__lib_path__")
+try:
+    cdll.LoadLibrary("__lib_path__")
+except OSError:
+    if sys.platform != "linux":
+        raise
+    import torch  # noqa: F401
+    cdll.LoadLibrary("__lib_path__")
 """
 
     def bit_width(self) -> int:
@@ -205,7 +218,15 @@ cdll.LoadLibrary("__lib_path__")
             except Exception:
                 return False
 
-            return self._probe_load(output_path)
+            load_ok_marker = output_path + ".load_ok"
+            if os.path.isfile(load_ok_marker):
+                return True
+
+            load_ok = self._probe_load(output_path)
+            if load_ok:
+                with open(load_ok_marker, "w") as f:
+                    f.write("")
+            return load_ok
 
     def __bool__(self) -> bool:
         return self.__bool__impl(config.cpp.vec_isa_ok)
@@ -626,10 +647,9 @@ def valid_vec_isa_list() -> list[VecISA]:
         if (caps.get("sve2", False) or caps.get("sve", False)) and caps.get(
             "bf16", False
         ):
-            if caps.get("sve_max_length") == 128:
-                isa_list.append(VecSVE(128))
-            else:
-                isa_list.append(VecSVE(256))
+            isa = VecSVE(128 if caps.get("sve_max_length") == 128 else 256)
+            if isa:
+                isa_list.append(isa)
         else:
             isa_list.append(VecNEON())
 

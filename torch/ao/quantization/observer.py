@@ -618,7 +618,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
                 \end{cases}\\
         \end{array}
 
-    where :math:`x_\text{min/max}` is the running average min/max, :math:`X` is
+    where :math:`x_\text{min/max}` is the running average min/max, :math:`X`
     is the incoming tensor, and :math:`c` is the ``averaging_constant``.
 
     The scale and zero point are then computed as in

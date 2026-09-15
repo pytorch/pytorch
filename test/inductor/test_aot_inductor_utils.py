@@ -15,6 +15,7 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
+from torch.export.pt2_archive import PT2ArchiveReader, PT2ArchiveWriter
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
@@ -35,6 +36,34 @@ class WrapperModule(torch.nn.Module):
 
 
 class AOTIRunnerUtil:
+    @staticmethod
+    def _run_abicompat_package(package_path, list_example_inputs, rng_state=None):
+        with PT2ArchiveReader(package_path) as reader:
+            names = reader.get_file_names()
+            abicompat_names = [name for name in names if name.endswith("_abicompat.so")]
+            if len(abicompat_names) != 1:
+                raise AssertionError(
+                    f"Expected one ABI-compatible DSO, found {len(abicompat_names)}"
+                )
+            abicompat_name = abicompat_names[0]
+            legacy_name = abicompat_name.removesuffix("_abicompat.so") + ".so"
+            if legacy_name not in names:
+                raise AssertionError(f"ABI-compatible DSO has no peer {legacy_name}")
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                abicompat_package_path = os.path.join(temp_dir, "model.pt2")
+                with PT2ArchiveWriter(abicompat_package_path) as writer:
+                    for name in names:
+                        if name == legacy_name:
+                            continue
+                        output_name = legacy_name if name == abicompat_name else name
+                        writer.write_bytes(output_name, reader.read_bytes(name))
+
+                optimized = torch._inductor.aoti_load_package(abicompat_package_path)
+                if rng_state is not None:
+                    torch.set_rng_state(rng_state)
+                return [optimized(*inputs) for inputs in list_example_inputs]
+
     @staticmethod
     def legacy_compile(
         model,
@@ -187,8 +216,46 @@ class AOTIRunnerUtil:
             inductor_configs=inductor_configs,
             dynamic_shapes=dynamic_shapes,
         )
+        if os.environ.get("AOTI_TEST_USE_ABICOMPAT_DSO") == "1":
+            return AOTIRunnerUtil._run_abicompat_package(
+                package_path, [example_inputs]
+            )[0]
+
         optimized = torch._inductor.aoti_load_package(package_path)
-        return optimized(*example_inputs)
+        with PT2ArchiveReader(package_path) as reader:
+            names = reader.get_file_names()
+            abicompat_names = [name for name in names if name.endswith("_abicompat.so")]
+            if not abicompat_names:
+                device = optimized.get_metadata().get("AOTI_DEVICE_KEY")
+                if (
+                    IS_FBCODE
+                    and device == "cpu"
+                    and any(name.endswith(".wrapper.so") for name in names)
+                ):
+                    raise AssertionError(
+                        "CPU AOTI package is missing its ABI-compatible DSO"
+                    )
+                return optimized(*example_inputs)
+
+            if len(abicompat_names) != 1:
+                raise AssertionError(
+                    f"Expected one ABI-compatible DSO, found {len(abicompat_names)}"
+                )
+            abicompat_name = abicompat_names[0]
+            legacy_name = abicompat_name.removesuffix("_abicompat.so") + ".so"
+            if legacy_name not in names:
+                raise AssertionError(f"ABI-compatible DSO has no peer {legacy_name}")
+
+            abicompat_inputs = copy.deepcopy(example_inputs)
+            rng_state = torch.get_rng_state()
+            legacy_result = optimized(*example_inputs)
+            abicompat_result = AOTIRunnerUtil._run_abicompat_package(
+                package_path, [abicompat_inputs], rng_state
+            )[0]
+
+        if not same(legacy_result, abicompat_result):
+            raise AssertionError("libstdc++ and libc++ AOTI results differ")
+        return legacy_result
 
     @staticmethod
     def run_multiple(
@@ -203,6 +270,11 @@ class AOTIRunnerUtil:
             inductor_configs=inductor_configs,
             dynamic_shapes=dynamic_shapes,
         )
+        if os.environ.get("AOTI_TEST_USE_ABICOMPAT_DSO") == "1":
+            return AOTIRunnerUtil._run_abicompat_package(
+                package_path, list_example_inputs
+            )
+
         optimized = torch._inductor.aoti_load_package(package_path)
         list_output_tensors = []
         for example_inputs in list_example_inputs:

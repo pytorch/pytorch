@@ -1116,6 +1116,65 @@ In a similar way where ``__torch_function__`` is able to interpose on all of tor
 Most of these functions are defined in ``native_functions.yaml`` which specifies the properties of these functions as well as their backend implementation. Their implementation alongside specified features are then automatically registered via codegen.
 Some more exotic functions or features are also registered in other places in the C++ codebase or in user-defined C++ extensions.
 
+(python-number-overload-resolution)=
+
+### Python argument binding and dispatcher overloads
+
+The Python binding selects an operator overload before the dispatcher selects
+feature and backend keys. For built-in operators, code generation groups the
+available schemas into Python signatures and orders otherwise-equivalent
+``Tensor`` signatures before ``Scalar`` signatures. This ordering is independent
+of the order in which the schemas appear in ``native_functions.yaml``.
+
+A Python number normally matches a ``Scalar`` parameter, while a
+{class}`Tensor` matches a ``Tensor`` parameter. For example, the generated
+binding for ``clamp_min`` exposes these signatures in this order:
+
+```text
+clamp_min(Tensor input, Tensor min)
+clamp_min(Tensor input, Scalar min)
+```
+
+The first signature rejects a Python number, so ``torch.clamp_min(x, 1.0)``
+selects ``aten::clamp_min(Tensor, Scalar)``. In contrast,
+``torch.clamp_min(x, torch.tensor(1.0))`` selects
+``aten::clamp_min.Tensor(Tensor, Tensor)``. After the binding selects a
+signature, it converts the arguments according to that signature and calls the
+corresponding dispatcher overload. The dispatcher does not reconsider the
+Scalar-versus-Tensor choice based on argument values.
+
+As a compatibility exception, the Python argument parser allows numbers to
+match ``Tensor`` parameters for the following operator names:
+
+- ``add``, ``sub``, ``mul``, ``div``, and their in-place and ``out`` variants;
+- the ``subtract``, ``multiply``, ``divide``, and ``true_divide`` aliases and
+  their in-place and ``out`` variants;
+- ``floor_divide`` and its in-place and ``out`` variants;
+- ``to``, ``_to_copy``, ``copy``, and ``copy_``; and
+- ``_conj``.
+
+For these names, the Tensor signature is tried first and accepts a Python
+number. The binding converts the number with ``scalar_to_tensor`` into a
+zero-dimensional Tensor and marks it as a wrapped number. This is a temporary,
+name-based compatibility allowlist, not the default conversion rule for Tensor
+parameters.
+
+Wrapped numbers are also important when an operation runs on an accelerator.
+Kernels can extract their value and pass it as a kernel argument, just as they
+do for a Scalar, without transferring a Tensor between devices. Naively moving
+a CPU scalar Tensor to the accelerator before using it would introduce a
+blocking CPU-to-accelerator copy for a value that can instead be passed directly.
+
+The distinction matters when schemas have different semantics. A ``Scalar``
+argument is a fixed parameter, whereas a zero-dimensional Tensor is still a
+Tensor argument. Custom operator schemas, including schemas inferred from
+{func}`torch.library.custom_op`, should therefore use ``Scalar`` for Python
+numbers that are parameters and ``Tensor`` for values that belong to the
+operator's Tensor input space. Reordering overload declarations does not change
+this distinction, and adding an operator to the number-as-Tensor allowlist can
+cause a Python number to select the Tensor overload instead of the Scalar
+overload.
+
 It is also possible to add `new` native functions using {mod}`torch.library`. This Python feature allows defining and/or adding new implementations to native functions. This can be used to add missing kernels, replace existing ones or define brand new native functions.
 
 You can find many examples of ``__torch_dispatch__``-based subclasses in the [subclass zoo](https://github.com/albanD/subclass_zoo) repo.
