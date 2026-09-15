@@ -468,6 +468,92 @@ else:
         with self.assertRaises(ValueError):
             opt_fn()
 
+    def test_random_object_draws_advance_input_state(self):
+        # A cache hit must draw from the input object's live state rather
+        # than replay the trace-time snapshot (and must advance that state).
+        def fn(x, rng):
+            return x + rng.randint(1, 100)
+
+        shapes = ([1], [1, 5], [2, 2], [2, 3])
+
+        def run(f):
+            rng = random.Random(123456)
+            outs = [f(torch.zeros(s), rng).flatten()[0].item() for s in shapes]
+            return outs, rng.getstate()
+
+        ref, ref_state = run(fn)
+        for fullgraph in (False, True):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=fullgraph)
+            res, res_state = run(opt_fn)
+            self.assertEqual(res, ref)
+            self.assertEqual(res_state, ref_state)
+            self.assertLess(cnt.frame_count, len(shapes))
+
+    def test_random_object_alternating_instances(self):
+        def fn(x, rng):
+            return x.sum() + rng.random()
+
+        def run(f):
+            r1, r2 = random.Random(1), random.Random(2)
+            outs = [f(torch.ones(2), r).item() for r in (r1, r2, r1, r2)]
+            return outs, r1.getstate(), r2.getstate()
+
+        ref = run(fn)
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        res = run(torch.compile(fn, backend=cnt))
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_random_object_mixed_with_global_draws(self):
+        # Module-level and instance draws in one frame must interleave in
+        # program order on a cache hit.
+        def fn(x, rng):
+            a = random.randint(1, 100)
+            b = rng.randint(1, 100)
+            c = random.uniform(0, 1)
+            d = rng.random()
+            return x + a + b + c + d
+
+        shapes = ([1], [1, 5], [2, 2], [2, 3])
+
+        def run(f):
+            random.seed(7)
+            rng = random.Random(11)
+            outs = [f(torch.zeros(s), rng).flatten()[0].item() for s in shapes]
+            return outs, random.getstate(), rng.getstate()
+
+        ref = run(fn)
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True)
+        # Warm up so compile-time draws do not perturb the measured run.
+        run(opt_fn)
+        frame_count = cnt.frame_count
+        res = run(opt_fn)
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, frame_count)
+
+    def test_random_object_draws_across_graph_break(self):
+        def fn(x, rng):
+            x = x + rng.randint(1, 100)
+            torch._dynamo.graph_break()
+            return x + rng.randint(1, 100)
+
+        def run(f):
+            rng = random.Random(5)
+            outs = [f(torch.zeros(3), rng).sum().item() for _ in range(3)]
+            return outs, rng.getstate()
+
+        ref = run(fn)
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        res = run(torch.compile(fn, backend=cnt))
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_random_module_shuffle_sample(self):
         # Module-level random.shuffle/random.sample must trace under fullgraph
         # (exercised by the CPython dict/list tests). Like an explicit Random

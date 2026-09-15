@@ -2139,6 +2139,12 @@ def _codegen_random_mutation(ctx: SideEffectReplayContext) -> None:
     if not isinstance(var, variables.RandomVariable):
         raise AssertionError(type(var))
 
+    if not var.state_baked:
+        # Draws replayed on the runtime object already advanced its state;
+        # the trace-time snapshot would clobber it.
+        ctx.log(var)
+        return
+
     def gen_fn() -> None:
         cg(var.source)  # type: ignore[attr-defined]
         cg.load_attr("setstate")

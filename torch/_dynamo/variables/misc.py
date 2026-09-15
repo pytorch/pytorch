@@ -91,7 +91,12 @@ from .base import (
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .object_protocol import generic_str
-from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
+from .user_defined import (
+    call_random_fn,
+    is_standard_setattr,
+    RandomCallOnSource,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -2979,6 +2984,7 @@ class RandomVariable(VariableTracker):
 
     _nonvar_fields = {
         "random",
+        "state_baked",
         *VariableTracker._nonvar_fields,
     }
 
@@ -3006,6 +3012,14 @@ class RandomVariable(VariableTracker):
         else:
             seed = seed.as_python_constant() if seed is not None else None
             self.random = random.Random(seed)
+        # True once draws replay from a trace-time snapshot and the final
+        # state is written back via setstate: sourceless construction and
+        # seed/setstate pin that snapshot to trace-time constants, while
+        # shuffle/sample on a sourced object bake the state observed at
+        # trace time, which is stale on cache hits (see shuffle). While
+        # False, draws on a sourced object replay on the live runtime object
+        # so they read and advance its actual state.
+        self.state_baked = self.source is None
 
     def python_type(self) -> type[random.Random]:
         return random.Random
@@ -3079,6 +3093,7 @@ class RandomVariable(VariableTracker):
             *[x.as_python_constant() for x in args],
             **{key: val.as_python_constant() for key, val in kwargs.items()},
         )
+        self.state_baked = True
         return variables.ConstantVariable.create(None)
 
     def getstate(
@@ -3097,6 +3112,7 @@ class RandomVariable(VariableTracker):
     ) -> VariableTracker:
         tx.output.side_effects.mutation(self)
         self.random.setstate(self.unwrap_state(args[0]))
+        self.state_baked = True
         return variables.ConstantVariable.create(None)
 
     def shuffle(
@@ -3115,6 +3131,11 @@ class RandomVariable(VariableTracker):
         # both advance the symbolic RNG and obtain the permutation to apply.
         if not hasattr(seq, "items"):
             raise AssertionError("shuffle only supports ListVariable and TupleVariable")
+        # For a sourced object this bakes the trace-time state snapshot, which
+        # is stale on cache hits (pre-existing limitation): the permutation
+        # shapes the traced program, so live replay would need state guards or
+        # a runtime-computed permutation.
+        self.state_baked = True
         perm = list(range(len(seq.items)))
         self.random.shuffle(perm)
         tx.output.side_effects.mutation(seq)
@@ -3141,6 +3162,8 @@ class RandomVariable(VariableTracker):
         # Like shuffle, sample's selected positions depend only on the
         # population length and RNG state, so sample over an index range to
         # advance the symbolic RNG and pick the population elements to keep.
+        # Same trace-time state bake and cache-hit staleness as shuffle.
+        self.state_baked = True
         indices = self.random.sample(range(len(elems)), k)
         return variables.ListVariable(
             [elems[i] for i in indices],
@@ -3149,6 +3172,12 @@ class RandomVariable(VariableTracker):
 
     def _call_random(self, tx, name, args, kwargs):
         tx.output.side_effects.mutation(self)
+        if self.source is not None and not self.state_baked:
+            # The incoming state is unknown at trace time, so replay the draw
+            # on the runtime object. The trace-time shadow still advances via
+            # the example value so a later shuffle/sample stays consistent.
+            replay = RandomCallOnSource(self.source, name)
+            return call_random_fn(tx, getattr(self.random, name), args, kwargs, replay)
         state = self.random.getstate()
 
         def call_random_meth(*args: Any, **kwargs: Any) -> Any:
