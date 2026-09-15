@@ -2,7 +2,7 @@
 import functools
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch._dynamo.utils import counters
@@ -21,7 +21,7 @@ from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config as inductor_config, distributed_autotune, lowering as L
+from .. import config as inductor_config, distributed_autotune, ir, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
@@ -38,6 +38,7 @@ from ..lowering import (
     register_lowering,
     transform_args,
 )
+from ..runtime.hints import DeviceProperties
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -65,7 +66,12 @@ from ..utils import (
     use_triton_template,
     use_triton_tma_template,
 )
-from .decompose_k import decompose_k_subgraph_template
+from .decompose_k import (
+    cat2_decompose_k_whole_plan_template,
+    decompose_k_subgraph_template,
+    get_blackwell_decompose_k_candidates,
+    get_cat2_fp32_prologue_sources,
+)
 from .mm_common import (
     _fits_int32_buffer_span,
     _is_static_problem,
@@ -422,6 +428,14 @@ addmm_contiguous_subgraph_template = ContiguousTemplate(
 )
 
 
+def _is_single_use_mm_rhs() -> bool:
+    current_node = V.graph.current_node
+    if current_node is None or len(current_node.args) < 2:
+        return False
+    rhs = current_node.args[1]
+    return isinstance(rhs, torch.fx.Node) and len(rhs.users) == 1
+
+
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
@@ -506,6 +520,65 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
     # Create MMKernelInputs for standard MM at the top
     kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=out_dtype)
+
+    cat2_source_names = get_cat2_fp32_prologue_sources(mat2)
+    decompose_k_backends = OrderedSet(
+        backend.strip().upper()
+        for backend in inductor_config.triton.decompose_k_bmm_backends.split(",")
+    )
+    if (
+        out_dtype is None
+        and inductor_config.triton.enable_blackwell_decompose_k_producer_selection
+        and inductor_config.triton.max_triton_decompose_k_fusion_choices > 0
+        and static_shape
+        and is_nonzero
+        and _is_single_use_mm_rhs()
+        and cat2_source_names is not None
+        and use_aten_gemm_kernels()
+        and "TRITON" in decompose_k_backends
+        and use_decompose_k_choice(m, n, k)
+        and use_triton_blackwell_tma_template(
+            mat1, mat2, output_layout=layout, add_guards=True
+        )
+    ):
+        m_hint, n_hint, k_hint = V.graph.sizevars.guard_int_seq((m, n, k))
+        device_properties = DeviceProperties.create(layout.device)
+        triton_candidates = get_blackwell_decompose_k_candidates(
+            m_hint,
+            n_hint,
+            k_hint,
+            device_properties.multi_processor_count,
+            max_choices=inductor_config.triton.max_triton_decompose_k_fusion_choices,
+        )
+        source_nodes = [
+            ir.TensorBox.create(V.graph.get_buffer(name)) for name in cat2_source_names
+        ]
+        whole_plan_inputs = cast(list[Buffer], [mat1, *source_nodes])
+        whole_plan_choices: list[ChoiceCaller] = [
+            cat2_decompose_k_whole_plan_template.generate(
+                input_nodes=whole_plan_inputs,
+                layout=layout,
+            )
+        ]
+
+        whole_plan_choices.extend(
+            cat2_decompose_k_whole_plan_template.generate(
+                input_nodes=whole_plan_inputs,
+                layout=layout,
+                k_split=k_split,
+                bmm_config_index=config_index,
+            )
+            for config_index, k_split in triton_candidates
+        )
+        return ir.TensorBox.create(
+            ir.MultiSubgraphBuffer(
+                layout,
+                whole_plan_inputs,
+                whole_plan_choices,
+                "mm_cat2_decompose_k_whole_plan",
+                benchmark_with_cudagraphs=True,
+            )
+        )
 
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.mm_{m}_{n}_{k}"] += 1

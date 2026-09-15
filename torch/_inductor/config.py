@@ -2324,6 +2324,21 @@ class triton:
         os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K", "0") == "1"
     )
 
+    # Benchmark complete materialized and producer-fused Triton decompose-K
+    # plans. Initially supported producer contracts remain separately guarded
+    # by their lowering legality checks.
+    enable_blackwell_decompose_k_producer_selection = (
+        os.environ.get(
+            "TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K_PRODUCER_SELECTION", "0"
+        )
+        == "1"
+    )
+
+    # Maximum number of fused whole-plan choices for Triton decompose-K.
+    max_triton_decompose_k_fusion_choices = int(
+        os.environ.get("TORCHINDUCTOR_MAX_TRITON_DECOMPOSE_K_FUSION_CHOICES", "2")
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.

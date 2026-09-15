@@ -9807,8 +9807,13 @@ class Scheduler:
         # allowing gathers by allowing increasing write_bytes by small factor
         # TODO - make configurable per input, for instance, bias can fuse fp32 -> fp16 profitably
 
-        BYTES_THRESHOLD_MULTIPLIER = 1.1
-        if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
+        template_buf = template_node.get_template_node_or_throw()
+        bytes_threshold_multiplier = template_buf.annotations.get(
+            "prologue_fusion_max_input_bytes_to_output_ratio", 1.1
+        )
+        if not isinstance(bytes_threshold_multiplier, (int, float)):
+            raise AssertionError("prologue fusion byte ratio must be numeric")
+        if read_bytes > (write_bytes * float(bytes_threshold_multiplier)):
             why("prologue fusion will not increase amount of bytes read in kernel")
             return False
 
