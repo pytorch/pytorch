@@ -82,6 +82,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     IS_X86,
+    lazy_skip_if,
     load_tests,
     MI350_ARCH,
     parametrize,
@@ -6146,7 +6147,10 @@ with torch.cuda.graph(g):
             self.assertEqual(rc, "3")
 
     @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
-    @skipIfRocmVersionAtLeast([7, 14])
+    @lazy_skip_if(
+        lambda: TEST_WITH_ROCM and (7, 14) <= getRocmVersion() < (10, 2),
+        "rocprofiler-sdk visibility conflict in ROCm 7.14 through 10.1",
+    )
     def test_hip_device_count(self):
         """Validate device_count works with both CUDA/HIP visible devices"""
         test_script = """\
