@@ -42,6 +42,28 @@ Add `--cuda-graph` to capture one write and one read and benchmark graph
 replay. The `ibverbs` backend also needs `"cuda_graph":true` in each rank's
 options to select GPUNetIO.
 
+## Concurrent GPU/NIC pairs
+
+Use an even number of ranks. Adjacent ranks form independent pairs: 0 writes
+to and reads from 1, 2 accesses 3, and so on. Each local rank uses its matching
+CUDA device. Assign a distinct GPU-local NIC to each rank; `--interfaces`
+selects counters, while backend options or environment variables select the
+transport's NIC.
+
+Each size validates writes and reads on every pair. `write.pairs` and
+`read.pairs` report median latency, payload rate, and both NIC counters.
+`aggregate_bandwidth_gbps` divides total payload by the slowest rank's
+barrier-delimited phase duration, including synchronization overhead; it does
+not sum rates derived from independent medians. The original top-level
+latency and bandwidth fields describe the first pair.
+
+`--minimum-line-rate 0` records results without enforcing a performance floor.
+A nonzero threshold checks aggregate capacity and every pair's payload and
+physical NIC rates. Measurements include Python dispatch and CUDA stream
+synchronization; they exclude allocation, registration, descriptor exchange,
+warmup, and validation. Each pair has one outstanding synchronous transfer.
+Run benchmarks sequentially on idle GPUs and NICs.
+
 ## UCXX transports
 
 The PyPI wheels support TCP. On two standard hosts, force TCP so UCX does not
