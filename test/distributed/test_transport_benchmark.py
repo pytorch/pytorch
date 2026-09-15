@@ -183,7 +183,7 @@ class TestTransportBenchmark(TestCase):
         ):
             benchmark.parse_args(["--backend", "ibverbs", "--one-way-connect"])
 
-    @parametrize("backend", ["nixl", "ucxx"])
+    @parametrize("backend", ["mooncake", "nixl", "ucxx"])
     def test_one_way_connect(self, backend):
         args = benchmark.parse_args(["--backend", backend, "--one-way-connect"])
         self.assertTrue(args.one_way_connect)

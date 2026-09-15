@@ -8,6 +8,7 @@ Install the optional backend package matching the operation:
 
 ```bash
 uv pip install "ibverbs[gpunetio-triton]"
+uv pip install mooncake-transfer-engine  # use mooncake-transfer-engine-cuda13 with CUDA 13
 uv pip install nixl
 uv pip install "ucxx-cu12==0.51.1"  # use ucxx-cu13 with CUDA 13
 ```
@@ -42,6 +43,32 @@ address, such as isolated network namespaces.
 Add `--cuda-graph` to capture one write and one read and benchmark graph
 replay. The `ibverbs` backend also needs `"cuda_graph":true` in each rank's
 options to select GPUNetIO.
+
+## Mooncake transport
+
+The Mooncake adapter uses Transfer Engine with P2P metadata exchange; no metadata
+server is required. Set each rank's reachable `host` and optional RDMA
+`device_name` through `--options`:
+
+```bash
+torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+  --master-addr="$MASTER_ADDR" --master-port=29500 \
+  benchmarks/distributed/transport/benchmark.py \
+  --backend mooncake --device cpu --interfaces "$INTERFACE" --rdma-counters \
+  --options="{\"host\":\"$LOCAL_IP\",\"device_name\":\"$HCA\"}"
+```
+
+Set `MC_USE_IPV6=1` on both ranks when `host` uses IPv6.
+
+Use `--device cuda` for GPU memory. Transfers synchronize the local CUDA stream
+and complete before returning; CUDA graph capture is unsupported. Peers must
+finish accessing exposed buffers before exchanging descriptors or starting
+transfers. Keep registered allocations unchanged until the transport closes.
+Without `nvidia_peermem`, set `WITH_NVIDIA_PEERMEM=0` to use DMA-BUF registration.
+
+For CPU TCP testing, set `MC_FORCE_TCP=1`, pass `"protocol":"tcp"` in `--options`,
+and omit `--rdma-counters`. Mooncake may otherwise auto-select RDMA even when
+`protocol` is `"tcp"`. `MC_TRANSFER_TIMEOUT` controls Mooncake's transfer timeout.
 
 ## NIXL transport
 
@@ -80,10 +107,21 @@ uv run --no-sync python -m torch.distributed.run --standalone --nproc-per-node=4
   --sizes 8,4096,1048576,16777216,67108864,268435456 \
   --warmup 20 --iterations 100 --output nixl-4gpu.json
 
+env -u MC_FORCE_TCP -u MC_INTRANODE_NVLINK -u MC_FORCE_MNNVL \
+MC_USE_IPV6=1 MC_GID_INDEX=3 WITH_NVIDIA_PEERMEM=0 \
+uv run --no-sync python -m torch.distributed.run --standalone --nproc-per-node=4 \
+  benchmarks/distributed/transport/benchmark.py \
+  --backend mooncake --device cuda --interfaces beth3,beth4,beth0,beth1 \
+  --options '[{"host":"::1","device_name":"mlx5_0"},{"host":"::1","device_name":"mlx5_3"},{"host":"::1","device_name":"mlx5_4"},{"host":"::1","device_name":"mlx5_5"}]' \
+  --rdma-counters --one-way-connect --minimum-line-rate 0 \
+  --sizes 8,4096,1048576,16777216,67108864,268435456 \
+  --warmup 20 --iterations 100 --output mooncake-4gpu.json
 ```
 
 NIXL's `cuda_copy` enables CUDA memory support; excluding `cuda_ipc` and shared
-memory forces inter-rank transfers through RDMA.
+memory forces inter-rank transfers through RDMA. Mooncake's force variables
+must be unset: setting them to `0` still enables them. Loopback addresses above
+carry Mooncake metadata only; its payload uses the selected HCAs.
 
 NIXL 1.4.1 wheels can conflict with system verbs providers' `libnl-route` at
 process exit. If the backtrace ends in `rtnl_tc_unregister`, use this worker
@@ -216,16 +254,17 @@ Omit `cuda_copy` for CPU-only runs. If `nvidia_peermem` is unavailable, add
 `UCX_RNDV_SCHEME=get_ppln`; CUDA then stages through host memory.
 `UCX_PROTO_INFO=y` reports the selected lanes.
 
-## NIXL GPU scaling report
+## NIXL and Mooncake GPU scaling report
 
 Measured 2026-09-15 on one host with eight H100 80 GB GPUs and eight 400 Gb/s
-ConnectX-7 ports, using CUDA 13.0 and NIXL 1.4.1 with bundled UCX 1.22.0.
-GPU0 through GPU7 used
+ConnectX-7 ports, using CUDA 13.0, NIXL 1.4.1 with bundled UCX 1.22.0, and
+`mooncake-transfer-engine-cuda13` 0.3.13.post1. GPU0 through GPU7 used
 `mlx5_0,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_9,mlx5_10,mlx5_11`, respectively;
 their interfaces were `beth3,beth4,beth0,beth1,beth2,beth5,beth6,beth7`.
 
 Runs used adjacent GPU pairs, one NIC per GPU, and the RDMA settings and
-netlink worker above. CUDA allocations used the default allocator. NIXL transferred
+netlink worker above. CUDA allocations used the default allocator; Mooncake
+used DMA-BUF registration without `nvidia_peermem`. Both backends transferred
 GPU buffers through the physical NICs. Each transfer uses one NIC at each
 endpoint; independent pairs run concurrently.
 
@@ -240,11 +279,14 @@ one-direction payload capacity.
 | NIXL | 2 | 382.0 | 301.1 | 385.3 | 303.6 |
 | NIXL | 4 | 762.2 | 600.9 | 769.8 | 606.8 |
 | NIXL | 8 | 1525.2 | 1202.8 | 1540.1 | 1214.3 |
+| Mooncake | 2 | 312.0 | 312.8 | 317.0 | 317.2 |
+| Mooncake | 4 | 612.1 | 610.0 | 629.9 | 631.8 |
+| Mooncake | 8 | 1139.2 | 1157.0 | 1192.9 | 1194.0 |
 
-Every pair passed payload validation in all nine runs. Sender and receiver
+Every pair passed payload validation in all 18 runs. Sender and receiver
 RDMA byte counters matched for every active NIC. At eight GPUs and 256 MiB,
-NIXL reached 96% write and 76% read utilization. These measurements cover the
-synchronous transport adapter with
+NIXL reached 96% write and 76% read utilization; Mooncake reached 75% in both
+directions. These measurements cover the synchronous transport adapters with
 default backend concurrency settings.
 
 ## Earlier backend benchmark report
