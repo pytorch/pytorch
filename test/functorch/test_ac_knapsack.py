@@ -1,4 +1,6 @@
 # Owner(s): ["module: functorch"]
+import networkx as nx
+
 from torch._functorch._activation_checkpointing.graph_info_provider import (
     GraphInfoProvider,
 )
@@ -252,6 +254,61 @@ class TestKnapsackEvaluator(TestCase):
         self.assertEqual(result["peak_memory"], 0.5)
         self.assertEqual(result["recomputation_runtime"], 101.0)
 
+    def test_evaluate_knapsack_output_accounting_for_backward_pass_with_saved_predecessor(
+        self,
+    ):
+        saved_nodes_idxs = [1]
+        recomputable_node_idxs = [0, 2]
+        result = self.knapsack_evaluator.evaluate_knapsack_output(
+            saved_nodes_idxs=saved_nodes_idxs,
+            recomputable_node_idxs=recomputable_node_idxs,
+            account_for_backward_pass=True,
+        )
+        self.assertAlmostEqual(result["peak_memory"], 0.4)
+
+    def test_get_backward_memory_from_topologically_sorted_graph_with_saved_branching_predecessor(
+        self,
+    ):
+        node_graph = nx.DiGraph(
+            [
+                ("node1", "node2"),
+                ("node1", "node3"),
+                ("node2", "node5"),
+                ("node3", "node5"),
+            ]
+        )
+        node_memories = {
+            "node1": 0.1,
+            "node2": 0.2,
+            "node3": 0.2,
+            "node5": 0.2,
+        }
+        saved_nodes_set = {"node2"}
+        peak_memory_after_forward_pass = 0.2
+
+        result = self.knapsack_evaluator._get_backward_memory_from_topologically_sorted_graph(
+            node_graph=node_graph,
+            node_memories=node_memories,
+            saved_nodes_set=saved_nodes_set,
+            peak_memory_after_forward_pass=peak_memory_after_forward_pass,
+        )
+
+        expected_result = [
+            (0.2, "Initial Peak/Current Memory"),
+            (0.4, "Recomputing Node: node5"),
+            (0.6, "Recomputing Predecessor of node5: node3"),
+            (0.7, "Recomputing Predecessor of node5: node1"),
+            (0.5, "Dropping Node: node5"),
+            (0.3, "Dropping Node(already saved): node3"),
+            (0.1, "Dropping Node(already saved): node2"),
+            (0.0, "Dropping Node(already saved): node1"),
+        ]
+
+        self.assertEqual(len(result), len(expected_result))
+        for result_item, expected_result_item in zip(result, expected_result):
+            self.assertAlmostEqual(result_item[0], expected_result_item[0])
+            self.assertEqual(result_item[1], expected_result_item[1])
+
     def test_evaluate_knapsack_output_with_wrong_sized_values(self):
         saved_nodes_idxs = [0]
         recomputable_node_idxs = [1]
@@ -324,10 +381,70 @@ class TestKnapsackEvaluator(TestCase):
             (0.1, "Dropping Node(already saved): node2"),
             (0.0, "Dropping Node(already saved): node1"),
         ]
-        print(result, expected_result)
         for result_item, expected_result_item in zip(result, expected_result):
             self.assertAlmostEqual(result_item[0], expected_result_item[0])
             self.assertEqual(result_item[1], expected_result_item[1])
+
+    def test_get_backward_memory_from_topologically_sorted_graph_with_saved_predecessor(
+        self,
+    ):
+        saved_nodes_set = {"node2"}
+        peak_memory_after_forward_pass = 0.2
+
+        result = self.knapsack_evaluator._get_backward_memory_from_topologically_sorted_graph(
+            node_graph=self.graph_info_provider.recomputable_node_only_graph_with_larger_graph_context,
+            node_memories=self.graph_info_provider.all_node_memories,
+            saved_nodes_set=saved_nodes_set,
+            peak_memory_after_forward_pass=peak_memory_after_forward_pass,
+        )
+
+        events = [event for _, event in result]
+
+        recomputed_saved_nodes = [
+            event
+            for event in events
+            if event.startswith("Recomputing Predecessor")
+            and event.rsplit(": ", 1)[-1] in saved_nodes_set
+        ]
+        self.assertEqual(recomputed_saved_nodes, [])
+
+        self.assertIn("Recomputing Node: node1", events)
+        self.assertNotIn("Recomputing Predecessor of node5: node1", events)
+
+        expected_final_memory = peak_memory_after_forward_pass - sum(
+            self.graph_info_provider.all_node_memories[node] for node in saved_nodes_set
+        )
+        self.assertAlmostEqual(result[-1][0], expected_final_memory)
+        self.assertAlmostEqual(max(memory for memory, _ in result), 0.4)
+
+    def test_get_backward_memory_from_topologically_sorted_graph_with_multiple_saved_nodes(
+        self,
+    ):
+        saved_nodes_set = {"node1", "node2"}
+        peak_memory_after_forward_pass = 0.3
+
+        result = self.knapsack_evaluator._get_backward_memory_from_topologically_sorted_graph(
+            node_graph=self.graph_info_provider.recomputable_node_only_graph_with_larger_graph_context,
+            node_memories=self.graph_info_provider.all_node_memories,
+            saved_nodes_set=saved_nodes_set,
+            peak_memory_after_forward_pass=peak_memory_after_forward_pass,
+        )
+
+        events = [event for _, event in result]
+
+        recomputed_saved_nodes = [
+            event
+            for event in events
+            if event.startswith("Recomputing Predecessor")
+            and event.rsplit(": ", 1)[-1] in saved_nodes_set
+        ]
+        self.assertEqual(recomputed_saved_nodes, [])
+
+        expected_final_memory = peak_memory_after_forward_pass - sum(
+            self.graph_info_provider.all_node_memories[node] for node in saved_nodes_set
+        )
+        self.assertAlmostEqual(result[-1][0], expected_final_memory)
+        self.assertAlmostEqual(max(memory for memory, _ in result), 0.5)
 
 
 class TestActivationCheckpointingKnapsack(TestCase):
