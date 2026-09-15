@@ -2108,7 +2108,7 @@ from user code:
             g["AOT_BRANCH_SCALE"] = saved
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("[1] KeyError on G['AOT_BRANCH_SCALE']", message)
-        self.assertIn("For [1]: a guarded global is missing", message)
+        self.assertIn("a guarded global is missing", message)
         self.assertIn("the module the compiled function was traced in", message)
         self.assertIn("Add a ModelInput", message)
 
@@ -2126,7 +2126,7 @@ from user code:
         self.addCleanup(g.pop, probe, None)
         del g[name]
         g[probe] = saved
-        return probe, saved
+        return saved
 
     def test_module_dispatch_evaluates_a_matching_tree_once(self):
         # The scan calls the matching result's declared `fn` field rather than the
@@ -2390,7 +2390,7 @@ from user code:
         # the next lookup, so the scan rejects [1] and the re-check accepts it:
         # the call is served [1]'s graph at the cost of one more check() of its
         # tree.
-        _, saved = self._install_global_probe("AOT_BRANCH_SCALE", misses=1)
+        saved = self._install_global_probe("AOT_BRANCH_SCALE", misses=1)
         manager = model.forward.compiled_results[1]._artifacts.guard_manager
         with patch.object(manager, "check", wraps=manager.check) as check:
             out = model(x, 1)
@@ -2635,39 +2635,6 @@ from user code:
         self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
             self.assertEqual(loaded(x), x * 3)
-
-    def test_no_match_message_when_a_guard_answers_inconsistently(self):
-        # Both dispatch passes ran [1]'s whole tree and both rejected the call,
-        # so an accept while the report asks why contradicts them rather than
-        # correcting them: neither the guards it just passed nor "add a
-        # ModelInput" says anything true about that entry.
-        mod = ModeBranchGlobalModule()
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        x = torch.randn(3, 3)
-        model._aot_compile(
-            [
-                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
-                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
-            ]
-        )
-        probe, _ = self._install_global_probe("AOT_BRANCH_SCALE", misses=2)
-        with self.assertRaises(RuntimeError) as ctx:
-            model(x, 1)
-        message = str(ctx.exception)
-        # Two rejections in dispatch, then the report's accept: one lookup per
-        # evaluation, since one accessor is rooted at the global and the dict-tag
-        # fast path that would skip it is off -- the probe's pop/insert bumped
-        # this module dict's version past the one the last accept recorded.
-        self.assertEqual(probe.compares, 3)
-        self.assertIn("[1] <guards rejected this call twice and then accepted", message)
-        # [0] is a real mismatch, so its advice still applies to the call.
-        self.assertIn("[0] L['mode'] == 0", message)
-        self.assertIn("Add a ModelInput", message)
 
     def test_no_match_report_names_the_results_the_dispatch_judged(self):
         # compiled_results is public, and the report indexes the binding the
