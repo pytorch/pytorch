@@ -2,6 +2,7 @@
 import contextlib
 import functools
 from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,6 +24,7 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     validate_subgraph_args_types,
 )
+from torch._library.effects import EffectType
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -30,6 +32,31 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+
+
+def _validate_num_effect_tokens(num_effect_tokens, num_carries=None):
+    if type(num_effect_tokens) is not int or num_effect_tokens not in (0, 1):
+        raise ValueError("num_effect_tokens must be 0 or 1")
+    if num_carries is not None and num_effect_tokens > num_carries:
+        raise ValueError("effect token is missing from carried_inputs")
+
+
+def _graph_has_effects(gm):
+    from torch._higher_order_ops.effects import has_effects, with_effects
+
+    for submodule in gm.modules():
+        if not isinstance(submodule, torch.fx.GraphModule):
+            continue
+        for node in submodule.graph.nodes:
+            if node.op != "call_function":
+                continue
+            nested_tokens = 0
+            if node.target in (while_loop_op, while_loop_stack_output_op):
+                nested_tokens = node.kwargs.get("num_effect_tokens", 0)
+                _validate_num_effect_tokens(nested_tokens)
+            if nested_tokens or node.target is with_effects or has_effects(node.target):
+                return True
+    return False
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -45,6 +72,7 @@ class WhileLoopOp(HigherOrderOperator):
         /,
         *,
         mutated_arg_indices: str = "",
+        num_effect_tokens: int = 0,
     ):
         if not isinstance(carried_inputs, (tuple, list)):
             raise RuntimeError(
@@ -55,11 +83,21 @@ class WhileLoopOp(HigherOrderOperator):
                 f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
             )
 
+        _validate_num_effect_tokens(num_effect_tokens, len(carried_inputs))
+        if num_effect_tokens and carried_inputs[0] is None:
+            raise NotImplementedError(
+                "the leading effect-token carry of this while_loop is None, "
+                "which means the compiling backend keeps effect tokens lifted "
+                "(unlift_effect_tokens=False); effectful torch.while_loop "
+                "requires an effect-token-unlifting backend such as inductor"
+            )
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if mutated_arg_indices:
             kwargs["mutated_arg_indices"] = mutated_arg_indices
+        if num_effect_tokens:
+            kwargs["num_effect_tokens"] = num_effect_tokens
         # pyrefly: ignore [missing-attribute]
         return super().__call__(
             cond_fn,
@@ -77,10 +115,12 @@ class WhileLoopOp(HigherOrderOperator):
         carried_inputs,
         additional_inputs,
         mutated_arg_indices="",
+        num_effect_tokens=0,
     ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
 
+        _validate_num_effect_tokens(num_effect_tokens, len(carried_inputs))
         all_inputs = carried_inputs + additional_inputs
 
         cond_gm: torch.fx.GraphModule = (
@@ -265,6 +305,7 @@ def while_loop_dense(
     additional_inputs,
     stack_output=False,
     mutated_arg_indices="",
+    num_effect_tokens=0,
 ):
     carried_vals = carried_inputs
 
@@ -330,8 +371,17 @@ def while_loop_dense(
 
 @while_loop_op.py_autograd_impl
 def while_loop_autograd(
-    cond_fn, body_fn, operands, additional_inputs, mutated_arg_indices=""
+    cond_fn,
+    body_fn,
+    operands,
+    additional_inputs,
+    mutated_arg_indices="",
+    num_effect_tokens=0,
 ):
+    if num_effect_tokens:
+        raise NotImplementedError(
+            "effects in torch.while_loop are not supported with autograd"
+        )
     return WhileLoopAutogradOp.apply(
         cond_fn,
         body_fn,
@@ -375,6 +425,7 @@ def while_loop_tracing(
     additional_inputs,
     stack_output=False,
     mutated_arg_indices="",
+    num_effect_tokens=0,
 ):
     op = while_loop_stack_output_op if stack_output else while_loop_op
 
@@ -386,6 +437,7 @@ def while_loop_tracing(
         carried_inputs,
         additional_inputs,
         mutated_arg_indices,
+        num_effect_tokens,
     ):
         # NOTE [unspecialize int carry with unbacked symints]
         # When we support int carry, we'll also need to support int output of body_fn because.
@@ -485,9 +537,11 @@ def while_loop_tracing(
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
 
         args = (cond_graph, body_graph, carried_inputs, additional_inputs)
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if not stack_output and mutated_arg_indices:
             kwargs["mutated_arg_indices"] = mutated_arg_indices
+        if not stack_output and num_effect_tokens:
+            kwargs["num_effect_tokens"] = num_effect_tokens
 
         proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
@@ -514,6 +568,7 @@ def while_loop_tracing(
         carried_inputs,
         additional_inputs,
         mutated_arg_indices,
+        num_effect_tokens,
     )
 
 
@@ -526,6 +581,7 @@ def while_loop_fake_tensor_mode(
     additional_inputs,
     stack_output=False,
     mutated_arg_indices="",
+    num_effect_tokens=0,
 ):
     with mode:
         # NOTE: [Handling unback symints in subgraph of while_loop]
@@ -614,11 +670,27 @@ def while_loop_func(
     additional_inputs,
     stack_output=False,
     mutated_arg_indices="",
+    num_effect_tokens=0,
 ):
     op = while_loop_stack_output_op if stack_output else while_loop_op
+    _validate_num_effect_tokens(num_effect_tokens, len(carried_inputs))
+    mode = ctx.mode if hasattr(ctx, "mode") else None
+
+    def _restore_tokens(tokens):
+        if mode is not None:
+            mode._tokens.clear()
+            mode._tokens.update(tokens)
+
+    if num_effect_tokens and mode is not None:
+        raise NotImplementedError(
+            "Python re-functionalization of an effectful while_loop is unsupported"
+        )
+    if num_effect_tokens and mutated_arg_indices:
+        raise NotImplementedError("while_loop effects with mutation are unsupported")
+
     # For now, we only support auto-functionalization for while_loop when using python
     # functionalization mode
-    if not stack_output and hasattr(ctx, "mode"):
+    if not stack_output and mode is not None:
         hop_instance = HopInstance.create(
             op,
             cond_fn,
@@ -629,7 +701,7 @@ def while_loop_func(
         )
         if can_auto_functionalize(hop_instance):
             return do_auto_functionalize_v2(
-                ctx.mode,
+                mode,
                 hop_instance,
                 tuple(
                     pytree.tree_flatten(
@@ -646,21 +718,104 @@ def while_loop_func(
         functional_cond_fn = ctx.functionalize(_maybe_run_with_interpreter(cond_fn))
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        checked_graphs = {}
         for fn, fn_name in [
             (cond_fn, "cond_fn"),
             (body_fn, "body_fn"),
         ]:
-            _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
-        op_kwargs = {}
+            checked_graphs[fn_name] = _check_alias_and_mutation(
+                fn, unwrapped_inputs, fn_name, pre_dispatch
+            )
+
+        body_has_effect = False
+        if not num_effect_tokens:
+
+            def _discover_effect_tokens(fn):
+                tokens_before = dict(mode._tokens) if mode is not None else {}
+                probed_tokens = {}
+                try:
+                    materialize_as_graph(fn, unwrapped_inputs)
+                    if mode is not None:
+                        probed_tokens = dict(mode._tokens)
+                finally:
+                    _restore_tokens(tokens_before)
+                if mode is not None and mode._allow_token_discovery:
+                    for key, token in probed_tokens.items():
+                        mode._tokens.setdefault(key, token)
+
+            if _graph_has_effects(checked_graphs["cond_fn"]):
+                raise NotImplementedError(
+                    "effects in while_loop cond_fn are unsupported"
+                )
+            body_has_effect = _graph_has_effects(checked_graphs["body_fn"])
+            if stack_output and body_has_effect:
+                raise NotImplementedError(
+                    "effects in while_loop_stack_output are unsupported"
+                )
+            if body_has_effect and mode is None:
+                raise NotImplementedError(
+                    "while_loop effects require Python functionalization"
+                )
+            if body_has_effect and mutated_arg_indices:
+                raise NotImplementedError(
+                    "while_loop effects with mutation are unsupported"
+                )
+            if body_has_effect and torch.compiler.is_exporting():
+                raise NotImplementedError(
+                    "effects in while_loop are unsupported during export"
+                )
+            if body_has_effect:
+                _discover_effect_tokens(functional_body_fn)
+
+        active_mode = mode if body_has_effect else None
+        if active_mode is not None:
+            orig_functional_cond_fn = functional_cond_fn
+            orig_functional_body_fn = functional_body_fn
+
+            @functools.wraps(orig_functional_cond_fn)
+            def functional_cond_fn(_token, *args):
+                return orig_functional_cond_fn(*args)
+
+            @functools.wraps(orig_functional_body_fn)
+            def functional_body_fn(token, *args):
+                saved_tokens = dict(active_mode._tokens)
+                try:
+                    _restore_tokens({EffectType.ORDERED: ctx.wrap_tensors((token,))[0]})
+                    body_outs = orig_functional_body_fn(*args)
+                    ordered_token = active_mode._tokens[EffectType.ORDERED]
+                    token_out = ctx.unwrap_tensors((ordered_token,))[0]
+                    return (token_out, *body_outs)
+                finally:
+                    _restore_tokens(saved_tokens)
+
+        op_kwargs: dict[str, Any] = {}
         if not stack_output and mutated_arg_indices:
             op_kwargs["mutated_arg_indices"] = mutated_arg_indices
+        if not stack_output and (num_effect_tokens or body_has_effect):
+            op_kwargs["num_effect_tokens"] = 1
+
+        loop_carried_inputs = unwrapped_carried_inputs
+        if active_mode is not None:
+            ordered_token = active_mode._tokens.get(EffectType.ORDERED)
+            if ordered_token is None:
+                raise NotImplementedError(
+                    "while_loop body effect detection and token discovery "
+                    "disagree: the materialized body graph contains an effect "
+                    "but no ORDERED token was discovered for this trace"
+                )
+            token = ctx.unwrap_tensors((ordered_token,))[0]
+            loop_carried_inputs = (token, *loop_carried_inputs)
         ret = op(
             functional_cond_fn,
             functional_body_fn,
-            unwrapped_carried_inputs,
+            loop_carried_inputs,
             unwrapped_additional_inputs,
+            # pyrefly: ignore [bad-argument-type]
             **op_kwargs,
         )
+        if active_mode is not None:
+            active_mode._tokens[EffectType.ORDERED] = ctx.wrap_tensors((ret[0],))[0]
+            ret = ret[1:]
         return ctx.wrap_tensors(ret)
 
 
