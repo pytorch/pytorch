@@ -584,6 +584,43 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class EnterKernelProfileScopeLine(WrapperLine):
+    """Opens the `{` of a kernel profiling block.
+
+    The block is a real C++ scope, so everything a kernel call declares inside
+    it dies at the closing brace. Every memo that decides whether a
+    declaration is emitted has to be scoped with it, or a later line outside
+    the block names a variable that no longer exists: the buffer reuse pool
+    (a workspace freed inside would be handed to an allocation outside as
+    `auto new = std::move(inner)`), the precomputed-size memo, and the int
+    array cache.
+    """
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.push_kernel_profile_scope_state()
+        code.writeline("{")
+
+
+@dataclasses.dataclass
+class ExitKernelProfileScopeLine(WrapperLine):
+    """Closes the `{` that EnterKernelProfileScopeLine opened."""
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.pop_kernel_profile_scope_state()
+        code.writeline("}")
+
+
+@dataclasses.dataclass
 class SwitchLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.Switch
@@ -1457,10 +1494,23 @@ class IndexPutFallbackLine(WrapperLine):
             idx.codegen_reference() if idx else self.wrapper.none_str
             for idx in self.indices
         ]
-
-        self.wrapper._generate_index_put_fallback(
-            node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+        # index_put_ takes (self, indices, values, accumulate), but the index
+        # list is spread across inputs and the wrapper hook passes it as a
+        # flattened array, so the profiling metadata is built here rather than
+        # from the node's inputs. Each entry gets its own expression instead of
+        # reusing the one passed to the kernel: a reinterpret view's expression
+        # owns the handle it names, so the same one used in two statements
+        # would be freed by the first.
+        profiling_args = self.wrapper.make_profiling_args(
+            [node.inputs[0], *self.indices, node.inputs[1], None]
         )
+
+        with self.wrapper.profiled_kernel_scope(
+            node.get_kernel_name(), node, profiling_args
+        ):
+            self.wrapper._generate_index_put_fallback(
+                node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_index_put_fallback
@@ -1481,16 +1531,35 @@ class ScatterFallbackLine(WrapperLine):
             (x, index) = (t.codegen_reference() for t in node.inputs)
             src = node.constant_args[1]
         device = d.type if (d := node.get_device()) else V.graph.device_type
-        self.wrapper._generate_scatter_fallback(
-            x,
-            [x, node.constant_args[0], index, src],
-            node.cpp_kernel_name,
-            node.python_kernel_name,
-            node.src_is_tensor,
-            node.kwargs["reduce"],
-            node.codegen_kwargs(),
-            device,
+        kwargs = node.codegen_kwargs()
+        # scatter keeps `dim` in constant_args between its tensors, so the
+        # profiling metadata is built here, in the schema order the wrapper
+        # hook passes: (self, dim, index, src) followed by one entry per
+        # argument codegen_kwargs emits. `src` is a scalar for the value
+        # overloads.
+        profiling_args = self.wrapper.make_profiling_args(
+            [
+                node.inputs[0],
+                None,
+                node.inputs[1],
+                node.inputs[2] if node.src_is_tensor else None,
+                *([None] * len(kwargs)),
+            ]
         )
+        # Record the shim the hook actually calls, not the ATen symbol the node
+        # carries: a trace consumer keys on the emitted name.
+        record_name = self.wrapper.scatter_fallback_kernel_name(node.get_kernel_name())
+        with self.wrapper.profiled_kernel_scope(record_name, node, profiling_args):
+            self.wrapper._generate_scatter_fallback(
+                x,
+                [x, node.constant_args[0], index, src],
+                node.cpp_kernel_name,
+                node.python_kernel_name,
+                node.src_is_tensor,
+                node.kwargs["reduce"],
+                kwargs,
+                device,
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_scatter_fallback
@@ -1696,6 +1765,11 @@ class PythonWrapperCodegen(CodeGen):
         # its own braces -- does not register; anything emitting a numel inside
         # one has to maintain the depth too.
         self.kernel_profile_scope_depth: int = 0
+        # Index in self.lines of the `{` opening the outermost profiling block
+        # currently being collected, or None when there is none. A declaration
+        # that has to stay visible after the block closes is inserted there,
+        # which puts it in front of the brace, instead of appended.
+        self.kernel_profile_scope_hoist_index: int | None = None
         self.lines: list[Line] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -2323,6 +2397,25 @@ class PythonWrapperCodegen(CodeGen):
     def pop_codegened_graph(self):
         return self.codegened_graph_stack.pop()
 
+    def push_kernel_profile_scope_state(self):
+        """Save the declaration memos a profiling block is about to shadow.
+
+        Nothing to save for the Python wrapper, which has no block scope.
+        """
+
+    def pop_kernel_profile_scope_state(self):
+        """Restore what push_kernel_profile_scope_state saved."""
+
+    def writeline_outside_kernel_profile_scope(self, line):
+        """Emit a declaration that has to outlive the innermost profiling
+        block, such as a workspace allocated once per graph and never freed."""
+        index = self.kernel_profile_scope_hoist_index
+        if index is None:
+            self.writeline(line)
+        else:
+            self.lines.insert(index, line)
+            self.kernel_profile_scope_hoist_index = index + 1
+
     def push_computed_sizes(self, computed_sizes):
         from copy import deepcopy
 
@@ -2654,6 +2747,16 @@ class PythonWrapperCodegen(CodeGen):
     def generate_scatter_fallback(self, node: ir.ScatterFallback):
         self.writeline(ScatterFallbackLine(self, node))
 
+    def scatter_fallback_kernel_name(self, kernel_name: str) -> str:
+        """The name the scatter fallback is emitted under, given the name the
+        wrapper resolves the node to.
+
+        The Python wrapper calls the ATen op under that name; CppWrapperCpu
+        calls the `_out` variant of the C shim symbol, which is what its
+        RecordFunction has to say.
+        """
+        return kernel_name
+
     def _generate_scatter_fallback(
         self,
         output,
@@ -2944,6 +3047,15 @@ class PythonWrapperCodegen(CodeGen):
                 past_planning_states.append(planning_states.pop())
                 if config.allow_buffer_reuse:
                     self.estimate_peak = peak_estimate_stack.pop()
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A buffer freed inside the block must not be offered to an
+                # allocation after it, and one freed before it must not be
+                # reused inside: either way the ReuseLine declares its new name
+                # on the wrong side of a brace. The state is the same graph's,
+                # so estimate_peak is left alone.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
+                past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
             raise AssertionError(
@@ -4104,8 +4216,12 @@ class PythonWrapperCodegen(CodeGen):
                 # expand existing allocation
                 prior.node = WorkspaceArg.maximum(prior.node, ws)
             else:
-                self.writeline(line)
-                self.writeline(self.make_zero_buffer(name))
+                # Allocated once at first use and never freed, so it has to be
+                # declared outside any profiling block: the first kernel to
+                # need it may sit inside one, and every later kernel that
+                # names it sits in a different block.
+                self.writeline_outside_kernel_profile_scope(line)
+                self.writeline_outside_kernel_profile_scope(self.make_zero_buffer(name))
                 self.allocated_workspaces[name] = line
         else:
             raise AssertionError(ws.zero_mode)
@@ -5330,6 +5446,81 @@ class PythonWrapperCodegen(CodeGen):
         Python wrapper; CppWrapperCpu overrides it to emit the real block.
         """
         yield
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        return
+
+    def records_profiling_args(self) -> bool:
+        """Whether write_record_function_handle consumes argument metadata.
+
+        Building that metadata is not free: a reinterpret view mints a tensor
+        handle whose only owner is the expression handed back, so a wrapper
+        that discards the list leaks the handle. Such a wrapper says so here
+        instead, and nothing is built for it.
+        """
+        return False
+
+    def make_profiling_args(self, values: Sequence[Any]) -> list[str | None] | None:
+        """Profiling metadata for a caller whose wrapper hook reorders the
+        kernel's arguments, so `_get_profiling_args` cannot derive it.
+
+        Values are the IR nodes in the order the hook passes them, with None
+        for each non-tensor. Returns None when nothing would record the result,
+        which is what keeps a reinterpret view from emitting an owner-less
+        handle.
+        """
+        if not (self.records_profiling_args() and kernel_profile_enabled()):
+            return None
+        return _profiling_arg_entries(values)
+
+    @contextlib.contextmanager
+    def profiled_kernel_scope(
+        self,
+        kernel_name: str,
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        """A kernel_profile_scope that also records a
+        RAIIAtenRecordFunctionHandle for the kernel.
+
+        The record function only exists on the platforms
+        kernel_profile_enabled() accepts, so that is the gate, and it is passed
+        down so the surrounding block opens on the same condition.
+
+        A caller whose codegen reorders the kernel's arguments passes
+        profiling_args itself; otherwise the metadata is derived from
+        node_schedule."""
+        enabled = kernel_profile_enabled()
+        with self.kernel_profile_scope(kernel_name, node_schedule, enabled=enabled):
+            if enabled:
+                # Deriving the metadata emits codegen for ReinterpretView
+                # arguments, so it is skipped for a wrapper that records none.
+                if not self.records_profiling_args():
+                    profiling_args = None
+                elif profiling_args is None:
+                    profiling_args = self._get_extern_kernel_profiling_args(
+                        node_schedule
+                    )
+                self.write_record_function_handle(kernel_name, profiling_args)
+            yield
+
+    @staticmethod
+    def _get_extern_kernel_profiling_args(
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+    ) -> list[str | None] | None:
+        """Profiling metadata for an ExternKernel codegen'd through a dedicated
+        wrapper hook instead of the C shim helper.
+
+        This covers the kernels whose argument order the shared builder already
+        reproduces; the ones that reorder their arguments on the way to the
+        shim supply their own metadata."""
+        if not isinstance(node_schedule, ir.ExternKernel):
+            return None
+        return _get_profiling_args(node_schedule)
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
