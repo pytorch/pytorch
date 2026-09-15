@@ -396,9 +396,26 @@ _scaled_gemm(
       scaling_choice_a,
       scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-  // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
-  if (scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false)) {
-    TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+#ifdef USE_ROCM
+  // hipBLASLt only has solutions for every layout permutation with tensorwise scaling;
+  // row-wise and block-wise bind their scale vectors to the operand orientation and are
+  // TN-only on all gfx archs. scaled_mm_arch_allowed() ignores sm90_only/sm100_only on
+  // ROCm, so it cannot express this.
+  const bool tn_only = scaling_choice_a != ScalingType::TensorWise ||
+      scaling_choice_b != ScalingType::TensorWise;
+#else
+  // H100 only supports row-major x column-major, but all permutations are supported on Blackwells
+  const bool tn_only = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false);
+#endif
+  if (tn_only) {
+    TORCH_CHECK(
+        args.transa == 't' && args.transb == 'n',
+        "Only multiplication of row-major and column-major matrices is supported by "
+#ifdef USE_ROCM
+        "hipBLASLt for non-tensorwise scaling");
+#else
+        "cuBLASLt");
+#endif
   }
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
   // Some cuBLASLt algorithms skip the D write for distinct C/D when M=1.
@@ -505,7 +522,8 @@ _scaled_rowwise_rowwise(
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
-//  - Only works if mat1 is row-major and mat2 is column-major
+//  - Only row-major mat1 x column-major mat2 is supported on CUDA SM90, and on ROCm for
+//    every scaling recipe other than tensorwise
 //  - Only works if matrices sizes are divisible by 32
 //  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
 //    and scale_b should have size = to mat2.size(1)
