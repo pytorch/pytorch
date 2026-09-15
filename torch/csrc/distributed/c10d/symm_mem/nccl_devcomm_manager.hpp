@@ -249,10 +249,21 @@ class TORCH_API NCCLDevCommManager {
   // destructor cleanup remains a fallback.
   void register_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
-#ifdef USE_ROCM
     auto registered_comm = group_to_comm_.find(group_name);
     const bool is_new_registration = registered_comm == group_to_comm_.end() ||
         registered_comm->second != comm;
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    // Device communicators are built from a specific host comm, so a
+    // replacement invalidates every one of them. Drop them here or
+    // `get_devcomm` would hand a kernel a devcomm tied to a comm this registry
+    // no longer owns. Erasing without `ncclDevCommDestroy` is safe for the
+    // reason given at `unregister_comm`: the predecessor's own destroy
+    // reclaims what the devcomm holds.
+    if (is_new_registration && registered_comm != group_to_comm_.end()) {
+      devcomm_registry_.erase(group_name);
+    }
+#endif
+#ifdef USE_ROCM
     ncclCommProperties_t comm_props = NCCL_COMM_PROPERTIES_INITIALIZER;
     const bool device_api_support =
         ncclCommQueryProperties(comm, &comm_props) == ncclSuccess &&
@@ -297,6 +308,20 @@ class TORCH_API NCCLDevCommManager {
   // Unregister `group_name` on this manager's device. Safe to call when
   // nothing is registered. Does not destroy the host comm; lifetime stays
   // with the producer.
+  //
+  // Neither overload calls `ncclDevCommDestroy` on the entries it drops. That
+  // would be a collective call (it deregisters the devcomm's resource window),
+  // so it cannot run on the unilateral abort path. It is also unnecessary:
+  // destroying the host comm runs ncclDevrFinalize, which drains windows whose
+  // owning devcomm was never explicitly destroyed, and abort reaches that same
+  // drain as destroy does (commReclaim -> commCleanup -> commFree). The other
+  // half of ncclDevCommDestroy, the GIN contexts, is a no-op here because
+  // these devcomms are built with ginConnectionType NCCL_GIN_CONNECTION_NONE
+  // and so are never given any. That last part is conditional: the flag is
+  // per-comm, so a comm that enabled GIN elsewhere (multi-node symmetric
+  // kernels) attaches contexts to devcomms that never requested them, and comm
+  // teardown does not reclaim those. Single-node symmetric memory, which is
+  // what this path supports, cannot reach it.
   //
   // This key-only form is retained for CUDA callers. ROCm teardown uses the
   // identity-safe overload below.
@@ -346,7 +371,12 @@ class TORCH_API NCCLDevCommManager {
       // communicator. This is important to ensure no kernels are still using
       // the device communicator when we destroy it.
       C10_CUDA_CHECK(cudaDeviceSynchronize());
-      // Iterate through all groups and their device communicators
+      // Fallback path. Producers retire their registry entry before the
+      // communicator it was built from is invalidated, so in an orderly
+      // teardown nothing survives to here; see `unregister_comm` for why that
+      // early erase does not need `ncclDevCommDestroy`. Whatever does reach
+      // here still has a live host comm to destroy through, which is what the
+      // `group_to_comm_` lookup below establishes.
       for (auto& [group_name, group_map] : devcomm_registry_) {
         // Find the host communicator for the group.
         // Device communicators need the host communicator for destruction.
