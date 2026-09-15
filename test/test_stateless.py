@@ -609,6 +609,38 @@ class TestStatelessFunctionalAPI(TestCase):
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless._functional_call, "stateless")
+    ])
+    def test_reparametrize_shared_submodule(self, functional_call):
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self):
+                return self.w.sum()
+
+        class Parent(torch.nn.Module):
+            def __init__(self, child):
+                super().__init__()
+                self.a = child
+                self.b = child
+
+            def forward(self):
+                return self.a() + self.b()
+
+        child = Child()
+        parent = Parent(child)
+        prev_w = child.w.clone()
+
+        new_w = torch.tensor([2.0, 2.0, 2.0])
+        out = functional_call(parent, {"a.w": new_w}, tie_weights=True)
+        self.assertEqual(out, new_w.sum() * 2)
+        self.assertIsInstance(child.w, torch.nn.Parameter)
+        self.assertEqual(child.w, prev_w)
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
     def test_setattr(self, functional_call):
