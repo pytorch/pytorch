@@ -508,6 +508,7 @@ user_stack=None)
             None,
             type(x),
             torch._C._dispatch_keys(x),
+            False,
         )
         self.assertTrue(guard_manager.check(x))
         self.assertTrue(guard_manager.check_verbose(x).result)
