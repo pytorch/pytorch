@@ -548,6 +548,16 @@
 - name: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   log_probs: _ctc_loss_backward(grad, log_probs, targets, input_lengths, target_lengths, result0, result1, blank, zero_infinity)
 
+- name: _ctc_loss_backward(Tensor grad_out, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
+  grad_out, log_probs: "grad.defined() ? ctc_loss_double_backward(grad, grad_out, log_probs, targets, input_lengths, target_lengths, blank, zero_infinity) : std::make_tuple(zeros_like(grad_out), zeros_like(log_probs))"
+  neg_log_likelihood: non_differentiable
+  log_alpha: non_differentiable
+
+- name: _ctc_loss_backward.Tensor(Tensor grad_out, Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
+  grad_out, log_probs: "grad.defined() ? ctc_loss_double_backward(grad, grad_out, log_probs, targets, input_lengths, target_lengths, blank, zero_infinity) : std::make_tuple(zeros_like(grad_out), zeros_like(log_probs))"
+  neg_log_likelihood: non_differentiable
+  log_alpha: non_differentiable
+
 - name: deg2rad(Tensor self) -> Tensor
   self: deg2rad_backward(grad)
   result: auto_element_wise
@@ -2751,10 +2761,10 @@
 
 # cudnn
 - name: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
-  log_probs: _cudnn_ctc_loss_backward(grad, result0, result1, zero_infinity)
+  log_probs: ctc_loss_fused_backward(grads, log_probs, targets, input_lengths, target_lengths, result0, result1, blank, zero_infinity)
 
 - name: _cudnn_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
-  log_probs: _cudnn_ctc_loss_backward(grad, result0, result1, zero_infinity)
+  log_probs: ctc_loss_fused_backward(grads, log_probs, targets, input_lengths, target_lengths, result0, result1, blank, zero_infinity)
 
 - name: cudnn_convolution_transpose(Tensor self, Tensor weight, SymInt[] padding, SymInt[] output_padding, SymInt[] stride, SymInt[] dilation, SymInt groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
   self, weight: "_cudnn_convolution_backward(self, grad, weight, padding, output_padding, stride, dilation, true, groups, {grad_input_mask[0], grad_input_mask[1]})"
@@ -2856,10 +2866,10 @@
   dropout_state: non_differentiable
 
 - name: miopen_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
-  log_probs: _miopen_ctc_loss_backward(grad, result0, result1, zero_infinity)
+  log_probs: ctc_loss_fused_backward(grads, log_probs, targets, input_lengths, target_lengths, result0, result1, blank, zero_infinity)
 
 - name: miopen_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
-  log_probs: _miopen_ctc_loss_backward(grad, result0, result1, zero_infinity)
+  log_probs: ctc_loss_fused_backward(grads, log_probs, targets, input_lengths, target_lengths, result0, result1, blank, zero_infinity)
 
 - name: mkldnn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
   output_differentiability: [True, True, True, False]
