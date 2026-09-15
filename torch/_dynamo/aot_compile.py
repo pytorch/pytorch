@@ -1603,10 +1603,16 @@ class AOTCompiledModel:
                     "tag-safe fast path that refused without running the tree>"
                 )
                 continue
+            if not reason.verbose_code_parts:
+                # A failing accessor can answer false with no parts to quote.
+                lines.append(f"  [{i}] <guard check failed without naming a guard>")
+                continue
             parts = reason.verbose_code_parts
             if missing_at is None and any(map(_names_a_missing_global, parts)):
                 missing_at = i
-            lines.append(f"  [{i}] {'; '.join(parts)}")
+            # Collapse every separator splitlines() reads the report back on.
+            joined = " ".join("; ".join(parts).splitlines())
+            lines.append(f"  [{i}] {joined}")
         if missing_at is not None:
             hint = results[missing_at]._missing_global_hint()
             lines.append(f"For [{missing_at}]: {hint}")
