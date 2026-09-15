@@ -20,8 +20,13 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
-from torch._dynamo.graph_utils import _graph_device_type
-from torch._dynamo.package import FunctionPicklerBase, SerializedCode, SystemInfo
+from torch._dynamo.graph_utils import _graph_device_types
+from torch._dynamo.package import (
+    _collapse_device_types,
+    FunctionPicklerBase,
+    SerializedCode,
+    SystemInfo,
+)
 
 from . import convert_frame
 from .aot_compile_types import (
@@ -1110,7 +1115,8 @@ def aot_compile_fullgraph(
         if backend_input is None:
             raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        device_type = _graph_device_type(backend_input.graph_module.graph)
+        graph = backend_input.graph_module.graph
+        device_type = _collapse_device_types(_graph_device_types(graph))
         if (
             backend_input.fake_mode.shape_env
             is not graph_capture_output.output_graph.shape_env
@@ -1455,7 +1461,11 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
-def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
+# Parameters as (name, kind, default id), co_freevars, closure cell ids.
+_BindingKey = tuple[tuple[tuple[str, int, int], ...], tuple[str, ...], tuple[int, ...]]
+
+
+def _binding_key(artifacts: CompileArtifacts) -> _BindingKey:
     # What prepare_f_locals reads, with defaults and cells by identity. Signature
     # equality is unusable here: Parameter.__eq__ takes bool() of
     # `default == default`, which raises for a tensor default.
@@ -1510,15 +1520,12 @@ class AOTCompiledModel:
 
     model: torch.nn.Module
     compiled_results: list[AOTCompiledFunction]
-    # The results last judged and whether one bind of a call serves them all.
-    # compiled_results is public, so a call that finds them changed decides
-    # again. One field on purpose: a single attribute store publishes contents
-    # and verdict together (an instance-dict store is atomic under the GIL and
-    # locked on free-threaded builds), so a reader sees the old pair or the new
-    # one, never one list's contents beside another's verdict; two fields have
-    # no store order that keeps them consistent. Weak references, so a result
-    # the caller dropped is not kept alive here. The default is the verdict
-    # over no results.
+    # The results last judged, weakly so a dropped one is not kept alive, and
+    # whether one bind of a call serves them all; the default is the verdict
+    # over no results. One field so one store publishes both and a reader never
+    # sees one list's contents beside another's verdict. A hint, not a lock:
+    # the last writer wins, and a call that finds the contents changed decides
+    # again.
     _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
         dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
@@ -1538,23 +1545,24 @@ class AOTCompiledModel:
         # compiled_results is public, so read it once: every stage below judges
         # the results this call began with, on the binding decided over them.
         results = tuple(self.compiled_results)
-        bound: list[dict[str, object]] = []
-        # Whether results that bind alike reuse the first one's binding (a bind
-        # costs more than a check()), decided once a second result is reached
-        # so a call the first result serves pays nothing for it.
-        shared: bool | None = None
-        # check() ignores _guard_check_enabled, so scan every result.
-        for result in results:
-            if bound and shared is None:
-                shared = self._binds_alike(results)
-            if shared:
-                f_locals = bound[0]
-            else:
+        # check() ignores _guard_check_enabled, so scan every result. The first
+        # is bound and checked as at a single-result model; only a call it
+        # refuses asks whether the rest bind alike and can reuse its binding, a
+        # bind costing more than a check(). The reuse rests on check() only
+        # reading the f_locals it is handed, so one dict can serve every tree.
+        first = results[0]
+        f_locals = first.prepare_f_locals(self.model, *args, **kwargs)
+        if first._live_guard_manager().check(f_locals):
+            # The guards just passed: call fn rather than result(), whose
+            # __call__ would bind and evaluate them again.
+            return first.fn(self.model, *args, **kwargs)
+        bound = [f_locals]
+        shared = len(results) > 1 and self._binds_alike(results)
+        for result in results[1:]:
+            if not shared:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
             bound.append(f_locals)
             if result._live_guard_manager().check(f_locals):
-                # The guards just passed: call fn rather than result(), whose
-                # __call__ would bind and evaluate them again.
                 return result.fn(self.model, *args, **kwargs)
         # One exit of check() refuses without running the tree: a tag-safe root's
         # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
