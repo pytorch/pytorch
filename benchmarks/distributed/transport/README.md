@@ -1,5 +1,9 @@
 # Transport benchmark
 
+Most backends accept `new_transport(backend)` and infer devices from registered
+tensors. Passing `device` preserves each backend's device selection and
+validation. Torchcomms and ibverbs CUDA graph mode require an explicit device.
+
 Install the optional backend package matching the operation:
 
 ```bash
