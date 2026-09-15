@@ -27,6 +27,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <cstdint>
 #include <optional>
 
 #include <vector>
@@ -1626,6 +1627,11 @@ Tensor tensor_frombuffer(
       " bytes)");
 
   auto offset_buf = static_cast<char*>(buf) + offset;
+  TORCH_CHECK_VALUE(
+      reinterpret_cast<std::uintptr_t>(offset_buf) % elsize == 0,
+      "buffer is not aligned to element size (",
+      elsize,
+      " bytes)");
   auto options = TensorOptions().dtype(dtype).device(c10::kCPU);
 
   auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
