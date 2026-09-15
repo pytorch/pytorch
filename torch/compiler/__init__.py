@@ -6,7 +6,10 @@ from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
-from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
+from torch._higher_order_ops.invoke_subgraph import (
+    _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS,
+    NestedCompileRegionOptions,
+)
 
 # ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
 # plus an acceleration cache. Re-exported from the private impl module, whose
@@ -949,7 +952,13 @@ def nested_compile_region(
 
     Args:
         fn: The function to wrap
-        options: Optional backend to use for compiling the subgraph.
+        options: Optional compilation options for the subgraph. Construct them
+            with ``get_invoke_subgraph_compile_options`` from
+            ``torch._higher_order_ops.invoke_subgraph``. Its
+            ``fw_inductor_config_patches`` argument is stored as
+            ``inductor_config_patches``; its ``bw_inductor_config_patches``
+            argument retains the same name. Both mappings accept only the
+            Inductor config keys {supported_config_keys}.
             Warning: this is an experimental feature under development and
             not ready for use yet.
         max_reuse_entries: Maximum number of reuse cache entries per function
@@ -982,6 +991,15 @@ def nested_compile_region(
         options=options,
         max_reuse_entries=max_reuse_entries,
         reuse_hash_fn=reuse_hash_fn,
+    )
+
+
+if nested_compile_region.__doc__:
+    nested_compile_region.__doc__ = nested_compile_region.__doc__.format(
+        supported_config_keys=", ".join(
+            f"``{key}``"
+            for key in sorted(_SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS)
+        )
     )
 
 
@@ -1026,12 +1044,26 @@ def load_compiled_function(
                    and ``__builtins__`` when it has to build the builtins dict
                    one of those names holds, never overwriting a key it already
                    binds, and a global rebound in it afterwards is what the
-                   guards check on the next call. The compiled bytecode instead
-                   reads a load-time snapshot of this dict merged over the
-                   globals serialized with the artifact, so a name this dict
-                   omits still resolves there and a rebind the guards ACCEPT
-                   leaves the call computing with the load-time value -- a known
-                   limitation rather than a contract to rely on.
+                   guards check on the next call. The compiled bytecode reads a
+                   load-time snapshot of this dict merged over the globals
+                   serialized with the artifact, so a name this dict omits
+                   still resolves there; on top of that, a global that is
+                   itself the source of a kept guard is re-read from this dict
+                   on every call, so a rebind the guards ACCEPT -- a
+                   same-metadata swap under a kept ``TENSOR_MATCH``, which
+                   checks metadata, not values -- is what the call computes
+                   with. A global no kept guard reads keeps its load-time
+                   value, and so does a container a guard reaches only through
+                   a sub-path such as ``D['a']``, whose other members nothing
+                   certifies: a rebind of either is not seen, even when the
+                   guard on ``D['a']`` passes. That re-read is not atomic
+                   with the guard check before it, so a rebind landing between
+                   the two is served unchecked, as an eager compiled frame
+                   serves one landing between its guards and its globals. The
+                   re-read writes into the loaded artifact's own globals dict,
+                   which every call of it shares, so two threads serving one
+                   loaded artifact race on that write; a caller who needs
+                   isolation loads the artifact once per thread.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
