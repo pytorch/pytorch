@@ -916,8 +916,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors func_descr_get which calls PyMethod_New to bind
-        # the function to an instance.
+        # the function to an instance, and returns the function itself when
+        # there is no instance.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
+        if obj.is_constant_none():
+            return self
         source = obj.source and AttrSource(obj.source, self.fn.__name__)
         return UserMethodVariable(self, obj, source=source)
 
@@ -2082,27 +2085,25 @@ class UserMethodVariable(BaseUserFunctionVariable):
         obj: VariableTracker,
         owner: VariableTracker,
     ) -> VariableTracker:
-        # A bound method is already bound and does not re-bind to a new
-        # receiver: on 3.10 and 3.14, bm.__get__(other) is bm.
+        # method_descr_get: a bound method does not re-bind. Only reached where
+        # method has tp_descr_get (3.10 and 3.13+); see tp_getset below.
         return self
-
-    def _method_get(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # `bm.__get__` is a callable that returns the method, not the method
-        # itself, so hand back something callable that ignores its arguments.
-        # Verified on 3.10 and 3.14: bm.__get__(other) is bm and __self__ is
-        # preserved. 3.12 is the exception - it has no method.__get__, so the
-        # attribute forwards to __func__ and does re-bind.
-        return variables.LambdaVariable(lambda *args, **kwargs: self)
 
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
-    tp_getset = {
-        "__get__": GetSet(_method_get, readonly_setter),
-    }
     tp_members = {
         "__self__": Member(lambda s, _: s.im_self, readonly_setter),
         "__func__": Member(lambda s, _: s.im_func, readonly_setter),
     }
+
+    if "__get__" not in types.MethodType.__dict__:
+        # 3.11 and 3.12: method has no __get__, so method_getattro forwards the
+        # attribute to __func__, whose __get__ re-binds.
+        tp_getset = {
+            "__get__": GetSet(
+                lambda s, tx: s.im_func._get_dunder_get(tx), readonly_setter
+            )
+        }
 
 
 class WrappedUserMethodVariable(UserMethodVariable):

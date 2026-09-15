@@ -2064,6 +2064,17 @@
       ]
     }
   ],
+  "GB7935": [
+    {
+      "Gb_type": "checkpoint context_fn bound to a non-constant receiver",
+      "Context": "context_fn={ctx}",
+      "Explanation": "checkpoint needs context_fn as a Python callable, but the receiver of this bound method cannot be resolved to a constant object at trace time.",
+      "Hints": [
+        "Bind context_fn to an object created outside the compiled ",
+        "region, or pass a function or functools.partial instead."
+      ]
+    }
+  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",

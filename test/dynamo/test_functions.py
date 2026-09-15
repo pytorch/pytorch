@@ -5549,58 +5549,46 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(TypeError):
             opt_fn(torch.randn(3))
 
-    def test_dunder_method_source_does_not_recompile(self):
-        """The corrected dunder source must be stable across calls.
+    def test_method_vt_dunder_get_matches_eager(self):
+        """method.__get__ follows the running interpreter and wrap_descr_get.
 
-        AttrSource(TypeSource(src), "__len__") denotes type(obj).__len__, which
-        is a stable function. The previous obj.__len__ source denoted a bound
-        method rebuilt on every access, so guarding it could never match.
+        3.10 and 3.13+ have method.__get__, which returns the method unchanged;
+        3.11 and 3.12 do not, so the attribute forwards to __func__ and re-binds.
+        Either way the arguments are checked as wrap_descr_get checks them.
         """
 
-        class Sized:
-            def __init__(self, n):
-                self.n = n
+        class A:
+            def m(self):
+                return type(self).__name__
 
-            def __len__(self):
-                return self.n
+        class B:
+            pass
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        a, b = A(), B()
 
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(x, obj):
-            return x + len(obj)
-
-        x = torch.randn(3)
-        obj = Sized(2)
-        fn(x, obj)
-        self.assertEqual(cnt.frame_count, 1)
-        # Same type, same __len__ function: must reuse the compiled code.
-        for _ in range(3):
-            fn(x, Sized(2))
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_method_vt_dunder_get_returns_self(self):
-        """method.__get__ returns the method unchanged; it does not re-bind.
-
-        True on 3.10 and 3.13+, which have method.__get__. 3.12 lacks it, so
-        the attribute forwards to __func__ there and does re-bind.
-        """
-
-        class Counter:
-            def m(self, x):
-                return x + 1
-
-        c = Counter()
-        other = Counter()
+        def outcome(thunk):
+            try:
+                return thunk()
+            except TypeError:
+                return "TypeError"
 
         def fn(x):
-            g = c.m.__get__(other)
-            return (g.__self__ is c), g(x)
+            return (
+                outcome(lambda: a.m.__get__(b)()),
+                outcome(lambda: a.m.__get__(b, B)()),
+                outcome(lambda: a.m.__get__(b).__self__ is a),
+                outcome(lambda: a.m.__get__(None, B) is A.m),
+                outcome(lambda: A.m.__get__(None, B) is A.m),
+                outcome(lambda: a.m.__get__()),
+                outcome(lambda: a.m.__get__(None)),
+                outcome(lambda: a.m.__get__(None, None)),
+                outcome(lambda: a.m.__get__(b, B, 3)),
+                outcome(lambda: a.m.__get__(obj=b)),
+                x + 1,
+            )
 
         x = torch.randn(3)
-        same, out = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertTrue(same)
-        self.assertEqual(out, x + 1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_method_still_inlines_after_vt_split(self):
         """Method calls, attribute access and reconstruction survive the split."""

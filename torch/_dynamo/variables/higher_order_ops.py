@@ -4457,24 +4457,28 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             if isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
                 context_fn = ctx.fn
             elif isinstance(
-                ctx,
-                (
-                    torch._dynamo.variables.UserMethodVariable,
-                    torch._dynamo.variables.functions.FunctoolsPartialVariable,
-                ),
+                ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
-                # guard_as_python_constant graph-breaks when the receiver (or a
-                # partial argument) is not a constant. Report that against
-                # context_fn rather than letting the generic message escape.
-                from torch._dynamo.exc import Unsupported
-
+                context_fn = ctx.guard_as_python_constant()
+            elif isinstance(ctx, torch._dynamo.variables.UserMethodVariable):
+                # Binding the method needs its receiver as a real object. When
+                # the receiver was built inside the region that is impossible,
+                # so graph break with the reason rather than the generic one.
                 try:
                     context_fn = ctx.guard_as_python_constant()
                 except Unsupported as e:
-                    raise NotImplementedError(
-                        f"checkpoint could not resolve {type(ctx)} context_fn to a "
-                        f"Python callable: {e}"
-                    ) from e
+                    unimplemented(
+                        gb_type="checkpoint context_fn bound to a non-constant receiver",
+                        context=f"context_fn={ctx}",
+                        explanation="checkpoint needs context_fn as a Python callable, "
+                        "but the receiver of this bound method cannot be resolved to "
+                        "a constant object at trace time.",
+                        hints=[
+                            "Bind context_fn to an object created outside the compiled "
+                            "region, or pass a function or functools.partial instead.",
+                        ],
+                        from_exc=e,
+                    )
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
