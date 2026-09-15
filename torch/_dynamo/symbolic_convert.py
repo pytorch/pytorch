@@ -2376,13 +2376,16 @@ class InstructionTranslatorBase(
 
     @functools.cached_property
     def nn_modules_globals_vt(self) -> VariableTracker:
-        module_name = "torch.nn.modules.module"
-        module_source = self.import_source(module_name)
-        # The attribute chain, not the live sys.modules entry the alias binds:
-        # it stands in for the hook dicts nn.Module._call_impl reads through its
-        # own __globals__, which a sys.modules rebind does not move either.
-        fglobals_value = torch.nn.modules.module
-        return VariableTracker.build(self, fglobals_value, module_source)
+        # The defining module, whose dicts nn.Module._call_impl reads through
+        # its own __globals__; a sys.modules rebind moves neither. The alias
+        # binds the live entry, so it roots the guards only while that entry
+        # is this module, and the module itself is installed otherwise.
+        module = torch.nn.modules.module
+        source = self.import_source(module.__name__)
+        if self.output.global_scope[source.global_name] is not module:
+            name = self.output.install_global_by_id("___nn_modules_module", module)
+            source = GlobalSource(name)
+        return VariableTracker.build(self, module, source)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.arg is None:
@@ -2425,13 +2428,19 @@ class InstructionTranslatorBase(
             )
         else:
             # The live sys.modules entry, which is what IMPORT_NAME pushed and
-            # so what the guards this alias roots must read. A name since
-            # removed or blocked with None keeps what it last resolved to:
-            # re-importing here would run the module body inside the trace.
-            live = sys.modules.get(module_name) is not None
-            if live or module_name not in _import_source_cache:
-                _import_source_cache[module_name] = importlib.import_module(module_name)
-            value = _import_source_cache[module_name]
+            # so what the guards this alias roots must read, taken from
+            # sys.modules itself: importlib.import_module takes the module lock
+            # for a present name on 3.10. A name since removed or blocked with
+            # None keeps what it last resolved to, as re-importing would run
+            # the module body inside the trace; one still executing its body
+            # is imported, which waits for it as an import statement would.
+            value = sys.modules.get(module_name)
+            spec = getattr(value, "__spec__", None)
+            if value is None and module_name in _import_source_cache:
+                value = _import_source_cache[module_name]
+            elif value is None or getattr(spec, "_initializing", False):
+                value = importlib.import_module(module_name)
+            _import_source_cache[module_name] = value
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope
