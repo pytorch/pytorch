@@ -7286,6 +7286,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         result = IndentedBuffer()
         _argdefs, call_args, signature, _ = self.args.python_argdefs()
+        result.writeline("benchmark_artifact_kind = 'triton'")
+        result.writeline(f"arg_names = {tuple(map(str, call_args))!r}")
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
