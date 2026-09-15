@@ -7921,11 +7921,11 @@ def zero_numel_check_dims(self, dim, fn_name):
 
 # From aten/src/ATen/native/ReduceOps.cpp
 def check_argmax_argmin(name, self, dim):
-    torch._check(
+    torch._check_type(
         not self.is_complex(),
         lambda: f"{name}(): does not support complex input",
     )
-    torch._check(
+    torch._check_not_implemented(
         self.dtype is not torch.bool,
         lambda: f"{name}(): does not support bool input",
     )
