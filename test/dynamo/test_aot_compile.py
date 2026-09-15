@@ -48,8 +48,14 @@ from torch._dynamo.aot_compile import (
 )
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
+from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
-from torch._dynamo.package import DynamoCache, load_guards_state
+from torch._dynamo.package import (
+    _collapse_device_types,
+    DynamoCache,
+    load_guards_state,
+    SystemInfo,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import CleanupHook
 from torch._functorch.aot_autograd import (
@@ -60,6 +66,7 @@ from torch._guards import tracing, TracingContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
@@ -605,11 +612,13 @@ class ModeBranchGlobalModule(torch.nn.Module):
         return x * 2
 
 
-class TensorDefaultModule(torch.nn.Module):
+def make_masked_forward():
     # A tensor default makes inspect.Signature equality raise (Parameter.__eq__
     # takes bool() of `default == default`), whether or not the body reads it.
     def forward(self, x, mask=torch.ones(3)):
         return x * 2
+
+    return forward
 
 
 def make_scaling_forward(scale):
@@ -634,6 +643,28 @@ def aot_compile_forward(mod, forward, *args):
     model = torch.compile(mod, fullgraph=True, backend="eager")
     model._aot_compile([ModelInput(args=args, kwargs={}, contexts=[])])
     return model.forward.compiled_results[0]
+
+
+def compile_mode_defaults(x, *doubles_call):
+    # Two results of one module whose signatures differ only in the default
+    # for `mode`: [0] defaults it to 1 and is compiled for `x`, [1] defaults it
+    # to 0 and is compiled for `doubles_call`.
+    mod = ScaleModule()
+    triples = aot_compile_forward(mod, make_mode_default_forward(1), x)
+    doubles = aot_compile_forward(mod, make_mode_default_forward(0), *doubles_call)
+    return mod, triples, doubles
+
+
+class RecordedThread(threading.Thread):
+    # Keeps what its target raised, which threading would only print to stderr,
+    # so the test that joins it can fail on it.
+    failure: Exception | None = None
+
+    def run(self):
+        try:
+            super().run()
+        except Exception as e:
+            self.failure = e
 
 
 AOT_POOL_MODE = "sum"
@@ -2051,8 +2082,9 @@ from user code:
         dtypes = (torch.float32, torch.float64, torch.int64, torch.bfloat16)
         xs = [torch.ones(3, 3, dtype=dtype) for dtype in dtypes]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        compiled = model.forward
-        self.assertTrue(compiled._binds_alike(tuple(compiled.compiled_results)))
+        results = model.forward.compiled_results
+        self.assertEqual(len(results), 4)
+        self.assertTrue(model.forward._binds_alike(tuple(results)))
         binds = []
         bind = AOTCompiledFunction.prepare_f_locals
 
@@ -2060,15 +2092,16 @@ from user code:
             binds.append(result)
             return bind(result, *args, **kwargs)
 
-        with patch.object(AOTCompiledFunction, "prepare_f_locals", counted):
+        counting = patch.object(AOTCompiledFunction, "prepare_f_locals", counted)
+        with counting, patch.object(results[3], "fn", wraps=results[3].fn) as served:
             self.assertEqual(model(xs[3]), mod(xs[3]))
-        self.assertEqual(len(binds), 1)
+        served.assert_called_once()
+        self.assertEqual(binds, [results[0]])
 
     def test_module_dispatch_decides_a_shared_binding_past_the_first_result(self):
-        # Whether results bind alike is decided once a call reaches a second
-        # result, so a call the first result serves -- every call to a
-        # single-result model -- pays nothing for the shared binding, and
-        # nothing decides eagerly: the verdict stays at its default until then.
+        # Whether results bind alike is asked only once the first result has
+        # refused a call, so a call it serves pays nothing for the shared
+        # binding, and a single-result model never asks, served or not.
         mod, xs = ScaleModule(), (torch.randn(3, 3), torch.randn(3, 3).double())
         results = [aot_compile_forward(mod, ScaleModule.forward, x) for x in xs]
         combined = AOTCompiledModel(mod, results)
@@ -2078,7 +2111,12 @@ from user code:
             verdict.assert_not_called()
             self.assertEqual(combined(xs[1]), xs[1] * 2)
             verdict.assert_called_once()
-        self.assertEqual(combined._binding_verdict, ((), False))
+        single = AOTCompiledModel(mod, results[:1])
+        with patched as verdict:
+            self.assertEqual(single(xs[0]), xs[0] * 2)
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                single(xs[1])
+            verdict.assert_not_called()
 
     def test_module_dispatch_binds_per_result_when_signatures_differ(self):
         # Results assembled by hand need not agree on a signature, and the guards
@@ -2105,11 +2143,11 @@ from user code:
         # compiled_results is a public list, so the one-bind-per-call decision is
         # made again when its contents change: a result appended with its own
         # default for `mode` is bound from that default, not from [0]'s.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
-        combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
+        x = torch.randn(3, 3)
+        mod, triples, doubles = compile_mode_defaults(x, x.double())
+        combined = AOTCompiledModel(mod, [triples])
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
-        combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
+        combined.compiled_results.append(doubles)
         # Without the re-decision this call would be bound from [0], where mode
         # reads 1, and [1]'s `mode == 0` guard would reject it.
         self.assertEqual(combined(x.double()), x.double() * 2)
@@ -2119,12 +2157,12 @@ from user code:
         # [1] is compiled for mode=1 but defaults mode to 0, so a call leaving
         # mode out has no graph: bound from [0], where mode defaults to 1, its
         # guards would pass and serve x * 3 for a call eager answers x * 2.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
-        results = [aot_compile_forward(mod, triples, t) for t in (x, x.double())]
-        combined = AOTCompiledModel(mod, results)
+        x = torch.randn(3, 3)
+        mod, triples, doubles = compile_mode_defaults(x, x.double(), 1)
+        alike = aot_compile_forward(mod, make_mode_default_forward(1), x.double())
+        combined = AOTCompiledModel(mod, [triples, alike])
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
-        combined.compiled_results[1] = aot_compile_forward(mod, doubles, x.double(), 1)
+        combined.compiled_results[1] = doubles
         self.assertEqual(combined(x.double(), 1), x.double() * 3)
         with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
             combined(x.double())
@@ -2173,21 +2211,21 @@ from user code:
         # the old True: the decider is held inside its first _binding_key, before
         # it publishes anything, and the call made in that window decides for
         # itself and binds [1] from its own default.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
-        combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
+        x = torch.randn(3, 3)
+        mod, triples, doubles = compile_mode_defaults(x, x.double())
+        combined = AOTCompiledModel(mod, [triples])
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
-        combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
+        combined.compiled_results.append(doubles)
         entered, release = threading.Event(), threading.Event()
         binding_key = torch._dynamo.aot_compile._binding_key
 
         def held(artifacts):
             if threading.current_thread() is decider:
                 entered.set()
-                release.wait()
+                release.wait(timeout=10)
             return binding_key(artifacts)
 
-        decider = threading.Thread(
+        decider = RecordedThread(
             target=combined._binds_alike, args=(tuple(combined.compiled_results),)
         )
         with patch("torch._dynamo.aot_compile._binding_key", held):
@@ -2201,6 +2239,7 @@ from user code:
             self.assertEqual(combined(x.double()), x.double() * 2)
             release.set()
             decider.join()
+        self.assertIsNone(decider.failure)
         self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_never_pairs_old_contents_with_a_new_verdict(self):
@@ -2212,19 +2251,17 @@ from user code:
         # call identity-matched the contents still published beside it, bound [1]
         # from [0]'s `mode=1` default and served x * 3 for a call eager answers
         # x * 2; judged on its own binding, [1]'s `mode == 1` guard rejects it.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
-        first = aot_compile_forward(mod, triples, x)
-        second = aot_compile_forward(mod, doubles, x.double(), 1)
+        x = torch.randn(3, 3)
+        mod, first, second = compile_mode_defaults(x, x.double(), 1)
         entered, release = threading.Event(), threading.Event()
-        decider = threading.Thread(target=lambda: combined._binds_alike((first,)))
+        decider = RecordedThread(target=lambda: combined._binds_alike((first,)))
 
         class Held(AOTCompiledModel):
             def __setattr__(self, name, value):
                 super().__setattr__(name, value)
                 if threading.current_thread() is decider and not entered.is_set():
                     entered.set()
-                    release.wait()
+                    release.wait(timeout=10)
 
         combined = Held(mod, [first, second])
         self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
@@ -2244,8 +2281,12 @@ from user code:
         with patch.object(AOTCompiledModel, "_binds_alike", racing):
             with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
                 combined(x.double())
+            # Only racing starts the decider: a dispatch that stopped consulting
+            # _binds_alike would still raise above and leave the race untested.
+            self.assertIsNotNone(decider.ident)
             release.set()
             decider.join()
+        self.assertIsNone(decider.failure)
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
 
     def _aot_compile_mode_branches(self):
@@ -2469,7 +2510,8 @@ from user code:
         # results share a binding; deciding that through Signature equality
         # raised `Boolean value of Tensor with more than one value is ambiguous`
         # on the first call, for _aot_compile and deserialize alike.
-        mod = TensorDefaultModule()
+        mod = torch.nn.Module()
+        mod.forward = types.MethodType(make_masked_forward(), mod)
         model = torch.compile(mod, fullgraph=True, backend="eager")
         xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
@@ -2478,7 +2520,9 @@ from user code:
         for x in xs:
             self.assertEqual(model(x), x * 2)
         # Each result unpickles on its own, so the loaded results hold distinct
-        # default objects and bind per result: a false negative, not a false share.
+        # default objects and bind per result: a false negative, not a false
+        # share, pinned as the accepted limitation; a load that shared one memo
+        # across the blobs would flip it to True and is free to.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
         self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
@@ -2508,7 +2552,7 @@ from user code:
         self.assertEqual(combined(xs[0]), xs[0] * 3)
         self.assertEqual(combined(xs[1]), xs[1] * 5)
         # Loading gives each result a cell of its own, so a round trip binds per
-        # result too.
+        # result too: the same accepted limitation, equally free to flip.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
         self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
@@ -6229,6 +6273,249 @@ from user code:
         actual = loaded_fn(x)
         self.assertEqual(expected[0], actual[0])
         self.assertEqual(expected[1], actual[1])
+
+    def test_graph_device_types_scans_the_whole_graph(self):
+        # example_value is the key a Dynamo capture populates; the graphs below
+        # use "val".
+        with FakeTensorMode():
+            cpu = torch.empty(2)
+            cuda = torch.empty(2, device="cuda")
+        graph = torch.fx.Graph()
+        c = graph.placeholder("c")
+        c.meta["example_value"] = cpu
+        g = graph.placeholder("g")
+        g.meta["example_value"] = cuda
+        c_sum = graph.call_function(torch.ops.aten.sum.default, (c,))
+        c_sum.meta["example_value"] = cpu
+        g_sum = graph.call_function(torch.ops.aten.sum.default, (g,))
+        g_sum.meta["example_value"] = cuda
+        graph.output((c_sum, g_sum))
+        devices = _graph_device_types(graph)
+        self.assertEqual(devices, frozenset(("cpu", "cuda")))
+        self.assertEqual(_collapse_device_types(devices), "cuda")
+
+    def test_graph_device_types_reads_a_get_attr_submodule_body(self):
+        # A cond branch is a submodule the parent graph only references, and the
+        # cond node's meta shows what the branch returned (cpu) rather than the
+        # cuda it used -- the shape torch.cond emits.
+        with FakeTensorMode():
+            cpu = torch.empty(2)
+        body = torch.fx.Graph()
+        body_x = body.placeholder("x")
+        on_cuda = body.call_method("cuda", (body_x,))
+        body.output((body.call_method("cpu", (on_cuda,)),))
+        parent = torch.fx.Graph()
+        x = parent.placeholder("x")
+        x.meta["val"] = cpu
+        branch = parent.get_attr("cond_true_0")
+        cond = parent.call_function(
+            torch.ops.higher_order.cond, (x, branch, branch, (x,))
+        )
+        cond.meta["val"] = (cpu,)
+        parent.output((cond,))
+        root = {"cond_true_0": torch.fx.GraphModule({}, body)}
+        devices = _graph_device_types(torch.fx.GraphModule(root, parent).graph)
+        self.assertEqual(devices, frozenset(("cpu", "cuda")))
+        self.assertEqual(_collapse_device_types(devices), "cuda")
+
+    def test_graph_device_types_scans_a_reused_body_once(self):
+        # A reused region installs one body and emits a get_attr per call site
+        # (invoke_subgraph does), so a scan per node is exponential in nesting
+        # depth. The dotted target is the other half: a get_attr target is a
+        # qualified name, not a single attribute.
+        leaf = torch.fx.Graph()
+        leaf.output((leaf.call_method("cuda", (leaf.placeholder("x"),)),))
+        mid = torch.fx.Graph()
+        for _ in range(4):
+            mid.get_attr("leaf_0")
+        mid.output(())
+        mid_gm = torch.fx.GraphModule({"leaf_0": torch.fx.GraphModule({}, leaf)}, mid)
+        parent = torch.fx.Graph()
+        for _ in range(4):
+            parent.get_attr("wrap.mid_0")
+        parent.output(())
+        graph = torch.fx.GraphModule({"wrap.mid_0": mid_gm}, parent).graph
+        calls = []
+        real = _graph_device_types
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return real(*args, **kwargs)
+
+        with patch("torch._dynamo.graph_utils._graph_device_types", counting):
+            devices = counting(graph)
+        self.assertEqual(devices, frozenset(("cuda",)))
+        # 1 + 4 + 4: each body is entered once, the other calls return at once.
+        self.assertEqual(len(calls), 9)
+
+    def test_graph_device_types_stops_on_a_body_that_reaches_itself(self):
+        # Nothing in FX forbids it, and without a guard the scan never returns.
+        graph = torch.fx.Graph()
+        graph.output((graph.get_attr("loop"),))
+        gm = torch.fx.GraphModule({"loop": torch.nn.Module()}, graph)
+        gm.loop = gm
+        self.assertEqual(_graph_device_types(gm.graph), frozenset())
+
+    def test_graph_device_types_ignores_placeholders_without_a_device(self):
+        # A dynamic-shape capture can lead with a SymInt placeholder -- it does
+        # under the default config; the test harness canonicalizes tensors first --
+        # which has no device of its own, the shape the first graph below imitates.
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.empty(2, device="cuda")
+            s0 = shape_env.create_unbacked_symint()
+        graph = torch.fx.Graph()
+        graph.placeholder("s0").meta["val"] = s0
+        x_node = graph.placeholder("x")
+        x_node.meta["val"] = x
+        graph.call_function(torch.ops.aten.add.Tensor, (x_node, 1)).meta["val"] = x
+        self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
+
+        graph = torch.fx.Graph()
+        graph.placeholder("n").meta["val"] = 4
+        self.assertEqual(_graph_device_types(graph), frozenset())
+        self.assertEqual(_graph_device_types(None), frozenset())
+
+    def test_graph_device_types_ignores_autocast_device_strings(self):
+        # An autocast device type is a plain positional arg of _enter_autocast;
+        # read as a device, a CPU-only graph would refuse to load where it was
+        # saved.
+        with FakeTensorMode():
+            cpu = torch.empty(2)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = cpu
+        graph.call_function(torch.amp._enter_autocast, ("cuda", None, True, None))
+        graph.call_function(torch.ops.aten.add.Tensor, (x, 1)).meta["val"] = cpu
+        self.assertEqual(_graph_device_types(graph), frozenset(("cpu",)))
+
+        # The other direction, where the collapse would hide the mistake, so
+        # what this pins is the reported set itself.
+        with FakeTensorMode():
+            cuda = torch.empty(2, device="cuda")
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = cuda
+        graph.call_function(torch.amp._enter_autocast, ("cpu", None, True, None))
+        self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
+
+        # Real device positions are still read.
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method("to", (x, "mps"))
+        graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": "cuda"})
+        self.assertEqual(_graph_device_types(graph), frozenset(("mps", "cuda")))
+
+    @parametrize("method", ("cpu", "cuda", "xpu", "ipu", "mtia"))
+    def test_graph_device_types_reads_a_device_naming_method(self, method):
+        # x.cuda() names the device in the method, so a graph without meta has
+        # nothing else to read and would collapse to "cpu".
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method(method, (x,))
+        devices = _graph_device_types(graph)
+        self.assertEqual(devices, frozenset((method,)))
+        self.assertEqual(_collapse_device_types(devices), method)
+
+    def test_graph_device_types_reads_the_privateuse1_method(self):
+        # generate_methods_for_privateuse1_backend() gives a renamed backend a
+        # method named after it (.npu()), so the scan reads the name rather than
+        # baking in the default. The getter is patched rather than the backend
+        # really renamed: a real rename is once-per-process and would leak into
+        # every later test, and asserting on the unrenamed default name would
+        # pass against a scan that hardcoded it.
+        with patch.object(
+            torch._C, "_get_privateuse1_backend_name", return_value="npu"
+        ):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            graph.call_method("npu", (x,))
+            self.assertEqual(_graph_device_types(graph), frozenset(("npu",)))
+
+    def test_graph_device_types_reads_a_bare_device_index(self):
+        # Dynamo emits a bare index in a device position (device=0, x.to(0)),
+        # which torch.device resolves against the accelerator the build
+        # provides, not against the machine running the test.
+        try:
+            expected = frozenset((torch.device(0).type,))
+        except RuntimeError:
+            # A build with no accelerator has no device for index 0 to name, so
+            # this arm cannot be exercised here at all -- skip rather than
+            # assert the empty answer a helper ignoring integers also gives.
+            self.skipTest("no accelerator in this build for index 0 to name")
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method("to", (x, 0))
+        graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": 0})
+        self.assertEqual(_graph_device_types(graph), expected)
+
+    @parametrize("spec", ("not_a_device", 2**63, True))
+    def test_graph_device_types_ignores_an_unparsable_device_position(self, spec):
+        # A value torch.device rejects names no device rather than aborting an
+        # otherwise fine compile: an unknown name raises RuntimeError, an
+        # oversized index ValueError. True is deliberately excluded from the
+        # index arm, so it never reaches torch.device at all.
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method("to", (x, spec))
+        self.assertEqual(_graph_device_types(graph), frozenset())
+
+    def test_graph_device_types_drops_the_meta_device(self):
+        # meta is an abstract device: kept in, it wins the collapse over cpu
+        # and records device_type="meta", a string no host check can be run for.
+        with FakeTensorMode():
+            meta = torch.empty(2, device="meta")
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = meta
+        node = graph.call_function(
+            torch.ops.aten.ones.default, ([2],), {"device": "meta"}
+        )
+        node.meta["val"] = meta
+        self.assertEqual(_graph_device_types(graph), frozenset())
+        self.assertEqual(_collapse_device_types(_graph_device_types(graph)), "cpu")
+
+    def test_a_recorded_gpu_device_type_arms_the_load_check(self):
+        # What the flip from "cpu" to an accelerator buys, and what it costs: a
+        # recorded "cuda" is what makes check_compatibility compare the GPU
+        # name, so an artifact saved on one GPU is now refused on another, and
+        # the AOT load path calls this unguarded. Both names are fabricated --
+        # SystemInfo.current().gpu_name is None on a host without a GPU, which
+        # is a mismatch on one side of the check only -- and is_available is
+        # patched so the refusal under test is the GPU-name one there too.
+        here = dataclasses.replace(SystemInfo.current(), gpu_name="This GPU")
+        saved = dataclasses.replace(here, gpu_name="Some Other GPU")
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            here.check_compatibility(saved, "cpu")
+            with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
+                here.check_compatibility(saved, "cuda")
+            # The two load paths pass the saved info in opposite positions (AOT
+            # as other, caching precompile as self). With both names known they
+            # agree; only the side passed as other is required to be known, so
+            # an unknown name splits them.
+            with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
+                saved.check_compatibility(here, "cuda")
+            unknown = dataclasses.replace(here, gpu_name=None)
+            with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
+                unknown.check_compatibility(saved, "cuda")
+            saved.check_compatibility(unknown, "cuda")
+
+    def test_a_recorded_device_the_host_lacks_refuses_the_compile(self):
+        # __post_init__ runs at the end of a compile as well as on load, so the
+        # flip reaches the compile: a graph read as cuda no longer compiles
+        # where cuda is missing, which recording "cpu" let through. No loadable
+        # artifact is lost -- such a host records toolkit_version=None, which
+        # every load of a cuda artifact refuses.
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        artifacts = compiled_fn.aot_compile(((torch.randn(3),), {}))._artifacts
+        artifacts = dataclasses.replace(artifacts, device_type="cuda")
+        with patch.object(torch.cuda, "is_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "cuda is not available"):
+                AOTCompiledFunction(artifacts)
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_aot_compile(self):
