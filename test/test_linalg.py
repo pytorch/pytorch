@@ -8535,11 +8535,6 @@ class TestLinalgDevice(TestLinalg):
         for regex, fn in cuda_cases:
             self.assertRaisesRegex(RuntimeError, regex, fn)
 
-class TestLinalgCpu(TestLinalg):
-    hw_classification = HardwareClassification.CPU
-
-
-
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
@@ -8561,31 +8556,6 @@ class TestLinalgCpu(TestLinalg):
         t = torch.rand(3000, 3000, device=device, dtype=dtype)
         y = torch.linalg.eigh(t)
         self.assertEqual(y.eigenvalues.shape, (3000,))
-
-    def test_norm_complexhalf(self, device):
-        def gen_error_message(input_size, ord, keepdim, dim=None):
-            return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
-
-        vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
-
-        # Test supported ords
-        for keepdim in [False, True]:
-            # vector norm
-            x = torch.randn(25, device=device, dtype=torch.chalf)
-            x_cfloat = x.to(torch.cfloat)
-            for ord in vector_ords:
-                res = torch.linalg.norm(x, ord, keepdim=keepdim)
-                res_float = torch.linalg.norm(x_cfloat, ord, keepdim=keepdim)
-                msg = gen_error_message(x.size(), ord, keepdim)
-                self.assertEqual(res.shape, res_float.shape, msg=msg)
-                self.assertEqual(res.dtype, torch.half, msg=msg)
-                self.assertEqual(res, res_float, msg=msg, exact_dtype=False)
-
-                res_out = torch.tensor([], device=device, dtype=res.dtype)
-                torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
-                self.assertEqual(res_out.shape, res_float.shape, msg=msg)
-                self.assertEqual(res_out.dtype, torch.half, msg=msg)
-                self.assertEqual(res_out, res_float, msg=msg, exact_dtype=False)
 
     def test_powsum_dtype_kwarg_1d_reduction(self, device):
         # Test dtype kwarg on CPU with bfloat16 input and float32 computation
@@ -8658,12 +8628,112 @@ class TestLinalgCpu(TestLinalg):
 
     def test_renorm_ps(self, device):
         # full reduction
-        x = torch.randn(5, 5)
-        xn = x.numpy()
+        x = torch.randn(5, 5, device=device)
         for p in [1, 2, 3, 4, inf]:
             res = x.renorm(p, 1, 1)
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
             self.assertEqual(res, expected, msg=lambda msg: f"{msg}\nrenorm failed for {p}-norm")
+
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_lobpcg_torchscript(self, device, dtype):
+        from torch.testing._internal.common_utils import random_sparse_pd_matrix
+        from torch._linalg_utils import matmul as mm
+
+        lobpcg = torch.jit.script(torch.lobpcg)
+
+        m = 500
+        k = 5
+        A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
+        X1 = torch.randn((m, k), dtype=dtype, device=device)
+        E1, V1 = lobpcg(A1, X=X1)
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        self.assertLess(eq_err, 1e-6)
+
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex64)
+    def test_linalg_matrix_exp_no_warnings(self, device, dtype):
+        # this tests https://github.com/pytorch/pytorch/issues/80948
+        with freeze_rng_state():
+            torch.manual_seed(42)
+            tens = 0.5 * torch.randn(10, 3, 3, dtype=dtype, device=device)
+            tens = (0.5 * (tens.transpose(-1, -2) + tens))
+            with warnings.catch_warnings(record=True) as w:
+                tens.imag = torch.matrix_exp(tens.imag)
+                self.assertFalse(len(w))
+
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_solve_cpu_errors(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/163450:
+        # malformed pivots used to be passed straight to Lapack SYTRS which
+        # would write past the end of the matrix and corrupt the heap; they
+        # should now surface as a clean RuntimeError.
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        hermitian = dtype.is_complex
+        n = 5
+        A = random_hermitian_pd_matrix(n, dtype=dtype, device=device)
+        B = make_tensor((n, 1), dtype=dtype, device=device)
+        LD, pivots, _ = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+
+        # Sanity: the factorization output round-trips.
+        torch.linalg.ldl_solve(LD, pivots, B, hermitian=hermitian)
+
+        # Lapack uses 1-based pivot indices, so zero is invalid.
+        bad = pivots.clone()
+        bad[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| >= 1"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+        # Out-of-range positive pivot.
+        bad = pivots.clone()
+        bad[0] = n + 1
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+        # Negative pivots encode 2x2 block pivots and are legal, but |pivot|
+        # must still be <= N.
+        bad = pivots.clone()
+        bad[0] = -(n + 1)
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+class TestLinalgCpu(TestLinalg):
+    hw_classification = HardwareClassification.CPU
+
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_eigh_lwork_lapack(self, device, dtype):
+        # test that the calculated lwork does not cause a crash, see https://github.com/pytorch/pytorch/issues/145801
+        t = torch.rand(3000, 3000, device=device, dtype=dtype)
+        y = torch.linalg.eigh(t)
+        self.assertEqual(y.eigenvalues.shape, (3000,))
+
+    def test_norm_complexhalf(self, device):
+        def gen_error_message(input_size, ord, keepdim, dim=None):
+            return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
+
+        vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
+
+        # Test supported ords
+        for keepdim in [False, True]:
+            # vector norm
+            x = torch.randn(25, device=device, dtype=torch.chalf)
+            x_cfloat = x.to(torch.cfloat)
+            for ord in vector_ords:
+                res = torch.linalg.norm(x, ord, keepdim=keepdim)
+                res_float = torch.linalg.norm(x_cfloat, ord, keepdim=keepdim)
+                msg = gen_error_message(x.size(), ord, keepdim)
+                self.assertEqual(res.shape, res_float.shape, msg=msg)
+                self.assertEqual(res.dtype, torch.half, msg=msg)
+                self.assertEqual(res, res_float, msg=msg, exact_dtype=False)
+
+                res_out = torch.tensor([], device=device, dtype=res.dtype)
+                torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
+                self.assertEqual(res_out.shape, res_float.shape, msg=msg)
+                self.assertEqual(res_out.dtype, torch.half, msg=msg)
+                self.assertEqual(res_out, res_float, msg=msg, exact_dtype=False)
 
     @dtypes(*floating_and_complex_types())
     def test_linalg_lu_cpu_errors(self, device, dtype):
@@ -8719,22 +8789,6 @@ class TestLinalgCpu(TestLinalg):
         pivots[0] = 4
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
-
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_lobpcg_torchscript(self, device, dtype):
-        from torch.testing._internal.common_utils import random_sparse_pd_matrix
-        from torch._linalg_utils import matmul as mm
-
-        lobpcg = torch.jit.script(torch.lobpcg)
-
-        m = 500
-        k = 5
-        A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
-        X1 = torch.randn((m, k), dtype=dtype, device=device)
-        E1, V1 = lobpcg(A1, X=X1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
-        self.assertLess(eq_err, 1e-6)
 
     @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
                      "Scipy not found or older than 1.4.1")
@@ -9019,55 +9073,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             torch.testing.assert_close(res, ref, atol=1e-2, rtol=1e-2)
         finally:
             torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
-
-    @skipCPUIfNoLapack
-    @dtypes(torch.complex64)
-    def test_linalg_matrix_exp_no_warnings(self, device, dtype):
-        # this tests https://github.com/pytorch/pytorch/issues/80948
-        with freeze_rng_state():
-            torch.manual_seed(42)
-            tens = 0.5 * torch.randn(10, 3, 3, dtype=dtype, device=device)
-            tens = (0.5 * (tens.transpose(-1, -2) + tens))
-            with warnings.catch_warnings(record=True) as w:
-                tens.imag = torch.matrix_exp(tens.imag)
-                self.assertFalse(len(w))
-
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_ldl_solve_cpu_errors(self, device, dtype):
-        # Regression test for https://github.com/pytorch/pytorch/issues/163450:
-        # malformed pivots used to be passed straight to Lapack SYTRS which
-        # would write past the end of the matrix and corrupt the heap; they
-        # should now surface as a clean RuntimeError.
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        hermitian = dtype.is_complex
-        n = 5
-        A = random_hermitian_pd_matrix(n, dtype=dtype, device=device)
-        B = make_tensor((n, 1), dtype=dtype, device=device)
-        LD, pivots, _ = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
-
-        # Sanity: the factorization output round-trips.
-        torch.linalg.ldl_solve(LD, pivots, B, hermitian=hermitian)
-
-        # Lapack uses 1-based pivot indices, so zero is invalid.
-        bad = pivots.clone()
-        bad[0] = 0
-        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| >= 1"):
-            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
-
-        # Out-of-range positive pivot.
-        bad = pivots.clone()
-        bad[0] = n + 1
-        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
-            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
-
-        # Negative pivots encode 2x2 block pivots and are legal, but |pivot|
-        # must still be <= N.
-        bad = pivots.clone()
-        bad[0] = -(n + 1)
-        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
-            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
 
 class TestLinalgCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
