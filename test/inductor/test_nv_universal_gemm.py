@@ -28,6 +28,7 @@ from torch._inductor.utils import (
     run_and_get_code,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
@@ -114,7 +115,76 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
-# TODO(nikhilap): Remove Blackwell restriction once cutlass.operators includes H100 kernels
+@unittest.skipIf(
+    not (ensure_nv_universal_gemm_available() and SM90OrLater),
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or GPU is older than SM90",
+)
+@instantiate_parametrized_tests
+class TestNVUniversalGemmDense(TestCase):
+    """Dense NVIDIA Universal GEMM coverage for SM90 and later."""
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize(
+        "layout_a,layout_b",
+        (
+            ("contiguous", "contiguous"),
+            ("aligned_offset", "contiguous"),
+            ("contiguous", "aligned_offset"),
+            ("contiguous", "view"),
+            ("aligned_offset", "view"),
+            ("padded", "contiguous"),
+            ("contiguous", "padded"),
+        ),
+    )
+    def test_matmul(self, dtype, layout_a, layout_b):
+        """Test matmul with various dtypes and tensor layouts.
+
+        M=513 tests that non-divisible M dimension works
+        (only N and K must be divisible by 16).
+        """
+        m, n, k = 513, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout(layout_a, m, k, dtype)
+        b = _create_tensor_with_layout(layout_b, k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config()):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_matmul_swap_ab(self, dtype):
+        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
+        improving tile utilization for small-M shapes. Verify a small-M matmul
+        stays numerically correct with swap_ab enabled (the swapped operands and
+        transposed output view must round-trip to the original result).
+        """
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout("contiguous", m, k, dtype)
+        b = _create_tensor_with_layout("contiguous", k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+
+# EFC and block-scaled tests below remain Blackwell-only.
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
     "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
@@ -228,42 +298,6 @@ class TestNVUniversalGemm(TestCase):
         self.assertEqual(schema.parameter_names, ("D",))
         self.assertTrue(schema.returns_local_reduce)
 
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    @parametrize(
-        "layout_a,layout_b",
-        (
-            ("contiguous", "contiguous"),
-            ("aligned_offset", "contiguous"),
-            ("contiguous", "aligned_offset"),
-            ("contiguous", "view"),
-            ("aligned_offset", "view"),
-            ("padded", "contiguous"),
-            ("contiguous", "padded"),
-        ),
-    )
-    def test_matmul(self, dtype, layout_a, layout_b):
-        """Test matmul with various dtypes and tensor layouts.
-
-        M=513 tests that non-divisible M dimension works
-        (only N and K must be divisible by 16).
-        """
-        m, n, k = 513, 512, 512
-
-        def matmul(a, b):
-            return a @ b
-
-        a = _create_tensor_with_layout(layout_a, m, k, dtype)
-        b = _create_tensor_with_layout(layout_b, k, n, dtype)
-        expected = matmul(a, b)
-
-        torch._dynamo.reset()
-
-        with config.patch(_nvgemm_config()):
-            compiled_fn = torch.compile(matmul)
-            result = compiled_fn(a, b)
-
-        torch.testing.assert_close(result, expected)
-
     def test_arch_filter_rejects_min_cc_only_kernels(self):
         """designed_for_min_cc <= device cc is insufficient: an arch-conditional
         sm90 kernel reports min_cc=90 but only lists a cc=90 target and won't
@@ -291,30 +325,6 @@ class TestNVUniversalGemm(TestCase):
             len(min_cc_ok),
             "exact-arch filter should reject kernels that min_cc alone accepts",
         )
-
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_matmul_swap_ab(self, dtype):
-        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
-        improving tile utilization for small-M shapes. Verify a small-M matmul
-        stays numerically correct with swap_ab enabled (the swapped operands and
-        transposed output view must round-trip to the original result).
-        """
-        m, n, k = 16, 512, 512
-
-        def matmul(a, b):
-            return a @ b
-
-        a = _create_tensor_with_layout("contiguous", m, k, dtype)
-        b = _create_tensor_with_layout("contiguous", k, n, dtype)
-        expected = matmul(a, b)
-
-        torch._dynamo.reset()
-
-        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
-            compiled_fn = torch.compile(matmul)
-            result = compiled_fn(a, b)
-
-        torch.testing.assert_close(result, expected)
 
     def test_cudagraphs_intermediate_addmm(self):
         """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
