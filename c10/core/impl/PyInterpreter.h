@@ -228,11 +228,13 @@ struct C10_API PyInterpreterVTable {
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 
   // C++ FakeTensor callbacks; each returns true if it handled the op.
-  // try a registered Python decomposition for op.
+  // Try a registered Python decomposition for op. has_python_cia reports
+  // whether a Python CIA override exists even when it returns NotImplemented.
   virtual bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
-      bool has_symbolic_sizes) const = 0;
+      bool has_symbolic_sizes,
+      bool* has_python_cia) const = 0;
   // try a torch.library registered fake implementation for op
   virtual bool fake_try_custom_op_impl(
       const c10::OperatorHandle& op,
