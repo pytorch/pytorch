@@ -2817,13 +2817,15 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     __script_if_tracing_wrapper have the original attr at "__original_fn".
     """
 
-    def python_type(self) -> type:
-        return types.FunctionType
+    _cpython_type = types.FunctionType
 
     def __init__(self, wrapper_obj: Any, attr_to_trace: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.wrapper_obj = wrapper_obj
         self.attr_to_trace = attr_to_trace
+
+    def python_type(self) -> type:
+        return types.FunctionType
 
     def get_module(self) -> str:
         return self.wrapper_obj.__module__
@@ -2958,15 +2960,15 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         return self.wrapper_obj
 
 
-class WrapperUserMethodVariable(WrapperUserFunctionVariable):
+class WrapperUserMethodVariable(BaseUserFunctionVariable):
     """
-    Similar to WrapperUserFunctionVariable, but for methods. The only delta is
-    saving the vt for `self` object of the method which is then used by
-    WrapperUserFunctionVariable in `call_function` method.
+    Similar to WrapperUserFunctionVariable, but for methods. Sibling class
+    inheriting from BaseUserFunctionVariable so that
+    issubclass(WrapperUserMethodVariable, WrapperUserFunctionVariable) is False,
+    matching CPython (MethodType is not a FunctionType).
     """
 
-    def python_type(self) -> type:
-        return types.MethodType
+    _cpython_type = types.MethodType
 
     def __init__(
         self,
@@ -2975,11 +2977,52 @@ class WrapperUserMethodVariable(WrapperUserFunctionVariable):
         self_obj: VariableTracker,
         **kwargs: Any,
     ) -> None:
-        super().__init__(wrapper_obj, attr_to_trace, **kwargs)
+        super().__init__(**kwargs)
+        self.fn = WrapperUserFunctionVariable(wrapper_obj, attr_to_trace, **kwargs)
         self.obj = self_obj
+
+    def python_type(self) -> type:
+        return types.MethodType
 
     def self_args(self) -> list[VariableTracker]:
         return [self.obj]
+
+    def get_module(self) -> str:
+        return self.fn.get_module()
+
+    def get_name(self) -> str:
+        return self.fn.get_name()
+
+    def get_qualname(self) -> str:
+        return self.fn.get_qualname()
+
+    def get_code(self) -> types.CodeType:
+        return self.fn.get_code()
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        return self.fn.tp_getattro_impl(tx, name)
+
+    def get_function(self):
+        return self.fn.get_function()
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        return self.fn.lookup_instance_dict(tx, name)
+
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.fn.call_function(tx, self.self_args() + list(args), kwargs)
+
+    def get_real_python_backed_value(self) -> object:
+        return self.fn.get_real_python_backed_value()
 
 
 def _traceable_collective_remaps() -> dict[Any, Any]:
