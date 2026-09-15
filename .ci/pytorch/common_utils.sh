@@ -343,6 +343,14 @@ function install_torchcomms() {
   pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
+function install_nccl4py() {
+  local extra=cu12
+  if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
+    extra=cu13
+  fi
+  pip_install "nccl4py[${extra}]==0.5.0"
+}
+
 function install_spmd_types() {
   local commit
   commit=$(get_pinned_commit spmd_types)
