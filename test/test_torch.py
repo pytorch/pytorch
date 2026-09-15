@@ -11352,4 +11352,4 @@ instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', 
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
-    run_tests()f
+    run_tests()
