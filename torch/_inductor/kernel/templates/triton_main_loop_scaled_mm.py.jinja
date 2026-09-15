@@ -8,11 +8,10 @@
 
     stride_am = {{stride("A", 0)}}
     stride_bn = {{stride("B", 1)}}
-    # The lowering supplies v2's scale axes; defaults describe the legacy API.
-    stride_asm = {{stride("A_inverse_scale", SCALE_A_OUTER_DIM | default(0))}}
-    stride_ask = {{stride("A_inverse_scale", 1 - (SCALE_A_OUTER_DIM | default(0)))}}
-    stride_bsn = {{stride("B_inverse_scale", SCALE_B_OUTER_DIM | default(1))}}
-    stride_bsk = {{stride("B_inverse_scale", 1 - (SCALE_B_OUTER_DIM | default(1)))}}
+    stride_scale_a = {{stride("A_inverse_scale", 1 if SCALE_A_TRANSPOSED else 0)}}
+    stride_scale_b = {{stride("B_inverse_scale", 1 if SCALE_B_TRANSPOSED else 0)}}
+    stride_scale_a_col = {{stride("A_inverse_scale", 0 if SCALE_A_TRANSPOSED else 1)}}
+    stride_scale_b_col = {{stride("B_inverse_scale", 0 if SCALE_B_TRANSPOSED else 1)}}
 
     start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
     num_pid_m = tl.cdiv(M, BLOCK_M)
@@ -68,8 +67,8 @@
                 ki,
                 am_blocks,
                 ak_blocks,
-                stride_asm,
-                stride_ask,
+                stride_scale_a,
+                stride_scale_a_col,
                 BLOCK_M,
                 BLOCK_K,
                 MIN_BLOCK_TILE_AM,
@@ -83,8 +82,8 @@
                 M,
                 am_blocks,
                 ak_blocks,
-                stride_asm,
-                stride_ask,
+                stride_scale_a,
+                stride_scale_a_col,
                 BLOCK_M,
                 BLOCK_K,
                 MIN_BLOCK_TILE_AK,
@@ -99,8 +98,8 @@
                 ki,
                 bn_blocks,
                 bk_blocks,
-                stride_bsn,
-                stride_bsk,
+                stride_scale_b,
+                stride_scale_b_col,
                 BLOCK_N,
                 BLOCK_K,
                 MIN_BLOCK_TILE_BN,
@@ -114,8 +113,8 @@
                 N,
                 bn_blocks,
                 bk_blocks,
-                stride_bsn,
-                stride_bsk,
+                stride_scale_b,
+                stride_scale_b_col,
                 BLOCK_N,
                 BLOCK_K,
                 MIN_BLOCK_TILE_BK,
@@ -125,7 +124,7 @@
 
             a_scaled = a * scale_a_block
             b_scaled = b * scale_b_block
-            accumulator = tl.dot(a_scaled, b_scaled.T, accumulator)
+            accumulator = tl.dot(a_scaled, b_scaled.T, accumulator, input_precision=DOT_PRECISION)
 
         offs_cm = offs_am + tl.arange(0, BLOCK_M)
         offs_cn = offs_bn + tl.arange(0, BLOCK_N)
@@ -148,16 +147,16 @@ def blockwise1xTILESIZE_scaling(
     lhs_size,
     lhs_blocks,
     k_blocks,
-    stride_outer,
-    stride_k,
+    scale_stride,
+    scale_stride_col,
     BLOCK_lhs: tl.constexpr,
     BLOCK_K: tl.constexpr,
     MIN_BLOCK_TILE_K: tl.constexpr,
     TILE_SIZE: tl.constexpr,
 ):
     row_offs_scale = pid * BLOCK_lhs + tl.arange(0, BLOCK_lhs)
-    col_offs_scale = (ki * BLOCK_K) // TILE_SIZE + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
-    ptrs = scale + row_offs_scale[:, None] * stride_outer + col_offs_scale[None, :] * stride_k
+    col_offs_scale = ki * BLOCK_K // TILE_SIZE + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
+    ptrs = scale + row_offs_scale[:, None] * scale_stride + col_offs_scale[None, :] * scale_stride_col
     mask = (row_offs_scale[:, None] < lhs_size) & (col_offs_scale[None, :] < k_blocks)
     scale_block = tl.load(ptrs, mask=mask, other=1.0)
 
@@ -181,16 +180,16 @@ def blockwise128x128_scaling(
     ki,
     lhs_blocks,
     k_blocks,
-    stride_outer,
-    stride_k,
+    scale_stride,
+    scale_stride_col,
     BLOCK_lhs: tl.constexpr,
     BLOCK_K: tl.constexpr,
     MIN_BLOCK_TILE_lhs: tl.constexpr,
     MIN_BLOCK_TILE_K: tl.constexpr,
 ):
-    row_offs_scale = (pid * BLOCK_lhs) // 128 + tl.arange(0, (BLOCK_lhs + 128 - 1) // 128)
-    col_offs_scale = (ki * BLOCK_K) // 128 + tl.arange(0, (BLOCK_K + 128 - 1) // 128)
-    ptrs = scale + row_offs_scale[:, None] * stride_outer + col_offs_scale[None, :] * stride_k
+    row_offs_scale = pid * BLOCK_lhs // 128 + tl.arange(0, (BLOCK_lhs + 128 - 1) // 128)
+    col_offs_scale = ki * BLOCK_K // 128 + tl.arange(0, (BLOCK_K + 128 - 1) // 128)
+    ptrs = scale + row_offs_scale[:, None] * scale_stride + col_offs_scale[None, :] * scale_stride_col
     mask = (row_offs_scale[:, None] < lhs_blocks) & (col_offs_scale[None, :] < k_blocks)
     scale_block = tl.load(ptrs, mask=mask, other=1.0)
 
