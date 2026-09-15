@@ -12,23 +12,22 @@ CUDAEventCache::CUDAEventCache() = default;
 std::shared_ptr<at::cuda::CUDAEvent> CUDAEventCache::create(
     bool timing,
     bool external) {
-  const size_t index = (timing ? 1 : 0) | (external ? 2 : 0);
   // Register the deleter as a callback when the WorkNCCL object is destroyed.
   // Each deleter keeps a ref count to the cache object, so that even when
   // the thread that creates the cache is gone, the cache object won't be
   // destroyed until all the events in the cache are destroyed (ref number drops
   // to zero).
-  auto deleter = [cache = shared_from_this(),
-                  index](at::cuda::CUDAEvent* event) {
+  auto deleter = [cache = shared_from_this(), timing, external](
+                     at::cuda::CUDAEvent* event) {
     std::lock_guard<std::mutex> lock(cache->cacheMutex_);
     // We put the event back to the cache deque once the WorkNCCL object is
     // destroyed.
-    cache->eventsArray_[index].push_back(event);
+    cache->eventsArray_[timing][external].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
     std::lock_guard<std::mutex> lock(cacheMutex_);
-    auto& events = eventsArray_[index];
+    auto& events = eventsArray_[timing][external];
     // If we still have events in the cache, we reuse it. Otherwise, we create a
     // new one.
     if (!events.empty()) {
