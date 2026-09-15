@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, DeterministicGuard
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -88,6 +88,15 @@ def _graph_node_names(grad_fn):
         names.add(node.name())
         stack.extend(nxt for nxt, _ in node.next_functions)
     return names
+
+
+def _grid_sample_gradients(input, grid, grad_output, options, required=(True, True)):
+    """Return fresh requested gradients through the public functional operator."""
+    input = input.detach().requires_grad_(required[0])
+    grid = grid.detach().requires_grad_(required[1])
+    output = F.grid_sample(input, grid, **options)
+    targets = tuple(t for t in (input, grid) if t.requires_grad)
+    return torch.autograd.grad(output, targets, grad_output)
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -4422,16 +4431,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-4, rtol=5e-5)
 
                     if TEST_CUDA:
-                        input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_(input_requires_grad)
-                        grid_cuda = get_grid('cuda', grid_cpu.detach()).requires_grad_()
-                        out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
-                                                 align_corners=align_corners)
-                        self.assertEqual(out_cpu, out_cuda)
+                        gradients_cuda = gradients.cuda()
+                        for deterministic in (False, True):
+                            with self.subTest(deterministic=deterministic), DeterministicGuard(deterministic):
+                                input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_(input_requires_grad)
+                                grid_cuda = get_grid('cuda', grid_cpu.detach()).requires_grad_()
+                                out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
+                                                         align_corners=align_corners)
+                                self.assertEqual(out_cpu, out_cuda)
 
-                        out_cuda.backward(gradients.cuda())
-                        if input_requires_grad:
-                            self.assertEqual(input_cpu.grad, input_cuda.grad)
-                        self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5, rtol=0)
+                                out_cuda.backward(gradients_cuda, retain_graph=deterministic)
+                                if input_requires_grad:
+                                    self.assertEqual(input_cpu.grad, input_cuda.grad)
+                                self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5, rtol=0)
+
+                                if deterministic:
+                                    targets = (input_cuda, grid_cuda) if input_requires_grad else (grid_cuda,)
+                                    replay = torch.autograd.grad(out_cuda, targets, gradients_cuda)
+                                    for value, target in zip(replay, targets):
+                                        self.assertEqual(value.view(torch.int64), target.grad.view(torch.int64))
 
                         # check that zero-dimensional input strides don't error out
                         base_input = torch.randn(N, C, 1, IW)
@@ -6513,17 +6531,28 @@ class TestNNDeviceType(NNTestCase):
                 out_cpu.backward(gradients)
 
                 if torch.device(device).type != 'cpu':
-                    input_device = input_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_(
-                        input_requires_grad)
-                    grid_device = grid_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_()
-                    out_device = F.grid_sample(input_device, grid_device, mode=mode, padding_mode=padding_mode,
-                                               align_corners=align_corners)
-                    self.assertEqual(out_cpu, out_device)
+                    gradients_device = gradients.to(device)
+                    # CUDA also checks the deterministic backward, including bitwise replay.
+                    policies = (False, True) if torch.device(device).type == 'cuda' else (False,)
+                    for deterministic in policies:
+                        with self.subTest(deterministic=deterministic), DeterministicGuard(deterministic):
+                            input_device = input_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_(
+                                input_requires_grad)
+                            grid_device = grid_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_()
+                            out_device = F.grid_sample(input_device, grid_device, mode=mode, padding_mode=padding_mode,
+                                                       align_corners=align_corners)
+                            self.assertEqual(out_cpu, out_device)
 
-                    out_device.backward(gradients.to(device))
-                    if input_requires_grad:
-                        self.assertEqual(input_cpu.grad, input_device.grad)
-                    self.assertEqual(grid_cpu.grad, grid_device.grad, atol=5e-5, rtol=0)
+                            out_device.backward(gradients_device, retain_graph=deterministic)
+                            if input_requires_grad:
+                                self.assertEqual(input_cpu.grad, input_device.grad)
+                            self.assertEqual(grid_cpu.grad, grid_device.grad, atol=5e-5, rtol=0)
+
+                            if deterministic:
+                                targets = (input_device, grid_device) if input_requires_grad else (grid_device,)
+                                replay = torch.autograd.grad(out_device, targets, gradients_device)
+                                for value, target in zip(replay, targets):
+                                    self.assertEqual(value.view(torch.int64), target.grad.view(torch.int64))
 
                     # check that zero-dimensional input strides don't error out
                     base_input = torch.randn(N, C, 1, IH, IW)
@@ -10627,6 +10656,218 @@ class TestNNDeviceType(NNTestCase):
         loaded_model.__setstate__(state_dict)
         result = loaded_model(x)
         self.assertEqual(result, expected)
+
+    def _assert_grid_sample_gradient_accuracy(
+        self, value: torch.Tensor, expected: torch.Tensor, baseline: torch.Tensor
+    ) -> None:
+        """Use CPU FP64 as the oracle, with CPU eager's low-precision rounding baseline."""
+        value = value.cpu()
+        if value.dtype in (torch.float16, torch.bfloat16):
+            error = (value.double() - expected).abs()
+            baseline_error = (baseline.double() - expected).abs()
+            eps = torch.finfo(value.dtype).eps
+            self.assertTrue(torch.isfinite(value).all())
+            self.assertLessEqual(
+                error.max().item(),
+                baseline_error.max().item() + 2 * eps * expected.abs().max().item(),
+            )
+            self.assertLessEqual(
+                error.mean().item(),
+                baseline_error.mean().item() + eps * expected.abs().mean().item(),
+            )
+        else:
+            tolerance = 1e-10 if value.dtype == torch.float64 else 2e-5
+            self.assertEqual(value.double(), expected, atol=tolerance, rtol=tolerance)
+
+    @parametrize_test("route", ["native2d", "native3d", "cudnn"])
+    @parametrize_test("policy", [(False, False), (True, False), (True, True)])
+    @onlyCUDA
+    def test_grid_sample_dispatch(self, device, route, policy):
+        """Only deterministic mode may launch grouping, including warn-only mode."""
+        if (
+            torch.profiler.ProfilerActivity.CUDA
+            not in torch.profiler.supported_activities()
+        ):
+            self.skipTest("CUDA profiling unavailable")
+        if route == "cudnn" and (not TEST_CUDNN or torch.version.hip):
+            self.skipTest("cuDNN not available")
+        dims = 3 if route == "native3d" else 2
+        output_shape = (1,) * (dims - 1) + (513,)
+        input = torch.randn((1, 3) + (4,) * dims, device=device)
+        grid = torch.zeros((1,) + output_shape + (dims,), device=device)
+        grad = torch.randn((1, 3) + output_shape, device=device)
+        input.requires_grad_()
+        grid.requires_grad_()
+        options = dict(align_corners=route == "cudnn")
+        backward = partial(_grid_sample_gradients, input, grid, grad, options)
+        expected = _grid_sample_gradients(
+            input.cpu().double(),
+            grid.cpu().double(),
+            grad.cpu().double(),
+            dict(align_corners=route == "cudnn"),
+        )
+        enabled, warn_only = policy
+        with (
+            DeterministicGuard(enabled, warn_only=warn_only),
+            torch.backends.cudnn.flags(enabled=route == "cudnn"),
+        ):
+            output = F.grid_sample(input, grid, **options)
+            if route == "cudnn":
+                self.assertEqual(type(output.grad_fn).__name__, "CudnnGridSamplerBackward0")
+            first = torch.autograd.grad(output, (input, grid), grad)
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as prof:
+                actual = backward()
+        for value, prior, ref in zip(actual, first, expected):
+            self.assertEqual(value.cpu().double(), ref, atol=2e-5, rtol=2e-5)
+            if enabled:
+                self.assertEqual(value.view(torch.uint8), prior.view(torch.uint8))
+        names = {event.name for event in prof.events()}
+        self.assertEqual(any("make_records" in name for name in names), enabled)
+        if route == "cudnn":
+            self.assertEqual("aten::grid_sampler_2d_backward" in names, enabled)
+
+    @parametrize_test("dims", [2, 3])
+    @parametrize_test("mode", ["bilinear", "bicubic"])
+    @onlyCUDA
+    def test_grid_sample_gradcheck(self, device, dims, mode):
+        """Preserve first- and second-order autograd formulas through the new kernel."""
+        input = torch.randn(
+            (1, 2) + (3,) * dims, device=device, dtype=torch.double, requires_grad=True
+        )
+        grid = (
+            torch.rand((1,) + (2,) * dims + (dims,), device=device, dtype=torch.double)
+            * 0.6
+            - 0.3
+        ).requires_grad_()
+        with torch.backends.cudnn.flags(enabled=False), DeterministicGuard(True):
+            fn = partial(F.grid_sample, mode=mode, align_corners=False)
+            self.assertTrue(torch.autograd.gradcheck(fn, (input, grid)))
+            self.assertTrue(torch.autograd.gradgradcheck(fn, (input, grid)))
+
+    @onlyCUDA
+    def test_grid_sample_expanded_streams_and_graph(self, device):
+        """Cover offsets/zero strides, singleton dimensions, channel tails, and stream isolation."""
+        rng = torch.Generator().manual_seed(91)
+        t = 513
+        bases = [
+            torch.rand(1, 1, 1, 18, generator=rng),
+            torch.rand(1, 1, 2 * t, 4, generator=rng) * 0.02 - 0.01,
+            torch.rand(2, 1, 1, 2 * t, generator=rng),
+        ]
+        bases = [t.to(device) for t in bases]
+        data = (
+            bases[0][..., 1::2].expand(2, 65, 1, 9),
+            bases[1][:, :, 1::2, ::2].expand(2, 1, t, 2),
+            bases[2][..., 1::2].expand(2, 65, 1, t),
+        )
+        options = dict(padding_mode="reflection", align_corners=False)
+        expected = _grid_sample_gradients(*(t.cpu().double() for t in data), options)
+        current = torch.cuda.current_stream()
+        streams = [torch.cuda.Stream(), torch.cuda.Stream()]
+        results = []
+        with DeterministicGuard(True), torch.backends.cudnn.flags(enabled=False):
+            for stream in streams:
+                stream.wait_stream(current)
+                with torch.cuda.stream(stream):
+                    results.append(_grid_sample_gradients(*data, options))
+            for stream in streams:
+                current.wait_stream(stream)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = torch.ops.aten.grid_sampler_2d_backward(
+                    data[2], data[0], data[1], 0, 2, False, (True, True)
+                )
+            for _ in range(3):
+                graph.replay()
+                for value, other, graph_value, ref in zip(*results, captured, expected):
+                    self.assertEqual(value.view(torch.int32), other.view(torch.int32))
+                    self.assertEqual(
+                        value.view(torch.int32), graph_value.view(torch.int32)
+                    )
+                    self.assertEqual(value.cpu().double(), ref, atol=2e-4, rtol=2e-5)
+            # Replaying fixed pointers must rebuild geometry from current values.
+            bases[1].add_(0.25)
+            graph.replay()
+            eager = _grid_sample_gradients(*data, options)
+            expected = _grid_sample_gradients(*(t.cpu().double() for t in data), options)
+            for value, other, ref in zip(captured, eager, expected):
+                self.assertEqual(value.view(torch.int32), other.view(torch.int32))
+                self.assertEqual(value.cpu().double(), ref, atol=2e-4, rtol=2e-5)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize_test("dims", [2, 3])
+    @parametrize_test("mode", ["bilinear", "nearest", "bicubic"])
+    @onlyCUDA
+    def test_grid_sample_long_segments(self, device, dtype, dims, mode):
+        """Exercise fixed partial reductions, including low-precision product rounding."""
+        rng = torch.Generator().manual_seed(62)
+        output_shape = (1,) * (dims - 1) + (513,)
+        # Every sample shares one off-center coordinate, so segments stay long while
+        # interpolation weights are not exactly representable in low precision.
+        coordinate = torch.tensor((0.1, 0.2, 0.3)[:dims], dtype=dtype)
+        cpu = (
+            (torch.rand((2, 3) + (4,) * dims, generator=rng) * 2 - 1).to(dtype),
+            coordinate.expand((2,) + output_shape + (dims,)).contiguous(),
+            (torch.rand((2, 3) + output_shape, generator=rng) * 2 - 1).to(dtype),
+        )
+        options = dict(mode=mode, align_corners=False)
+        expected = _grid_sample_gradients(*(t.double() for t in cpu), options)
+        baseline = _grid_sample_gradients(*cpu, options)
+        data = tuple(t.to(device) for t in cpu)
+        with DeterministicGuard(True), torch.backends.cudnn.flags(enabled=False):
+            first = _grid_sample_gradients(*data, options)
+            second = _grid_sample_gradients(*data, options)
+        for value, other, ref, low in zip(first, second, expected, baseline):
+            value, other = value.cpu(), other.cpu()
+            self.assertEqual(value.view(torch.uint8), other.view(torch.uint8))
+            self._assert_grid_sample_gradient_accuracy(value, ref, low)
+
+    @onlyCUDA
+    @parametrize_test("dims,mode", [(2, "bilinear"), (2, "bicubic"), (3, "bicubic")])
+    def test_grid_sample_chunk_boundary(self, device, dims, mode):
+        """Fixed workspace chunks must accumulate across a batch boundary without overwrite."""
+        # Chunks hold 2**20 interpolation records; place the boundary inside batch 1.
+        neighbors = (4 if mode == "bicubic" else 2) ** dims
+        outputs = (2**20 // neighbors) // 2 + 3
+        spatial = (1,) * (dims - 1) + (outputs,)
+        rng = torch.Generator().manual_seed(18)
+        cpu = (
+            torch.rand((2, 1) + (2,) * dims, generator=rng, dtype=torch.double),
+            torch.rand((2,) + spatial + (dims,), generator=rng, dtype=torch.double) * 0.5 - 0.25,
+            torch.rand((2, 1) + spatial, generator=rng, dtype=torch.double) * 2 - 1,
+        )
+        options = dict(mode=mode, align_corners=False)
+        expected = _grid_sample_gradients(*cpu, options)
+        data = tuple(t.to(device) for t in cpu)
+        with DeterministicGuard(True), torch.backends.cudnn.flags(enabled=False):
+            first = _grid_sample_gradients(*data, options)
+            second = _grid_sample_gradients(*data, options)
+        for value, other, ref in zip(first, second, expected):
+            self.assertEqual(value.view(torch.int64), other.view(torch.int64))
+            self.assertEqual(value.cpu(), ref, atol=1e-9, rtol=1e-10)
+
+    @onlyCUDA
+    @parametrize_test("dims", [2, 3])
+    @parametrize_test("mode", ["bilinear", "nearest", "bicubic"])
+    def test_grid_sample_backward_output_mask(self, device, dims, mode):
+        """Input-only autograd and the native always-computed grid gradient keep their contracts."""
+        input = torch.randn((1, 3) + (4,) * dims, device=device)
+        grid = torch.rand((1,) + (2,) * dims + (dims,), device=device) - 0.5
+        grad = torch.randn((1, 3) + (2,) * dims, device=device)
+        backward = torch.ops.aten.grid_sampler_2d_backward if dims == 2 else torch.ops.aten.grid_sampler_3d_backward
+        options = dict(mode=mode, align_corners=False)
+        with DeterministicGuard(True), cudnn.flags(enabled=False):
+            both = _grid_sample_gradients(input, grid, grad, options)
+            input_only = _grid_sample_gradients(input, grid, grad, options, (True, False))
+            no_input, grid_grad = backward(grad, input, grid, F.GRID_SAMPLE_INTERPOLATION_MODES[mode], 0, False, (False, False))
+        self.assertEqual(input_only[0], both[0], atol=0, rtol=0)
+        self.assertIsNone(no_input)
+        self.assertEqual(grid_grad, both[1], atol=0, rtol=0)
 
     @skipMPS  # fp16 result has a NaN mismatch against the CPU reference on MPS
     @onlyAccelerator

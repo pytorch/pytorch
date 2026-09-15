@@ -34,10 +34,9 @@ class GridSamplerCodegenTests(InductorTestCase):
         self.assertNotIn("tl.int64", source_code)
 
     @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    @parametrize("dims_align", [(2, False), (2, True), (3, False)])
-    def test_grid_sampler_backward_deterministic(self, dims_align):
+    @parametrize("dims,align", [(2, False), (2, True), (3, False)])
+    def test_grid_sampler_backward_deterministic(self, dims, align):
         """Compiled autograd must preserve strict determinism for native and cuDNN routes."""
-        dims, align = dims_align
 
         def fn(a, b):
             return torch.nn.functional.grid_sample(a, b, align_corners=align)
