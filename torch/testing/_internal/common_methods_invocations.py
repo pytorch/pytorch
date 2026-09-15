@@ -20568,6 +20568,10 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            check_batched_forward_grad=False,
            assert_autodiffed=True,
            skips=(
+               # SchemaCheckMode checks input mutations with allclose, which does not support float8.
+               DecorateInfo(unittest.skip("allclose does not support float8"),
+                            'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
