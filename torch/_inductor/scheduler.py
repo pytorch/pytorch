@@ -4544,7 +4544,9 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         # When we fuse extra nodes into a FusedMixOrderReductions node,
         # we should not allow recursive mix-order reduction being
         # created.
-        if not self.scheduler.can_fuse(node1, node2, allow_mix_order_reduction=False):
+        if not self.scheduler._can_fuse_candidate(
+            node1, node2, allow_mix_order_reduction=False
+        ):
             return False
 
         # Since node1 is from the current mix order reduction, if node1 is
@@ -4855,7 +4857,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             if not foreach_match:
                 why("foreach do not have same length")
             return foreach_match and all(
-                producer.scheduler.can_fuse(l, r)
+                producer.scheduler._can_fuse_candidate(l, r)
                 for l, r in zip(producer.snodes, consumer.snodes)
             )
         elif consumer.is_foreach():
@@ -4868,7 +4870,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
             consumer_subnode = consumer.get_consumer_subnode_for(producer)
             if consumer_subnode is not None:
-                return consumer.scheduler.can_fuse(producer, consumer_subnode)
+                return consumer.scheduler._can_fuse_candidate(
+                    producer, consumer_subnode
+                )
 
             why("candidate producer is not dep of any foreach consumer")
             return False
@@ -4883,7 +4887,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
             producer_subnode = producer.get_producer_subnode_for(consumer)
             if producer_subnode is not None:
-                return producer.scheduler.can_fuse(producer_subnode, consumer)
+                return producer.scheduler._can_fuse_candidate(
+                    producer_subnode, consumer
+                )
 
             why("candidate consumer has no dep in any foreach producer")
             return False
@@ -7925,6 +7931,17 @@ class Scheduler:
             return False, None
         return True, update
 
+    def _can_apply_fusion(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> tuple[bool, FusionMemoryUpdate | None]:
+        if self.will_fusion_create_cycle(node1, node2):
+            return False, None
+        if self._fusion_memory_state is None:
+            return True, None
+        return self._can_fuse_peak_memory_check(self._fusion_memory_state, node1, node2)
+
     def fuse_if_speedup(
         self,
         node1: BaseSchedulerNode,
@@ -7932,12 +7949,13 @@ class Scheduler:
         speedup_fn: Callable[[], bool],
         fused_nodes: OrderedSet[BaseSchedulerNode],
     ):
-        can_fuse = self.can_fuse(node1, node2)
         state = self._fusion_memory_state
+        can_fuse = self.can_fuse(node1, node2)
         memory_update = state.pending_update if state is not None else None
         if can_fuse and speedup_fn():
             fused = self.fuse_two_nodes(node1, node2, fused_nodes)
-            self._apply_fusion_memory_update(fused, memory_update)
+            if state is not None:
+                self._apply_fusion_memory_update(fused, memory_update)
             return True
 
         return False
@@ -8057,7 +8075,15 @@ class Scheduler:
                 if self.get_fused_node(node_key2) is not node_key2:
                     raise AssertionError("expected node_key2 to be its own fused node")
 
-                self.fuse_if_speedup(node_key1, node_key2, is_speedup, fused_nodes)
+                if not is_speedup():
+                    continue
+                state = self._fusion_memory_state
+                can_fuse, memory_update = self._can_apply_fusion(node_key1, node_key2)
+                if not can_fuse:
+                    continue
+                fused = self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+                if state is not None:
+                    self._apply_fusion_memory_update(fused, memory_update)
 
         for node1, node2 in possible_fusion_pairs:
             # if either node is in a pending fusion, resolve it.
@@ -8107,7 +8133,8 @@ class Scheduler:
                     continue
 
                 fused = self.fuse_two_nodes(node1, node2, fused_nodes)
-                self._apply_fusion_memory_update(fused, memory_update)
+                if state is not None:
+                    self._apply_fusion_memory_update(fused, memory_update)
 
     def _finish_pending_fusions(
         self,
@@ -8809,13 +8836,13 @@ class Scheduler:
                         continue
                     seen.add(key)
 
-                    if self.can_fuse(node1, node2, is_reorder_round):
+                    if self._can_fuse_candidate(node1, node2, is_reorder_round):
                         possible_fusions.append(key)
                     elif (
                         node2.is_template()
                         or node2.is_foreach()
                         or isinstance(node2, FusedNestedReductions)
-                    ) and self.can_fuse(node2, node1, is_reorder_round):
+                    ) and self._can_fuse_candidate(node2, node1, is_reorder_round):
                         # These fusions are order dependent. Fused nested reductions
                         # must remain the producer for scheduler bookkeeping.
                         possible_fusions.append((node2, node1))
@@ -10250,16 +10277,29 @@ class Scheduler:
             can_reorder=can_reorder,
             allow_mix_order_reduction=allow_mix_order_reduction,
         )
-        if can_fuse and self.will_fusion_create_cycle(node1, node2):
-            can_fuse = False
-        state = self._fusion_memory_state
         memory_update = None
-        if can_fuse and state is not None:
-            can_fuse, memory_update = self._can_fuse_peak_memory_check(
-                state, node1, node2
-            )
-        if state is not None:
-            state.pending_update = memory_update
+        if can_fuse:
+            can_fuse, memory_update = self._can_apply_fusion(node1, node2)
+        if self._fusion_memory_state is not None:
+            self._fusion_memory_state.pending_update = memory_update
+        tracker.finish(rollback=not can_fuse)
+        return can_fuse
+
+    def _can_fuse_candidate(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        can_reorder: bool = False,
+        allow_mix_order_reduction: bool = True,
+    ) -> bool:
+        """Check fusion legality without final cycle and memory checks."""
+        tracker = _LoopMutationTracker.create((node1, node2))
+        can_fuse = self._can_fuse_impl(
+            node1,
+            node2,
+            can_reorder=can_reorder,
+            allow_mix_order_reduction=allow_mix_order_reduction,
+        )
         tracker.finish(rollback=not can_fuse)
         return can_fuse
 
