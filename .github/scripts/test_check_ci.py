@@ -10,7 +10,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-ACTION = ROOT / ".github/actions/check-ci/action.yml"
+WORKFLOWS = ROOT / ".github/workflows"
 
 
 class TestCheckCI(TestCase):
@@ -22,7 +22,8 @@ class TestCheckCI(TestCase):
         failures: int = 0,
         error: int = 1,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], list[str]]:
-        script = yaml.safe_load(ACTION.read_text())["runs"]["steps"][0]["run"]
+        workflow = yaml.safe_load((WORKFLOWS / "_check-ci.yml").read_text())
+        script = workflow["jobs"]["check-ci"]["steps"][0]["run"]
         with tempfile.TemporaryDirectory() as tmp:
             scratch = Path(tmp)
             calls = scratch / "calls"
@@ -54,6 +55,7 @@ class TestCheckCI(TestCase):
             }
             result = subprocess.run(
                 ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
+                cwd=scratch,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -64,6 +66,17 @@ class TestCheckCI(TestCase):
                 calls.read_text().splitlines() if calls.exists() else [],
                 delays.read_text().splitlines() if delays.exists() else [],
             )
+
+    def test_workflow_gates_match(self) -> None:
+        workflow = yaml.safe_load((WORKFLOWS / "_check-ci.yml").read_text())
+        gate = workflow["jobs"]["check-ci"]["steps"][0]
+        for filename, job in (
+            ("_runner-determinator.yml", "runner-determinator"),
+            ("_select-release-runner.yml", "select"),
+        ):
+            with self.subTest(workflow=filename):
+                workflow = yaml.safe_load((WORKFLOWS / filename).read_text())
+                self.assertEqual(workflow["jobs"][job]["steps"][0], gate)
 
     def test_title_prefix(self) -> None:
         for title, expected in (

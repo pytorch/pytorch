@@ -77,7 +77,6 @@ jobs:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-metamates-rule:
-    needs: get-label-type
     if: github.repository_owner == 'pytorch' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     environment: update-commit-hash
@@ -136,7 +135,6 @@ jobs:
           GH_TOKEN="${PYTORCHBOT_TOKEN}" gh pr comment "${BRANCH}" --body "@pytorchbot merge"
 
   update-commit-hashes:
-    needs: get-label-type
     runs-on: ubuntu-24.04
     environment: update-commit-hash
     strategy:
@@ -182,7 +180,6 @@ jobs:
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-triton-commit-hash:
-    needs: get-label-type
     # Tracks the triton release branch from triton_version.txt and opens a labeled, self-merging pin-bump PR.
     runs-on: ubuntu-24.04
     environment: update-commit-hash
