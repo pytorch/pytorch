@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import torch
 
-from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport
+from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
 
 
 _MAGIC = b"PTTCP001"
@@ -297,11 +297,24 @@ class TCPTransport(Transport):
                 self._registered[key] = _RegisteredMemory(tensor)
         return TCPMemory(self, tensor, remote, reused)
 
-    def write(self, local_buffer: MemoryView, remote_buffer: RemoteBuffer) -> int:
+    def write(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
         local = self._local_view(local_buffer, mutable=False)
         remote = self._remote_buffer(remote_buffer)
         if local.size() > remote.length:
             raise ValueError("local view does not fit in the remote buffer")
+        return self._run_transfer(
+            lambda: self._write(local, remote),
+            local._memory._tensor.device,
+            async_op=async_op,
+        )
+
+    def _write(self, local: TCPMemoryView, remote: TCPRemoteBuffer) -> int:
         request_id, completion = self._new_completion()
         try:
             flows = self._connection()
@@ -326,11 +339,24 @@ class TCPTransport(Transport):
             raise
         return 0
 
-    def read(self, local_buffer: MutableMemoryView, remote_buffer: RemoteBuffer) -> int:
+    def read(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+    ) -> int | Work:
         local = cast(TCPMutableMemoryView, self._local_view(local_buffer, mutable=True))
         remote = self._remote_buffer(remote_buffer)
         if local.size() > remote.length:
             raise ValueError("local view does not fit in the remote buffer")
+        return self._run_transfer(
+            lambda: self._read(local, remote),
+            local._memory._tensor.device,
+            async_op=async_op,
+        )
+
+    def _read(self, local: TCPMutableMemoryView, remote: TCPRemoteBuffer) -> int:
         request_id, completion = self._new_completion(local, local.size())
         try:
             flow = self._connection()[0]
@@ -351,6 +377,7 @@ class TCPTransport(Transport):
         return 0
 
     def close(self) -> None:
+        self._close_work()
         if self._closed.is_set():
             return
         self._closed.set()

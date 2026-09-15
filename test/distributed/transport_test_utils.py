@@ -1,6 +1,7 @@
 import pickle
 
 import torch
+from torch.distributed._transport import Work
 
 
 class TransportTestMixin:
@@ -55,6 +56,31 @@ class TransportTestMixin:
             self.assertEqual(destination, source[16:32])
             with self.assertRaises(ValueError):
                 source_memory.to_view(source.nbytes + 1)
+        finally:
+            first.close()
+            second.close()
+
+    def test_transport_async_work(self) -> None:
+        first, second = self.make_transport_pair()
+        try:
+            source = torch.arange(64, dtype=torch.uint8)
+            destination = torch.zeros_like(source)
+            read_target = torch.zeros_like(source)
+            source_memory = first.register_memory(source)
+            destination_memory = second.register_memory(destination)
+            read_memory = first.register_memory(read_target)
+            remote = pickle.loads(pickle.dumps(destination_memory.to_remote_buffer()))
+            write = first.write(source_memory.to_view(), remote, async_op=True)
+            read = first.read(read_memory.to_mutable_view(), remote, async_op=True)
+            self.assertIsInstance(write, Work)
+            self.assertIsInstance(read, Work)
+            self.assertTrue(read.wait())
+            self.assertTrue(write.wait())
+            self.assertTrue(write.is_completed())
+            self.assertTrue(read.is_completed())
+            self.assertEqual(read.get_future().wait(), [])
+            self.assertEqual(destination, source)
+            self.assertEqual(read_target, source)
         finally:
             first.close()
             second.close()
