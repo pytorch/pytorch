@@ -3,6 +3,7 @@
 # Owner(s): ["module: numpy"]
 
 import sys
+import warnings
 from itertools import product
 from unittest import skipIf
 
@@ -484,6 +485,38 @@ class TestNumPyInterop(TestCase):
             self.assertIsInstance(geq2_x, torch.ByteTensor)
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
+
+    @onlyCPU
+    def test_numpy_array_interface_copy(self, device):
+        x = torch.tensor([1, 2, 3])
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+
+            y = np.asarray(x)
+            self.assertIsInstance(y, np.ndarray)
+            self.assertEqual(y.tolist(), [1, 2, 3])
+            y[0] = 4
+            self.assertEqual(x[0], 4)
+
+            copied = np.array(x, copy=True)
+            self.assertIsInstance(copied, np.ndarray)
+            self.assertEqual(copied.tolist(), [4, 2, 3])
+            copied[0] = 5
+            self.assertEqual(x[0], 4)
+
+            no_copy = np.array(x, dtype=np.int64, copy=False)
+            self.assertIsInstance(no_copy, np.ndarray)
+            no_copy[0] = 6
+            self.assertEqual(x[0], 6)
+
+            wrapped = np.abs(x)
+            self.assertIsInstance(wrapped, torch.Tensor)
+            self.assertEqual(wrapped, torch.tensor([6, 2, 3]))
+
+        if np.lib.NumpyVersion(np.__version__) >= "2.0.0":
+            with self.assertRaises(ValueError):
+                np.array(x, dtype=np.float32, copy=False)
 
     @onlyCPU
     def test_multiplication_numpy_scalar(self, device) -> None:
