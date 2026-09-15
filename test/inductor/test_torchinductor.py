@@ -1285,7 +1285,7 @@ def xfail_if_mps(fn):
     def wrapper(self, *args, **kwargs):
         if not is_mps_backend(self.device):
             return fn(self, *args, **kwargs)
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017 - xfail_if_mps wrapper catches any MPS error
             return fn(self, *args, **kwargs)
 
     return wrapper

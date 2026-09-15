@@ -969,9 +969,7 @@ class SimpleElasticAgent(ElasticAgent):
                     )
                     self._restart_workers(self._worker_group)
             else:
-                raise Exception(  # noqa: TRY002
-                    f"[{role}] Worker group in {state.name} state"
-                )
+                raise RuntimeError(f"[{role}] Worker group in {state.name} state")
 
     def _exit_barrier(self):
         """

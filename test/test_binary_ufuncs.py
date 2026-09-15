@@ -1089,7 +1089,7 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(y.addcmul(y, y, value=x), 21)
 
         x = torch.tensor(2.0, requires_grad=True)
-        self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
+        self.assertRaises(TypeError, lambda: y.addcmul(y, y, value=x))
 
     # Tests that the binary operators and, or, and xor (as well as their reflected and inplace versions)
     # work properly (AKA &, ||, ^ and &=, |=, ^=)

@@ -106,7 +106,7 @@ def bundle_inputs(
     Tensors in lists or tuples will not.
     """
     if not isinstance(model, torch.jit.ScriptModule):
-        raise Exception("Only ScriptModule is supported.")  # noqa: TRY002
+        raise RuntimeError("Only ScriptModule is supported.")
 
     ignored_methods, ignored_attrs = _get_bundled_inputs_attributes_and_methods(model)
     clone = torch._C._hack_do_not_use_clone_module_with_class(  # type: ignore[attr-defined]
@@ -166,7 +166,7 @@ def augment_model_with_bundled_inputs(
         of each tuple are the args that make up one input.
     """
     if not isinstance(model, torch.jit.ScriptModule):
-        raise Exception("Only ScriptModule is supported.")  # noqa: TRY002
+        raise RuntimeError("Only ScriptModule is supported.")
 
     forward: Callable = model.forward
 
@@ -239,13 +239,13 @@ def augment_many_model_functions_with_bundled_inputs(
     Tensors in lists or tuples will not.
     """
     if not isinstance(model, torch.jit.ScriptModule):
-        raise Exception("Only ScriptModule is supported.")  # noqa: TRY002
+        raise RuntimeError("Only ScriptModule is supported.")
 
     if not inputs:
-        raise Exception("Please provide inputs for at least 1 function")  # noqa: TRY002
+        raise RuntimeError("Please provide inputs for at least 1 function")
 
     if hasattr(model, "get_all_bundled_inputs") or hasattr(model, "get_bundled_inputs_functions_and_info"):
-        raise Exception(  # noqa: TRY002
+        raise RuntimeError(
             "Models can only be augmented with bundled inputs once. "
             "This Model seems to have already been augmented with "
             "bundled inputs. Please start afresh with one that "
@@ -261,7 +261,7 @@ def augment_many_model_functions_with_bundled_inputs(
             if hasattr(function, "name"):
                 function_name = function.name  # type: ignore[attr-defined]
             else:
-                raise Exception(  # noqa: TRY002
+                raise RuntimeError(
                     'At least one of your functions has no attribute name please ensure all have one. m.foo.name = "foo"')
 
 
@@ -274,12 +274,12 @@ def augment_many_model_functions_with_bundled_inputs(
 
         if hasattr(model, "_generate_bundled_inputs_for_" + function_name):
             if input_list is not None:
-                raise Exception(  # noqa: TRY002
+                raise RuntimeError(
                     f"inputs[{function_name}] is not None, but _generate_bundled_inputs_for_{function_name} is already defined"
                 )
             # Model author already defined _generate_bundled_inputs_for_<function_name>.
         elif input_list is None or len(input_list) == 0:
-            raise Exception(  # noqa: TRY002
+            raise RuntimeError(
                 f"inputs for {function_name} must be specified if "
                 f"_generate_bundled_inputs_for_{function_name} is not already defined"
             )
@@ -373,7 +373,7 @@ def _inflate_expr(
     if isinstance(arg, InflatableArg):
         if arg.fmt_fn:
             if arg.fmt not in ["{}", ""]:
-                raise Exception(  # noqa: TRY002
+                raise RuntimeError(
                     f"Bundled input argument at position '{ref}' has "
                     f"both arg.fmt_fn => \n{arg.fmt_fn} "
                     f"\n and arg.fmt  => {arg.fmt}. "
@@ -404,7 +404,7 @@ def _inflate_expr(
                         f"{ref}.contiguous(memory_format={fmt})", None)
         # Prevent big tensors from being bundled by default.
         # TODO: Provide more useful diagnostics.
-        raise Exception(  # noqa: TRY002
+        raise RuntimeError(
             f"Bundled input argument at position '{ref}' is "
             f"a tensor with storage size {arg._typed_storage().size()}. "
             f"You probably don't want to bundle this as an input. "

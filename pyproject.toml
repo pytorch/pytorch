@@ -475,7 +475,7 @@ external = [
 ]
 ignore = [
     # these ignores are from flake8-bugbear; please fix!
-    "B007", "B008", "B017",
+    "B007", "B008",
     "B018", # Useless expression
     "B023",
     "B028", # No explicit `stacklevel` keyword argument found

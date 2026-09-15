@@ -1739,7 +1739,7 @@ class TestLinalg(TestCase):
             input_numpy = input.cpu().numpy()
 
             msg = f'numpy does not raise error but pytorch does, for case "{test_case_info}"'
-            with self.assertRaises(Exception, msg=test_case_info):
+            with self.assertRaises(Exception, msg=test_case_info):  # noqa: B017 - numpy error type varies
                 np.linalg.norm(input_numpy, ord, dim, keepdim)
 
         S = 10

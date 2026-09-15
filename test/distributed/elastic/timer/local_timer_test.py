@@ -52,9 +52,9 @@ if not INVALID_PLATFORMS:
             self.server.stop()
 
         def test_exception_propagation(self):
-            with self.assertRaises(Exception, msg="foobar"):
+            with self.assertRaises(RuntimeError, msg="foobar"):
                 with timer.expires(after=1):
-                    raise Exception("foobar")  # noqa: TRY002
+                    raise RuntimeError("foobar")
 
         def test_no_client(self):
             # no timer client configured; exception expected

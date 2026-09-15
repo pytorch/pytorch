@@ -4332,7 +4332,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                     args = (sample_input.input,) + tuple(sample_input.args)
                     kwargs = sample_input.kwargs
                     for batched_args, in_dims, _ in generate_vmap_inputs(args, {}):
-                        with self.assertRaises(Exception):
+                        with self.assertRaises(Exception):  # noqa: B017 - error_inputs vary per op
                             vmap(op, in_dims)(*batched_args, **kwargs)
 
             # Sample inputs check
