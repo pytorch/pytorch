@@ -1455,19 +1455,15 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
-_ParamKey = tuple[str, inspect._ParameterKind, int]
-_BindingKey = tuple[list[_ParamKey], tuple[str, ...], list[int]]
-
-
-def _binding_key(artifacts: CompileArtifacts) -> _BindingKey:
+def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
     # What prepare_f_locals reads, with defaults and cells by identity. Signature
     # equality is unusable here: Parameter.__eq__ takes bool() of
     # `default == default`, which raises for a tensor default.
     env, params = artifacts.runtime_env, artifacts.signature.parameters.values()
     return (
-        [(p.name, p.kind, id(p.default)) for p in params],
+        tuple([(p.name, p.kind, id(p.default)) for p in params]),
         env.bytecode.co_freevars,
-        [id(cell) for cell in env.closure or ()],
+        tuple([id(cell) for cell in env.closure or ()]),
     )
 
 
@@ -1477,18 +1473,32 @@ class AOTCompiledModel:
 
     Private and experimental, like ``_aot_compile`` which builds one. Only
     ``compiled_results`` serializes; ``deserialize`` needs the model again.
+    ``compiled_results`` must hold at least one result: ``aot_compile_module``
+    refuses an empty list, and neither the constructor nor ``deserialize``
+    checks, so an empty one is the caller's error.
+
+    ``compiled_results`` may be edited between calls. A call judges the list
+    it began with, and results that bind alike -- equal parameter names, kinds
+    and default objects, the same closure cells, as every result of one
+    ``_aot_compile`` has -- share one binding of the call; whether they do is
+    decided again whenever the list's contents change.
 
     Dispatch walks ``compiled_results`` in order and serves the first result
-    whose guard check accepts the call. A first ``check()`` can refuse
-    without evaluating the tree (the recursive dict-tag fast path), so if no
-    check accepted, every refused tree is checked once more before dispatch
-    gives up on it; a result whose guards would pass can therefore be outranked
-    by a later result whose first check accepted. Opting a result out through
-    ``disable_guard_check()`` does not skip its guard evaluation: it is served
-    in index order when its check accepts, and on the strength of its opt-out
-    alone only after both the scan and the re-check found no match; one
-    opt-out replaces the ``No AOT compiled graph matched this call`` error
-    for the whole model.
+    whose guard check accepts the call. One exit of ``check()`` refuses without
+    evaluating the tree -- the no-tensor-aliasing exit of the recursive
+    dict-tag fast path in ``GuardManager::check_nopybind``, reached only with
+    ``use_recursive_dict_tags_for_guards`` on -- so if no check accepted, every
+    result is checked once more before dispatch gives up; a result whose guards
+    would pass can therefore be outranked by a later result whose first check
+    accepted. When neither pass accepts, the call is served by the first result
+    that opted out through ``disable_guard_check()``, from any index, and only
+    when none did does it raise the ``No AOT compiled graph matched this call``
+    report below. That is all the flag does here: ``check()`` never reads it,
+    so an opted-out result is scanned and re-checked like any other and is
+    served in index order when its check accepts, and on the strength of its
+    opt-out alone only after both the scan and the re-check found no match; one
+    opt-out replaces the ``No AOT compiled graph matched this call`` error for
+    the whole model.
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
@@ -1502,9 +1512,13 @@ class AOTCompiledModel:
     compiled_results: list[AOTCompiledFunction]
     # The results last judged and whether one bind of a call serves them all.
     # compiled_results is public, so a call that finds them changed decides
-    # again; one field, so no reader pairs the verdict with another list's
-    # contents; weak references, so a result the caller dropped is not kept
-    # alive here. The default is the verdict over no results.
+    # again. One field on purpose: a single attribute store publishes contents
+    # and verdict together (an instance-dict store is atomic under the GIL and
+    # locked on free-threaded builds), so a reader sees the old pair or the new
+    # one, never one list's contents beside another's verdict; two fields have
+    # no store order that keeps them consistent. Weak references, so a result
+    # the caller dropped is not kept alive here. The default is the verdict
+    # over no results.
     _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
         dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
@@ -1524,32 +1538,32 @@ class AOTCompiledModel:
         # compiled_results is public, so read it once: every stage below judges
         # the results this call began with, on the binding decided over them.
         results = tuple(self.compiled_results)
-        # A bind costs more than a check(), so results that bind alike share
-        # one, made ahead of every guard like the per-result binds below.
-        shared = (
-            results[0].prepare_f_locals(self.model, *args, **kwargs)
-            if self._binds_alike(results)
-            else None
-        )
-        # Per-result bindings, kept for the re-check and the report; a shared one
-        # is reused as is.
         bound: list[dict[str, object]] = []
-        # Guard evaluation ignores _guard_check_enabled, so scan every result.
+        # Whether results that bind alike reuse the first one's binding (a bind
+        # costs more than a check()), decided once a second result is reached
+        # so a call the first result serves pays nothing for it.
+        shared: bool | None = None
+        # check() ignores _guard_check_enabled, so scan every result.
         for result in results:
-            if shared is not None:
-                f_locals = shared
+            if bound and shared is None:
+                shared = self._binds_alike(results)
+            if shared:
+                f_locals = bound[0]
             else:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
-                bound.append(f_locals)
+            bound.append(f_locals)
             if result._live_guard_manager().check(f_locals):
                 # The guards just passed: call fn rather than result(), whose
                 # __call__ would bind and evaluate them again.
                 return result.fn(self.model, *args, **kwargs)
-        # A check() can reject from the dict-tag fast path without running the
-        # tree; a second check() then runs the tree the fast path skipped,
-        # opted-out results too.
-        for i, result in enumerate(results):
-            f_locals = shared if shared is not None else bound[i]
+        # One exit of check() refuses without running the tree: a tag-safe root's
+        # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
+        # disarms that root, so a second check() runs the tree it skipped. With
+        # use_recursive_dict_tags_for_guards off (the default) no root is tag
+        # safe and this pass re-runs trees that genuinely failed, lambda guards
+        # included, bumping the failing node's _fail_count a second time; about
+        # 1us per result, accepted.
+        for result, f_locals in zip(results, bound):
             if result._live_guard_manager().check(f_locals):
                 return result.fn(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
@@ -1557,8 +1571,6 @@ class AOTCompiledModel:
         for result in results:
             if not result._guard_check_enabled:
                 return result.fn(self.model, *args, **kwargs)
-        if shared is not None:
-            bound = [shared] * len(results)
         raise RuntimeError(self._no_match_report(results, bound))
 
     def _no_match_report(
@@ -1575,13 +1587,7 @@ class AOTCompiledModel:
         ]
         missing_at: int | None = None
         for i, result in enumerate(results):
-            try:
-                reason = result._live_guard_manager().check_verbose(bound[i])
-            except Exception as e:
-                # check_verbose runs paths check() did not (a repr of a user
-                # object, for one); one entry raising must not cost the others.
-                lines.append(f"  [{i}] <guard check could not be described: {e!r}>")
-                continue
+            reason = result._live_guard_manager().check_verbose(bound[i])
             if reason.result:
                 lines.append(
                     f"  [{i}] <guards rejected this call twice and then accepted "
