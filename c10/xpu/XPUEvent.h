@@ -250,6 +250,7 @@ struct XPUEvent {
     }
     // Base reusability on per-event profiling support regardless of
     // enable_timing_, to align with c10::Event behavior.
+    // See Note [Reusable Event Usage]
     reusable_ = device.has(sycl::aspect::ext_oneapi_per_event_profiling);
     if (reusable_) {
       event_ = std::make_unique<sycl::event>(syclex::make_event(
