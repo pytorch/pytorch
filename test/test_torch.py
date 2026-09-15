@@ -6434,6 +6434,49 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.ne(a, b).tolist(), [False, False, True])
 
 
+    @onlyNativeDeviceTypes
+    def test_where_scalar_fp16_overflow(self, device):
+        # torch.where(cond, overflowing_scalar, fp16_tensor) previously
+        # silently produced +/-Inf because scalar_tensor uses a relaxed cast
+        # for numel==1 tensors. The where implementation now checks for
+        # overflow explicitly to stay consistent with fill_/full_like.
+        cond = torch.tensor([True, False, True], device=device)
+        fp16 = torch.zeros(3, dtype=torch.float16, device=device)
+        overflow = 65507.0  # > float16 max (~65504)
+        err = "cannot be converted to type"
+
+        with self.assertRaisesRegex(RuntimeError, err):
+            torch.where(cond, overflow, fp16)
+        with self.assertRaisesRegex(RuntimeError, err):
+            torch.where(cond, fp16, overflow)
+        with self.assertRaisesRegex(RuntimeError, err):
+            torch.where(cond, -overflow, fp16)
+
+        # Values within float16 range must still work
+        result = torch.where(cond, 100.0, fp16)
+        self.assertEqual(result.dtype, torch.float16)
+        result = torch.where(cond, fp16, 100.0)
+        self.assertEqual(result.dtype, torch.float16)
+
+        # bfloat16 is the other half of the guard's domain (bf16 max ~3.39e38).
+        bf16 = torch.zeros(3, dtype=torch.bfloat16, device=device)
+        bf16_overflow = 1e39  # > bfloat16 max
+        with self.assertRaisesRegex(RuntimeError, err):
+            torch.where(cond, bf16_overflow, bf16)
+        with self.assertRaisesRegex(RuntimeError, err):
+            torch.where(cond, bf16, bf16_overflow)
+        result = torch.where(cond, 100.0, bf16)
+        self.assertEqual(result.dtype, torch.bfloat16)
+
+        # Reduced-precision types outside AT_DISPATCH_REDUCED_FLOATING_TYPES
+        # (float8) must keep working: the bounds check only covers Half/BFloat16,
+        # so these still go through the existing relaxed cast rather than raising.
+        f8 = torch.zeros(3, dtype=torch.float8_e4m3fn, device=device)
+        result = torch.where(cond, 1.0, f8)
+        self.assertEqual(result.dtype, torch.float8_e4m3fn)
+        result = torch.where(cond, f8, 1.0)
+        self.assertEqual(result.dtype, torch.float8_e4m3fn)
+
     @skipIfTorchInductor("FIXME")
     def test_hook_remove(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/58354
