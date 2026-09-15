@@ -2631,15 +2631,52 @@ class TestIgnoreCurrentSnapshot(TestCase):
         )
         return top.merge_into.call_args.kwargs["ignore_current_checks"]
 
+    def _waived_names(self, post_comment: Any) -> list[str]:
+        """The names the merge comment renders for what it waived."""
+        info = post_comment.call_args.kwargs["ignore_current_checks_info"]
+        return [name for name, _, _ in info]
+
     def test_every_stacked_pr_contributes_its_own_red_checks(
-        self, mock_get_ghstack_prs: Any, mock_pr_cls: Any, *args: Any
+        self,
+        mock_get_ghstack_prs: Any,
+        mock_pr_cls: Any,
+        mock_get_classifications: Any,
+        mock_find_matching_merge_rule: Any,
+        mock_ensure_mergeable_labels: Any,
+        mock_post_comment: Any,
+        *args: Any,
     ) -> None:
+        """One job name, red on both PRs: the waivers must not collapse into one,
+        and the comment must say which PR each came from."""
         self.assertEqual(
-            self._waivers_of_stack(
-                mock_get_ghstack_prs, mock_pr_cls, "lower-red", "top-red"
-            ),
-            {(1000, "lower-red"), (1001, "top-red")},
+            self._waivers_of_stack(mock_get_ghstack_prs, mock_pr_cls, "red", "red"),
+            {(1000, "red"), (1001, "red")},
         )
+        self.assertEqual(
+            self._waived_names(mock_post_comment), ["red (#1000)", "red (#1001)"]
+        )
+
+    def test_a_lone_pr_tags_nothing(
+        self,
+        mock_get_ghstack_prs: Any,
+        mock_pr_cls: Any,
+        mock_get_classifications: Any,
+        mock_find_matching_merge_rule: Any,
+        mock_ensure_mergeable_labels: Any,
+        mock_post_comment: Any,
+        *args: Any,
+    ) -> None:
+        pr = self._pr(1000, "red")
+        mock_pr_cls.return_value = pr
+        merge(
+            pr,
+            mock.MagicMock(spec=GitRepo),
+            comment_id=1,
+            dry_run=True,
+            ignore_current=True,
+        )
+        self.assertEqual(self._waived_names(mock_post_comment), ["red"])
+        mock_get_ghstack_prs.assert_not_called()
 
     def test_a_green_stack_waives_nothing(
         self, mock_get_ghstack_prs: Any, mock_pr_cls: Any, *args: Any
