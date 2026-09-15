@@ -3820,6 +3820,7 @@ def _enforce_native_matmul_config_min_xblock(
 ) -> list[Config]:
     if min_xblock is None:
         return configs
+    min_xblock = next_power_of_2(min_xblock)
 
     adjusted_configs: list[Config] = []
     for original in configs:
@@ -3835,9 +3836,9 @@ def _enforce_native_matmul_config_min_xblock(
             ):
                 cfg.kwargs[field] //= 2
 
-        # Native matmul requires at least 16 elements in the dot dimension.
+        # Native matmul requires at least 16 elements in the Y and dot tiles.
         # Prefer shrinking the independent output-row tile when raising X.
-        shrink("YBLOCK", 1)
+        shrink("YBLOCK", 16)
         if r0_block is None:
             shrink("R0_BLOCK", 16)
 
