@@ -49,6 +49,7 @@ def gen_registration_headers(
     backend_index: BackendIndex,
     per_operator_headers: bool,
     rocm: bool,
+    has_native_aot: bool = False,
 ) -> list[str]:
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
@@ -62,7 +63,11 @@ def gen_registration_headers(
             headers.append("#include <ATen/hip/EmptyTensor.h>")
         else:
             headers.append("#include <ATen/cuda/EmptyTensor.h>")
-        headers.append("#include <ATen/NativeAotStubs.h>")
+        # Only when a declaration targets this key: a tree (or a build that
+        # opts out with --native-aot-ops-dir=) that declares nothing produces
+        # the same registration TU it did before native-AOT existed.
+        if has_native_aot:
+            headers.append("#include <ATen/NativeAotStubs.h>")
     elif backend_index.dispatch_key == DispatchKey.MPS:
         headers.append("#include <ATen/mps/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.XPU:
