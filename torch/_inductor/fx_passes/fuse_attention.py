@@ -22,21 +22,19 @@ aten = torch.ops.aten
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
 
 
-_INFERENCE_ONLY_SFDP_PATTERNS = frozenset(
-    OrderedSet(
-        [
-            "_sfdp_pattern_13",
-            "_sfdp_pattern_15",
-            "_sfdp_pattern_17",
-            "_sfdp_pattern_18",
-            "_sfdp_pattern_19",
-            "_sfdp_pattern_20",
-            "_sfdp_pattern_21",
-            "_sfdp_pattern_22",
-            "_sfdp_pattern_23",
-            "_sfdp_pattern_24",
-        ]
-    )
+_INFERENCE_ONLY_SFDP_PATTERNS = OrderedSet(
+    [
+        "_sfdp_pattern_13",
+        "_sfdp_pattern_15",
+        "_sfdp_pattern_17",
+        "_sfdp_pattern_18",
+        "_sfdp_pattern_19",
+        "_sfdp_pattern_20",
+        "_sfdp_pattern_21",
+        "_sfdp_pattern_22",
+        "_sfdp_pattern_23",
+        "_sfdp_pattern_24",
+    ]
 )
 
 
@@ -954,6 +952,74 @@ def _is_supported_scale(scale) -> bool:
     return isinstance(scale, (float, int, torch.SymInt))
 
 
+_matmul_like_ops = OrderedSet(
+    [
+        torch.ops.aten.bmm.default,
+        torch.ops.aten.mm.default,
+        torch.ops.aten.matmul.default,
+    ]
+)
+_reshape_like_ops = OrderedSet(
+    [
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+        torch.ops.aten.transpose.int,
+        torch.ops.aten.permute.default,
+        torch.ops.aten.contiguous.default,
+        torch.ops.aten.expand.default,
+        torch.ops.aten.clone.default,
+        torch.ops.aten.div.Tensor,
+        torch.ops.aten.mul.Tensor,
+    ]
+)
+
+
+def _is_matmul_derived(node) -> bool:
+    """Return True if ``node`` is a reshaping/permutation of a matmul output.
+
+    The masked SDPA patterns add a broadcastable attention mask to the matmul
+    scores. When the add operands are commuted (``attn_mask + scores`` instead of
+    ``scores + attn_mask``), this lets us identify the scores operand and hence
+    the mask operand regardless of position.
+    """
+    seen = OrderedSet[int]()
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if id(n) in seen:
+            continue
+        seen.add(id(n))
+        target = getattr(n, "target", None)
+        if target in _matmul_like_ops:
+            return True
+        if (
+            target in _reshape_like_ops
+            and n.args
+            and isinstance(n.args[0], torch.fx.Node)
+        ):
+            stack.append(n.args[0])
+    return False
+
+
+def _get_attn_mask_node(add_mask_node):
+    """Return the attention-mask operand of a masked-add node.
+
+    ``add_mask_node`` matches ``aten.add.Tensor`` whose two operands are the
+    matmul scores and the (broadcastable) attention mask. The operands may
+    appear in either order because the add is commutative.
+    """
+    if len(add_mask_node[0].args) != 2:
+        return None
+    op0, op1 = add_mask_node[0].args
+    # The scores operand is the matmul-derived one; the mask is the other.
+    if isinstance(op0, torch.fx.Node) and _is_matmul_derived(op0):
+        return op1
+    if isinstance(op1, torch.fx.Node) and _is_matmul_derived(op1):
+        return op0
+    # Fall back to the original assumption (mask is the second operand).
+    return op1
+
+
 def _sfdp_params_check(match):
     if not all(k in match.kwargs for k in ("query", "key", "value")):
         raise AssertionError("expected query, key, value in match.kwargs")
@@ -980,9 +1046,8 @@ def _sfdp_params_check(match):
     add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
     # Has attn_mask add.
     if len(add_mask_node) > 0:
-        attn_mask_node = add_mask_node[0].args[1]
-        # attn_mask_node may be a float/int number.
-        if not hasattr(attn_mask_node, "meta"):
+        attn_mask_node = _get_attn_mask_node(add_mask_node)
+        if attn_mask_node is None or not hasattr(attn_mask_node, "meta"):
             return False
         attn_mask = attn_mask_node.meta["val"]  # type: ignore[union-attr]
         # Make sure attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool
@@ -1122,6 +1187,23 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     gp_bs1_inp = functools.partial(
         torch.empty, (1, 8, 4, 16), device=device, requires_grad=True
     )
+
+    # Patterns whose attention-mask addition may appear commuted in user graphs:
+    # the add is commutative, so `attn_mask + scores` is equivalent to
+    # `scores + attn_mask`. Only these patterns match both operand orders.
+    commutative_mask_add_patterns = [
+        "_sfdp_pattern_5",
+        "_sfdp_pattern_6",
+        "_sfdp_pattern_14",
+        "_sfdp_pattern_16",
+        "_sfdp_pattern_19",
+        "_sfdp_pattern_21",
+        "_sfdp_pattern_22",
+        "_sfdp_pattern_24",
+        "_sfdp_pattern_25",
+        "_sfdp_pattern_26",
+        "_sfdp_pattern_29",
+    ]
 
     # softmax will generate a dtype conversion on inputs if they are in half,
     # but will not in float, so we generate a pattern for both
@@ -1472,6 +1554,8 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             if args[0].size(0) == 1:
                 name += "_bs1"
 
+            match_commutative_ops = pattern_name in commutative_mask_add_patterns
+
             if pattern_name not in _INFERENCE_ONLY_SFDP_PATTERNS:
                 training_name = name + "_training"
                 yield (
@@ -1485,6 +1569,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                         "extra_check": extra_check,
                         "scalar_workaround": workaround,
                         "skip_duplicates": True,
+                        "match_commutative_ops": match_commutative_ops,
                     },
                 )
             inference_workaround = {}
@@ -1516,6 +1601,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     # with dropout turned into clone, we end up with a number of
                     # semantically identical graphs
                     "skip_duplicates": True,
+                    "match_commutative_ops": match_commutative_ops,
                 },
             )
 
