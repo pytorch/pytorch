@@ -1501,6 +1501,11 @@ class CheckpointPolicy(enum.Enum):
         NOT equivalent to not using checkpointing. Using such a policy would
         save additional tensors not limited to ones that are actually needed for
         gradient computation.
+
+        Selective checkpointing always saves explicitly registered, non-aliasing
+        ordered effects that are valid SAC cache boundaries instead of replaying
+        them, even when the policy requests recomputation. Raw c10d launches are
+        not valid cache boundaries and are excluded.
     """
     MUST_SAVE = 0
     PREFER_SAVE = 1
@@ -1513,6 +1518,19 @@ class CheckpointPolicy(enum.Enum):
 def _policy_from_bool(b):
     # For backward compatibility
     return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
+
+
+def _is_cacheable_effect(op) -> bool:
+    """Return whether SAC can cache an effectful op instead of replaying it.
+
+    Raw c10d launches mutate separately allocated outputs and return an
+    asynchronous Work handle, so their return value is not a valid cache
+    boundary. Functional collectives are handled separately by the AOT
+    partitioner.
+    """
+    from torch._higher_order_ops.effects import has_effects
+
+    return has_effects(op) and op.namespace != "c10d"
 
 
 SAC_IGNORED_OPS = {
@@ -1589,6 +1607,11 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
+        if policy in (
+            CheckpointPolicy.MUST_RECOMPUTE,
+            CheckpointPolicy.PREFER_RECOMPUTE,
+        ) and _is_cacheable_effect(func):
+            policy = CheckpointPolicy.MUST_SAVE
 
         if is_compiling:
             if proxy_mode is not None:
