@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-import warnings
 from collections.abc import Callable, Sequence
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
@@ -443,19 +442,19 @@ class FSDPState(_State):
         # In eager, register hooks directly on grad-requiring outputs.
         tensors = collect_grad_tensors(output)
         for t in tensors:
-            if t._base is not None:
+            t.register_hook(self._pre_backward)
+            if t._base is not None and t.grad_fn is not None:
                 cls = ", ".join(type(m).__name__ for m in self._modules) or "?"
-                warnings.warn(
-                    f"FSDP2-wrapped module ({cls}) returned a view tensor. "
-                    "An in-place op on this view (e.g., `x += y`) will silently "
-                    "drop the pre-backward hook and skip the all-gather, which "
-                    "can cause backward to fail or produce wrong gradients. "
+                torch._C._autograd._set_view_rebase_warning(
+                    t,
+                    f"FSDP2-wrapped module ({cls}) returned a view tensor "
+                    "that was modified in-place, directly or through an alias. "
+                    "This may bypass the pre-backward hook and skip the "
+                    "all-gather, which can cause backward to fail or produce "
+                    "wrong gradients. "
                     "Use out-of-place ops (`out = out + y`, not `out += y`) or "
                     "`.clone()` the output before any in-place op.",
-                    UserWarning,
-                    stacklevel=2,
                 )
-            t.register_hook(self._pre_backward)
         if torch._C._are_functorch_transforms_active():
             # Under functorch, some differentiable outputs report
             # requires_grad=False inside the transform even when returned

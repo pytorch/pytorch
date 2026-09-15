@@ -13,6 +13,7 @@
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -171,6 +172,14 @@ TORCH_API c10::intrusive_ptr<Node> rebase_history(
     const Variable& /*self*/,
     Edge gradient_edge);
 
+// Call after registering a tensor hook to diagnose mutations that can bypass
+// this view's current backward node. The base tracks the registration so even
+// pre-existing aliases are covered. A warning is consumed once; registering
+// again for the same node replaces it. No node or tensor is kept alive.
+TORCH_API void set_view_rebase_warning(
+    const Variable& self,
+    std::string message);
+
 /// Gets the raw gradient function pointer, whatever it currently is.
 TORCH_API Node* grad_fn_unsafe(const Variable& /*self*/);
 
@@ -228,6 +237,12 @@ inline bool is_tensor_stealable(
 /// history. As an optimization, a Variable may store a nullptr, in lieu of a
 /// default constructed AutogradMeta.
 
+struct ViewRebaseWarning {
+  c10::weak_intrusive_ptr<Node> grad_fn;
+  uint32_t version;
+  std::string message;
+};
+
 struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
 
@@ -258,6 +273,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // each other, so using both is not defined behavior.
   std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
+
+  // Stored on the ultimate base so mutations through pre-existing aliases
+  // are also detected. The registry is protected by mutex_; the atomic flag
+  // avoids locking for tensors without diagnostics.
+  std::unique_ptr<std::vector<ViewRebaseWarning>> view_rebase_warnings_;
+  std::atomic<bool> has_view_rebase_warnings_{false};
 
   // The post_acc_grad_hooks_ field stores only Python hooks
   // (PyFunctionTensorPostAccGradHooks) that are called after the

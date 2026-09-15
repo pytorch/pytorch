@@ -2568,6 +2568,260 @@ class TestAutograd(TestCase):
         view.sum().backward()
         self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
 
+    @parametrize("operation", ["identity", "out_of_place", "clone_inplace", "view"])
+    def test_view_rebase_warning_safe_usage(self, operation):
+        leaf = torch.ones(4, requires_grad=True)
+        view = (leaf * 2).view(2, 2)
+        hook_calls = []
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            view.register_hook(lambda grad: hook_calls.append(grad))
+            torch._C._autograd._set_view_rebase_warning(view, "view hook was bypassed")
+            if operation == "identity":
+                output = view
+            elif operation == "out_of_place":
+                output = view + 1
+            elif operation == "clone_inplace":
+                output = view.clone().add_(1)
+            else:
+                output = view.t()
+            output.sum().backward()
+        self.assertEqual(caught, [])
+        self.assertEqual(len(hook_calls), 1)
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
+
+    @parametrize("target", ["view", "descendant", "base", "sibling"])
+    @parametrize("grad_enabled", [True, False])
+    def test_view_rebase_warning_mutation(self, target, grad_enabled):
+        leaf = torch.ones(4, requires_grad=True)
+        base = leaf * 2
+        view = base.view(2, 2)
+        sibling = base.view(2, 2)
+        hook_calls = []
+        message = "view hook was bypassed"
+        view.register_hook(lambda grad: hook_calls.append(grad))
+        torch._C._autograd._set_view_rebase_warning(view, message)
+        descendant = view.t()
+        mutated = {
+            "view": view,
+            "descendant": descendant,
+            "base": base,
+            "sibling": sibling,
+        }[target]
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with torch.set_grad_enabled(grad_enabled):
+                mutated.add_(1)
+            # A descendant can be used for backward without revisiting the marked view.
+            output = descendant if target == "descendant" else view
+            output.sum().backward()
+        self.assertEqual(len(caught), 1)
+        self.assertRegex(str(caught[0].message), f"^{message}")
+        self.assertIs(caught[0].category, UserWarning)
+        self.assertEqual(hook_calls, [])
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
+
+    @parametrize("delete_original_view", [True, False])
+    def test_view_rebase_warning_existing_descendant(self, delete_original_view):
+        leaf = torch.ones(4, requires_grad=True)
+        view = (leaf * 2).view(2, 2)
+        descendant = view.t()
+        hook_calls = []
+        message = "view hook was bypassed"
+        view.register_hook(lambda grad: hook_calls.append(grad))
+        torch._C._autograd._set_view_rebase_warning(view, message)
+        if delete_original_view:
+            view_ref = weakref.ref(view)
+            del view
+            self.assertIsNone(view_ref())
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            descendant.add_(1)
+            descendant.sum().backward()
+        self.assertEqual(len(caught), 1)
+        self.assertRegex(str(caught[0].message), f"^{message}")
+        self.assertEqual(hook_calls, [])
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
+
+    def test_view_rebase_warning_expired_hook(self):
+        base = torch.ones(4, requires_grad=True).clone()
+        view = base.view(2, 2)
+        sentinel = torch.empty(0)
+        sentinel_ref = weakref.ref(sentinel)
+
+        def hook(grad, captured=sentinel):
+            return None
+
+        handle = view.register_hook(hook)
+        torch._C._autograd._set_view_rebase_warning(view, "view hook was bypassed")
+        del view, hook, handle, sentinel
+        gc.collect()
+        self.assertIsNone(sentinel_ref())
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            base.add_(1)
+            base.sum().backward()
+        self.assertEqual(caught, [])
+
+    def test_view_rebase_warning_detach(self):
+        leaf = torch.ones(4, requires_grad=True)
+        view = (leaf * 2).view(2, 2)
+        hook_calls = []
+        view.register_hook(lambda grad: hook_calls.append(grad))
+        torch._C._autograd._set_view_rebase_warning(view, "view hook was bypassed")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            detached = view.detach().requires_grad_()
+            descendant = detached.view(4)
+            with torch.no_grad():
+                descendant.add_(1)
+            descendant.sum().backward()
+        self.assertEqual(caught, [])
+        self.assertEqual(hook_calls, [])
+        self.assertIsNone(leaf.grad)
+        self.assertEqual(detached.grad, torch.ones_like(detached))
+
+    def test_view_rebase_warning_ordinary_hook_silent(self):
+        leaf = torch.ones(4, requires_grad=True)
+        view = (leaf * 2).view(2, 2)
+        hook_calls = []
+        view.register_hook(lambda grad: hook_calls.append(grad))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            view.add_(1)
+            view.sum().backward()
+        self.assertEqual(caught, [])
+        self.assertEqual(hook_calls, [])
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
+
+    def test_view_rebase_warning_once_across_aliases(self):
+        leaf = torch.ones(4, requires_grad=True)
+        view = (leaf * 2).view(2, 2)
+        view.register_hook(lambda grad: None)
+        message = "view hook was bypassed"
+        torch._C._autograd._set_view_rebase_warning(view, message)
+        first = view.t()
+        second = view[:]
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            first.add_(1)
+            second.mul_(2)
+            (view + first + second).sum().backward()
+        self.assertEqual(len(caught), 1)
+        self.assertRegex(str(caught[0].message), f"^{message}")
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 12))
+
+    def test_view_rebase_warning_multiple_registrations(self):
+        leaf = torch.ones(4, requires_grad=True)
+        base = leaf * 2
+        first = base.view(2, 2)
+        second = base[:]
+        first.register_hook(lambda grad: None)
+        second.register_hook(lambda grad: None)
+        torch._C._autograd._set_view_rebase_warning(first, "first hook was bypassed")
+        torch._C._autograd._set_view_rebase_warning(second, "second hook was bypassed")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            base.add_(1)
+        self.assertEqual(len(caught), 2)
+        for expected in ("first hook was bypassed", "second hook was bypassed"):
+            self.assertEqual(
+                sum(str(w.message).startswith(expected) for w in caught), 1
+            )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            base.add_(1)
+            (first.sum() + second.sum()).backward()
+        self.assertEqual(caught, [])
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 4))
+
+    @parametrize("mutate_before_rearming", [True, False])
+    def test_view_rebase_warning_rearm(self, mutate_before_rearming):
+        leaf = torch.ones(4, requires_grad=True)
+        view = (leaf * 2).view(2, 2)
+        hook_calls = []
+        view.register_hook(lambda grad: hook_calls.append("old"))
+        torch._C._autograd._set_view_rebase_warning(view, "old hook was bypassed")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            if mutate_before_rearming:
+                view.add_(1)
+                _ = view.grad_fn
+            view.register_hook(lambda grad: hook_calls.append("new"))
+            torch._C._autograd._set_view_rebase_warning(view, "new hook was bypassed")
+            descendant = view.t()
+            descendant.add_(1)
+            descendant.sum().backward()
+        expected = ["old hook was bypassed"] if mutate_before_rearming else []
+        expected.append("new hook was bypassed")
+        self.assertEqual(len(caught), len(expected))
+        for warning, message in zip(caught, expected):
+            self.assertRegex(str(warning.message), f"^{message}")
+        self.assertEqual(hook_calls, [])
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 2))
+
+    @parametrize("target", ["view", "base"])
+    @parametrize("grad_enabled", [True, False])
+    def test_view_rebase_warning_as_error(self, target, grad_enabled):
+        leaf = torch.ones(4, requires_grad=True)
+        base = leaf * 2
+        view = base.view(2, 2)
+        view.register_hook(lambda grad: None)
+        message = "view hook was bypassed"
+        torch._C._autograd._set_view_rebase_warning(view, message)
+        mutated = view if target == "view" else base
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            with self.assertRaisesRegex(UserWarning, message):
+                with torch.set_grad_enabled(grad_enabled):
+                    mutated.mul_(3)
+                _ = view.grad_fn
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            view.sum().backward()
+        self.assertEqual(caught, [])
+        self.assertEqual(leaf.grad, torch.full_like(leaf, 6 if grad_enabled else 2))
+
+    @parametrize("target", ["view", "base"])
+    def test_view_rebase_warning_reentrant_handler(self, target):
+        script = f"""
+import warnings
+import torch
+
+leaf = torch.ones(2, requires_grad=True)
+base = leaf * 2
+view = base[:]
+view.register_hook(lambda grad: None)
+torch._C._autograd._set_view_rebase_warning(view, "view hook was bypassed")
+calls = []
+
+def showwarning(*args, **kwargs):
+    calls.append(view.grad_fn)
+
+warnings.simplefilter("always")
+warnings.showwarning = showwarning
+{target}.mul_(3)
+_ = view.grad_fn
+view.sum().backward()
+if len(calls) != 1:
+    raise RuntimeError(f"Expected one warning, got {{len(calls)}}")
+torch.testing.assert_close(leaf.grad, torch.full_like(leaf, 6))
+"""
+        subprocess.check_output(
+            [sys.executable, "-c", script],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+            timeout=20,
+        )
+
+    @parametrize("tensor_kind", ["nonview", "view_without_grad"])
+    def test_view_rebase_warning_invalid_tensor(self, tensor_kind):
+        tensor = torch.ones(4, requires_grad=tensor_kind == "nonview")
+        if tensor_kind == "view_without_grad":
+            tensor = tensor.view(2, 2)
+        with self.assertRaisesRegex(RuntimeError, "view"):
+            torch._C._autograd._set_view_rebase_warning(tensor, "view warning")
+
     def test_retain_grad_cycle(self):
         x = torch.ones(5, 5, requires_grad=True)
 

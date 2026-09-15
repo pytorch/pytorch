@@ -15,6 +15,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <c10/util/Exception.h>
 
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -174,6 +175,89 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
   return get_autograd_meta(self);
 }
 
+void set_view_rebase_warning(const Variable& self, std::string message) {
+  auto* view_meta = get_view_autograd_meta(self);
+  TORCH_CHECK(
+      view_meta && view_meta->has_bw_view() && self.requires_grad(),
+      "set_view_rebase_warning requires a differentiable view with a grad_fn");
+  self.grad_fn(); // Refresh the view before recording its backward node.
+  std::unique_lock<std::mutex> view_lock(view_meta->mutex_);
+  auto grad_fn = view_meta->grad_fn_;
+  TORCH_CHECK(
+      grad_fn,
+      "set_view_rebase_warning requires a differentiable view with a grad_fn");
+  auto version = view_meta->get_attr_version();
+  const auto& base = view_meta->get_backward_view().base_;
+  view_lock.unlock();
+
+  auto* base_meta = materialize_autograd_meta(base);
+  std::vector<ViewRebaseWarning> retired;
+  std::lock_guard<std::mutex> lock(base_meta->mutex_);
+  if (!base_meta->view_rebase_warnings_) {
+    base_meta->view_rebase_warnings_ =
+        std::make_unique<std::vector<ViewRebaseWarning>>();
+  }
+  auto& warnings = *base_meta->view_rebase_warnings_;
+  warnings.erase(
+      std::remove_if(
+          warnings.begin(),
+          warnings.end(),
+          [&](ViewRebaseWarning& warning) {
+            if (warning.grad_fn.expired() ||
+                warning.grad_fn._unsafe_get_target() == grad_fn.get()) {
+              retired.push_back(std::move(warning));
+              return true;
+            }
+            return false;
+          }),
+      warnings.end());
+  warnings.push_back(
+      {c10::weak_intrusive_ptr<Node>(grad_fn), version, std::move(message)});
+  base_meta->has_view_rebase_warnings_.store(true, std::memory_order_release);
+}
+
+static void warn_on_view_rebase(const at::TensorBase& self) {
+  auto* view_meta = get_view_autograd_meta(self);
+  const auto& base = view_meta && view_meta->has_bw_view()
+      ? view_meta->get_backward_view().base_
+      : self;
+  auto* meta = get_autograd_meta(base);
+  if (!meta ||
+      !meta->has_view_rebase_warnings_.load(std::memory_order_acquire)) {
+    return;
+  }
+  std::vector<ViewRebaseWarning> pending;
+  std::vector<ViewRebaseWarning> retired;
+  {
+    std::lock_guard<std::mutex> lock(meta->mutex_);
+    const auto version = base._version();
+    auto& warnings = *meta->view_rebase_warnings_;
+    warnings.erase(
+        std::remove_if(
+            warnings.begin(),
+            warnings.end(),
+            [&](ViewRebaseWarning& warning) {
+              if (warning.grad_fn.expired()) {
+                retired.push_back(std::move(warning));
+                return true;
+              }
+              if (warning.version != version) {
+                pending.push_back(std::move(warning));
+                return true;
+              }
+              return false;
+            }),
+        warnings.end());
+    meta->has_view_rebase_warnings_.store(
+        !warnings.empty(), std::memory_order_release);
+  }
+  // Warning handlers may inspect the tensor or raise. Finish the history
+  // update and release metadata locks before invoking them.
+  for (const auto& warning : pending) {
+    TORCH_WARN(warning.message);
+  }
+}
+
 static void update_tensor_hooks_on_new_gradfn(
     const at::TensorBase& self,
     const c10::intrusive_ptr<torch::autograd::Node>& old_fn,
@@ -238,6 +322,7 @@ c10::intrusive_ptr<Node> rebase_history(
     }
     set_gradient_edge(view_info.base_, {copy_slices, 0});
     self.grad_fn(); // trigger an update to the view's grad_fn
+    warn_on_view_rebase(self);
     return copy_slices;
   }
 
@@ -246,6 +331,7 @@ c10::intrusive_ptr<Node> rebase_history(
   // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
   torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
       self, old_fn, self.grad_fn());
+  warn_on_view_rebase(self);
   return fn;
 }
 
@@ -684,7 +770,7 @@ const c10::intrusive_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
-    std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
+    std::unique_lock<std::mutex> lock(diff_view_meta->mutex_);
     auto& view_info = diff_view_meta->get_backward_view();
     if (!diff_view_meta->grad_fn_ && !view_info.base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
@@ -756,6 +842,8 @@ const c10::intrusive_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
 
       torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
           self, old_fn, diff_view_meta->grad_fn_);
+      lock.unlock();
+      torch::autograd::impl::warn_on_view_rebase(self);
     }
     return diff_view_meta->grad_fn_;
   }

@@ -4,7 +4,9 @@ import collections
 import copy
 import functools
 import itertools
+import warnings
 from typing import Any
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -20,7 +22,12 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_HPU
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_HPU,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -242,6 +249,87 @@ class TestFullyShardAutograd(FSDPTest):
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
 
+class TestFullyShardViewOutputWarning(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    @parametrize("return_view", [False, True])
+    @parametrize(
+        "mutation",
+        [
+            "none",
+            "out_of_place",
+            "clone",
+            "in_place",
+            "descendant",
+            "base",
+            "sibling",
+            "no_grad",
+        ],
+    )
+    def test_output_view_warning(self, return_view: bool, mutation: str):
+        class ViewOutput(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(4, 4))
+                self.output: torch.Tensor | None = None
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                output = x @ self.weight
+                self.output = output.view_as(output) if return_view else output
+                return self.output
+
+        model = ViewOutput()
+        fully_shard(model, reshard_after_forward=True)
+        state = fully_shard.state(model)
+        inp = torch.randn(2, 4, device=device_type)
+        with (
+            mock.patch.object(
+                state, "_pre_backward", wraps=state._pre_backward
+            ) as hook,
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            output = model(inp)
+            self.assertEqual(len(caught), 0)
+            self.assertIs(output, model.output)
+            self.assertEqual(output._base is not None, return_view)
+            base = output._base if return_view else output
+            result = output
+            if mutation == "out_of_place":
+                result = output + 1
+            elif mutation == "clone":
+                result = output.clone().add_(1)
+            elif mutation == "in_place":
+                output.add_(1)
+            elif mutation == "descendant":
+                result = output.view(-1)
+                result.add_(1)
+            elif mutation == "base":
+                base.add_(1)
+            elif mutation == "sibling":
+                base.view_as(output).add_(1)
+            elif mutation == "no_grad":
+                with torch.no_grad():
+                    output.add_(1)
+            # Mutating an alias or using no_grad can defer the view's rebase.
+            _ = result.grad_fn
+            if return_view and mutation not in ("none", "out_of_place", "clone"):
+                self.assertEqual(len(caught), 1)
+                self.assertIs(caught[0].category, UserWarning)
+                self.assertRegex(
+                    str(caught[0].message),
+                    r"FSDP2-wrapped module \(FSDPViewOutput\)",
+                )
+            else:
+                result.sum().backward()
+                self.assertEqual(len(caught), 0)
+                hook.assert_called_once()
+                self.assertIsNotNone(model.weight.grad)
+
+
 class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
@@ -340,6 +428,9 @@ class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
             self.assertTrue(torch.equal(ref_loss, loss))
             for ref_param, param in zip(ref_model.parameters(), model.parameters()):
                 self.assertTrue(torch.equal(ref_param, param))
+
+
+instantiate_parametrized_tests(TestFullyShardViewOutputWarning)
 
 
 if __name__ == "__main__":
