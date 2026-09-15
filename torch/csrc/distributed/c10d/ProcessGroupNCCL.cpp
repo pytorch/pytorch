@@ -845,8 +845,10 @@ void ProcessGroupNCCL::WorkNCCL::recordEndEvent(
     bool asyncOp,
     c10::cuda::CaptureStatus captureStatus) {
   ncclEndEvent_->record(stream);
-#ifndef USE_ROCM
   if (asyncOp && captureStatus == c10::cuda::CaptureStatus::Active) {
+#ifdef USE_ROCM
+    captureId_ = c10::cuda::captureInfoMayInitCtx(stream).id;
+#else
     capturedEndEvent_ =
         CUDAEventCache::get(device_.index())->create(false, true);
     const cudaGraphNode_t* dependencies = nullptr;
@@ -871,23 +873,30 @@ void ProcessGroupNCCL::WorkNCCL::recordEndEvent(
     // from capture's join requirement, without delaying the NCCL launch or
     // making independent work on the origin stream wait for NCCL to finish.
     c10::cuda::setCaptureDependencies(stream, &node, 1);
-  }
 #endif
+  }
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
   auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
   // Block the current stream on the NCCL stream
-  if (capturedEndEvent_) {
+  if (captureId_) {
     auto info = c10::cuda::captureInfoMayInitCtx(currentStream);
     if (info.status == c10::cuda::CaptureStatus::Active &&
-        info.id == captureId_) {
+        info.id == *captureId_) {
       ncclEndEvent_->block(currentStream);
     } else {
+#ifdef USE_ROCM
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          false,
+          "Waiting on captured collective work outside its original capture "
+          "is not supported on ROCm.");
+#else
       if (info.status == c10::cuda::CaptureStatus::Active) {
         retainCapturedEvent(info.graph, capturedEndEvent_);
       }
       capturedEndEvent_->block(currentStream);
+#endif
     }
   } else {
     ncclEndEvent_->block(currentStream);

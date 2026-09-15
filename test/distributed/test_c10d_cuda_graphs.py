@@ -401,5 +401,41 @@ class NCCLCrossCaptureTest(C10dBackendTest, MultiProcessTestCase):
 instantiate_device_type_tests(NCCLCrossCaptureTest, globals(), only_for="cuda")
 
 
+@unittest.skipIf(not TEST_WITH_ROCM, "ROCm capture restriction")
+@unittest.skipIf(not dist.is_nccl_available(), "NCCL required")
+class NCCLCaptureWaitROCmTest(C10dBackendTest, MultiProcessTestCase):
+    backend_name = "nccl-legacy"
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("wait_in_capture", [False, True])
+    def test_wait_outside_original_capture(self, device, wait_in_capture):
+        self._init_pg()
+        inp = torch.ones(4, device=self.device)
+        dist.all_reduce(inp, async_op=True).wait()
+        inp.fill_(1)
+        torch.cuda.synchronize()
+
+        producer = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(producer):
+            work = dist.all_reduce(inp, async_op=True)
+            work.wait()
+        producer.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(inp, torch.full_like(inp, self.world_size))
+
+        message = "outside its original capture is not supported on ROCm"
+        if wait_in_capture:
+            consumer = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(consumer):
+                with self.assertRaisesRegex(NotImplementedError, message):
+                    work.wait()
+        else:
+            with self.assertRaisesRegex(NotImplementedError, message):
+                work.wait()
+
+
+instantiate_device_type_tests(NCCLCaptureWaitROCmTest, globals(), only_for="cuda")
+
+
 if __name__ == "__main__":
     run_tests()

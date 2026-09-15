@@ -432,8 +432,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Recording and waiting graphs retain it independently of this work item.
     std::shared_ptr<at::cuda::CUDAEvent> capturedEndEvent_;
 
-    // The capture ID used to identify waits within the original capture.
-    c10::cuda::CaptureId_t captureId_ = 0;
+    // The original capture ID for captured async work; unset for other work.
+    std::optional<c10::cuda::CaptureId_t> captureId_;
 
     // The NCCL communicator used for this work item.
     std::shared_ptr<NCCLComm> ncclComm_;
