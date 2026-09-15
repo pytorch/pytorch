@@ -1504,8 +1504,10 @@ class CheckpointPolicy(enum.Enum):
 
         Selective checkpointing always saves explicitly registered, non-aliasing
         ordered effects that are valid SAC cache boundaries instead of replaying
-        them, even when the policy requests recomputation. Raw c10d launches are
-        not valid cache boundaries and are excluded.
+        them, even when the policy would otherwise replay them. Raw c10d launches
+        are not valid cache boundaries and are excluded. Since saved SAC entries
+        are consumed during backward, a checkpoint containing such an effect does
+        not support repeated backward with ``retain_graph=True``.
     """
     MUST_SAVE = 0
     PREFER_SAVE = 1
@@ -1513,6 +1515,9 @@ class CheckpointPolicy(enum.Enum):
     PREFER_RECOMPUTE = 3
     MUST_CPU_OFFLOAD = 4
     PREFER_CPU_OFFLOAD = 5
+
+
+_SAVE_POLICIES = (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE)
 
 
 def _policy_from_bool(b):
@@ -1607,10 +1612,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
-        if policy in (
-            CheckpointPolicy.MUST_RECOMPUTE,
-            CheckpointPolicy.PREFER_RECOMPUTE,
-        ) and _is_cacheable_effect(func):
+        if policy not in _SAVE_POLICIES and _is_cacheable_effect(func):
             policy = CheckpointPolicy.MUST_SAVE
 
         if is_compiling:
@@ -1620,7 +1622,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                 for node in itertools.islice(reversed(graph.nodes), num_new):
                     node.meta["recompute"] = policy
 
-        if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
+        if policy in _SAVE_POLICIES or is_compiling:
             # SAC caches these tensors outside the autograd graph, bypassing
             # SavedVariable, so simulate pack/unpack with the user's
             # saved-tensors hooks (if any): hooks like save_on_cpu must see
