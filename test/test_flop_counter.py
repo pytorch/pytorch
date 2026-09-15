@@ -17,10 +17,12 @@ from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
+    TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils.flop_counter import sdpa_backward_flop_count, sdpa_flop_count
 
 
@@ -33,6 +35,7 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
+HAS_XPU = TEST_XPU
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -488,7 +491,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(not HAS_CUDA and not HAS_XPU, "CUDA or XPU not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Flash attention not supported (pre-SM80 hardware on CUDA)",
@@ -501,13 +504,14 @@ class TestFlopCounter(TestCase):
         seq_len = 128
         head_dim = 64
         dtype = torch.float16
+        device = "cuda" if HAS_CUDA else "xpu"
 
         query = torch.randn(
             batch_size,
             n_heads_q,
             seq_len,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
         )
         key = torch.randn(
@@ -515,7 +519,7 @@ class TestFlopCounter(TestCase):
             n_heads_kv,
             seq_len,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
         )
         value = torch.randn(
@@ -523,7 +527,7 @@ class TestFlopCounter(TestCase):
             n_heads_kv,
             seq_len,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
         )
 
@@ -997,7 +1001,7 @@ class TestFlopCounter(TestCase):
         self.assertEqual(called, 1)
         self.assertExpectedInline(get_total_flops(mode), """9001""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_flop_counter_custom_triton_manual_decomp(self):
         import triton
         import triton.language as tl
@@ -1014,8 +1018,8 @@ class TestFlopCounter(TestCase):
             out = tl.sin(x)
             tl.store(out_ptr + offsets, out, mask=mask)
 
-        x = torch.randn(3, device="cuda")
-        out = torch.empty(3, device="cuda")
+        x = torch.randn(3, device=GPU_TYPE)
+        out = torch.empty(3, device=GPU_TYPE)
 
         @register_flop_formula(sin_kernel)
         def compute_sin_kernel_flops(*args, **kwargs) -> int:
@@ -1047,7 +1051,7 @@ class TestFlopCounter(TestCase):
             torch.ops.mylib.sin_op()
         self.assertExpectedInline(get_total_flops(m2), """2""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_flop_counter_custom_triton_op_two_kernels_manual_decomp(self):
         import triton
         import triton.language as tl
@@ -1074,8 +1078,8 @@ class TestFlopCounter(TestCase):
             out = tl.cos(x)
             tl.store(out_ptr + offsets, out, mask=mask)
 
-        x = torch.randn(3, device="cuda")
-        out = torch.empty(3, device="cuda")
+        x = torch.randn(3, device=GPU_TYPE)
+        out = torch.empty(3, device=GPU_TYPE)
 
         @register_flop_formula(sin_kernel)
         def compute_sin_kernel_flops(*args, **kwargs) -> int:
@@ -1121,7 +1125,7 @@ class TestFlopCounter(TestCase):
             torch.ops.mylib.trig_op()
         self.assertExpectedInline(get_total_flops(m2), """2""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @torch._functorch.config.patch("activation_memory_budget", 0.1)
     @torch._functorch.config.patch("activation_memory_budget_solver", "dp")
     @torch._functorch.config.patch("is_non_builtin_to_include", True)
@@ -1152,7 +1156,7 @@ class TestFlopCounter(TestCase):
             tl.store(out_ptr + offsets, out, mask=mask)
 
         n_elements = int(1e7)
-        x = torch.randn(n_elements, device="cuda", requires_grad=True)
+        x = torch.randn(n_elements, device=GPU_TYPE, requires_grad=True)
 
         cos_flops_recorded, sin_flops_recorded = 0, 0
 
@@ -1244,19 +1248,20 @@ class TestFlopCounter(TestCase):
         ]
         self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
 
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(not HAS_CUDA and not HAS_XPU, "CUDA or XPU not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_scaled_mm(self):
         dtype = e4m3_type
+        device = "cuda" if HAS_CUDA else "xpu"
         with FlopCounterMode() as mode:
             torch._scaled_mm(
-                torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),
-                torch.randn((7 * 16, 5 * 16), device="cuda").to(dtype).t(),
-                scale_a=torch.ones((), device="cuda"),
-                scale_b=torch.ones((), device="cuda"),
+                torch.randn((3 * 16, 5 * 16), device=device).to(dtype),
+                torch.randn((7 * 16, 5 * 16), device=device).to(dtype).t(),
+                scale_a=torch.ones((), device=device),
+                scale_b=torch.ones((), device=device),
                 out_dtype=torch.bfloat16,
             )
 
@@ -1400,7 +1405,7 @@ class TestFlexAttentionEstimation(TestCase):
         self.assertEqual(fwd_flops, expected_flops)
 
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not HAS_CUDA, "requires CUDA")
+    @unittest.skipIf(not HAS_CUDA and not HAS_XPU, "requires CUDA or XPU")
     def test_flex_attention_roofline_estimate(self):
         """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
         from torch._inductor.fx_passes.overlap_scheduling import (
