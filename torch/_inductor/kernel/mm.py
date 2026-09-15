@@ -521,17 +521,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     # Create MMKernelInputs for standard MM at the top
     kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=out_dtype)
 
-    cat2_source_names = (
-        get_cat2_fp32_prologue_sources(mat2)
-        if inductor_config.triton.enable_blackwell_decompose_k_cat2_selection
-        else None
-    )
+    cat2_source_names = get_cat2_fp32_prologue_sources(mat2)
     decompose_k_backends = OrderedSet(
         backend.strip().upper()
         for backend in inductor_config.triton.decompose_k_bmm_backends.split(",")
     )
     if (
         out_dtype is None
+        and inductor_config.triton.enable_blackwell_decompose_k_producer_selection
         and inductor_config.triton.max_triton_decompose_k_fusion_choices > 0
         and static_shape
         and is_nonzero

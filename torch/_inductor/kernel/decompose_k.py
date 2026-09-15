@@ -345,7 +345,9 @@ class Cat2DecomposeKWholePlanTemplate(SubgraphTemplate):
                     ),
                 )
             choice.config_patches = {
-                "triton.enable_blackwell_decompose_k_cat2_selection": False
+                # The choice's nested graph contains the same producer and MM.
+                # Disable recursive whole-plan discovery while compiling it.
+                "triton.enable_blackwell_decompose_k_producer_selection": False
             }
             return choice
 

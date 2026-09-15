@@ -2324,10 +2324,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K", "0") == "1"
     )
 
-    # Benchmark the complete materialized and fused plans for the exact
-    # two-source FP32 cat-to-BF16 producer supported by Blackwell decompose-K.
-    enable_blackwell_decompose_k_cat2_selection = (
-        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K_CAT2_SELECTION", "0")
+    # Benchmark complete materialized and producer-fused Triton decompose-K
+    # plans. Initially supported producer contracts remain separately guarded
+    # by their lowering legality checks.
+    enable_blackwell_decompose_k_producer_selection = (
+        os.environ.get(
+            "TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K_PRODUCER_SELECTION", "0"
+        )
         == "1"
     )
 
