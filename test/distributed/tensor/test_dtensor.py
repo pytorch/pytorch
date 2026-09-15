@@ -38,7 +38,9 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     run_tests,
     skipIfHpu,
@@ -74,7 +76,9 @@ class DummyMLP(torch.nn.Module):
             self.net2.bias.fill_(1.2)
 
 
-class DTensorTest(DTensorTestBase):
+class TestDTensorDevice(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     def test_dtensor_constructor(self):
         device_mesh = self.build_device_mesh()
@@ -994,8 +998,8 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(dt_scalar.to_local(), 42.0)
 
 
-DTensorTestWithLocalTensor = create_local_tensor_test_class(
-    DTensorTest,
+TestDTensorDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorDevice,
     skipped_tests=[
         # Async output in local mode is not supported
         "test_dtensor_async_output",
@@ -1007,7 +1011,9 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
-class DTensorSubclassTest(DTensorTestBase):
+class TestDTensorSubclassDevice(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _make_dtensor(self, cls, mesh):
         base = DTensor.from_local(
             torch.randn(4, 4, device=self.device_type), mesh, [Replicate()]
@@ -1074,7 +1080,9 @@ class DTensorSubclassTest(DTensorTestBase):
         self.assertEqual(len(custom_ops), 0)
 
 
-class DTensorMeshTest(DTensorTestBase):
+class TestDTensorMeshDevice(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
@@ -1415,7 +1423,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @unittest.expectedFailure
     @with_comms
-    def test_dtensor_cond(self):
+    def test_dtensor_cond(self, device):
         mesh = self.build_device_mesh()
 
         def make_dtensor(*shape, dtype, device):
@@ -1425,7 +1433,7 @@ class DTensorMeshTest(DTensorTestBase):
                 placements=None,
             )
 
-        x = make_dtensor(1, 1, dtype=torch.bfloat16, device="cuda")
+        x = make_dtensor(1, 1, dtype=torch.bfloat16, device=device)
 
         # Fails with AssertionError: P1972527564
         torch.cond(
@@ -1534,8 +1542,8 @@ class DTensorMeshTest(DTensorTestBase):
             dtensor.as_strided((4, 6), (6, 1), 1)
 
 
-DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
-    DTensorMeshTest,
+TestDTensorMeshDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorMeshDevice,
     skipped_tests=[
         # Test asserts must be rewritten for local tensor
         "test_from_local_sub_mesh",
@@ -1548,7 +1556,9 @@ DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
-class TestDTensorPlacementTypes(DTensorTestBase):
+class TestDTensorPlacementTypesDevice(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
@@ -1612,12 +1622,14 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
 
 
-TestDTensorPlacementTypesWithLocalTensor = create_local_tensor_test_class(
-    TestDTensorPlacementTypes,
+TestDTensorPlacementTypesDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorPlacementTypesDevice,
 )
 
 
-class TestDTensorSpec(DTensorTestBase):
+class TestDTensorSpecDevice(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
@@ -1863,13 +1875,15 @@ class TestDTensorSpec(DTensorTestBase):
         self.assertEqual(local_shape2, expected_shape2)
 
 
-TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
-    TestDTensorSpec,
+TestDTensorSpecDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorSpecDevice,
 )
 
 
 class TestMixedPartialTypes(TestCase):
     """Test that mixed Partial reduce types are rejected by all DTensor APIs."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1923,6 +1937,13 @@ class TestMixedPartialTypes(TestCase):
         )
         # no error
         redistribute_local_tensor(tensor, current_spec, target_spec)
+
+
+instantiate_device_type_tests(TestDTensorDevice, globals())
+instantiate_device_type_tests(TestDTensorSubclassDevice, globals())
+instantiate_device_type_tests(TestDTensorMeshDevice, globals())
+instantiate_device_type_tests(TestDTensorPlacementTypesDevice, globals())
+instantiate_device_type_tests(TestDTensorSpecDevice, globals())
 
 
 if __name__ == "__main__":
