@@ -1008,8 +1008,8 @@ if(USE_ROCM)
   endif()
 
   # On ROCm < 7.14 IntraNodeComm loads libamd_smi at runtime via dlopen, because
-  # linking it would put its unversioned rsmi_* re-exports in the global scope
-  # and interpose the librocm_smi64 symbols RCCL resolves there. On ROCm >= 7.14
+  # linking it would put its rsmi_* re-exports in the global scope and
+  # interpose the librocm_smi64 symbols RCCL resolves there. On ROCm >= 7.14
   # RCCL no longer references rsmi_* at all, so there is nothing to interpose
   # and amd_smi is linked directly (see cmake/Dependencies.cmake).
   if(USE_DISTRIBUTED)
