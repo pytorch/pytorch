@@ -1233,8 +1233,7 @@ def triton_arg_dtype(arg: Any) -> torch.dtype | None:
 
 def needs_upcast_to_float32(arg: Any) -> bool:
     return (
-        not config.triton.codegen_upcast_to_fp32
-        and isinstance(arg, CSEVariable)
+        isinstance(arg, CSEVariable)
         and arg.dtype in (torch.float16, torch.bfloat16)
     )
 
@@ -1287,7 +1286,7 @@ def get_dtype_handler() -> DtypePropagationOpsHandler:
 
 def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     """
-    Codegen helper to upcast arguments to float32, depending on the config and dtype.
+    Codegen helper to upcast arguments to float32, depending on the dtype.
     This decorates tl.math/libdevice codegen functions.
     """
 
@@ -2308,7 +2307,10 @@ class TritonOverrides(OpOverrides):
             )
             return f"triton_helpers.pow_integer({base}, {exponent})"
 
-        any_needs_upcast = needs_upcast_to_float32(a) or needs_upcast_to_float32(b)
+        # pow casts its inputs separately; preserve its existing output policy.
+        any_needs_upcast = not config.triton.codegen_upcast_to_fp32 and (
+            needs_upcast_to_float32(a) or needs_upcast_to_float32(b)
+        )
         pow_dtype = result_dtype
         if pow_dtype not in (torch.float32, torch.float64):
             # libdevice.pow only accepts fp32/fp64. Keep low-precision floating

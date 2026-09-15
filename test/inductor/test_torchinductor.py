@@ -4488,6 +4488,22 @@ for dtype in (torch.int32, torch.int64):
         )
         self.common(fn, (a, b))
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @config.patch("triton.codegen_upcast_to_fp32", True)
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_lowp_intermediate_upcast(self, dtype):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA libdevice regression test")
+
+        def fn(x):
+            lowp = torch.arange(x.numel(), dtype=torch.int64, device=x.device).to(dtype)
+            return (
+                torch.div(lowp, 2, rounding_mode="floor"),
+                torch.sin(lowp),
+            )
+
+        self.common(fn, (torch.empty(8, device=self.device),))
+
     def test_minimum_signed_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/185610
         # torch.minimum(-0.0, +0.0) must return -0.0 per IEEE 754.
