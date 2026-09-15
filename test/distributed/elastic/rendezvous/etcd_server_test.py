@@ -6,12 +6,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import socket
 import sys
 import unittest
+from unittest import mock
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -58,3 +60,39 @@ class EtcdServerTest(unittest.TestCase):
             self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()
+
+    def test_find_free_port_retries_after_socket_construction_failure(self):
+        addrs = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+        ]
+
+        real_socket = socket.socket
+        calls = {"count": 0}
+
+        def fake_socket(family, type, proto):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise OSError("socket failed")
+            return real_socket(family, type, proto)
+
+        with mock.patch("socket.getaddrinfo", return_value=addrs), mock.patch(
+            "socket.socket", side_effect=fake_socket
+        ):
+            sock = find_free_port()
+            try:
+                self.assertEqual(2, calls["count"])
+            finally:
+                sock.close()
+
+    def test_find_free_port_all_attempts_fail(self):
+        addrs = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+        ]
+
+        with mock.patch("socket.getaddrinfo", return_value=addrs), mock.patch(
+            "socket.socket", side_effect=OSError("socket failed")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Failed to create a socket"):
+                find_free_port()
