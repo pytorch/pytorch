@@ -576,7 +576,8 @@ class FSDPParamGroup:
                 self.unshard(self.unshard_async_op)
                 self.wait_for_unshard()
             for fsdp_param in self.fsdp_params:
-                fsdp_param.restore_unsharded_grad()
+                if not fsdp_param.offload_to_cpu:
+                    fsdp_param.restore_unsharded_grad()
                 fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
@@ -593,8 +594,21 @@ class FSDPParamGroup:
             if not is_bw():
                 self.reshard()
                 self._record_post_forward()
+                self._register_cpu_grad_owners()
             self._training_state = TrainingState.IDLE
             return output
+
+    def _register_cpu_grad_owners(self) -> None:
+        if (
+            isinstance(self.offload_policy, CPUOffloadPolicy)
+            and self.is_unsharded
+            and not is_bw()
+        ):
+            # Expose CPU accumulation to zero_grad() after forward, including
+            # partial group forwards that retain the compute weights.
+            for fsdp_param in self.fsdp_params:
+                if fsdp_param._grad_is_partial:
+                    fsdp_param._setattr_on_modules(fsdp_param.sharded_param)
 
     def _record_post_forward(self) -> None:
         # Since a group has one pre-backward unshard for each forward call
@@ -616,7 +630,8 @@ class FSDPParamGroup:
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
             for fsdp_param in self.fsdp_params:
-                fsdp_param.restore_unsharded_grad()
+                if self.reduce_grads or not fsdp_param.offload_to_cpu:
+                    fsdp_param.restore_unsharded_grad()
             if default_prefetch:
                 self._backward_prefetch()
 

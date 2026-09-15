@@ -8,9 +8,11 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
     DataParallelMeshDims,
     fully_shard,
     MixedPrecisionPolicy,
+    OffloadPolicy,
 )
 from torch.distributed.tensor import DTensor, Partial, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -18,6 +20,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 if dist._is_spmd_types_available():
@@ -25,10 +28,173 @@ if dist._is_spmd_types_available():
     from spmd_types.checker import typecheck
 
 
+class TrackPendingGradCopies(TorchDispatchMode):
+    def __init__(self, parameters):
+        super().__init__()
+        self.grads = [p.grad._local_tensor for p in parameters if p.grad is not None]
+        self.storages = {g.untyped_storage().data_ptr() for g in self.grads}
+        self.h2d = 0
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        if func == torch.ops.aten._to_copy.default and args[0].device.type == "cpu":
+            tensor = args[0]._local_tensor if isinstance(args[0], DTensor) else args[0]
+            device = kwargs.get("device")
+            if (
+                device is not None
+                and torch.device(device).type != "cpu"
+                and tensor.untyped_storage().data_ptr() in self.storages
+            ):
+                self.h2d += 1
+        return func(*args, **kwargs)
+
+
+class OffloadPendingGradModel(nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.first = nn.Linear(4, 2, bias=False, device=device)
+        self.second = nn.Linear(4, 2, bias=False, device=device)
+
+    def forward(self, inp, use_second=True):
+        output = self.first(inp)
+        if use_second:
+            output = output + self.second(inp)
+        return output
+
+
 class TestFullyShardPendingGrad(FSDPTest):
     @property
     def world_size(self):
         return 2
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "mutation",
+        ["none", "scale", "zero", "zero_none", "clone", "shard", "replicate", "unused"],
+    )
+    def test_cpu_offload_pending_grad(self, device, mutation):
+        self.run_subtests(
+            {"pin_memory": [False, True]},
+            self._test_cpu_offload_pending_grad,
+            torch.device(device).type,
+            mutation,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_pending_grad_late_sync(self, device):
+        self.run_subtests(
+            {"pin_memory": [False, True]},
+            self._test_cpu_offload_pending_grad,
+            torch.device(device).type,
+            "none",
+            late_sync=True,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("set_to_none", [False, True])
+    def test_cpu_offload_pending_grad_partial_group(self, device, set_to_none):
+        self._test_cpu_offload_pending_grad(
+            torch.device(device).type,
+            "zero_none" if set_to_none else "zero",
+            pin_memory=False,
+            partial_group=True,
+        )
+
+    def _test_cpu_offload_pending_grad(
+        self, device, mutation, pin_memory, late_sync=False, partial_group=False
+    ):
+        model = OffloadPendingGradModel(device)
+        with torch.no_grad():
+            for param in model.parameters():
+                param.fill_(0.25)
+        ref_model = copy.deepcopy(model).to(torch.bfloat16)
+        for param in ref_model.parameters():
+            param.grad_dtype = torch.float32
+        mesh = init_device_mesh(device, (self.world_size,))
+        fully_shard(
+            [model.first, model.second] if partial_group else model,
+            mesh=mesh,
+            reshard_after_forward=False,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+            ),
+            offload_policy=CPUOffloadPolicy(pin_memory=pin_memory),
+        )
+        if partial_group:
+            fully_shard(model)
+        model.set_reshard_after_backward(pin_memory)
+        state_module = model.first if partial_group else model
+        fsdp_params = [
+            param
+            for group in state_module._get_fsdp_state()._fsdp_param_groups
+            for param in group.fsdp_params
+        ]
+        for step in range(4):
+            sync = step == 3
+            before_forward_sync = not sync if late_sync and step >= 2 else sync
+            model.set_requires_gradient_sync(before_forward_sync)
+            inputs = [
+                torch.arange(8, device=device, dtype=torch.bfloat16).view(2, 4) / 8
+                + (rank + 1) / 2
+                + step / 4
+                for rank in range(self.world_size)
+            ]
+            use_second = mutation != "unused" or not sync
+            if partial_group and step == 1:
+                use_second = False
+            ref_loss = sum(ref_model(inp, use_second).float().sum() for inp in inputs)
+            ref_loss = ref_loss / self.world_size
+            with TrackPendingGradCopies(model.parameters()) as copies:
+                if partial_group and step == 1:
+                    inp = inputs[self.rank].requires_grad_()
+                    loss = model.first(inp).float().sum()
+                else:
+                    loss = model(inputs[self.rank], use_second).float().sum()
+                model.set_requires_gradient_sync(sync)
+                if step == 1 and mutation in ("zero", "zero_none"):
+                    for param in model.parameters():
+                        self.assertEqual(param.device.type, "cpu")
+                        self.assertEqual(param.grad.device.type, "cpu")
+                    for module in (model, ref_model):
+                        module.zero_grad(set_to_none=mutation == "zero_none")
+                ref_loss.backward()
+                loss.backward()
+            if step > 0 and not sync:
+                if mutation not in ("shard", "replicate") or step > 1:
+                    self.assertEqual(copies.h2d, 0)
+            if sync:
+                self.assertGreater(copies.h2d, 0)
+            for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+                self.assertEqual(param.device.type, "cpu")
+                if ref_param.grad is None:
+                    self.assertIsNone(param.grad)
+                    continue
+                self.assertEqual(param.grad.device.type, "cpu")
+                self.assertEqual(param.grad.dtype, torch.float32)
+                self.assertEqual(ref_param.grad, param.grad.to(device).full_tensor())
+            if not sync:
+                for param in fsdp_params:
+                    self.assertIsNone(param._unsharded_param.grad)
+            if step == 0:
+                for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+                    if mutation == "scale":
+                        ref_param.grad.mul_(0.5)
+                        param.grad.mul_(0.5)
+                    elif mutation == "clone":
+                        ref_param.grad = ref_param.grad.clone().mul_(2)
+                        param.grad = param.grad.clone().mul_(2)
+                    elif mutation in ("shard", "replicate"):
+                        ref_param.grad = ref_param.grad.clone().mul_(2)
+                        replacement = ref_param.grad.cpu()
+                        placement = Replicate()
+                        if mutation == "shard":
+                            replacement = replacement.chunk(self.world_size)[
+                                self.rank
+                            ].clone()
+                            placement = Shard(0)
+                        param.grad = DTensor.from_local(
+                            replacement, mesh, (placement,)
+                        ).cpu()
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -350,6 +516,20 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
         return 4
 
     @skip_if_lt_x_gpu(4)
+    def test_cpu_offload_spmd_pending_grad(self, device):
+        device = torch.device(device).type
+        mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("dp", "tp"))
+        self._test_reduced_to_pending_spmd_grad(
+            device,
+            torch.bfloat16,
+            mesh,
+            "avg",
+            "mul",
+            False,
+            cpu_offload=True,
+        )
+
+    @skip_if_lt_x_gpu(4)
     def test_pending_grad_replacement_spmd(self, device):
         device = torch.device(device).type
         mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("dp", "tp"))
@@ -388,7 +568,14 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
         )
 
     def _test_reduced_to_pending_spmd_grad(
-        self, device, dtype, mesh, reduce_op, mutation, reshard_after_backward
+        self,
+        device,
+        dtype,
+        mesh,
+        reduce_op,
+        mutation,
+        reshard_after_backward,
+        cpu_offload=False,
     ):
         ref_model = nn.Sequential(
             nn.Linear(4, 4, bias=False, device=device, dtype=dtype),
@@ -405,6 +592,9 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
             dp_mesh_dims=DataParallelMeshDims(shard="dp"),
             mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
             reshard_after_forward=False,
+            offload_policy=CPUOffloadPolicy(pin_memory=False)
+            if cpu_offload
+            else OffloadPolicy(),
         )
         model.set_reshard_after_backward(reshard_after_backward)
         if reduce_op == "sum":
@@ -439,11 +629,15 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
                         self.assertEqual(param.grad.placements[0], Partial(reduce_op))
                     else:
                         self.assertEqual(param.grad.placements[0], param.placements[0])
-                self.assertEqual(ref_param.grad, param.grad.full_tensor())
+                if cpu_offload:
+                    self.assertEqual(param.grad.device.type, "cpu")
+                self.assertEqual(ref_param.grad, param.grad.to(device).full_tensor())
 
         syncs = (True, False, True)
         if mutation == "replicate":
             syncs = (True, False, False, True)
+        if cpu_offload:
+            syncs = (False, False, False, True)
         replacement_refs = []
         for step, sync in enumerate(syncs):
             model.set_requires_gradient_sync(sync)
@@ -455,16 +649,19 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
                 ref_loss = ref_loss / len(ranks_by_dp)
             ref_loss.backward()
             inp = make_input(self.rank, step)
-            with (
-                spmd.set_current_mesh(mesh),
-                typecheck(strict_mode="strict", local=False),
-            ):
-                spmd.assert_type(
-                    inp,
-                    {dp_axis: spmd.V, tp_axis: spmd.V},
-                    partition_spec=spmd.PartitionSpec((dp_axis, tp_axis), None),
-                )
-                model(inp).backward()
+            with TrackPendingGradCopies(model.parameters()) as copies:
+                with (
+                    spmd.set_current_mesh(mesh),
+                    typecheck(strict_mode="strict", local=False),
+                ):
+                    spmd.assert_type(
+                        inp,
+                        {dp_axis: spmd.V, tp_axis: spmd.V},
+                        partition_spec=spmd.PartitionSpec((dp_axis, tp_axis), None),
+                    )
+                    model(inp).backward()
+            if cpu_offload and step > 0 and not sync:
+                self.assertEqual(copies.h2d, 0)
             check_grads(pending=not sync)
             for grad, expected in replacement_refs:
                 self.assertEqual(grad.full_tensor(), expected)

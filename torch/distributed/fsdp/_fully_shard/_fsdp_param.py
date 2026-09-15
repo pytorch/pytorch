@@ -1039,7 +1039,8 @@ class FSDPParam:
             self._sharded_post_forward_param = None
             self._sharded_post_forward_param_data = None  # free
         self.sharded_state = ShardedState.UNSHARDED
-        self.restore_unsharded_grad()
+        if not self.offload_to_cpu:
+            self.restore_unsharded_grad()
 
     def _setattr_on_modules(self, param: nn.Parameter) -> None:
         unsafe_setattr_param(
@@ -1101,6 +1102,8 @@ class FSDPParam:
         remain live when resharding after backward is disabled.
         """
         unsharded_param = getattr(self, "_unsharded_param", None)
+        grad_is_pending = self._grad_is_partial
+        pending_grad_to_accumulate = None
         if self._grad_is_partial:
             grad = self.sharded_param.grad
             if grad is not None:
@@ -1108,6 +1111,16 @@ class FSDPParam:
                     raise AssertionError("Expected a DTensor for the pending gradient")
                 if grad._spec is not self._pending_grad_spec:
                     grad = self._redistribute_pending_grad(grad)
+            if (
+                self.offload_to_cpu
+                and unsharded_param is not None
+                and unsharded_param.grad is not None
+            ):
+                # Keep the public CPU gradient authoritative between no-sync
+                # backwards; transfer only the new contribution from the GPU.
+                pending_grad_to_accumulate = grad
+                grad = unsharded_param.grad
+                grad_is_pending = False
         else:
             grad = unsharded_param.grad if unsharded_param is not None else None
         if grad is None:
@@ -1151,7 +1164,7 @@ class FSDPParam:
         placements = list(self._spmd_placements)
         if isinstance(grad, DTensor):
             local_grad = grad._local_tensor
-            if self._grad_is_partial or self.mesh_info.is_spmd_mesh:
+            if grad_is_pending or self.mesh_info.is_spmd_mesh:
                 placements = list(grad.placements)
             else:
                 placements[self.mesh_info.mesh.ndim :] = grad.placements
@@ -1166,6 +1179,27 @@ class FSDPParam:
         )
         for dim in dp_dims:
             placements[dim] = Partial(self._pending_grad_reduce_op)
+        if pending_grad_to_accumulate is not None:
+            # Match any non-DP layout before offloading the new contribution.
+            new_grad = self._redistribute_pending_grad(
+                _from_local_no_grad(
+                    local_grad,
+                    DTensorSpec(
+                        self._spmd_mesh,
+                        tuple(placements),
+                        tensor_meta=TensorMeta(
+                            self.sharded_param.size(),
+                            self.sharded_param.stride(),
+                            local_grad.dtype,
+                        ),
+                    ),
+                )
+            )
+            local_grad = pending_grad_to_accumulate._local_tensor.to(
+                device=self.sharded_param.device
+            )
+            local_grad.add_(new_grad._local_tensor.to(device=local_grad.device))
+            placements = list(pending_grad_to_accumulate.placements)
         local_grad = local_grad.to(device=self.sharded_param.device)
         if not self._grad_is_partial and self.sharded_param.grad is not None:
             sharded_grad = self.sharded_param.grad
@@ -1216,10 +1250,11 @@ class FSDPParam:
         self.sharded_param.grad_dtype = pending_grad.dtype
         self.sharded_param.grad = pending_grad
         self._pending_grad_spec = pending_grad._spec
-        if not self._grad_is_partial:
-            self._pending_unsharded_grad_spec = (
-                grad._spec if isinstance(grad, DTensor) else None
-            )
+        if not grad_is_pending:
+            if pending_grad_to_accumulate is None:
+                self._pending_unsharded_grad_spec = (
+                    grad._spec if isinstance(grad, DTensor) else None
+                )
             if unsharded_param is None:
                 raise AssertionError("Expected an unsharded gradient owner")
             unsharded_param.grad = None
@@ -1345,7 +1380,12 @@ class FSDPParam:
                     },
                     partition_spec=self._spmd_partition_spec,
                 )
-            self._unsharded_param.grad = unsharded_grad
+            if self._unsharded_param.grad is None:
+                self._unsharded_param.grad = unsharded_grad
+            else:
+                # Synchronization may be enabled after pre-backward, or a
+                # partial group may not have run its pre-backward hook.
+                self._unsharded_param.grad.add_(unsharded_grad)
         self.sharded_param.grad = None
         self.sharded_param.grad_dtype = self.sharded_grad_dtype
         self._grad_is_partial = False
