@@ -14,6 +14,7 @@ import gzip
 import json
 import os
 import warnings
+from functools import partial
 from hashlib import sha256
 from typing import Any
 from unittest import main, mock, skip, TestCase
@@ -1827,7 +1828,7 @@ class TestDockerCiGates(TestCase):
         mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
         mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
         top_pr.merge_changes_locally.assert_called_once_with(
-            repo, False, 1, ghstack_prs=ghstack_prs
+            repo, False, 1, ghstack_prs=ghstack_prs, ignore_current_checks_by_pr=None
         )
 
 
@@ -2500,6 +2501,252 @@ class TestGreenlightGuardWiring(TestCase):
         self.assertEqual(mock_check.call_args.kwargs["skip_internal_checks"], True)
         self.assertEqual(
             mock_check.call_args.kwargs["ignore_current_checks"], ["some-check"]
+        )
+
+
+class TestMergeIgnoreCurrent(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.repo = mock.MagicMock(spec=GitRepo)
+        self.repo.current_branch.return_value = "main"
+        self.repo.show_ref.return_value = "head-2"
+        self.lower = self._pr(1)
+        self.top = self._pr(2)
+        self.prs = {1: self.lower, 2: self.top}
+        self.stack = [(self.lower, "orig-1"), (self.top, "orig-2")]
+        self.lower_checks = self.lower.get_checkrun_conclusions.return_value
+        self.top_checks = self.top.get_checkrun_conclusions.return_value
+        self.lower_checks["lint"] = self.lower_checks["lint"]._replace(status="FAILURE")
+        self.top_checks["test"] = self.top_checks["test"]._replace(status="FAILURE")
+        self.post_comment = mock.Mock()
+        self.sleep = mock.Mock()
+        self.save_record = mock.Mock()
+        self.rule = MergeRule(
+            "default",
+            patterns=["*"],
+            approved_by=["maintainer"],
+            mandatory_checks_name=["lint", "test"],
+        )
+        for patcher in (
+            mock.patch("trymerge.gh_post_pr_comment", self.post_comment),
+            mock.patch("trymerge.time.sleep", self.sleep),
+            mock.patch("trymerge.save_merge_record", self.save_record),
+            mock.patch("trymerge.manually_close_merged_pr"),
+            mock.patch("trymerge.check_for_sev"),
+            mock.patch("trymerge.can_skip_internal_checks", return_value=False),
+            mock.patch("trymerge.get_drci_classifications", return_value={}),
+            mock.patch("trymerge.read_merge_rules", return_value=[self.rule]),
+            mock.patch("trymerge.get_ghstack_prs", side_effect=self._get_stack),
+            mock.patch(
+                "trymerge.GitHubPR",
+                side_effect=lambda org, project, pr_num: self.prs[pr_num],
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _pr(self, pr_num: int) -> Any:
+        cls = GitHubPR
+        pr = mock.MagicMock(spec=cls)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = pr_num
+        pr.default_branch.return_value = "main"
+        pr.last_commit_sha.return_value = f"head-{pr_num}"
+        pr.get_commit_sha_at_comment.return_value = f"head-{pr_num}"
+        pr.is_ghstack_pr.return_value = True
+        pr.is_closed.return_value = False
+        pr.is_docker_affecting.return_value = False
+        pr.is_dependabot_pr.return_value = False
+        pr.has_internal_changes.return_value = False
+        pr.get_changed_files.return_value = ["feature.py"]
+        pr.get_approved_by.return_value = ["maintainer"]
+        pr.get_changes_requested_by.return_value = []
+        pr.get_labels.return_value = ["merging", "topic: not user facing"]
+        url = f"https://ci.example/{pr_num}"
+        pr.get_checkrun_conclusions.return_value = {
+            name: JobCheckState(
+                name, f"{url}/{name}", "SUCCESS", None, None, None, None
+            )
+            for name in ("lint", "test")
+        }
+        pr.merge_into.side_effect = partial(cls.merge_into, pr)
+        pr.merge_changes_locally.side_effect = partial(cls.merge_changes_locally, pr)
+        pr.merge_ghstack_into.side_effect = partial(cls.merge_ghstack_into, pr)
+        return pr
+
+    def _get_stack(
+        self, repo: GitRepo, pr: GitHubPR, open_only: bool = True
+    ) -> list[tuple[Any, str]]:
+        return [
+            (stacked, rev)
+            for stacked, rev in self.stack
+            if not open_only or not stacked.is_closed()
+        ]
+
+    def test_merges_each_pr_with_its_own_initial_failures(self) -> None:
+        merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.assertEqual(
+            [call.args for call in self.repo.cherry_pick.call_args_list],
+            [("orig-1",), ("orig-2",)],
+        )
+        self.repo.push.assert_called_once_with("main", True)
+        message = self.post_comment.call_args_list[0].args[3]
+        self.assertIn("[#1: lint](https://ci.example/1/lint)", message)
+        self.assertIn("[test](https://ci.example/2/test)", message)
+
+    def test_pending_dependency_check_must_finish(self) -> None:
+        self._check_dependency_outcome(None, "SUCCESS")
+
+    def test_new_dependency_failure_blocks_merge(self) -> None:
+        self._check_dependency_outcome(None, "FAILURE")
+
+    def test_missing_dependency_check_must_run(self) -> None:
+        self._check_dependency_outcome("MISSING", "SUCCESS")
+
+    def test_missing_dependency_check_that_fails_blocks_merge(self) -> None:
+        self._check_dependency_outcome("MISSING", "FAILURE")
+
+    def _check_dependency_outcome(
+        self, initial_status: str | None, final_status: str
+    ) -> None:
+        check = self.lower_checks["test"]
+        if initial_status == "MISSING":
+            del self.lower_checks["test"]
+        else:
+            self.lower_checks["test"] = check._replace(status=initial_status)
+
+        def finish_check(seconds: int) -> None:
+            if seconds == 300:
+                self.lower_checks["test"] = check._replace(status=final_status)
+
+        self.sleep.side_effect = finish_check
+        if final_status == "FAILURE":
+            with self.assertRaisesRegex(
+                MergeRuleFailedError, "(?s)stacked PR #1:.*mandatory check.*failed"
+            ):
+                merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+            self.repo.push.assert_not_called()
+        else:
+            merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+            self.repo.push.assert_called_once_with("main", True)
+        self.sleep.assert_any_call(300)
+        self.assertEqual(self.top.merge_into.call_count, 2)
+
+    def test_missing_dependency_approval_blocks_merge(self) -> None:
+        self.lower.get_approved_by.return_value = []
+        with self.assertRaisesRegex(
+            MergeRuleFailedError, "(?s)stacked PR #1:.*not been reviewed"
+        ):
+            merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.repo.push.assert_not_called()
+
+    def test_failed_dependency_cla_cannot_be_ignored(self) -> None:
+        cla_check = "EasyCLA"
+        self.rule.mandatory_checks_name.append(cla_check)
+        self.top_checks[cla_check] = JobCheckState(
+            cla_check, "https://ci.example/2/cla", "SUCCESS", None, None, None, None
+        )
+        self.lower_checks[cla_check] = self.top_checks[cla_check]._replace(
+            status="FAILURE", url="https://ci.example/1/cla"
+        )
+        with self.assertRaisesRegex(
+            MergeRuleFailedError, f"(?s)stacked PR #1:.*{cla_check}"
+        ):
+            merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.repo.push.assert_not_called()
+
+    def test_dependency_internal_changes_block_merge(self) -> None:
+        self.lower.has_internal_changes.return_value = True
+        with self.assertRaisesRegex(RuntimeError, "must be landed via Phabricator"):
+            merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.repo.push.assert_not_called()
+
+    def test_authorized_bot_can_skip_dependency_internal_checks(self) -> None:
+        self.lower.has_internal_changes.return_value = True
+        with mock.patch("trymerge.can_skip_internal_checks", return_value=True):
+            merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.repo.push.assert_called_once_with("main", True)
+
+    def test_dependency_startup_failure_cannot_be_ignored(self) -> None:
+        self.lower_checks["test"] = self.lower_checks["test"]._replace(
+            status="STARTUP_FAILURE"
+        )
+        with self.assertRaisesRegex(
+            MergeRuleFailedError, "(?s)stacked PR #1:.*mandatory check.*failed"
+        ):
+            merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.repo.push.assert_not_called()
+
+    def test_normal_stack_merge_does_not_ignore_failures(self) -> None:
+        self.top_checks["test"] = self.top_checks["test"]._replace(status="SUCCESS")
+        with self.assertRaisesRegex(
+            MergeRuleFailedError, "(?s)stacked PR #1:.*mandatory check.*failed"
+        ):
+            merge(self.top, self.repo, 1, dry_run=True)
+        self.repo.push.assert_not_called()
+
+    def test_regular_pr_still_ignores_current_failures(self) -> None:
+        self.top.is_ghstack_pr.return_value = False
+        merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.repo.push.assert_called_once_with("main", True)
+        self.repo.cherry_pick.assert_not_called()
+        self.lower.get_checkrun_conclusions.assert_not_called()
+
+    def test_force_merge_still_bypasses_checks(self) -> None:
+        merge(self.top, self.repo, 1, dry_run=True, skip_mandatory_checks=True)
+        self.repo.push.assert_called_once_with("main", True)
+        self.assertFalse(self.save_record.call_args.kwargs["ignore_current"])
+
+    def test_closed_dependency_is_not_snapshotted(self) -> None:
+        self.lower.is_closed.return_value = True
+        merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.lower.get_checkrun_conclusions.assert_not_called()
+        self.repo.cherry_pick.assert_called_once_with("orig-2")
+
+    def test_dependency_only_failures_mark_record_as_ignore_current(self) -> None:
+        self.top_checks["test"] = self.top_checks["test"]._replace(status="SUCCESS")
+        merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        self.assertTrue(self.save_record.call_args.kwargs["ignore_current"])
+        self.assertEqual(self.save_record.call_args.kwargs["ignore_current_checks"], [])
+
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    @mock.patch("trymerge.is_authorized_without_greenlight")
+    def test_greenlight_authorization_uses_each_pr_snapshot(
+        self, mock_auth: Any, mock_evaluate: Any
+    ) -> None:
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+        merge(self.top, self.repo, 1, dry_run=True, ignore_current=True)
+        _, prs = mock_evaluate.call_args.args
+        for pr in prs:
+            pr.is_authorized_without_greenlight()
+        self.assertEqual(
+            [call.args[0].pr_num for call in mock_auth.call_args_list], [1, 2]
+        )
+        self.assertEqual(
+            [call.kwargs["ignore_current_checks"] for call in mock_auth.call_args_list],
+            [["lint"], ["test"]],
+        )
+
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    @mock.patch("trymerge.is_authorized_without_greenlight")
+    def test_greenlight_authorization_never_reuses_root_snapshot_for_dependency(
+        self, mock_auth: Any, mock_evaluate: Any
+    ) -> None:
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+        check_greenlight_reviewed_head_sha(
+            self.top,
+            self.repo,
+            [self.lower, self.top],
+            wait_window=None,
+            ignore_current_checks=["test"],
+        )
+        _, prs = mock_evaluate.call_args.args
+        for pr in prs:
+            pr.is_authorized_without_greenlight()
+        self.assertEqual(
+            [call.kwargs["ignore_current_checks"] for call in mock_auth.call_args_list],
+            [None, ["test"]],
         )
 
 

@@ -1408,6 +1408,7 @@ class GitHubPR:
         comment_id: int | None = None,
         skip_all_rule_checks: bool = False,
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
+        ignore_current_checks_by_pr: dict[int, list[str]] | None = None,
     ) -> list[GitHubPR]:
         if not self.is_ghstack_pr():
             raise AssertionError(
@@ -1427,12 +1428,14 @@ class GitHubPR:
                 filter_ghstack=True, ghstack_deps=pr_dependencies
             )
             if pr.pr_num != self.pr_num and not skip_all_rule_checks:
+                ignored_checks = (ignore_current_checks_by_pr or {}).get(pr.pr_num)
                 try:
                     find_matching_merge_rule(
                         pr,
                         repo,
                         skip_mandatory_checks=skip_mandatory_checks,
                         skip_internal_checks=can_skip_internal_checks(self, comment_id),
+                        ignore_current_checks=ignored_checks,
                     )
                 except MergeRuleFailedError as ex:
                     raise type(ex)(
@@ -1501,6 +1504,7 @@ class GitHubPR:
         comment_id: int,
         ignore_current_checks: list[str] | None = None,
         greenlight_wait: GreenlightWaitWindow | None = None,
+        ignore_current_checks_by_pr: dict[int, list[str]] | None = None,
     ) -> None:
         skip_internal_checks = can_skip_internal_checks(self, comment_id)
         # Raises exception if matching rule is not found
@@ -1531,6 +1535,7 @@ class GitHubPR:
             skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=skip_internal_checks,
             ignore_current_checks=ignore_current_checks,
+            ignore_current_checks_by_pr=ignore_current_checks_by_pr,
         )
 
         # A ghstack merge lands all open PRs below this one. Use the topmost
@@ -1553,6 +1558,7 @@ class GitHubPR:
                 skip_mandatory_checks,
                 comment_id,
                 ghstack_prs=ghstack_prs,
+                ignore_current_checks_by_pr=ignore_current_checks_by_pr,
             )
 
             # Log, but do not block on, a docker land race.
@@ -1571,6 +1577,7 @@ class GitHubPR:
         if comment_id and self.pr_num:
             # Finally, upload the record to s3. The list of pending and failed
             # checks are at the time of the merge
+            ignored_dependencies = any((ignore_current_checks_by_pr or {}).values())
             save_merge_record(
                 comment_id=comment_id,
                 pr_num=self.pr_num,
@@ -1588,7 +1595,7 @@ class GitHubPR:
                 merge_commit_sha=merge_commit_sha,
                 is_failed=False,
                 skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=bool(ignore_current_checks),
+                ignore_current=bool(ignore_current_checks) or ignored_dependencies,
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to s3")
@@ -1628,6 +1635,7 @@ class GitHubPR:
         branch: str | None = None,
         skip_all_rule_checks: bool = False,
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
+        ignore_current_checks_by_pr: dict[int, list[str]] | None = None,
     ) -> list[GitHubPR]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
@@ -1645,6 +1653,7 @@ class GitHubPR:
                 comment_id=comment_id,
                 skip_all_rule_checks=skip_all_rule_checks,
                 ghstack_prs=ghstack_prs,
+                ignore_current_checks_by_pr=ignore_current_checks_by_pr,
             )
 
         msg = self.gen_commit_message()
@@ -2088,6 +2097,7 @@ def check_greenlight_reviewed_head_sha(
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
     ignore_current_checks: list[str] | None = None,
+    ignore_current_checks_by_pr: dict[int, list[str]] | None = None,
 ) -> None:
     """Block a merge that only greenlight authorizes and that greenlight has not
     approved at the head commit being landed.
@@ -2123,7 +2133,9 @@ def check_greenlight_reviewed_head_sha(
                     repo,
                     skip_mandatory_checks=skip_mandatory_checks,
                     skip_internal_checks=skip_internal_checks,
-                    ignore_current_checks=ignore_current_checks,
+                    ignore_current_checks=ignore_current_checks
+                    if stacked.pr_num == pr.pr_num
+                    else (ignore_current_checks_by_pr or {}).get(stacked.pr_num),
                 ),
             )
             for stacked in prs_to_merge
@@ -2965,12 +2977,12 @@ def merge(
         ignore_current,
     )
 
-    # probably a bad name, but this is a list of current checks that should be
-    # ignored and is toggled by the --ignore-current flag
     ignore_current_checks_info = []
+    ignore_current_checks_by_pr: dict[int, list[str]] = {}
 
+    prs_to_merge = [pr]
     if pr.is_ghstack_pr():
-        get_ghstack_prs(repo, pr)  # raises error if out of sync
+        prs_to_merge = [stacked_pr for stacked_pr, _ in get_ghstack_prs(repo, pr)]
 
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
@@ -2992,13 +3004,38 @@ def merge(
     ensure_mergeable_labels(pr, comment_id, dry_run)
 
     if ignore_current:
-        checks = pr.get_checkrun_conclusions()
-        _, failing, _ = categorize_checks(
-            checks,
-            list(checks.keys()),
-            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
-        )
-        ignore_current_checks_info = failing
+        # Snapshot each PR once so failures that appear while waiting still block.
+        for stacked in prs_to_merge:
+            if stacked.pr_num != pr.pr_num:
+                # Preserve the approval and CLA gates before ignoring failures.
+                try:
+                    find_matching_merge_rule(
+                        stacked,
+                        repo,
+                        skip_mandatory_checks=True,
+                        skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+                    )
+                except MergeRuleFailedError as ex:
+                    raise type(ex)(
+                        f"Merge rule check failed for stacked PR #{stacked.pr_num}:\n\n{ex}",
+                        ex.rule,
+                    ) from ex
+            checks = stacked.get_checkrun_conclusions()
+            _, failing, _ = categorize_checks(
+                checks,
+                list(checks.keys()),
+                ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
+            )
+            if stacked.pr_num != pr.pr_num:
+                # Dependencies rely on merge rules to reject workflow startup failures.
+                failing = [
+                    x for x in failing if checks[x[0]].status != "STARTUP_FAILURE"
+                ]
+            ignore_current_checks_by_pr[stacked.pr_num] = [x[0] for x in failing]
+            for name, url, job_id in failing:
+                if stacked.pr_num != pr.pr_num:
+                    name = f"#{stacked.pr_num}: {name}"
+                ignore_current_checks_info.append((name, url, job_id))
 
     post_starting_merge_comment(
         repo,
@@ -3014,9 +3051,7 @@ def merge(
     # Owned out here so the greenlight wait budget spans every iteration below rather
     # than restarting each time merge_into is re-entered.
     greenlight_wait = GreenlightWaitWindow()
-    ignore_current_checks = [
-        x[0] for x in ignore_current_checks_info
-    ]  # convert to List[str] for convenience
+    ignore_current_checks = ignore_current_checks_by_pr.pop(pr.pr_num, [])
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(pr.org, pr.project, skip_mandatory_checks)
         current_time = time.time()
@@ -3090,6 +3125,7 @@ def merge(
                 comment_id=comment_id,
                 ignore_current_checks=ignore_current_checks,
                 greenlight_wait=greenlight_wait,
+                ignore_current_checks_by_pr=ignore_current_checks_by_pr,
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
