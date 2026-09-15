@@ -9,6 +9,7 @@ import sympy
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.ir as ir
+import torch._inductor.memory as inductor_memory
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
@@ -409,6 +410,72 @@ class TestScheduler(TestCase):
         self.assertEqual(
             groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
         )
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
+        def fn(x, weight):
+            early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
+            late = torch.cos(x).sum(dim=0)
+            return early, late
+
+        x = torch.testing.make_tensor((1, 4096), device=device, dtype=torch.bool)
+        weight = torch.testing.make_tensor(
+            (4096, 1), device=device, dtype=torch.float32
+        )
+
+        def compile_and_measure(increase_gb, pct_threshold):
+            torch._dynamo.reset()
+            metrics.reset()
+            final_peaks = []
+            original_fuse_nodes = Scheduler.fuse_nodes
+
+            def fuse_nodes_and_record(scheduler, nodes):
+                nodes = original_fuse_nodes(scheduler, nodes)
+                graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+                graph_outputs = OrderedSet(V.graph.get_output_names())
+                freeable = inductor_memory.get_freeable_input_buf(nodes, graph_inputs)
+                inductor_memory.assign_memory_planning_info_for_scheduler_buffers(
+                    nodes, scheduler.name_to_buf
+                )
+                inductor_memory.assign_memory_planning_info_for_scheduler_nodes(
+                    nodes,
+                    scheduler.name_to_fused_node,
+                    scheduler.name_to_buf,
+                    freeable,
+                )
+                peak, _ = inductor_memory.estimate_peak_memory(
+                    nodes, freeable, graph_outputs
+                )
+                final_peaks.append(peak)
+                return nodes
+
+            with patch.object(Scheduler, "fuse_nodes", fuse_nodes_and_record):
+                compiled = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    options={
+                        "fx_graph_cache": False,
+                        "reorder_for_peak_memory": False,
+                        "fusion_memory_timeline_peak_memory_increase_gb": increase_gb,
+                        "fusion_memory_timeline_peak_memory_pct_threshold": pct_threshold,
+                    },
+                )
+                self.assertEqual(compiled(x, weight), fn(x, weight))
+
+            self.assertEqual(len(final_peaks), 1)
+            return metrics.generated_kernel_count, final_peaks[0]
+
+        unrestricted_count, unrestricted_peak = compile_and_measure(None, None)
+        guarded_count, guarded_peak = compile_and_measure(0.0, None)
+
+        self.assertEqual(unrestricted_count, 1)
+        self.assertEqual(guarded_count, 2)
+        self.assertLess(guarded_peak, unrestricted_peak)
+        self.assertEqual(compile_and_measure(1000.0, None)[0], 1)
+        self.assertEqual(compile_and_measure(None, 1000.0)[0], 1)
+        self.assertEqual(compile_and_measure(1000.0, 0.0)[0], 2)
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
         snode = Mock()
