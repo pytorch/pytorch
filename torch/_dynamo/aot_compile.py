@@ -49,14 +49,15 @@ _EXTERNAL_DATA_HINT = (
 )
 
 # What a raise can cost the tree it came out of, said once: the no-match report
-# and the warning the serving paths log both name it. Hedged, because only a
-# throw skips the reset on check_nopybind_template's exits: a tree that returns
-# with an error set (the SystemError _unwrapped_raise reads through) reset on
-# its way out, and neither the last-resort veto nor this clause tells the two
-# apart.
+# and the warning the serving paths log both name it. Phrased for one tree or
+# several, since the report's caveat names every tree it rests on. Hedged,
+# because only a throw skips the reset on check_nopybind_template's exits: a
+# tree that returns with an error set (the SystemError _unwrapped_raise reads
+# through) reset on its way out, and neither the last-resort veto nor this
+# clause tells the two apart.
 _STALE_AFTER_THROW = (
-    "a C++ throw out of it can leave its own relational guard state stale, so "
-    "its next check can reject a call it fits or accept one it does not"
+    "a C++ throw out of a tree can leave that tree's relational guard state "
+    "stale, so its next check can reject a call it fits or accept one it does not"
 )
 
 
@@ -1732,18 +1733,18 @@ class AOTCompiledModel:
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, at most one
-    ``For [i]:`` hint, for the first entry whose guards failed on a global the
-    process does not define, and -- when some checked tree reached an answer,
-    or the artifact holds no input at all -- the advice to add a ``ModelInput``
-    or check which guards ``guard_filter_fn`` kept. When every rejection that
-    advice rests on followed a raise from its own tree, it names and quotes
-    those raises and says to fix them first; when no checked tree ever
-    answered, a line saying every guard tree raised replaces it, unless an
-    opted-out result's line has already said the raise withheld it. When some
-    checked input's guard tree raised, that exception is the ``__cause__`` of
-    the ``RuntimeError`` rather than the exception the caller sees, so a caller
-    catching the tree's own type
+    per compiled result quoting the guards that refused it, one ``For [i, j]:``
+    line per distinct missing-global hint naming the entries whose guards failed
+    on a global the process does not define, and -- when some checked tree
+    reached an answer, or the artifact holds no input at all -- the advice to
+    add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept. When
+    every rejection that advice rests on followed a raise from its own tree, it
+    names and quotes those raises and says to fix them first; when no checked
+    tree ever answered, a line saying every guard tree raised replaces it,
+    unless an opted-out result's line has already said the raise withheld it.
+    When some checked input's guard tree raised, that exception is the
+    ``__cause__`` of the ``RuntimeError`` rather than the exception the caller
+    sees, so a caller catching the tree's own type
     (``SystemError`` for a leaf that returned with an error set,
     ``RuntimeError`` for a ``TORCH_CHECK``) catches the report instead.
     """
@@ -1950,6 +1951,12 @@ class AOTCompiledModel:
             "No AOT compiled graph matched this call. Tried "
             f"{len(results)} compiled input(s):"
         ]
+        # Hint text -> the entries it is for, in first-seen order: entries that
+        # share a scope share a sentence, and one whose scope differs keeps its
+        # own rather than being read the first entry's advice.
+        hinted: dict[str, list[int]] = {}
+        resolved: dict[str, Any] | None = None
+        tried_forward = False
         # An opted-out result is reported at all only because a raise vetoed the
         # last resort above; without one it is served and there is no report.
         raiser = next(
@@ -1960,7 +1967,6 @@ class AOTCompiledModel:
         # ModelInput could have covered it even where its line below is a raise.
         coverable = any(results[i]._guard_check_enabled for i in answered)
         trusted_rejection = any(results[i]._guard_check_enabled for i in trusted)
-        missing_at: int | None = None
         withheld = False
         for i, result in enumerate(results):
             if not result._guard_check_enabled:
@@ -1995,9 +2001,7 @@ class AOTCompiledModel:
             if reason.result:
                 lines.append(
                     f"  [{i}] <guards did not accept this call in dispatch and "
-                    "accepted it here: a guard that does not answer consistently, "
-                    "or a tag-safe fast path that refused without running the "
-                    "tree>"
+                    "accepted it here: a guard that does not answer consistently>"
                 )
                 continue
             if not reason.verbose_code_parts:
@@ -2005,29 +2009,28 @@ class AOTCompiledModel:
                 lines.append(f"  [{i}] <guard check failed without naming a guard>")
                 continue
             parts = reason.verbose_code_parts
-            if missing_at is None and any(map(_names_a_missing_global, parts)):
-                missing_at = i
+            if any(map(_names_a_missing_global, parts)):
+                forward: str | None = None
+                if result._guard_scope is _GuardScope.SUPPLIED and not tried_forward:
+                    tried_forward = True
+                    # Resolving forward runs user code: get_traced_fn formats a
+                    # forward it refuses into its error, and that repr can raise past
+                    # what _resolve_guard_scope catches. The report must still arrive.
+                    try:
+                        resolved, _ = _resolve_guard_scope(self.model)
+                    except Exception:
+                        pass
+                if resolved is not None and resolved is result._guard_globals:
+                    # Named as the instance attribute: the load resolved the scope from
+                    # model.forward, and a rebound instance reads another function's dict.
+                    forward = f"this {type(self.model).__name__} instance's forward"
+                hint = result._missing_global_hint(forward=forward)
+                hinted.setdefault(hint, []).append(i)
             # Collapse every separator splitlines() reads the report back on.
             joined = " ".join("; ".join(parts).splitlines())
             lines.append(f"  [{i}] {joined}")
-        if missing_at is not None:
-            missing_global = results[missing_at]
-            # Named as the instance attribute: the load resolved the scope from
-            # model.forward, and a rebound instance reads another function's dict.
-            forward: str | None = f"this {type(self.model).__name__} instance's forward"
-            resolved: dict[str, Any] | None = None
-            if missing_global._guard_scope is _GuardScope.SUPPLIED:
-                # Resolving forward runs user code: get_traced_fn formats a
-                # forward it refuses into its error, and that repr can raise past
-                # what _resolve_guard_scope catches. The report must still arrive.
-                try:
-                    resolved, _ = _resolve_guard_scope(self.model)
-                except Exception:
-                    pass
-            if resolved is None or resolved is not missing_global._guard_globals:
-                forward = None
-            hint = missing_global._missing_global_hint(forward=forward)
-            lines.append(f"For [{missing_at}]: {hint}")
+        for hint, at in hinted.items():
+            lines.append(f"For [{', '.join(map(str, at))}]: {hint}")
         if withheld:
             lines.append(
                 f"[{raiser}]'s raise, not a guard failure, is what withheld "
@@ -2056,15 +2059,18 @@ class AOTCompiledModel:
                 # and quoted here because nothing else on the report carries
                 # such a raise: the entry line quotes the rejection, the raiser
                 # line names the FIRST enabled raiser, which need not be one of
-                # these, and the chain carries the first raise of all.
+                # these, and the chain carries the first raise of all. Bracketed
+                # as on the entry line and joined with a semicolon: the quoted
+                # text is arbitrary user text that may hold commas, and
+                # _raise_text has a parenthetical of its own.
                 untrusted = [
-                    f"[{i}] ({_raise_text(raised[i])})"
+                    f"[{i}] <{_raise_text(raised[i])}>"
                     for i in sorted(answered - trusted)
                     if results[i]._guard_check_enabled
                 ]
                 plural = "s" if len(untrusted) > 1 else ""
                 advice += (
-                    f" Fix the raise{plural} out of {', '.join(untrusted)} first: "
+                    f" Fix the raise{plural} out of {'; '.join(untrusted)} first: "
                     "every rejection this advice rests on followed a raise from "
                     f"its own tree, and {_STALE_AFTER_THROW}."
                 )
