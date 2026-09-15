@@ -113,6 +113,7 @@ from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import (
+    has_triton_cuda_tma_device,
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
 )
@@ -4444,6 +4445,8 @@ class AOTInductorTestsTemplate:
     def test_triton_kernel_tma_descriptor_1d(self, dynamic, tma_version):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
+        if GPU_TYPE == "cuda" and not has_triton_cuda_tma_device():
+            self.skipTest("requires CUDA TMA device support")
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
@@ -4506,6 +4509,8 @@ class AOTInductorTestsTemplate:
     def test_triton_kernel_tma_descriptor_2d(self, dynamic, tma_version):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
+        if GPU_TYPE == "cuda" and not has_triton_cuda_tma_device():
+            self.skipTest("requires CUDA TMA device support")
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
