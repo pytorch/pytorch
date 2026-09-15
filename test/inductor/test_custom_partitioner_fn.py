@@ -5,7 +5,8 @@ from torch._C import FileCheck
 from torch._inductor.custom_graph_pass import CustomPartitionerFn, get_hash_for_files
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class MyCustomPartitionerFn(CustomPartitionerFn):
@@ -27,7 +28,9 @@ class MyCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestCustomPartitionerFn(TestCase):
-    def test_custom_partitioner_fn(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_custom_partitioner_fn(self, device):
         """
         For function f(a, b), with the  partitioner in the compile_fx stack,
         the addition `a+b` (equivalently `buf0`) is saved for backward.
@@ -41,8 +44,8 @@ class TestCustomPartitionerFn(TestCase):
         def f(a, b):
             return (a + b).cos().cos()
 
-        a = torch.randn((2, 2), requires_grad=True, device=GPU_TYPE)
-        b = torch.randn((2, 2), requires_grad=True, device=GPU_TYPE)
+        a = torch.randn((2, 2), requires_grad=True, device=device)
+        b = torch.randn((2, 2), requires_grad=True, device=device)
 
         # CASE 1 -- default
         # addition `a + b` (i.e, `buf0`) is saved for backward.
@@ -65,8 +68,14 @@ class TestCustomPartitionerFn(TestCase):
         self.assertTrue(custom_partitioner_fn.called)
 
 
+instantiate_device_type_tests(
+    TestCustomPartitionerFn, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
+    from torch.utils._triton import has_triton
 
-    if HAS_GPU:
+    if has_triton():
         run_tests()
