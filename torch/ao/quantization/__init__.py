@@ -18,6 +18,7 @@ from .quantization_mappings import *  # noqa: F403 # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
+from .utils import MatchAllNode, Pattern
 
 
 # ensure __module__ is set correctly for public APIs
@@ -34,7 +35,6 @@ __all__ = [
     "FixedQParamsObserver",
     "FusedMovingAvgObsFakeQuantize",
     "HistogramObserver",
-    # pyrefly: ignore [bad-dunder-all]
     "MatchAllNode",
     "MinMaxObserver",
     "MovingAverageMinMaxObserver",
@@ -42,7 +42,6 @@ __all__ = [
     "NoopObserver",
     "ObserverBase",
     "ObserverOrFakeQuantize",
-    # pyrefly: ignore [bad-dunder-all]
     "Pattern",
     "PerChannelMinMaxObserver",
     "PlaceholderObserver",
