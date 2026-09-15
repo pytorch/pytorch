@@ -86,6 +86,9 @@ class Transformer(Module):
             other attention and feedforward operations, otherwise after. Default: ``False`` (after).
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
+        vocab_size: this parameter is accepted for **compatibility** with wrappers that
+            It exists only so that wrappers that expect a vocabulary size argument can
+            instantiate this layer without adaptation; it is ignored.
 
     Examples:
         >>> transformer_model = nn.Transformer(
@@ -116,6 +119,7 @@ class Transformer(Module):
         bias: bool = True,
         device=None,
         dtype=None,
+        vocab_size=None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
