@@ -248,6 +248,7 @@ struct C10_API FakeTensorMode {
   void set_constant(
       c10::TensorImpl* fake_impl,
       c10::intrusive_ptr<c10::TensorImpl> constant);
+  void clear_constant(c10::TensorImpl* fake_impl) noexcept;
 
   // return the real constant a fake tensor was created from, or nullptr
   const c10::intrusive_ptr<c10::TensorImpl>& get_constant(

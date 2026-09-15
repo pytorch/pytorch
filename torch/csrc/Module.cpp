@@ -2819,6 +2819,12 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& fake, const std::optional<at::Tensor>& constant) {
         TORCH_CHECK(fake.defined(), "Expected a defined tensor");
         TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
+        if (constant) {
+          TORCH_CHECK(
+              constant->defined(), "Expected a defined constant tensor");
+          TORCH_CHECK(
+              !constant->is_fake(), "Expected a non-fake constant tensor");
+        }
         auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
         TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
         mode->set_constant(
