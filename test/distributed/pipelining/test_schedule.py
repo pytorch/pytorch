@@ -182,6 +182,12 @@ class ScheduleTest(TestCase):
         ):
             info.set_buffer(torch.ones(2))
 
+        missing_grad = _RecvInfo("grad", source=2, tensor_meta=None)
+        with self.assertRaisesRegex(PipeliningMetadataError, "no tensor metadata"):
+            missing_grad.allocate_buffer(stage.device)
+        with self.assertRaisesRegex(PipeliningMetadataError, "expects no gradient"):
+            missing_grad.set_buffer(torch.ones(2))
+
     def test_get_schedule_class(self):
         # List of all expected schedule names
         schedule_names = [
