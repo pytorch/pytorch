@@ -45,12 +45,14 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     setup_torchcomms_pg,
     skip_if_lt_x_gpu,
+    skip_if_rocm_arch_multiprocess,
     skip_if_rocm_multiprocess,
     skip_if_rocm_ver_atleast_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI350_ARCH,
     parametrize,
     requires_cuda,
     requires_cuda_p2p_access,
@@ -357,8 +359,17 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 
         pg = dist.group.WORLD
         pg.use_pg_for_symm_mem_rendezvous = True
+        # A natively recording backend ("nccl") writes into the CUDAEvent
+        # recorder that _dump_nccl_trace reads; a hooked one ("nccl2") gets its
+        # own c10::Event instance keyed by backend name. Both name their entries
+        # after the backend, so read whichever instance this group records into.
+        backend_name = pg._get_backend(torch.device(self.device)).name()
+        records_natively = backend_name == "nccl"
         try:
-            torch._C._distributed_c10d._reset_fr_recording_nccl()
+            if records_natively:
+                torch._C._distributed_c10d._reset_fr_recording_nccl()
+            else:
+                torch._C._distributed_c10d._reset_fr_trace(backend=backend_name)
 
             t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(
                 self.rank
@@ -368,23 +379,26 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertEqual(symm_mem_hdl.rank, self.rank)
             self.assertEqual(symm_mem_hdl.world_size, self.world_size)
 
-            entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())[
-                "entries"
-            ]
-            ag_entries = [
-                e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
-            ]
-            bc_entries = [e for e in entries if e["profiling_name"] == "nccl:broadcast"]
+            trace = (
+                torch._C._distributed_c10d._dump_nccl_trace()
+                if records_natively
+                else torch._C._distributed_c10d._dump_fr_trace(backend=backend_name)
+            )
+            entries = pickle.loads(trace)["entries"]
+            ag_name = f"{backend_name}:_all_gather_base"
+            ag_entries = [e for e in entries if e["profiling_name"] == ag_name]
+            bc_name = f"{backend_name}:broadcast"
+            bc_entries = [e for e in entries if e["profiling_name"] == bc_name]
             has_mc = symm_mem_hdl.multicast_ptr != 0
             # Exchanges routed through the PG: the RendezvousRequest allgather
             # (always), the handle exchange allgather (NVLink-fabric hardware
             # only; elsewhere handles go through ipc_channel), and, when
-            # multicast is set up, a success-flag allgather plus a multicast
-            # handle broadcast (fabric only).
-            lo, hi = (2, 3) if has_mc else (1, 2)
+            # multicast is set up, pre-bind and final success-flag allgathers
+            # plus a multicast handle broadcast (fabric only).
+            lo, hi = (3, 4) if has_mc else (1, 2)
             self.assertTrue(
                 lo <= len(ag_entries) <= hi,
-                f"expected {lo} to {hi} NCCL _all_gather_base from rendezvous "
+                f"expected {lo} to {hi} {ag_name} from rendezvous "
                 f"(multicast={has_mc}), got {len(ag_entries)}: "
                 f"{[e['profiling_name'] for e in entries]}",
             )
@@ -820,7 +834,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # MultiProcContinuousTest will skip all the following tests if a test fails (
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
-@skip_if_rocm_multiprocess  # AsyncTP is not yet supported on ROCm
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
+# The first AsyncTPTest case to execute hangs in its subprocess on the gfx950
+# CI distributed runners (whichever test that is), while the whole class passes
+# locally on gfx950 at world sizes 2/4/8 and on the mi300 CI shard with the same
+# ROCm image; skipped on that arch until it can be investigated on those runners.
+@skip_if_rocm_arch_multiprocess(MI350_ARCH)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
