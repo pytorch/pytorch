@@ -42,6 +42,9 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     in_kernel_invocation_manager,
     is_fake_tensor,
+    maybe_get_fake_device,
+    maybe_get_item_memo,
+    maybe_set_item_memo,
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
@@ -636,14 +639,14 @@ def dyn_shape(
 def _unique(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     dim: int | None,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
     *,
     unique_consecutive: bool = False,
-) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -651,7 +654,20 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+    memo_name = "unique_consecutive_memo" if unique_consecutive else "unique_memo"
+    nnz = getattr(arg, memo_name, None)
+    if (
+        nnz is not None
+        and not isinstance(arg, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+        and (
+            (
+                not arg.is_inference()
+                and getattr(arg, f"_{memo_name}_vc", None) != arg._version
+            )
+            or getattr(arg, f"_{memo_name}_epoch", None) != fake_mode.epoch
+        )
+    ):
+        nnz = None
 
     # Do not use a memo for unique_dim
     if dim is not None or nnz is None:
@@ -683,10 +699,12 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            if unique_consecutive:
-                arg.unique_consecutive_memo = nnz  # pyrefly: ignore[bad-assignment]
-            else:
-                arg.unique_memo = nnz  # pyrefly: ignore[bad-assignment]
+            arg_any = typing_cast(Any, arg)
+            setattr(arg_any, memo_name, nnz)
+            if not isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                if not arg.is_inference():
+                    setattr(arg_any, f"_{memo_name}_vc", arg._version)
+                setattr(arg_any, f"_{memo_name}_epoch", fake_mode.epoch)
 
     if dim is None:
         # pyrefly: ignore[no-matching-overload]
@@ -695,7 +713,9 @@ def _unique(
         # pyrefly: ignore[no-matching-overload]
         ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
-    return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
+    return_if_dim_and_cpu = dim is not None and maybe_get_fake_device(
+        arg
+    ) == torch.device("cpu")
     if return_inverse or return_if_dim_and_cpu:
         inverse = arg.new_empty(
             arg.shape if dim is None else (arg.shape[dim],), dtype=torch.int64
@@ -712,18 +732,18 @@ def _unique(
         counts = arg.new_empty(0, dtype=torch.int64)
     ret.append(counts)
 
-    return tuple(ret)
+    return ret[0], ret[1], ret[2]
 
 
 @register_op_impl(aten._unique2.default)
 def unique2(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
-) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
 
 
@@ -731,10 +751,10 @@ def unique2(
 def unique(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     sorted: bool = True,
     return_inverse: bool = False,
-) -> tuple[FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     uniques, inverse, _counts = _unique(
         fake_mode, func, arg, None, sorted, return_inverse, False
     )
@@ -802,12 +822,12 @@ def meta_select(
 def unique_dim(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     dim: int,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
-) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return _unique(
         fake_mode,
         func,
@@ -824,11 +844,11 @@ def unique_dim(
 def unique_consecutive(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     return_inverse: bool = False,
     return_counts: bool = False,
     dim: int | None = None,
-) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return _unique(
         fake_mode,
         func,
@@ -1292,7 +1312,7 @@ def repeat_interleave_tensor(
 def local_scalar_dense(
     fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
 ) -> int | float | bool | torch.SymInt | torch.SymFloat | torch.SymBool:
-    if (r := arg.item_memo) is not None:
+    if (r := maybe_get_item_memo(arg)) is not None:
         return r
     if fake_mode.shape_env is None or (
         not fake_mode.shape_env.allow_scalar_outputs
@@ -1308,7 +1328,7 @@ def local_scalar_dense(
         r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
-    arg.item_memo = r
+    maybe_set_item_memo(arg, r)
     return r
 
 

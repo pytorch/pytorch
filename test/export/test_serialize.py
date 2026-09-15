@@ -54,7 +54,7 @@ from torch._export.serde.serialize import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.opaque_object import get_opaque_type_name, register_custom_class
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
@@ -1218,7 +1218,7 @@ class TestDeserialize(TestCase):
                 if val1 is None or val2 is None:
                     # Either both are None
                     self.assertEqual(val1, val2)
-                elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
+                elif is_fake_tensor(val1) and is_fake_tensor(val2):
                     # Or both are fake tensors with the same shape/dtype
                     self.assertEqual(len(val1.shape), len(val2.shape))
                     for s1, s2 in zip(val1.shape, val2.shape):
@@ -1235,7 +1235,7 @@ class TestDeserialize(TestCase):
                     for v1, v2 in zip(
                         pytree.tree_leaves(val1), pytree.tree_leaves(val2)
                     ):
-                        if isinstance(v1, FakeTensor):
+                        if is_fake_tensor(v1):
                             self.assertEqual(v1.shape, v2.shape)
                             self.assertEqual(v1.dtype, v2.dtype)
                 else:
@@ -1382,14 +1382,14 @@ class TestDeserialize(TestCase):
 
         self.assertEqual(len(ep.constants), 1)
         constant_name, fake_constant = next(iter(ep.constants.items()))
-        self.assertIsInstance(fake_constant, FakeTensor)
+        self.assertTrue(is_fake_tensor(fake_constant))
         self.assertFalse(is_concrete_int(fake_constant.shape[0]))
 
         with torch.serialization.safe_globals([_reconstruct_fake_tensor]):
             loaded_ep = deserialize(serialize(ep))
 
         loaded_constant = loaded_ep.constants[constant_name]
-        self.assertIsInstance(loaded_constant, FakeTensor)
+        self.assertTrue(is_fake_tensor(loaded_constant))
         self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
         self.assertEqual(loaded_constant.shape[1], 3)
 
@@ -2639,7 +2639,7 @@ class TestSerializeCustomClass(TestCase):
 
         serialized_vals = serialize(ep)
         ep = deserialize(serialized_vals)
-        self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
+        self.assertTrue(is_fake_tensor(ep.constants["custom_obj"].get()))
 
     def test_custom_class_input_to_function(self):
         class Foo(torch.nn.Module):
