@@ -1080,14 +1080,11 @@ class CompileTestCPU(TestCase):
         self.assertIn("torch.ops._c10d_functional.wait_tensors.default", code)
 
         torch._dynamo.reset()
-        with (
-            torch._inductor.config.patch({"cpp_wrapper": True}),
-            self.assertRaisesRegex(
-                torch._inductor.exc.InductorError,
-                "wait_tensors is not supported with C\\+\\+ wrapper/AOTInductor",
-            ),
-        ):
-            torch.compile(func)(args)
+        with torch._inductor.config.patch({"cpp_wrapper": True}):
+            actual, (cpp_code,) = run_and_get_code(torch.compile(func), args)
+        self.assertIn("wait_tensors", cpp_code)
+        self.assertEqual(actual, func(args))
+        self.assertEqual(AOTIRunnerUtil.run(func, (args,)), func(args))
 
 
 class CompileTest(TestCase):

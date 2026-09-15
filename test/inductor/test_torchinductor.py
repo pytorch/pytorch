@@ -65,6 +65,7 @@ from torch._inductor.codegen.common import DataTypePropagation, OptimizationCont
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    fresh_cache,
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_kernels,
@@ -152,7 +153,7 @@ importlib.import_module("filelock")
 from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner, FxCompileMode
 from torch._inductor.utils import has_torchvision_roi_align
-from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.common_utils import slowTest, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import (  # noqa: F401
     clone_preserve_strides_offset,
     GPU_TYPE,
@@ -20169,7 +20170,173 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # end of class CommonTemplate - add new tests here
 
 
-class TestScatterReinplacing(TestCase):
+class TestScatterReinplacing(TorchTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        self.addCleanup(torch._dynamo.reset)
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(fresh_cache())
+        stack.enter_context(
+            config.patch(
+                {
+                    "debug": True,
+                    "debug_index_asserts": True,
+                    "cpp.min_chunk_size": 1,
+                    "triton.autotune_pointwise": False,
+                    "implicit_fallbacks": False,
+                    "generate_intermediate_hooks": True,
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @unittest.skipUnless(torch.distributed.is_available(), "requires distributed")
+    @parametrize(
+        "wrapper_op",
+        (
+            "view",
+            "split",
+            "wait_tensor",
+            "wait_tensors",
+            "split_getitem",
+            "wait_tensors_getitem",
+        ),
+    )
+    @parametrize("return_alias", (False, True))
+    @parametrize("wrapper_depth", (1, 2))
+    def test_control_deps_output_aliases(
+        self, device, wrapper_op, return_alias, wrapper_depth
+    ):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+        from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops
+        from torch._inductor.fx_utils import FakeTensorUpdater
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.utils._ordered_set import OrderedSet
+
+        targets = {
+            "view": aten.view.default,
+            "split": aten.split.Tensor,
+            "wait_tensor": torch.ops._c10d_functional.wait_tensor.default,
+            "wait_tensors": torch.ops._c10d_functional.wait_tensors.default,
+            "split_getitem": operator.getitem,
+            "wait_tensors_getitem": operator.getitem,
+        }
+
+        def fn(x, diag):
+            independent = x + 1
+            updated = torch.diagonal_scatter(x, diag)
+            value = updated if return_alias else independent
+            if wrapper_op == "view":
+                out = value.view(16)
+            elif wrapper_op.startswith("split"):
+                out = value.split(2)[1]
+            elif wrapper_op == "wait_tensor":
+                out = torch.ops._c10d_functional.wait_tensor.default(value)
+            else:
+                out = torch.ops._c10d_functional.wait_tensors.default(
+                    [independent, updated]
+                )[int(return_alias)]
+            x.copy_(updated)
+            return out
+
+        x = torch.arange(16.0, device=device).reshape(4, 4)
+        diag = torch.full((4,), -1.0, device=device)
+        expected_x = x.clone()
+        expected = fn(expected_x, diag)
+        gm = make_fx(fn, tracing_mode="fake")(x, diag)
+        if wrapper_op.endswith("getitem"):
+            wrapped = next(iter(gm.graph.find_nodes(op="output"))).args[0]
+        else:
+            wrapped = next(n for n in gm.graph.nodes if n.target is targets[wrapper_op])
+        updated = next(
+            n for n in gm.graph.nodes if n.target is aten.diagonal_scatter.default
+        )
+        for _ in range(wrapper_depth):
+            name = wrapped.name
+            preserve_node_ordering(gm.graph, {wrapped: OrderedSet([updated])})
+            wrapped = next(n for n in gm.graph.nodes if n.name == name)
+
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        actual_x = x.clone()
+        actual = gm(actual_x, diag)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
+        )
+        actual.add_(100)
+        self.assertEqual(actual_x, expected_x)
+        self.assertEqual(
+            any(n.target is aten.clone for n in gm.graph.nodes), return_alias
+        )
+
+    @unittest.skipUnless(torch.distributed.is_available(), "requires distributed")
+    @parametrize("wrapper_op", ("wait_tensor", "wait_tensors", "getitem"))
+    def test_control_deps_input_aliases(self, device, wrapper_op):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+        from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops
+        from torch._inductor.fx_utils import FakeTensorUpdater
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn(x, diag, idx, value):
+            before = torch.index_put(x, (idx,), value)
+            if wrapper_op != "wait_tensor":
+                waited = torch.ops._c10d_functional.wait_tensors.default([before])[0]
+            else:
+                waited = torch.ops._c10d_functional.wait_tensor.default(before)
+            updated = torch.diagonal_scatter(waited, diag)
+            x.copy_(updated)
+            return updated
+
+        args = (
+            torch.arange(16.0, device=device).reshape(4, 4),
+            torch.full((4,), -1.0, device=device),
+            torch.tensor([0], device=device),
+            torch.full((1, 4), 10.0, device=device),
+        )
+        expected_args = tuple(arg.clone() for arg in args)
+        expected = fn(*expected_args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        target = {
+            "wait_tensor": torch.ops._c10d_functional.wait_tensor.default,
+            "wait_tensors": torch.ops._c10d_functional.wait_tensors.default,
+            "getitem": operator.getitem,
+        }[wrapper_op]
+        wrapped = next(n for n in gm.graph.nodes if n.target is target)
+        dep = next(n for n in gm.graph.nodes if n.op == "placeholder")
+        preserve_node_ordering(gm.graph, {wrapped: OrderedSet([dep])})
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        actual = gm(*args)
+        self.assertEqual(actual, expected)
+        self.assertEqual(args[0], expected_args[0])
+        self.assertIn(aten.index_put_.default, [n.target for n in gm.graph.nodes])
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), args[0].untyped_storage().data_ptr()
+        )
+        actual.add_(100)
+        self.assertEqual(args[0], expected_args[0])
+
     @unittest.skipUnless(torch.distributed.is_available(), "requires distributed")
     @parametrize("view_count", (1, 2))
     @parametrize("return_alias", (False, True))

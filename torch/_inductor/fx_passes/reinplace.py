@@ -19,6 +19,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
 )
 from torch._inductor import config, inductor_prims
+from torch._inductor.fx_passes.control_dependencies import control_deps
 from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
@@ -226,17 +227,97 @@ _UNRESOLVED_ALIASES = object()
 
 
 def _flat_node_args(node: torch.fx.Node) -> list[torch.fx.Node]:
-    """Every fx Node in node's args/kwargs, looking inside containers."""
-    flat_args = pytree.tree_leaves((node.args, node.kwargs))
+    """Every data argument, excluding control_deps' ordering-only dependencies."""
+    args = node.args[2:] if node.target is control_deps else node.args
+    flat_args = pytree.tree_leaves((args, node.kwargs))
     return [arg for arg in flat_args if isinstance(arg, torch.fx.Node)]
 
 
 def _as_alias_nodes(value: Any) -> list[torch.fx.Node]:
-    if isinstance(value, torch.fx.Node):
-        return [value]
-    if isinstance(value, (list, tuple)):
-        return [v for v in value if isinstance(v, torch.fx.Node)]
-    return []
+    return [v for v in pytree.tree_leaves(value) if isinstance(v, torch.fx.Node)]
+
+
+def _control_deps_aliases(
+    node: torch.fx.Node,
+    mutated_args_by_op: dict[Callable[..., Any], tuple[int, ...]],
+    bindings: dict[torch.fx.Node, Any] | None = None,
+) -> Any:
+    """Map the subgraph's returned aliases to the wrapper's data arguments.
+
+    Containers use dictionaries so getitems retain element correspondence;
+    tensor leaves contain their possible alias sources in the outer graph.
+    Bindings preserve outer producers when nested wrappers lift list operands.
+    """
+    bindings = {} if bindings is None else bindings
+    subgraph_attr = node.args[1]
+    if isinstance(subgraph_attr, torch.fx.Node):
+        subgraph_attr = bindings.get(subgraph_attr, subgraph_attr)
+    if not isinstance(subgraph_attr, torch.fx.Node):
+        return _UNRESOLVED_ALIASES
+    if subgraph_attr.op == "get_attr" and isinstance(subgraph_attr.target, str):
+        subgraph = getattr(
+            subgraph_attr.graph.owning_module, subgraph_attr.target, None
+        )
+    else:
+        # Nested wrappers lift the inner GraphModule into a placeholder.
+        subgraph = subgraph_attr.meta.get("val")
+    if not isinstance(subgraph, torch.fx.GraphModule):
+        return _UNRESOLVED_ALIASES
+
+    inputs = dict(
+        zip(
+            subgraph.graph.find_nodes(op="placeholder"),
+            pytree.tree_map_only(
+                torch.fx.Node, lambda arg: bindings.get(arg, arg), node.args[2:]
+            ),
+        )
+    )
+
+    def resolve(value):
+        if isinstance(value, (tuple, list)):
+            return {i: resolve(element) for i, element in enumerate(value)}
+        if isinstance(value, dict):
+            return {key: resolve(element) for key, element in value.items()}
+        if not isinstance(value, torch.fx.Node):
+            return ()
+        if value in inputs:
+            bound = inputs[value]
+            if isinstance(bound, torch.fx.Node):
+                aliases = _multi_output_aliases(bound, mutated_args_by_op)
+                if isinstance(aliases, dict) or aliases is _UNRESOLVED_ALIASES:
+                    return aliases
+                if _is_view_op(bound.target) and isinstance(
+                    bound.meta.get("val"), (list, tuple)
+                ):
+                    return dict.fromkeys(range(len(bound.meta["val"])), (bound,))
+            return bound
+        if value.target is control_deps:
+            return _control_deps_aliases(value, mutated_args_by_op, inputs)
+        if value.target is operator.getitem:
+            aliases = resolve(value.args[0])
+            if aliases is _UNRESOLVED_ALIASES:
+                return aliases
+            if isinstance(aliases, dict):
+                return aliases.get(value.args[1], ())
+        aliases = _multi_output_aliases(value, mutated_args_by_op)
+        if isinstance(aliases, dict):
+            return resolve(aliases)
+        sources = (
+            _flat_node_args(value)
+            if aliases is _UNRESOLVED_ALIASES
+            else _alias_sources(value, mutated_args_by_op)
+        )
+        resolved = tuple(
+            source for arg in sources for source in _as_alias_nodes(resolve(arg))
+        )
+        if _is_view_op(value.target) and isinstance(
+            value.meta.get("val"), (list, tuple)
+        ):
+            return dict.fromkeys(range(len(value.meta["val"])), resolved)
+        return resolved
+
+    output = next(iter(subgraph.graph.find_nodes(op="output")))
+    return resolve(output.args[0])
 
 
 def _auto_functionalized_result_offset(mutable_op: Any) -> int | None:
@@ -270,6 +351,12 @@ def _multi_output_aliases(
     if node.op != "call_function" or isinstance(target, str):
         return None
 
+    if target is control_deps:
+        aliases = _control_deps_aliases(node, mutated_args_by_op)
+        if isinstance(aliases, dict) or aliases is _UNRESOLVED_ALIASES:
+            return aliases
+        return None
+
     if target is operator.getitem:
         # An element that is itself a list of tensors (a Tensor(a!)[] argument
         # handed back by auto_functionalized) is a container in its own right.
@@ -280,6 +367,8 @@ def _multi_output_aliases(
         if not isinstance(parent_aliases, dict):
             return None
         element = parent_aliases.get(node.args[1])
+        if isinstance(element, dict):
+            return element
         return dict(enumerate(element)) if isinstance(element, (list, tuple)) else None
 
     if target is _WAIT_TENSORS_OP:
@@ -374,6 +463,12 @@ def _alias_sources(
     target = node.target
     if node.op != "call_function" or isinstance(target, str):
         return []
+
+    if target is control_deps:
+        aliases = _control_deps_aliases(node, mutated_args_by_op)
+        if aliases is _UNRESOLVED_ALIASES:
+            return _flat_node_args(node)
+        return _as_alias_nodes(aliases)
 
     if target is operator.getitem:
         parent = node.args[0]
