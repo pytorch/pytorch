@@ -128,7 +128,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
   if constexpr (
       std::is_same<scalar_t, c10::BFloat16>::value ||
       std::is_same<scalar_t, c10::Half>::value) {
-    typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
+    typedef short __attribute__((ext_vector_type(2))) vec_short2;
     union ill {
       unsigned int i[2];
       int64_t il;
