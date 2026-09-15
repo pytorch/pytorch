@@ -525,9 +525,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
     def test_get_compile_args_e2e_real_no_fake_mode_mismatch(self):
         """E2E: compile_fx_inner fails when given FakeTensors from
-        different FakeTensorModes (extracted from real-mode traced graph
-        placeholder metadata) but succeeds with _get_compile_args which
-        returns concrete args for real-mode tracing.
+        real-mode traced graph placeholder metadata but succeeds with
+        _get_compile_args which returns concrete args for real-mode tracing.
 
         This is the minimal repro for the FakeTensorMode mismatch
         AssertionError that affected 85/126 graphs in the model extractor.
