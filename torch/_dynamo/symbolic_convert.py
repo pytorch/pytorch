@@ -2378,13 +2378,16 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self) -> VariableTracker:
         # The defining module, whose dicts nn.Module._call_impl reads through
         # its own __globals__; a sys.modules rebind moves neither. The alias
-        # binds the live entry, so it roots the guards only while that entry
-        # is this module, and the module itself is installed otherwise.
+        # binds the live entry, so it roots the guards only while it holds this
+        # module, read back after import_source since that is what a guard
+        # rooted at it reads. Otherwise the guards walk the attributes the value
+        # is read through, from the torch package's own alias: an artifact load
+        # seeds an __import_* name, where one minted by id has no seeding.
         module = torch.nn.modules.module
         source = self.import_source(module.__name__)
         if self.output.global_scope[source.global_name] is not module:
-            name = self.output.install_global_by_id("___nn_modules_module", module)
-            source = GlobalSource(name)
+            root = self.import_source("torch")
+            source = self.output.get_chained_attr_source(root, "nn.modules.module")
         return VariableTracker.build(self, module, source)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
@@ -2435,11 +2438,17 @@ class InstructionTranslatorBase(
             # the module body inside the trace; one still executing its body
             # is imported, which waits for it as an import statement would.
             value = sys.modules.get(module_name)
-            spec = getattr(value, "__spec__", None)
             if value is None and module_name in _import_source_cache:
                 value = _import_source_cache[module_name]
-            elif value is None or getattr(spec, "_initializing", False):
+            elif value is None:
                 value = importlib.import_module(module_name)
+            elif isinstance(value, types.ModuleType):
+                # Out of the instance dict, like the __name__ reads below: an
+                # attribute read runs a PEP 562 __getattr__ or a class-level
+                # __getattribute__ (importlib.util._LazyModule imports on any).
+                spec = object.__getattribute__(value, "__dict__").get("__spec__")
+                if getattr(spec, "_initializing", False):
+                    value = importlib.import_module(module_name)
             _import_source_cache[module_name] = value
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
@@ -2449,8 +2458,8 @@ class InstructionTranslatorBase(
         # seeding a guard scope -- can leave it bound to a module object of this
         # name that is not the one resolved here. That is not the name collision
         # this checks for (two module names still mangle to one alias).
-        bound = f_globals.get(alias, value)
-        if bound is not value:
+        if alias in f_globals and f_globals[alias] is not value:
+            bound = f_globals[alias]
             # __name__ is read out of the instance dict through
             # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
             # class-level __getattribute__ (importlib.util._LazyModule imports on
@@ -2504,7 +2513,9 @@ class InstructionTranslatorBase(
         # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
         # trace that graph-breaks or restarts, as does the write install makes
         # to this name. A writer's same-named module is replaced: value is the
-        # live entry whenever there is one.
+        # live entry whenever sys.modules holds a module under the name, and
+        # what this process's traces last bound when the name is gone or
+        # blocked with None, where the writer's module is no more live.
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
