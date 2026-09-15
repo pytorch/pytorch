@@ -648,7 +648,11 @@ _efficient_attention_backward(
     at::Tensor q_t = query.permute({0,2,1,3});
     at::Tensor k_t = key.permute({0,2,1,3});
     at::Tensor v_t = value.permute({0,2,1,3});
-    at::Tensor out_t = out.permute({0,2,1,3});
+    // AOTriton's fused backward reads the forward output through the
+    // (batch, seq, heads, dim)-contiguous strides the forward wrote it with and
+    // memory-faults on any other layout, e.g. the (batch, heads, seq, dim)-
+    // contiguous `out` context parallel hands back. Materialize when needed.
+    at::Tensor out_t = out.contiguous().permute({0,2,1,3});
     at::Tensor dq_t = grad_q.permute({0,2,1,3});
     at::Tensor dk_t = grad_k.permute({0,2,1,3});
     at::Tensor dv_t = grad_v.permute({0,2,1,3});

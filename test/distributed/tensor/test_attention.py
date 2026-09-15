@@ -109,7 +109,9 @@ class RingAttentionTest(DTensorTestBase):
         return False
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
+    @skipIfRocm(
+        msg="efficient-attention fp32 diverges from the full-sequence result by up to 3e-4 through the context-parallel merge, above the 2e-6 fp32 tolerance"
+    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
