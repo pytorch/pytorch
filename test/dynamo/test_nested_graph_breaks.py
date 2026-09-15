@@ -6,6 +6,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.utils._pytree as python_pytree
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 try:
@@ -31,6 +32,8 @@ class CustomizedCtxManager:
 
 
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
         # prevents them from being freevars
@@ -1682,6 +1685,28 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(3)
         self.assertEqual(fn(inp), inp + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_fstring_with_spec_graph_break_in_custom_str(self):
+        """Exercise an explicit empty format spec when __str__ graph-breaks."""
+        import inspect
+
+        def target_fn(x: list[int]) -> int:
+            return sum(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            sig = inspect.signature(target_fn)
+            f"{sig:}"
+            return x + 1
+
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp), inp + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
 
     def test_exhausted_generator_across_graph_break(self):
         """Reconstruct an exhausted generator after a graph break.
