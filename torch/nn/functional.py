@@ -5557,9 +5557,10 @@ def grid_sample(
         to build `Spatial Transformer Networks`_ .
 
     Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
+        The CUDA backward pass may be nondeterministic by default. Enabling
+        :func:`torch.use_deterministic_algorithms` selects a deterministic
+        implementation, which may use more memory and run more slowly.
+        See :doc:`/notes/randomness` for background.
 
     Note:
         NaN values in :attr:`grid` would be interpreted as ``-1``.
