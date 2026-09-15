@@ -567,6 +567,17 @@ _efficient_attention_backward(
 
 #ifdef USE_ROCM
   // ROCM Implementation
+  // Empty grad_out means there is nothing to accumulate; skip the backends,
+  // which cannot launch on empty inputs (see _efficient_attention_forward).
+  if (grad_out.numel() == 0) {
+    grad_q.zero_();
+    grad_k.zero_();
+    grad_v.zero_();
+    if (grad_bias.defined()) {
+      grad_bias.zero_();
+    }
+    return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
+  }
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
