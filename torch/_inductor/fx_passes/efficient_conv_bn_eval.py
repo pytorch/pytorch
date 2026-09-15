@@ -21,6 +21,176 @@ from .pre_grad import efficient_conv_bn_eval_pass
 _BATCH_NORM_SIGNATURE = inspect.signature(torch.nn.functional.batch_norm)
 
 
+def _make_conv_signature(names, defaults):
+    """Build an inspect.Signature for a conv/linear target from its parameter
+    names, mirroring the public torch.* API (the builtins are not
+    introspectable and the aten ops only expose their schema)."""
+    return inspect.Signature(
+        [
+            inspect.Parameter(
+                name,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=defaults.get(name, inspect.Parameter.empty),
+            )
+            for name in names
+        ]
+    )
+
+
+_CONV_DEFAULTS = {
+    "bias": None,
+    "stride": 1,
+    "padding": 0,
+    "dilation": 1,
+    "groups": 1,
+    "output_padding": 0,
+}
+
+_CONV_SIGNATURES = {
+    torch.conv1d: _make_conv_signature(
+        ["input", "weight", "bias", "stride", "padding", "dilation", "groups"],
+        _CONV_DEFAULTS,
+    ),
+    torch.conv2d: _make_conv_signature(
+        ["input", "weight", "bias", "stride", "padding", "dilation", "groups"],
+        _CONV_DEFAULTS,
+    ),
+    torch.conv3d: _make_conv_signature(
+        ["input", "weight", "bias", "stride", "padding", "dilation", "groups"],
+        _CONV_DEFAULTS,
+    ),
+    torch.conv_transpose1d: _make_conv_signature(
+        [
+            "input",
+            "weight",
+            "bias",
+            "stride",
+            "padding",
+            "output_padding",
+            "groups",
+            "dilation",
+        ],
+        _CONV_DEFAULTS,
+    ),
+    torch.conv_transpose2d: _make_conv_signature(
+        [
+            "input",
+            "weight",
+            "bias",
+            "stride",
+            "padding",
+            "output_padding",
+            "groups",
+            "dilation",
+        ],
+        _CONV_DEFAULTS,
+    ),
+    torch.conv_transpose3d: _make_conv_signature(
+        [
+            "input",
+            "weight",
+            "bias",
+            "stride",
+            "padding",
+            "output_padding",
+            "groups",
+            "dilation",
+        ],
+        _CONV_DEFAULTS,
+    ),
+    torch._C._nn.linear: _make_conv_signature(
+        ["input", "weight", "bias"], _CONV_DEFAULTS
+    ),
+    torch.ops.aten.linear.default: _make_conv_signature(
+        ["input", "weight", "bias"], _CONV_DEFAULTS
+    ),
+    torch.ops.aten.conv1d.default: _make_conv_signature(
+        ["input", "weight", "bias", "stride", "padding", "dilation", "groups"],
+        _CONV_DEFAULTS,
+    ),
+    torch.ops.aten.conv2d.default: _make_conv_signature(
+        ["input", "weight", "bias", "stride", "padding", "dilation", "groups"],
+        _CONV_DEFAULTS,
+    ),
+    torch.ops.aten.conv3d.default: _make_conv_signature(
+        ["input", "weight", "bias", "stride", "padding", "dilation", "groups"],
+        _CONV_DEFAULTS,
+    ),
+    torch.ops.aten.conv_transpose1d.default: _make_conv_signature(
+        [
+            "input",
+            "weight",
+            "bias",
+            "stride",
+            "padding",
+            "output_padding",
+            "groups",
+            "dilation",
+        ],
+        _CONV_DEFAULTS,
+    ),
+    torch.ops.aten.conv_transpose2d.input: _make_conv_signature(
+        [
+            "input",
+            "weight",
+            "bias",
+            "stride",
+            "padding",
+            "output_padding",
+            "groups",
+            "dilation",
+        ],
+        _CONV_DEFAULTS,
+    ),
+    torch.ops.aten.conv_transpose3d.input: _make_conv_signature(
+        [
+            "input",
+            "weight",
+            "bias",
+            "stride",
+            "padding",
+            "output_padding",
+            "groups",
+            "dilation",
+        ],
+        _CONV_DEFAULTS,
+    ),
+}
+
+
+def _normalize_conv_args(conv_node, conv_signature):
+    """Merge a conv node's positional args and kwargs against its signature.
+
+    FX records F.conv2d-style calls with the arguments the user spelled,
+    which may be passed by keyword (bias=, stride=, padding=, ...).  Return
+    (input, weight, bias, remaining_args) with the defaults filled in so the
+    decomposed call reproduces the original semantics.  See gh-196165.
+    """
+    bound = conv_signature.bind_partial(*conv_node.args, **conv_node.kwargs)
+    if not isinstance(conv_node.target, torch._ops.OpOverload):
+        # The torch.* Python API fills in defaults like stride=1, padding=0;
+        # reproduce that so the fused call matches the original semantics.
+        bound.apply_defaults()
+    else:
+        # aten ops with trailing args omitted from the graph rely on the
+        # op's own C++ defaults, so leave them unbound here rather than
+        # substituting Python-level int defaults for their List[int] args.
+        pass
+    if "input" not in bound.arguments or "weight" not in bound.arguments:
+        return None
+    remaining = tuple(
+        v
+        for name, v in bound.arguments.items()
+        if name not in ("input", "weight", "bias")
+    )
+    return (
+        bound.arguments["input"],
+        bound.arguments["weight"],
+        bound.arguments.get("bias"),
+        remaining,
+    )
+
+
 def efficient_conv_bn_eval(
     bn: nn.modules.batchnorm._BatchNorm, conv: nn.modules.conv._ConvNd, x: torch.Tensor
 ):
@@ -152,8 +322,10 @@ def efficient_conv_bn_eval_decomposed(
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
-    extra_check=lambda match: not inductor_config.freezing
-    and inductor_config.efficient_conv_bn_eval_fx_passes,
+    extra_check=lambda match: (
+        not inductor_config.freezing
+        and inductor_config.efficient_conv_bn_eval_fx_passes
+    ),
 )
 def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs):
     """
@@ -212,6 +384,16 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
 
     counters["inductor"]["efficient_conv_bn_eval"] += 1
 
+    # Merge positional args and kwargs before reading them: the conv may
+    # have been called with bias=/stride=/padding= by keyword (gh-196165).
+    normalized_conv_args = _normalize_conv_args(
+        conv_node,
+        _CONV_SIGNATURES[input_fn],  # type: ignore[arg-type]
+    )
+    if normalized_conv_args is None:
+        return
+    conv_input, conv_weight, conv_bias, conv_remaining_args = normalized_conv_args
+
     with graph.inserting_before(bn_node):
         # prepare args for the fused function
         bn_running_mean = normalized_args[1]
@@ -219,14 +401,6 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
         bn_weight = normalized_args[3]
         bn_bias = normalized_args[4]
         bn_eps = normalized_args[7]
-        if len(conv_node.args) < 2:  # type: ignore[union-attr]
-            raise AssertionError(
-                f"expected at least 2 conv_node args, got {len(conv_node.args)}"  # type: ignore[union-attr]
-            )
-        conv_input = conv_node.args[0]  # type: ignore[union-attr]
-        conv_weight = conv_node.args[1]  # type: ignore[union-attr]
-        conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]
-        conv_remaining_args = conv_node.args[3:]  # type: ignore[union-attr]
         args = (
             bn_weight,
             bn_bias,
@@ -267,8 +441,10 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
-    extra_check=lambda match: not inductor_config.freezing
-    and inductor_config.efficient_conv_bn_eval_fx_passes,
+    extra_check=lambda match: (
+        not inductor_config.freezing
+        and inductor_config.efficient_conv_bn_eval_fx_passes
+    ),
 )
 def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwargs):
     bn_node = match.nodes[0]
@@ -308,6 +484,16 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
 
     counters["inductor"]["efficient_conv_bn_eval"] += 1
 
+    # Merge positional args and kwargs before reading them: the conv may
+    # have been called with bias=/stride=/padding= by keyword (gh-196165).
+    normalized_conv_args = _normalize_conv_args(
+        conv_node,
+        _CONV_SIGNATURES[input_fn],  # type: ignore[arg-type]
+    )
+    if normalized_conv_args is None:
+        return
+    conv_input, conv_weight, conv_bias, conv_remaining_args = normalized_conv_args
+
     with graph.inserting_before(bn_node):
         # prepare args for the fused function
         bn_weight = bn_node.args[1]
@@ -315,14 +501,6 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
         bn_running_mean = bn_node.args[3]
         bn_running_var = bn_node.args[4]
         bn_eps = bn_node.args[7]
-        if len(conv_node.args) < 2:  # type: ignore[union-attr]
-            raise AssertionError(
-                f"expected at least 2 conv_node args, got {len(conv_node.args)}"  # type: ignore[union-attr]
-            )
-        conv_input = conv_node.args[0]  # type: ignore[union-attr]
-        conv_weight = conv_node.args[1]  # type: ignore[union-attr]
-        conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]
-        conv_remaining_args = conv_node.args[3:]  # type: ignore[union-attr]
         args = (
             bn_weight,
             bn_bias,
@@ -367,8 +545,10 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
-    extra_check=lambda match: not inductor_config.freezing
-    and inductor_config.efficient_conv_bn_eval_fx_passes,
+    extra_check=lambda match: (
+        not inductor_config.freezing
+        and inductor_config.efficient_conv_bn_eval_fx_passes
+    ),
 )
 def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
     # We matched a BN node
