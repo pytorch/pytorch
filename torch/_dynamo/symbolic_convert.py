@@ -257,14 +257,10 @@ ExceptionTypes: TypeAlias = (
 )
 
 
-@functools.cache
-def _import_module(name: str) -> types.ModuleType:
-    """
-    The process's first resolution of the name, kept for its lifetime: nothing
-    invalidates the memo, so after a sys.modules handover it is an older object
-    than the live entry. import_source writes it only when it is that entry.
-    """
-    return importlib.import_module(name)
+# What import_source last bound under each name, served when the name has since
+# left sys.modules or been blocked there with None. Never cleared, not by
+# torch._dynamo.reset() either.
+_import_source_cache: dict[str, types.ModuleType] = {}
 
 
 def _registered_module_for_globals(
@@ -2380,10 +2376,10 @@ class InstructionTranslatorBase(
 
     @functools.cached_property
     def nn_modules_globals_vt(self) -> VariableTracker:
-        module_name = "torch.nn.modules.module"
-        module_source = self.import_source(module_name)
-        fglobals_value = _import_module(module_name)
-        return VariableTracker.build(self, fglobals_value, module_source)
+        # The defining module, whose dicts nn.Module._call_impl reads through
+        # its own __globals__; a sys.modules rebind does not move them.
+        module = torch.nn.modules.module
+        return VariableTracker.build(self, module, self.import_source(module.__name__))
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.arg is None:
@@ -2421,14 +2417,30 @@ class InstructionTranslatorBase(
             value = torch.package.package_importer._package_imported_modules[
                 module_name
             ]
-            # A registry lookup, not a memo: the module the name resolves to now.
-            live = True
             alias = (
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = _import_module(module_name)
-            live = module_name in sys.modules and sys.modules[module_name] is value
+            # The live sys.modules entry, which is what IMPORT_NAME pushed and
+            # so what the guards this alias roots must read, taken from
+            # sys.modules itself: importlib.import_module takes the module lock
+            # for a present name on 3.10. A name since removed or blocked with
+            # None keeps what it last resolved to, as re-importing would run
+            # the module body inside the trace; one still executing its body
+            # is imported, which waits for it as an import statement would.
+            value = sys.modules.get(module_name)
+            if value is None and module_name in _import_source_cache:
+                value = _import_source_cache[module_name]
+            elif value is None:
+                value = importlib.import_module(module_name)
+            elif isinstance(value, types.ModuleType):
+                # Out of the instance dict, like the __name__ reads below: an
+                # attribute read runs a PEP 562 __getattr__ or a class-level
+                # __getattribute__ (importlib.util._LazyModule imports on any).
+                spec = object.__getattribute__(value, "__dict__").get("__spec__")
+                if getattr(spec, "_initializing", False):
+                    value = importlib.import_module(module_name)
+            _import_source_cache[module_name] = value
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope
@@ -2437,8 +2449,7 @@ class InstructionTranslatorBase(
         # seeding a guard scope -- can leave it bound to a module object of this
         # name that is not the one resolved here. That is not the name collision
         # this checks for (two module names still mangle to one alias).
-        rebind = alias not in f_globals or f_globals[alias] is value
-        if not rebind:
+        if alias in f_globals and f_globals[alias] is not value:
             bound = f_globals[alias]
             # __name__ is read out of the instance dict through
             # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
@@ -2484,15 +2495,6 @@ class InstructionTranslatorBase(
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
-            # The writer's module was the live entry when the writer ran, and
-            # the memo can predate or postdate a handover of the name since, so
-            # the memo replaces it only when it is the live entry now: the graph
-            # is specialized on what IMPORT_NAME pushed, the live entry, and
-            # this alias roots its guards. When neither is live the writer's
-            # module stays -- the memo would be no less stale -- and the guards
-            # read a module the graph was not built from, as they do for an
-            # empty slot whenever the memo is not the live entry.
-            rebind = live
         # Recorded only once the check has passed: the package entry outlives a
         # graph break here, and install() binds every recorded alias.
         if self.package is not None:
@@ -2501,9 +2503,11 @@ class InstructionTranslatorBase(
         # The write is into a live namespace and nothing unwinds it -- there is
         # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
         # trace that graph-breaks or restarts, as does the write install makes
-        # to this name.
-        if rebind:
-            f_globals[alias] = value
+        # to this name. A writer's same-named module is replaced: value is the
+        # live entry whenever sys.modules holds a module under the name, and
+        # what this process's traces last bound when the name is gone or
+        # blocked with None, where the writer's module is no more live.
+        f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
 
