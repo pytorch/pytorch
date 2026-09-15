@@ -838,6 +838,56 @@ def _dict_unflatten(values: Iterable[T], context: Context) -> dict[Any, T]:
     return dict(zip(context, values, strict=True))
 
 
+# JSON has no tuple type, so a tuple that appears in a built-in mapping context --
+# the list of dict keys, e.g. the ``(1, 2)`` in ``{(1, 2): ...}`` -- would be
+# written out as an array and read back as a ``list``. A ``list`` is unhashable
+# and cannot be used as a mapping key, so ``tree_unflatten`` would then fail to
+# reconstruct an otherwise valid pytree. We escape tuples with an explicit marker
+# on the way out and restore them on the way in.
+#
+# This escaping is applied ONLY to the built-in mapping contexts (``dict``,
+# ``OrderedDict``, ``defaultdict``) whose context is the list of keys -- never to
+# the generic JSON path used by arbitrary registered nodes. A custom node whose
+# default-serialized context legitimately contains ``{"__tuple__": [...]}`` is
+# therefore passed through untouched. Contexts without tuples serialize
+# byte-for-byte as before, so previously serialized specs are unaffected.
+_TUPLE_MARKER = "__tuple__"
+
+
+def _json_escape_tuples(obj: Any) -> Any:
+    if isinstance(obj, tuple):
+        return {_TUPLE_MARKER: [_json_escape_tuples(item) for item in obj]}
+    if isinstance(obj, list):
+        return [_json_escape_tuples(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: _json_escape_tuples(value) for key, value in obj.items()}
+    return obj
+
+
+def _json_unescape_tuples(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        if len(obj) == 1 and _TUPLE_MARKER in obj:
+            return tuple(_json_unescape_tuples(item) for item in obj[_TUPLE_MARKER])
+        return {key: _json_unescape_tuples(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_json_unescape_tuples(item) for item in obj]
+    return obj
+
+
+def _mapping_context_serialize(context: Context) -> DumpableContext:
+    # ``dict`` / ``OrderedDict`` have no custom dumpable-context of their own, so
+    # this mirrors the generic JSON path (json string, EnumEncoder) exactly and
+    # only adds tuple escaping. Non-tuple contexts serialize byte-for-byte as
+    # before.
+    return json.dumps(_json_escape_tuples(context), cls=EnumEncoder)
+
+
+def _mapping_context_deserialize(dumpable_context: DumpableContext) -> Context:
+    return _json_unescape_tuples(
+        json.loads(dumpable_context, object_hook=enum_object_hook)
+    )
+
+
 def _namedtuple_flatten(d: NamedTuple) -> tuple[list[Any], Context]:
     return list(d), type(d)
 
@@ -943,7 +993,7 @@ def _defaultdict_serialize(context: Context) -> DumpableContext:
     json_defaultdict = {
         "default_factory_module": default_factory.__module__,
         "default_factory_name": default_factory.__qualname__,
-        "dict_context": dict_context,
+        "dict_context": _json_escape_tuples(dict_context),
     }
     return json_defaultdict
 
@@ -971,7 +1021,7 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
 
-    dict_context = dumpable_context["dict_context"]
+    dict_context = _json_unescape_tuples(dumpable_context["dict_context"])
     return [default_factory, dict_context]
 
 
@@ -1010,6 +1060,8 @@ _private_register_pytree_node(
     _dict_flatten,
     _dict_unflatten,
     serialized_type_name="builtins.dict",
+    to_dumpable_context=_mapping_context_serialize,
+    from_dumpable_context=_mapping_context_deserialize,
     flatten_with_keys_fn=_dict_flatten_with_keys,
 )
 _private_register_pytree_node(
@@ -1026,6 +1078,8 @@ _private_register_pytree_node(
     _ordereddict_flatten,
     _ordereddict_unflatten,
     serialized_type_name="collections.OrderedDict",
+    to_dumpable_context=_mapping_context_serialize,
+    from_dumpable_context=_mapping_context_deserialize,
     flatten_with_keys_fn=_ordereddict_flatten_with_keys,
 )
 _private_register_pytree_node(
