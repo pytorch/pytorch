@@ -18,7 +18,10 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousParameters,
     RendezvousStoreInfo,
 )
-from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
+from torch.distributed.elastic.rendezvous.utils import (
+    _should_use_libuv,
+    parse_rendezvous_endpoint,
+)
 
 
 __all__ = ["StaticTCPRendezvous", "create_rdzv_handler"]
@@ -64,6 +67,8 @@ class StaticTCPRendezvous(RendezvousHandler):
         logger.info("Creating TCPStore as the c10d::Store implementation")
         is_master = self.rank == 0
         if not self._store:
+            use_libuv = _should_use_libuv()
+
             self._store = TCPStore(  # type: ignore[call-arg]
                 self.master_addr,
                 self.master_port,
@@ -71,6 +76,7 @@ class StaticTCPRendezvous(RendezvousHandler):
                 is_master,
                 self.timeout,
                 multi_tenant=True,
+                use_libuv=use_libuv,
             )
         store = PrefixStore(self.run_id, self._store)
         # TCPStore server instance is used by trainer code
