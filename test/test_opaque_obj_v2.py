@@ -1448,6 +1448,7 @@ def forward(self, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {f
     return (add_1,)""",
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_nested_reference_trace(self):
         def foo(nested_queue, x):
             q1 = nested_queue.q
