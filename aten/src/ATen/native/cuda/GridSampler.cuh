@@ -1,6 +1,9 @@
 #pragma once
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/GridSamplerUtils.h>
+
+#include <limits>
 
 namespace at::native {
 
@@ -317,5 +320,271 @@ void get_cubic_coefficients_grad(
   coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 
+
+// A non-finite pixel coordinate samples as a far finite one, on both devices
+// and in every mode: a NaN far to the left, an infinity far on its own side.
+// It is mapped before the padding: min/max and fmod order non-finites
+// differently per device.
+template <typename scalar_t>
+__forceinline__ __device__
+scalar_t nonfinite_to_far(scalar_t coordinate) {
+  if (::isnan(coordinate)) {
+    return static_cast<scalar_t>(-100.0);
+  }
+  if (::isinf(static_cast<double>(coordinate))) {
+    return coordinate > 0 ? static_cast<scalar_t>(1.0e15)
+                          : static_cast<scalar_t>(-1.0e15);
+  }
+  return coordinate;
+}
+
+// The pixel route's source index: the padding applied in pixel units, for any
+// coordinate. Border clips from any magnitude, reflection takes its parity with
+// fmod, and zeros sends a coordinate the later integer casts cannot hold to an
+// out-of-volume sentinel.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t pixel_source_index(scalar_t x, index_t size,
+                            GridSamplerPadding padding_mode,
+                            bool align_corners) {
+  x = nonfinite_to_far(x);
+  if (padding_mode == GridSamplerPadding::Border) {
+    x = ::min(static_cast<scalar_t>(size - 1),
+              ::max(x, static_cast<scalar_t>(0)));
+  } else if (padding_mode == GridSamplerPadding::Reflection) {
+    // the bounds reflect_coordinates halves, formed without doubling the extent
+    const scalar_t low =
+        align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
+    const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
+    if (span == 0) {
+      x = 0;
+    } else {
+      const scalar_t in = ::fabs(x - low);
+      const scalar_t extra = ::fmod(in, span);
+      const bool odd = ::fmod(::floor(in / span), static_cast<scalar_t>(2)) != 0;
+      x = odd ? span - extra + low : extra + low;
+    }
+    x = ::min(static_cast<scalar_t>(size - 1),
+              ::max(x, static_cast<scalar_t>(0)));
+  } else if (!(x > static_cast<scalar_t>(INT_MIN) &&
+               x < static_cast<scalar_t>(INT_MAX - 1))) {
+    // zeros bounds nothing: this guards the int conversion of the 32-bit path
+    x = static_cast<scalar_t>(-100.0);
+  }
+  return x;
+}
+
+// The set_grad twin: the padding's own derivative, one where the mapping is
+// locally the identity, zero where border clips, the reflection's sign where
+// it folds.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t pixel_source_index_set_grad(scalar_t x, index_t size,
+                                     GridSamplerPadding padding_mode,
+                                     bool align_corners, scalar_t* grad_in) {
+  x = nonfinite_to_far(x);
+  *grad_in = static_cast<scalar_t>(1);
+  if (padding_mode == GridSamplerPadding::Border) {
+    if (x < static_cast<scalar_t>(0) ||
+        x > static_cast<scalar_t>(size - 1)) {
+      *grad_in = static_cast<scalar_t>(0);
+    }
+    x = ::min(static_cast<scalar_t>(size - 1),
+              ::max(x, static_cast<scalar_t>(0)));
+  } else if (padding_mode == GridSamplerPadding::Reflection) {
+    // the bounds reflect_coordinates halves, formed without doubling the extent
+    const scalar_t low =
+        align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
+    const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
+    if (span == 0) {
+      x = 0;
+      *grad_in = static_cast<scalar_t>(0);
+    } else {
+      const scalar_t shifted = x - low;
+      const scalar_t sign =
+          shifted < 0 ? static_cast<scalar_t>(-1) : static_cast<scalar_t>(1);
+      const scalar_t in = ::fabs(shifted);
+      const scalar_t extra = ::fmod(in, span);
+      const bool odd = ::fmod(::floor(in / span), static_cast<scalar_t>(2)) != 0;
+      x = odd ? span - extra + low : extra + low;
+      *grad_in = odd ? -sign : sign;
+    }
+    if (x < static_cast<scalar_t>(0) ||
+        x > static_cast<scalar_t>(size - 1)) {
+      *grad_in = static_cast<scalar_t>(0);
+    }
+    x = ::min(static_cast<scalar_t>(size - 1),
+              ::max(x, static_cast<scalar_t>(0)));
+  } else if (!(x > static_cast<scalar_t>(INT_MIN) &&
+               x < static_cast<scalar_t>(INT_MAX - 1))) {
+    // zeros bounds nothing: this guards the int conversion of the 32-bit path
+    x = static_cast<scalar_t>(-100.0);
+  }
+  return x;
+}
+
+// grid_sampler_unnormalize with the extent in index_t, for the kernels that
+// index with int64_t. It converts where the int-taking helper converts.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t grid_sampler_unnormalize_sized(scalar_t coord, index_t size,
+                                        bool align_corners) {
+  if (align_corners) {
+    return ((coord + 1) / 2) * static_cast<scalar_t>(size - 1);
+  } else {
+    return ((coord + 1) * static_cast<scalar_t>(size) - 1) / 2;
+  }
+}
+
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t grid_sampler_unnormalize_set_grad_sized(scalar_t coord, index_t size,
+                                                 bool align_corners,
+                                                 scalar_t* grad_in) {
+  if (align_corners) {
+    *grad_in = static_cast<scalar_t>(size - 1) / 2;
+    return ((coord + 1) / 2) * static_cast<scalar_t>(size - 1);
+  } else {
+    *grad_in = static_cast<scalar_t>(size) / 2;
+    return ((coord + 1) * static_cast<scalar_t>(size) - 1) / 2;
+  }
+}
+
+// compute_coordinates with the extent in index_t, the reflection parity
+// taken with fmod and no downgrade: no float converts to an integer, and a
+// position past INT_MAX keeps its voxel.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
+                                   GridSamplerPadding padding_mode,
+                                   bool align_corners) {
+  if (padding_mode == GridSamplerPadding::Border) {
+    coord = ::min(static_cast<scalar_t>(size - 1),
+                  ::max(coord, static_cast<scalar_t>(0)));
+  } else if (padding_mode == GridSamplerPadding::Reflection) {
+    // the bounds reflect_coordinates halves, formed without doubling the extent
+    const scalar_t low =
+        align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
+    const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
+    if (span == 0) {
+      coord = 0;
+    } else {
+      const scalar_t in = ::fabs(coord - low);
+      const scalar_t extra = ::fmod(in, span);
+      const bool odd = ::fmod(::floor(in / span), static_cast<scalar_t>(2)) != 0;
+      coord = odd ? span - extra + low : extra + low;
+    }
+    coord = ::min(static_cast<scalar_t>(size - 1),
+                  ::max(coord, static_cast<scalar_t>(0)));
+  }
+  return coord;
+}
+
+// The Keys coefficients with a as an argument, for the pixel route. a = -0.75
+// gives the bits of get_cubic_upsampling_coefficients.
+template<typename opmath_t>
+__forceinline__ __device__
+void get_cubic_coefficients_poly(opmath_t coeffs[4], opmath_t t, opmath_t a) {
+  opmath_t x1 = t;
+  coeffs[0] = cubic_convolution2<opmath_t>(x1 + 1.0, a);
+  coeffs[1] = cubic_convolution1<opmath_t>(x1, a);
+  opmath_t x2 = 1.0 - t;
+  coeffs[2] = cubic_convolution1<opmath_t>(x2, a);
+  coeffs[3] = cubic_convolution2<opmath_t>(x2 + 1.0, a);
+}
+
+template<typename opmath_t>
+__forceinline__ __device__
+void get_cubic_coefficients_a(opmath_t coeffs[4], opmath_t t, opmath_t a) {
+  // At an integer location the weights are [0, 1, 0, 0] for every a, which the
+  // polynomial only reproduces exactly for some a.
+  if (t == static_cast<opmath_t>(0)) {
+    coeffs[0] = 0;
+    coeffs[1] = 1;
+    coeffs[2] = 0;
+    coeffs[3] = 0;
+    return;
+  }
+  get_cubic_coefficients_poly<opmath_t>(coeffs, t, a);
+}
+
+template<typename opmath_t>
+__forceinline__ __device__
+void get_cubic_coefficients_grad_a(opmath_t coeffs[4], opmath_t t, opmath_t a) {
+  opmath_t x;
+  x = -1 - t;
+  coeffs[0] = (-3 * a * x - 10 * a) * x - 8 * a;
+  x = -t;
+  coeffs[1] = (-3 * (a + 2) * x - 2 * (a + 3)) * x;
+  x = 1 - t;
+  coeffs[2] = (3 * (a + 2) * x - 2 * (a + 3)) * x;
+  x = 2 - t;
+  coeffs[3] = (3 * a * x - 10 * a) * x + 8 * a;
+}
+
+// The device twin of resolve_cubic_taps in ATen/native/GridSampler.cpp, with
+// the fixed a = -0.75 helpers of the normalized route.
+template <typename coord_t, typename opmath_t, typename index_t>
+__forceinline__ __device__
+void resolve_cubic_taps(
+    coord_t coord,
+    index_t size,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    opmath_t coeffs[4],
+    opmath_t* coeffs_grad,
+    index_t indices[4]) {
+  const coord_t base = ::floor(coord);
+  const opmath_t t = static_cast<opmath_t>(coord - base);
+  get_cubic_upsampling_coefficients<opmath_t>(coeffs, t);
+  if (coeffs_grad != nullptr) {
+    get_cubic_coefficients_grad<opmath_t>(coeffs_grad, t);
+  }
+  const coord_t index_limit =
+      static_cast<coord_t>(std::numeric_limits<index_t>::max());
+  #pragma unroll 4
+  for (int i = 0; i < 4; ++i) {
+    const coord_t tap = compute_coordinates_sized(
+        base - 1 + i, size, padding_mode, align_corners);
+    // a tap that is not finite, or past the index type, fails before the cast
+    const index_t index = (tap >= 0 && tap < index_limit)
+        ? static_cast<index_t>(tap)
+        : static_cast<index_t>(-1);
+    indices[i] = index < size ? index : static_cast<index_t>(-1);
+  }
+}
+
+// `coord_t` places the taps (double when the grid is double), `opmath_t` is the
+// payload's accumulate type the coefficients are blended in.
+template<typename coord_t, typename opmath_t, typename index_t>
+__forceinline__ __device__
+void resolve_cubic_taps(
+    coord_t coord,
+    index_t size,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    opmath_t a,
+    opmath_t coeffs[4],
+    opmath_t* coeffs_grad,
+    index_t indices[4]) {
+  const coord_t base = ::floor(coord);
+  const opmath_t t = static_cast<opmath_t>(coord - base);
+  get_cubic_coefficients_a<opmath_t>(coeffs, t, a);
+  if (coeffs_grad != nullptr) {
+    get_cubic_coefficients_grad_a<opmath_t>(coeffs_grad, t, a);
+  }
+  const coord_t index_limit =
+      static_cast<coord_t>(std::numeric_limits<index_t>::max());
+  #pragma unroll 4
+  for (int i = 0; i < 4; ++i) {
+    const coord_t tap = compute_coordinates_sized(
+        base - 1 + i, size, padding_mode, align_corners);
+    // a tap that is not finite, or past the index type, fails before the cast
+    const index_t index = (tap >= 0 && tap < index_limit)
+        ? static_cast<index_t>(tap)
+        : static_cast<index_t>(-1);
+    indices[i] = index < size ? index : static_cast<index_t>(-1);
+  }
+}
 
 }  // namespace at::native
