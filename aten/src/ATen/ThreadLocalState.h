@@ -14,10 +14,6 @@
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
-namespace c10 {
-struct FakeTensorMode;
-}
-
 namespace at {
 
 // Thread local state contains values that are preserved across
@@ -46,8 +42,6 @@ class TORCH_API ThreadLocalState {
 
  private:
   c10::impl::LocalDispatchKeySet dispatch_key_;
-
-  std::shared_ptr<c10::FakeTensorMode> fake_tensor_mode_state_;
 
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
