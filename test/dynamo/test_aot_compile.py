@@ -2108,7 +2108,7 @@ from user code:
             g["AOT_BRANCH_SCALE"] = saved
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("[1] KeyError on G['AOT_BRANCH_SCALE']", message)
-        self.assertIn("a guarded global is missing", message)
+        self.assertIn("For [1]: a guarded global is missing", message)
         self.assertIn("the module the compiled function was traced in", message)
         self.assertIn("Add a ModelInput", message)
 
