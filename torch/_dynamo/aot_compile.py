@@ -5,7 +5,6 @@ import importlib
 import inspect
 import io
 import logging
-import operator
 import os
 import pickle
 import re
@@ -1452,19 +1451,6 @@ def _warn_dropped_module_dispatch(model: torch.nn.Module) -> None:
         )
 
 
-def _binding_key(artifacts: CompileArtifacts) -> tuple[object, ...]:
-    # What prepare_f_locals reads, with defaults and cells by identity (id, since
-    # the artifacts keep them alive). Signature equality is unusable here:
-    # Parameter.__eq__ takes bool() of `default == default`, which raises for a
-    # tensor default.
-    env, params = artifacts.runtime_env, artifacts.signature.parameters.values()
-    return (
-        [(p.name, p.kind, id(p.default)) for p in params],
-        env.bytecode.co_freevars,
-        [id(cell) for cell in env.closure or ()],
-    )
-
-
 @dataclass
 class AOTCompiledModel:
     """A module's forward compiled for several calls, with dispatch over them.
@@ -1479,73 +1465,30 @@ class AOTCompiledModel:
     gives up on it; a result whose guards would pass can therefore be outranked
     by a later result whose first check accepted. Opting a result out through
     ``disable_guard_check()`` does not skip its guard evaluation: it is served
-    in index order when its check accepts, and on the strength of its opt-out
-    alone only when no check accepted the call.
+    in index order when its check accepts.
     """
 
     model: torch.nn.Module
     compiled_results: list[AOTCompiledFunction]
-    # The list contents last judged and whether one bind of a call serves every
-    # one of them, as it does for every artifact aot_compile_module produces:
-    # compiled_results is public, so a call that finds them changed decides
-    # again. The comparison costs about what a bind does, so not once per call.
-    # One field, so a reader never sees the verdict about another list beside
-    # these contents. The default is the verdict over no results, so the first
-    # call decides.
-    _binding_verdict: tuple[tuple[AOTCompiledFunction, ...], bool] = dataclasses.field(
-        default=((), False), init=False, compare=False, repr=False
-    )
-
-    def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
-        # By identity, not ==: the dataclass __eq__ would reach the Signature
-        # compare _binding_key exists to avoid. Measured at 0.27us for four
-        # results, call included, against 0.81us for one check().
-        prior, shared = self._binding_verdict
-        if len(results) == len(prior) and all(map(operator.is_, results, prior)):
-            return shared
-        key = _binding_key(results[0]._artifacts) if results else None
-        shared = key is not None and all(
-            _binding_key(result._artifacts) == key for result in results[1:]
-        )
-        self._binding_verdict = (results, shared)
-        return shared
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        # compiled_results is public, so read it once: every stage below judges
-        # the results this call began with, on the binding decided over them.
+        # compiled_results is public, so read it once: both passes below judge
+        # the results this call began with, each on the binding made for it.
         results = tuple(self.compiled_results)
-        # Bound ahead of every guard, so a call the signature cannot bind still
-        # surfaces as bind_locals' TypeError, as the plain module call would; a
-        # bind costs more than a check(), so results that share one bind once.
-        shared = (
-            results[0].prepare_f_locals(self.model, *args, **kwargs)
-            if self._binds_alike(results)
-            else None
-        )
-        # Per-result bindings, kept for the re-check; a shared one is reused as is.
         bound: list[dict[str, object]] = []
         # Guard evaluation ignores _guard_check_enabled, so scan every result.
         for result in results:
-            if shared is not None:
-                f_locals = shared
-            else:
-                f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
-                bound.append(f_locals)
+            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+            bound.append(f_locals)
             if result._live_guard_manager().check(f_locals):
-                # The guards already passed; call fn directly so result() does
-                # not re-run the guard eval on this hot dispatch path.
+                # The guards just passed: call fn rather than result(), whose
+                # __call__ would bind and evaluate them again.
                 return result.fn(self.model, *args, **kwargs)
         # A check() can reject from the dict-tag fast path without running the
         # tree; a second check() then runs the tree the fast path skipped,
         # opted-out results too.
-        for i, result in enumerate(results):
-            f_locals = shared if shared is not None else bound[i]
+        for result, f_locals in zip(results, bound):
             if result._live_guard_manager().check(f_locals):
-                return result.fn(self.model, *args, **kwargs)
-        # A result that opted out via disable_guard_check() accepts anything, but
-        # only after both passes above have failed to find a real match.
-        for result in results:
-            if not result._guard_check_enabled:
                 return result.fn(self.model, *args, **kwargs)
         # All guards failed, just run one of them and throw the guard check error.
         return results[0](self.model, *args, **kwargs)
