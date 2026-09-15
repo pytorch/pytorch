@@ -137,6 +137,9 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void enable(bool value) = 0;
   virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
+  virtual size_t getMainPoolCachedMemory(c10::DeviceIndex /*device*/) {
+    return 0;
+  }
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
   // Keep for BC only
   virtual void recordStream(const DataPtr& ptr, CUDAStream stream) = 0;
