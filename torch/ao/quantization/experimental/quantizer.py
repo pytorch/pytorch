@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.apot_utils import (
     apot_to_float,
-    float_to_apot,
+    float_to_apot_device,
     quant_dequant_util,
 )
 
@@ -24,11 +24,13 @@ class APoTQuantizer:
         gamma: torch.Tensor,
         quantization_levels: torch.Tensor,
         level_indices: torch.Tensor,
+        device: torch.device | None = None,
     ) -> None:
-        self.alpha = alpha
-        self.gamma = gamma
-        self.quantization_levels = quantization_levels
-        self.level_indices = level_indices
+        device = alpha.device if device is None else device
+        self.alpha = alpha.to(device=device)
+        self.gamma = gamma.to(device=device)
+        self.quantization_levels = quantization_levels.to(device=device)
+        self.level_indices = level_indices.to(device=device)
 
     r""" Quantizes fp Tensor to integer APoT representation.
     Conversion is based on the qparams from a specified APoT non-uniform observer.
@@ -40,23 +42,22 @@ class APoTQuantizer:
     """
 
     def quantize(self, tensor2quantize: Tensor):
-        result = torch.tensor([])
-
-        # map float_to_apot over tensor2quantize elements
-        tensor2quantize = tensor2quantize.detach().apply_(
-            lambda x: float_to_apot(
-                x, self.quantization_levels, self.level_indices, self.alpha
-            )
+        tensor2quantize = tensor2quantize.detach()
+        quantized = float_to_apot_device(
+            tensor2quantize,
+            self.quantization_levels,
+            self.level_indices,
+            self.alpha,
         )
+
+        tensor2quantize.data.copy_(quantized)
 
         # convert to APoT int representation for dtype
         tensor2quantize = tensor2quantize.int()
 
         from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
-        result = TensorAPoT(self, tensor2quantize)  # type: ignore[assignment]
-
-        return result
+        return TensorAPoT(self, tensor2quantize)
 
     r""" Dequantizes integer Tensor to floating point (fp) representation
     based on the calculated quantization levels from a specified APoT non-uniform observer.
@@ -129,6 +130,7 @@ def quantize_APoT(
         gamma=gamma,
         quantization_levels=quantization_levels,
         level_indices=level_indices,
+        device=tensor2quantize.device,
     )
     result = quantizer.quantize(tensor2quantize)
     return result

@@ -73,15 +73,19 @@ class APoTObserver(ObserverBase):
 
         # create levels
         for i in range(self.n):
-            p_curr = torch.tensor([0])
+            p_curr = torch.zeros(
+                1, dtype=torch.get_default_dtype(), device=alpha.device
+            )
 
             for j in range((2**self.k - 2) + 1):
                 curr_ele = 2 ** (-(i + j * self.n))
-                p_append = torch.tensor([curr_ele])
+                p_append = torch.tensor(
+                    [curr_ele], dtype=torch.get_default_dtype(), device=alpha.device
+                )
                 p_curr = torch.cat((p_curr, p_append))
                 # introduce signed numbers
                 if signed:
-                    p_curr = torch.cat((p_curr, torch.tensor([-curr_ele])))
+                    p_curr = torch.cat((p_curr, -p_append))
 
             if signed:
                 # sort tensor in reverse order before adding to list if signed
@@ -95,12 +99,12 @@ class APoTObserver(ObserverBase):
         # if signed, add element at index 0 for each tensor
         # else, add element at index 1 for each tensor
         # gamma defined to ensure alpha is at max of range
-        p_sum = 0.0
+        p_sum = torch.zeros((), dtype=torch.get_default_dtype(), device=alpha.device)
         for tens in p_all:
             if signed:
-                p_sum += float(tens[0])
+                p_sum += tens[0]
             else:
-                p_sum += float(tens[1])
+                p_sum += tens[1]
 
         # assign gamma
         gamma = alpha / p_sum
@@ -112,16 +116,14 @@ class APoTObserver(ObserverBase):
 
         # calculate sum of each row
         for row in cartesian_product:
-            sum = 0.0
+            row_sum = torch.zeros(
+                (), dtype=torch.get_default_dtype(), device=alpha.device
+            )
             for ele in row:
-                sum += ele
-            quantization_levels_list.append(sum)
+                row_sum += ele
+            quantization_levels_list.append(row_sum)
 
-        quantization_levels_gamma = [
-            float(gamma) * ele for ele in quantization_levels_list
-        ]
-        quantization_levels = torch.tensor(quantization_levels_gamma)
-        level_indices = torch.tensor([])
+        quantization_levels = gamma.reshape(()) * torch.stack(quantization_levels_list)
         quantization_levels, level_indices = quantization_levels.sort()
 
         return (alpha, gamma, quantization_levels, level_indices)
