@@ -1050,56 +1050,39 @@ ldl_diagonal_panel_fused_kernel(
     // B -= L21 @ U12 = L21 @ D @ op(L21),
     // This kernel, however, only updates the parts of B which are within
     // the panel, i.e. B[:, :nb] and B[:nb, nb:].
-    // The remaining part of B is handled by a GEMM. {
-    auto curr_nb = nb - (curr_step + pivot_rank - panel_start);
-    auto curr_dim = n - (curr_step + pivot_rank);
-    auto* L21 = dLD + LinOff(curr_step + pivot_rank, curr_step, lda);
-    auto* U12 = dLD + LinOff(curr_step, curr_step + pivot_rank, lda);
-    auto* B   = dLD + LinOff(curr_step + pivot_rank, curr_step + pivot_rank, lda);
-
-    auto numel = curr_nb * curr_dim;
-
-    if (pivot_rank == 1) {
-      // Update B[:, :curr_nb]
-      for (int linidx = tid; linidx < numel; linidx += BS) {
-        auto r = linidx % curr_dim;
-        auto c = linidx / curr_dim;
-        B[LinOff(r, c, lda)] -= L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)];
-      }
-      // Update B[:curr_nb, curr_nb:]
-      curr_dim -= curr_nb;
-      if (curr_dim > 0) {
-        B   += LinOff(0, curr_nb, lda);
-        U12 += LinOff(0, curr_nb, lda);
-        numel = curr_dim * curr_nb;
-        for (int linidx = tid; linidx < numel; linidx += BS) {
-          auto r = linidx % curr_nb;
-          auto c = linidx / curr_nb;
+    // The remaining part of B is handled by an external GEMM. {
+    auto update_trailing_B = [&](auto* __restrict__ B, int h, int w,
+                                 const auto* __restrict__ L21, const auto* __restrict__ U12) {
+      auto numel = h * w;
+      if (pivot_rank == 1) {
+        for (int idx = threadIdx.x; idx < numel; idx += BS) {
+          auto r = idx % h;
+          auto c = idx / h;
           B[LinOff(r, c, lda)] -= L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)];
         }
-      }
-    } else { // pivot_rank == 2
-      // Update B[:, :curr_nb]
-      for (int linidx = tid; linidx < numel; linidx += BS) {
-        auto r = linidx % curr_dim;
-        auto c = linidx / curr_dim;
-        B[LinOff(r, c, lda)] -= (L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)]
-                               + L21[LinOff(r, 1, lda)] * U12[LinOff(1, c, lda)]);
-      }
-      // Update B[:curr_nb, curr_nb:]
-      curr_dim -= curr_nb;
-      if (curr_dim > 0) {
-        B   += LinOff(0, curr_nb, lda);
-        U12 += LinOff(0, curr_nb, lda);
-        numel = curr_dim * curr_nb;
-        for (int linidx = tid; linidx < numel; linidx += BS) {
-          auto r = linidx % curr_nb;
-          auto c = linidx / curr_nb;
+      } else {
+        for (int idx = threadIdx.x; idx < numel; idx += BS) {
+          auto r = idx % h;
+          auto c = idx / h;
           B[LinOff(r, c, lda)] -= (L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)]
                                  + L21[LinOff(r, 1, lda)] * U12[LinOff(1, c, lda)]);
         }
       }
-    }
+    };
+    auto curr_nb = nb - (curr_step + pivot_rank - panel_start);
+    auto curr_dim = n - (curr_step + pivot_rank);
+    const auto* __restrict__ L21 = dLD + LinOff(curr_step + pivot_rank, curr_step, lda);
+    const auto* __restrict__ U12 = dLD + LinOff(curr_step, curr_step + pivot_rank, lda);
+    auto* __restrict__ B = dLD + LinOff(curr_step + pivot_rank, curr_step + pivot_rank, lda);
+
+    // Update B[:, :curr_nb]
+    update_trailing_B(B, curr_dim, curr_nb, L21, U12);
+
+    // Update B[:curr_nb, curr_nb:]
+    curr_dim -= curr_nb;
+    B   += LinOff(0, curr_nb, lda);
+    U12 += LinOff(0, curr_nb, lda);
+    update_trailing_B(B, curr_nb, curr_dim, L21, U12);
     // }
 
     // Finish iteration
