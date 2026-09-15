@@ -17,7 +17,6 @@ from torch.distributed.fsdp._common_utils import (
     replace_grad_tensors,
 )
 from torch.profiler import record_function
-from torch.utils.checkpoint import _bypass_sac_dispatch_modes
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -126,6 +125,15 @@ class FSDPCommContext:
             return self.all_gather_copy_in_stream, self.all_gather_stream
         current_stream = self.device_handle.current_stream()
         return current_stream, current_stream
+
+    def release_all_gather_state(self, *wait_streams: torch.Stream) -> None:
+        """Release the deferred all-gather result after ordering its consumers."""
+        if (all_gather_state := self.all_gather_state) is None:
+            return
+        if all_gather_state.event is not None:
+            for stream in wait_streams:
+                stream.wait_event(all_gather_state.event)
+        self.all_gather_state = None
 
 
 # See [Note: Overlapping all-gather copy-in and all-gather]
@@ -415,17 +423,14 @@ class FSDPParamGroup:
             return
 
         with record_function(self._with_fqn("FSDP::all_gather")):
-            with _bypass_sac_dispatch_modes():
-                self._all_gather_result = foreach_all_gather(
-                    self.fsdp_params,
-                    self._all_gather_process_group,
-                    async_op,
-                    *self.comm_ctx.get_all_gather_streams(
-                        async_op, self._training_state
-                    ),
-                    self.device,
-                    self._all_gather_comm,
-                )
+            self._all_gather_result = foreach_all_gather(
+                self.fsdp_params,
+                self._all_gather_process_group,
+                async_op,
+                *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
+                self.device,
+                self._all_gather_comm,
+            )
 
     @_disable_functorch_if_active
     def wait_for_unshard(self):
@@ -441,9 +446,10 @@ class FSDPParamGroup:
             return  # no preceding unshard
         async_op = self._all_gather_result.all_gather_work is not None
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
-            if prev_all_gather_state := self.comm_ctx.all_gather_state:
-                self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
-                self.comm_ctx.all_gather_state = None  # free the all-gather result
+            self.comm_ctx.release_all_gather_state(
+                self.comm_ctx.all_gather_copy_in_stream,
+                self.comm_ctx.all_gather_stream,
+            )
         if isinstance(self.mesh_info, FSDPMeshInfo):
             world_size = self._all_gather_process_group.size()
         else:
@@ -474,12 +480,11 @@ class FSDPParamGroup:
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-                with _bypass_sac_dispatch_modes():
-                    foreach_all_gather_copy_out(
-                        self._all_gather_result,
-                        self.fsdp_params,
-                        self._all_gather_process_group,
-                    )
+                foreach_all_gather_copy_out(
+                    self._all_gather_result,
+                    self.fsdp_params,
+                    self._all_gather_process_group,
+                )
 
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()
