@@ -157,6 +157,7 @@ class HeuristicType(Enum):
 
 class AutotuneHint(Enum):
     ONE_ELEMENT_PER_THREAD = 0
+    SCALAR_ACCUMULATORS = 1
 
     # Triton codegen tries to codegen set of AutotuneHints.
     # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
@@ -340,6 +341,7 @@ class InductorMeta(typing.TypedDict, total=False):
     combo_tuning_groups: typing.Any
     combo_coordesc_field_order: list[str]
     combo_coordesc_field_limits: dict[str, int]
+    combo_coordesc_field_minimums: dict[str, int]
     combo_warp_stage_candidates: typing.Any
     extra_launcher_args: typing.Any
     fixed_grid: typing.Any

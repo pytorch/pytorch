@@ -9,7 +9,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/empty.h>
 #include <ATen/ops/repeat_interleave.h>
 #include <ATen/ops/repeat_interleave_native.h>
 #endif

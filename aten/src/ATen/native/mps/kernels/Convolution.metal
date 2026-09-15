@@ -292,7 +292,7 @@ kernel void conv_weight_to_dhwio(
        input_channel) *
           params.output_channels +
       output_channel;
-  for (int kernel_width_index = 0; kernel_width_index < params.kernel_width;
+  for (uint kernel_width_index = 0; kernel_width_index < params.kernel_width;
        ++kernel_width_index) {
     destination_row
         [kernel_width_index * params.input_channels_per_group *
@@ -310,9 +310,7 @@ INSTANTIATE_CONV_WEIGHT_TO_DHWIO(float)
 INSTANTIATE_CONV_WEIGHT_TO_DHWIO(half)
 INSTANTIATE_CONV_WEIGHT_TO_DHWIO(bfloat)
 
-#if __METAL_VERSION__ >= 400 && \
-    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
-#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#if C10_METAL_HAS_MPP
 #include <metal_cooperative_tensor>
 #include <metal_simdgroup>
 
@@ -822,7 +820,7 @@ INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 1, 1, 64, 64)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 2, 2, dyn, -1)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 2, 2, 2, dyn, -1)
 
-#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
+#endif // C10_METAL_HAS_MPP
 
 // Direct NCHW conv fallback for filter dims >= 256 (MPSGraph miscomputes); each
 // thread does R consecutive ow outputs. I is int when all numels fit in int32.
