@@ -224,6 +224,10 @@ struct PyObjectDispatchFunc {
   // PyObject_New does not run C++ constructors, so keep non-trivial C++
   // state behind pointers and delete it in tp_dealloc.
   c10::OperatorHandle* handle;
+  // OperatorHandle is a non-owning view: the Dispatcher frees the OperatorDef
+  // once its last registration goes away, which can happen while this object
+  // is still reachable from Python. Hold a registration so it cannot.
+  c10::RegistrationHandleRAII* registration;
   c10::impl::PyInterpreter* interpreter;
   vectorcallfunc vectorcall;
 };
@@ -235,6 +239,8 @@ struct PyObjectRedispatchFunc {
   // PyObject_New does not run C++ constructors, so keep non-trivial C++
   // state behind pointers and delete it in tp_dealloc.
   c10::OperatorHandle* handle;
+  // See PyObjectDispatchFunc::registration.
+  c10::RegistrationHandleRAII* registration;
   c10::impl::PyInterpreter* interpreter;
   vectorcallfunc vectorcall;
 };
@@ -573,12 +579,14 @@ static PyObject* pyobject_redispatch_vectorcall(
 static void pyobject_dispatch_dealloc(PyObjectDispatchFunc* self) {
   Py_XDECREF(self->cpp_dispatch_fn);
   Py_XDECREF(self->cpp_redispatch_fn);
+  delete self->registration;
   delete self->handle;
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
 static void pyobject_redispatch_dealloc(PyObjectRedispatchFunc* self) {
   Py_XDECREF(self->cpp_redispatch_fn);
+  delete self->registration;
   delete self->handle;
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
@@ -597,6 +605,10 @@ static PyObject* make_pyobject_dispatch_func(
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
   auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
+  // Acquire before PyObject_New so a throw here cannot leak a half-built
+  // object.
+  auto registration = std::make_unique<c10::RegistrationHandleRAII>(
+      c10::Dispatcher::singleton().registerName(handle.operator_name()));
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
   TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_dispatch_fn);
@@ -604,6 +616,7 @@ static PyObject* make_pyobject_dispatch_func(
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
   result->handle = owned_handle.release();
+  result->registration = registration.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -614,12 +627,17 @@ static PyObject* make_pyobject_redispatch_func(
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
   auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
+  // Acquire before PyObject_New so a throw here cannot leak a half-built
+  // object.
+  auto registration = std::make_unique<c10::RegistrationHandleRAII>(
+      c10::Dispatcher::singleton().registerName(handle.operator_name()));
   auto* result =
       PyObject_New(PyObjectRedispatchFunc, &PyObjectRedispatchFuncType);
   TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_redispatch_fn = cpp_redispatch_fn;
   result->handle = owned_handle.release();
+  result->registration = registration.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
