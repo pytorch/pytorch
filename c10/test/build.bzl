@@ -52,6 +52,7 @@ def define_targets(rules):
             ":complex_math_test_common",
             ":complex_test_common",
             "//c10/macros",
+            "//c10/util:TypeCast",
             "//c10/util:base",
             "@com_google_googletest//:gtest_main",
         ],
