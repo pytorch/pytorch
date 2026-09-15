@@ -9,10 +9,11 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
+from types import MappingProxyType
 from typing import Any, cast, Literal, NamedTuple, Protocol
 
 import torch
@@ -200,71 +201,24 @@ _PipelineResourceKey = int | tuple[int, int]
 
 
 @dataclass(frozen=True)
-class _PipelineResourceLifetime:
-    """One schedule-derived resource lifetime and its assigned slot."""
-
-    stage_index: int | None
-    microbatch_index: int
-    start_position: int
-    release_position: int
-    slot: int
-
-
-@dataclass(frozen=True)
 class _PipelineResourceLiveness:
-    """Immutable resource-slot plan derived from an executable schedule."""
+    """Deterministic resource-slot assignments for one pipeline rank."""
 
-    physical_rank: int
+    rank: int
     granularity: _PipelineResourceGranularity
     stage_indices: tuple[int, ...]
     num_microbatches: int
-    local_compute_actions: tuple[tuple[int, _Action], ...]
-    lifetimes: tuple[_PipelineResourceLifetime, ...]
+    assignments: Mapping[tuple[int, int], int]
     num_slots: int
 
-    @property
-    def peak_live_count(self) -> int:
-        """Return the maximum number of simultaneously live resources."""
-        return self.num_slots
-
     def slot_for(self, stage_index: int, microbatch_index: int) -> int:
-        """Return the assigned slot for one stage and microbatch.
-
-        Args:
-            stage_index: Global logical pipeline-stage index.
-            microbatch_index: Raw schedule microbatch index.
-
-        Returns:
-            The deterministic resource-slot index.
-
-        Raises:
-            ValueError: If either identifier is outside this plan.
-        """
-        if stage_index not in self.stage_indices:
-            raise ValueError(f"Stage {stage_index} is not tracked by this plan")
-        if not 0 <= microbatch_index < self.num_microbatches:
+        """Return the slot for a global stage and microbatch pair."""
+        try:
+            return self.assignments[(stage_index, microbatch_index)]
+        except KeyError as error:
             raise ValueError(
-                f"Microbatch {microbatch_index} is outside [0, {self.num_microbatches})"
-            )
-
-        lifetime_stage = None if self.granularity == "microbatch" else stage_index
-        for lifetime in self.lifetimes:
-            if (
-                lifetime.stage_index == lifetime_stage
-                and lifetime.microbatch_index == microbatch_index
-            ):
-                return lifetime.slot
-        raise ValueError(
-            f"No slot exists for stage {stage_index}, microbatch {microbatch_index}"
-        )
-
-
-@dataclass(frozen=True)
-class _PipelineRecvBufferSlots:
-    """Static forward and backward receive-slot assignments for one stage."""
-
-    forward: dict[int, int]
-    backward: dict[int, int]
+                f"No slot exists for stage {stage_index}, microbatch {microbatch_index}"
+            ) from error
 
 
 def _assign_pipeline_resource_slots(
@@ -280,95 +234,15 @@ def _assign_pipeline_resource_slots(
         while active and active[0][0] < start:
             _, slot = heapq.heappop(active)
             heapq.heappush(free_slots, slot)
-        slot = heapq.heappop(free_slots) if free_slots else next_slot
-        if slot == next_slot:
+        if free_slots:
+            slot = heapq.heappop(free_slots)
+        else:
+            slot = next_slot
             next_slot += 1
         assignments[key] = slot
         heapq.heappush(active, (release, slot))
 
     return assignments, next_slot
-
-
-def _assign_pipeline_recv_buffer_slots(
-    actions: Sequence[_Action],
-    *,
-    has_backward: bool,
-) -> dict[int, _PipelineRecvBufferSlots]:
-    """Derive receive-buffer lifetimes from a finalized local schedule."""
-    starts: dict[tuple[int, _ComputationType, int], int] = {}
-    releases: dict[tuple[int, _ComputationType, int], int] = {}
-
-    def process(action: _Action, position: int) -> None:
-        if action.sub_actions is not None:
-            for sub_action in action.sub_actions:
-                process(sub_action, position)
-            return
-        microbatch_index = action.microbatch_index
-        if microbatch_index is None:
-            return
-
-        computation_type = action.computation_type
-        if computation_type in (RECV_F, RECV_B):
-            if computation_type == RECV_B and not has_backward:
-                return
-            key = (action.stage_index, computation_type, microbatch_index)
-            if key in starts:
-                raise ValueError(f"Receive {key} appears more than once")
-            starts[key] = position
-            return
-
-        release_directions: tuple[_ComputationType, ...] = ()
-        if has_backward and computation_type in (FULL_BACKWARD, BACKWARD_WEIGHT):
-            release_directions = (RECV_F, RECV_B)
-        for direction in release_directions:
-            key = (action.stage_index, direction, microbatch_index)
-            if key in starts:
-                if key in releases:
-                    raise ValueError(f"Receive {key} is released more than once")
-                releases[key] = position
-
-    for position, action in enumerate(actions):
-        process(action, position)
-
-    if not has_backward:
-        # An inference output may alias its received input. Keep each input
-        # alive until the runtime has waited for every send at step completion.
-        final_position = len(actions)
-        releases.update(dict.fromkeys(starts, final_position))
-
-    missing_releases = sorted(starts.keys() - releases.keys(), key=str)
-    if missing_releases:
-        raise ValueError(
-            f"Receive-buffer lifetimes have no release action: {missing_releases}"
-        )
-
-    intervals: dict[
-        tuple[int, _ComputationType], list[tuple[_PipelineResourceKey, int, int]]
-    ] = defaultdict(list)
-    for (stage_index, direction, microbatch_index), start in starts.items():
-        intervals[(stage_index, direction)].append(
-            (
-                microbatch_index,
-                start,
-                releases[(stage_index, direction, microbatch_index)],
-            )
-        )
-
-    mutable_slots: dict[int, dict[_ComputationType, dict[int, int]]] = defaultdict(dict)
-    for (stage_index, direction), direction_intervals in intervals.items():
-        assignments, _ = _assign_pipeline_resource_slots(direction_intervals)
-        mutable_slots[stage_index][direction] = {
-            cast(int, microbatch_index): slot
-            for microbatch_index, slot in assignments.items()
-        }
-
-    return {
-        stage_index: _PipelineRecvBufferSlots(
-            forward=by_direction.get(RECV_F, {}),
-            backward=by_direction.get(RECV_B, {}),
-        )
-        for stage_index, by_direction in mutable_slots.items()
-    }
 
 
 @lru_cache
@@ -4074,19 +3948,19 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
 def _analyze_pipeline_resource_liveness(
     schedule: PipelineScheduleMulti,
     *,
-    physical_rank: int,
+    rank: int,
     stage_indices: Sequence[int],
     granularity: _PipelineResourceGranularity,
 ) -> _PipelineResourceLiveness:
     """Derive deterministic resource slots from a finalized pipeline schedule.
 
-    The resource is acquired immediately before forward and released after the
-    corresponding full backward or weight-backward action. Input-backward does
-    not release it because a later weight-backward may still consume state.
+    Each lifetime is inclusive of its forward and full- or weight-backward
+    action positions. Input-backward does not release the resource because a
+    custom deferred weight-backward closure may still consume forward state.
 
     Args:
         schedule: Constructed multi-stage schedule that will execute the step.
-        physical_rank: Pipeline rank whose local actions should be analyzed.
+        rank: Pipeline rank whose local actions should be analyzed.
         stage_indices: Global logical stages that use the planned resource.
         granularity: Share one lifetime across a microbatch or track each
             stage/microbatch pair independently.
@@ -4106,36 +3980,27 @@ def _analyze_pipeline_resource_liveness(
     if len(set(tracked_stages)) != len(tracked_stages):
         raise ValueError("stage_indices must be unique")
 
-    pipeline_order = getattr(schedule, "pipeline_order_with_comms", None)
-    if pipeline_order is None:
-        pipeline_order = schedule.pipeline_order
-    if physical_rank not in pipeline_order:
-        raise ValueError(
-            f"Rank {physical_rank} is not present in the pipeline schedule"
-        )
+    pipeline_order = (
+        schedule.pipeline_order_with_comms
+        if isinstance(schedule, _PipelineScheduleRuntime)
+        else schedule.pipeline_order
+    )
+    if rank not in pipeline_order:
+        raise ValueError(f"Rank {rank} is not present in the pipeline schedule")
 
     num_microbatches = schedule._n_microbatches
     tracked_stage_set = set(tracked_stages)
-    local_compute_actions: list[tuple[int, _Action]] = []
     starts: dict[tuple[int, int], int] = {}
     releases: dict[tuple[int, int], int] = {}
     input_backwards: set[tuple[int, int]] = set()
 
-    for position, action in enumerate(pipeline_order[physical_rank]):
-        if action is None:
-            continue
+    def process(action: _Action, position: int) -> None:
         if action.sub_actions is not None:
-            if any(
-                sub_action.stage_index in tracked_stage_set
-                for sub_action in action.sub_actions
-            ):
-                raise ValueError(
-                    "Overlapped pipeline actions are not supported by resource "
-                    "liveness analysis"
-                )
-            continue
+            for sub_action in action.sub_actions:
+                process(sub_action, position)
+            return
         if not action.is_compute_op or action.stage_index not in tracked_stage_set:
-            continue
+            return
         if action.microbatch_index is None:
             raise ValueError(f"Compute action {action} has no microbatch index")
         if not 0 <= action.microbatch_index < num_microbatches:
@@ -4143,7 +4008,6 @@ def _analyze_pipeline_resource_liveness(
                 f"Action {action} has a microbatch outside [0, {num_microbatches})"
             )
 
-        local_compute_actions.append((position, action))
         key = (action.stage_index, action.microbatch_index)
         if action.computation_type == FORWARD:
             if key in starts:
@@ -4169,6 +4033,12 @@ def _analyze_pipeline_resource_liveness(
                     "input backward"
                 )
             releases[key] = position
+
+    for position, action in enumerate(pipeline_order[rank]):
+        if action is None:
+            # Compute-only schedules retain bubbles as ``None``.
+            continue
+        process(action, position)
 
     expected = {
         (stage_index, microbatch_index)
@@ -4213,24 +4083,21 @@ def _analyze_pipeline_resource_liveness(
             for key in sorted(expected, key=lambda item: (starts[item], item))
         ]
 
-    assignments, num_slots = _assign_pipeline_resource_slots(intervals)
-    lifetimes = tuple(
-        _PipelineResourceLifetime(
-            stage_index=key[0] if isinstance(key, tuple) else None,
-            microbatch_index=key[1] if isinstance(key, tuple) else key,
-            start_position=start,
-            release_position=release,
-            slot=assignments[key],
-        )
-        for key, start, release in intervals
-    )
+    resource_assignments, num_slots = _assign_pipeline_resource_slots(intervals)
+    assignments = {
+        (stage_index, microbatch_index): resource_assignments[
+            microbatch_index
+            if granularity == "microbatch"
+            else (stage_index, microbatch_index)
+        ]
+        for stage_index, microbatch_index in expected
+    }
     return _PipelineResourceLiveness(
-        physical_rank=physical_rank,
+        rank=rank,
         granularity=granularity,
         stage_indices=tracked_stages,
         num_microbatches=num_microbatches,
-        local_compute_actions=tuple(local_compute_actions),
-        lifetimes=lifetimes,
+        assignments=MappingProxyType(assignments),
         num_slots=num_slots,
     )
 
