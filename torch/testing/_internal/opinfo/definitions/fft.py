@@ -821,6 +821,30 @@ python_ref_db: list[OpInfo] = [
                 dtypes=(torch.float16,),
                 device_type="cuda",
             ),
+            # XPU: oneMKL has no half DFT, so the eager kernel computes in
+            # float32 and the float16 ref cannot match its accuracy.
+            # See https://github.com/intel/torch-xpu-ops/issues/5271
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_executor",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
@@ -891,6 +915,23 @@ python_ref_db: list[OpInfo] = [
                 "test_python_ref",
                 dtypes=(torch.float16,),
                 device_type="cuda",
+            ),
+            # XPU: oneMKL has no half DFT, so the eager kernel computes in
+            # float32 and the float16 ref cannot match its accuracy.
+            # See https://github.com/intel/torch-xpu-ops/issues/5271
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_executor",
+                dtypes=(torch.float16,),
+                device_type="xpu",
             ),
         ],
     ),
