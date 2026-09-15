@@ -4529,7 +4529,9 @@ class PythonWrapperCodegen(CodeGen):
             )
             self.kernel_autotune_calls.do_indent()
             self.kernel_autotune_calls.writeline(
-                f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
+                f"{kernel_name}.precompile_and_save(stream={stream_name})"
+                if inductor_meta and inductor_meta.get("has_indirect_access")
+                else f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
             self.kernel_autotune_calls.do_unindent()
 
