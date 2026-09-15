@@ -612,11 +612,13 @@ class ModeBranchGlobalModule(torch.nn.Module):
         return x * 2
 
 
-class TensorDefaultModule(torch.nn.Module):
+def make_masked_forward():
     # A tensor default makes inspect.Signature equality raise (Parameter.__eq__
     # takes bool() of `default == default`), whether or not the body reads it.
     def forward(self, x, mask=torch.ones(3)):
         return x * 2
+
+    return forward
 
 
 def make_scaling_forward(scale):
@@ -641,6 +643,28 @@ def aot_compile_forward(mod, forward, *args):
     model = torch.compile(mod, fullgraph=True, backend="eager")
     model._aot_compile([ModelInput(args=args, kwargs={}, contexts=[])])
     return model.forward.compiled_results[0]
+
+
+def compile_mode_defaults(x, *doubles_call):
+    # Two results of one module whose signatures differ only in the default
+    # for `mode`: [0] defaults it to 1 and is compiled for `x`, [1] defaults it
+    # to 0 and is compiled for `doubles_call`.
+    mod = ScaleModule()
+    triples = aot_compile_forward(mod, make_mode_default_forward(1), x)
+    doubles = aot_compile_forward(mod, make_mode_default_forward(0), *doubles_call)
+    return mod, triples, doubles
+
+
+class RecordedThread(threading.Thread):
+    # Keeps what its target raised, which threading would only print to stderr,
+    # so the test that joins it can fail on it.
+    failure: Exception | None = None
+
+    def run(self):
+        try:
+            super().run()
+        except Exception as e:
+            self.failure = e
 
 
 AOT_POOL_MODE = "sum"
@@ -2058,8 +2082,9 @@ from user code:
         dtypes = (torch.float32, torch.float64, torch.int64, torch.bfloat16)
         xs = [torch.ones(3, 3, dtype=dtype) for dtype in dtypes]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
-        compiled = model.forward
-        self.assertTrue(compiled._binds_alike(tuple(compiled.compiled_results)))
+        results = model.forward.compiled_results
+        self.assertEqual(len(results), 4)
+        self.assertTrue(model.forward._binds_alike(tuple(results)))
         binds = []
         bind = AOTCompiledFunction.prepare_f_locals
 
@@ -2067,15 +2092,16 @@ from user code:
             binds.append(result)
             return bind(result, *args, **kwargs)
 
-        with patch.object(AOTCompiledFunction, "prepare_f_locals", counted):
+        counting = patch.object(AOTCompiledFunction, "prepare_f_locals", counted)
+        with counting, patch.object(results[3], "fn", wraps=results[3].fn) as served:
             self.assertEqual(model(xs[3]), mod(xs[3]))
-        self.assertEqual(len(binds), 1)
+        served.assert_called_once()
+        self.assertEqual(binds, [results[0]])
 
     def test_module_dispatch_decides_a_shared_binding_past_the_first_result(self):
-        # Whether results bind alike is decided once a call reaches a second
-        # result, so a call the first result serves -- every call to a
-        # single-result model -- pays nothing for the shared binding, and
-        # nothing decides eagerly: the verdict stays at its default until then.
+        # Whether results bind alike is asked only once the first result has
+        # refused a call, so a call it serves pays nothing for the shared
+        # binding, and a single-result model never asks, served or not.
         mod, xs = ScaleModule(), (torch.randn(3, 3), torch.randn(3, 3).double())
         results = [aot_compile_forward(mod, ScaleModule.forward, x) for x in xs]
         combined = AOTCompiledModel(mod, results)
@@ -2085,7 +2111,12 @@ from user code:
             verdict.assert_not_called()
             self.assertEqual(combined(xs[1]), xs[1] * 2)
             verdict.assert_called_once()
-        self.assertEqual(combined._binding_verdict, ((), False))
+        single = AOTCompiledModel(mod, results[:1])
+        with patched as verdict:
+            self.assertEqual(single(xs[0]), xs[0] * 2)
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                single(xs[1])
+            verdict.assert_not_called()
 
     def test_module_dispatch_binds_per_result_when_signatures_differ(self):
         # Results assembled by hand need not agree on a signature, and the guards
@@ -2112,11 +2143,11 @@ from user code:
         # compiled_results is a public list, so the one-bind-per-call decision is
         # made again when its contents change: a result appended with its own
         # default for `mode` is bound from that default, not from [0]'s.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
-        combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
+        x = torch.randn(3, 3)
+        mod, triples, doubles = compile_mode_defaults(x, x.double())
+        combined = AOTCompiledModel(mod, [triples])
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
-        combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
+        combined.compiled_results.append(doubles)
         # Without the re-decision this call would be bound from [0], where mode
         # reads 1, and [1]'s `mode == 0` guard would reject it.
         self.assertEqual(combined(x.double()), x.double() * 2)
@@ -2126,12 +2157,12 @@ from user code:
         # [1] is compiled for mode=1 but defaults mode to 0, so a call leaving
         # mode out has no graph: bound from [0], where mode defaults to 1, its
         # guards would pass and serve x * 3 for a call eager answers x * 2.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
-        results = [aot_compile_forward(mod, triples, t) for t in (x, x.double())]
-        combined = AOTCompiledModel(mod, results)
+        x = torch.randn(3, 3)
+        mod, triples, doubles = compile_mode_defaults(x, x.double(), 1)
+        alike = aot_compile_forward(mod, make_mode_default_forward(1), x.double())
+        combined = AOTCompiledModel(mod, [triples, alike])
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
-        combined.compiled_results[1] = aot_compile_forward(mod, doubles, x.double(), 1)
+        combined.compiled_results[1] = doubles
         self.assertEqual(combined(x.double(), 1), x.double() * 3)
         with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
             combined(x.double())
@@ -2180,21 +2211,21 @@ from user code:
         # the old True: the decider is held inside its first _binding_key, before
         # it publishes anything, and the call made in that window decides for
         # itself and binds [1] from its own default.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
-        combined = AOTCompiledModel(mod, [aot_compile_forward(mod, triples, x)])
+        x = torch.randn(3, 3)
+        mod, triples, doubles = compile_mode_defaults(x, x.double())
+        combined = AOTCompiledModel(mod, [triples])
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
-        combined.compiled_results.append(aot_compile_forward(mod, doubles, x.double()))
+        combined.compiled_results.append(doubles)
         entered, release = threading.Event(), threading.Event()
         binding_key = torch._dynamo.aot_compile._binding_key
 
         def held(artifacts):
             if threading.current_thread() is decider:
                 entered.set()
-                release.wait()
+                release.wait(timeout=10)
             return binding_key(artifacts)
 
-        decider = threading.Thread(
+        decider = RecordedThread(
             target=combined._binds_alike, args=(tuple(combined.compiled_results),)
         )
         with patch("torch._dynamo.aot_compile._binding_key", held):
@@ -2208,6 +2239,7 @@ from user code:
             self.assertEqual(combined(x.double()), x.double() * 2)
             release.set()
             decider.join()
+        self.assertIsNone(decider.failure)
         self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
     def test_module_dispatch_never_pairs_old_contents_with_a_new_verdict(self):
@@ -2219,19 +2251,17 @@ from user code:
         # call identity-matched the contents still published beside it, bound [1]
         # from [0]'s `mode=1` default and served x * 3 for a call eager answers
         # x * 2; judged on its own binding, [1]'s `mode == 1` guard rejects it.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        triples, doubles = make_mode_default_forward(1), make_mode_default_forward(0)
-        first = aot_compile_forward(mod, triples, x)
-        second = aot_compile_forward(mod, doubles, x.double(), 1)
+        x = torch.randn(3, 3)
+        mod, first, second = compile_mode_defaults(x, x.double(), 1)
         entered, release = threading.Event(), threading.Event()
-        decider = threading.Thread(target=lambda: combined._binds_alike((first,)))
+        decider = RecordedThread(target=lambda: combined._binds_alike((first,)))
 
         class Held(AOTCompiledModel):
             def __setattr__(self, name, value):
                 super().__setattr__(name, value)
                 if threading.current_thread() is decider and not entered.is_set():
                     entered.set()
-                    release.wait()
+                    release.wait(timeout=10)
 
         combined = Held(mod, [first, second])
         self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
@@ -2251,8 +2281,12 @@ from user code:
         with patch.object(AOTCompiledModel, "_binds_alike", racing):
             with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
                 combined(x.double())
+            # Only racing starts the decider: a dispatch that stopped consulting
+            # _binds_alike would still raise above and leave the race untested.
+            self.assertIsNotNone(decider.ident)
             release.set()
             decider.join()
+        self.assertIsNone(decider.failure)
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
 
     def _aot_compile_mode_branches(self):
@@ -2476,7 +2510,8 @@ from user code:
         # results share a binding; deciding that through Signature equality
         # raised `Boolean value of Tensor with more than one value is ambiguous`
         # on the first call, for _aot_compile and deserialize alike.
-        mod = TensorDefaultModule()
+        mod = torch.nn.Module()
+        mod.forward = types.MethodType(make_masked_forward(), mod)
         model = torch.compile(mod, fullgraph=True, backend="eager")
         xs = [torch.randn(3, 3), torch.randn(3, 3, dtype=torch.float64)]
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
@@ -2485,7 +2520,9 @@ from user code:
         for x in xs:
             self.assertEqual(model(x), x * 2)
         # Each result unpickles on its own, so the loaded results hold distinct
-        # default objects and bind per result: a false negative, not a false share.
+        # default objects and bind per result: a false negative, not a false
+        # share, pinned as the accepted limitation; a load that shared one memo
+        # across the blobs would flip it to True and is free to.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
         self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
@@ -2515,7 +2552,7 @@ from user code:
         self.assertEqual(combined(xs[0]), xs[0] * 3)
         self.assertEqual(combined(xs[1]), xs[1] * 5)
         # Loading gives each result a cell of its own, so a round trip binds per
-        # result too.
+        # result too: the same accepted limitation, equally free to flip.
         loaded = AOTCompiledModel.deserialize(mod, model.forward.serialize())
         self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
