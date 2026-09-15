@@ -568,9 +568,15 @@ if _enabled:
                     # class in question, and not on a superclass (which would
                     # be wrong wrong wrong!).
                     # See also https://github.com/pytorch/pytorch/issues/39463
-                    if "__annotations__" not in self.__class__.__dict__:
-                        self.__class__.__annotations__ = {}
-                    self.__annotations__[attr] = value.type
+                    #
+                    # Reading through the class rather than the instance is
+                    # required on 3.14+: PEP 649 moved class-body annotations
+                    # out of `cls.__dict__["__annotations__"]`, leaving
+                    # `__annotations__` reachable only as a descriptor on
+                    # `type`. `type.__annotations__` lazily creates a dict
+                    # owned by this class when it has none of its own, so no
+                    # superclass is mutated.
+                    self.__class__.__annotations__[attr] = value.type
                     value = value.value
                 return super().__setattr__(attr, value)
 
