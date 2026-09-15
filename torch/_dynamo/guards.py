@@ -1013,19 +1013,9 @@ def _guard_device_index_is_current(
     if source in decisions:
         return decisions[source]
 
-    from torch.fx.experimental.proxy_tensor import _coor_enabled
+    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 
-    if not _coor_enabled():
-        result = False
-    else:
-        device = value.device
-        acc = torch.accelerator.current_accelerator()
-        result = (
-            device.index is not None
-            and acc is not None
-            and device.type == acc.type
-            and device.index == torch.accelerator.current_device_index()
-        )
+    result = _coor_device_index_is_current(value.device)
     decisions[source] = result
     return result
 
