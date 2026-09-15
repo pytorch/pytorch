@@ -984,6 +984,10 @@ class PallasKernel(SIMDKernel):
         # For now, skip explicit bounds checking as JAX/Pallas handles this internally
         # TODO: Implement explicit bounds checking with assertions if needed
 
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        # Pallas/JAX does not support device-side runtime assertions; skip.
+        pass
+
     def _get_index_str(self, index: sympy.Expr) -> str:
         """
         Convert an index expression to a string suitable for Pallas indexing.
