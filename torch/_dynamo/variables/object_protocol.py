@@ -798,6 +798,41 @@ def pynumber_float(
     )
 
 
+def pyfloat_as_double(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
+    """Mirrors PyFloat_AsDouble, returning a plain float VariableTracker.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L221-L271
+    """
+    if issubclass(obj.python_type(), float):
+        result = obj
+    elif obj.tp_as_number.nb_float is not None:
+        result = obj.nb_float_impl(tx)
+        if not issubclass(result.python_type(), float):
+            raise_type_error(
+                tx,
+                f"{obj.python_type_name()}.__float__ returned non-float "
+                f"(type {result.python_type_name()})",
+            )
+    elif obj.tp_as_number.nb_index is not None:
+        index = pynumber_index(tx, obj)
+        if index.is_python_constant():
+            try:
+                value = int.__float__(index.as_python_constant())
+                return ConstantVariable.create(value)
+            except OverflowError as exc:
+                raise_observed_exception(OverflowError, tx, args=[str(exc)])
+        return index.nb_float_impl(tx)
+    else:
+        raise_type_error(tx, f"must be real number, not {obj.python_type_name()}")
+
+    if result.is_python_constant():
+        # PyFloat_AS_DOUBLE reads the payload without calling subclass overrides.
+        return ConstantVariable.create(float.__float__(result.as_python_constant()))
+    return result
+
+
 def getindex(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
