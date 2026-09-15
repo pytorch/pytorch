@@ -26,7 +26,11 @@ def throw_on_non_cuda(device):
 
 def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
     rngprim_def = torch.library.custom_op(
-        "rngprims::" + name, impl_aten, mutates_args=(), schema=schema
+        "rngprims::" + name,
+        impl_aten,
+        mutates_args=(),
+        schema=schema,
+        tags=tags,
     )
 
     rngprim_def.register_fake(impl_meta)

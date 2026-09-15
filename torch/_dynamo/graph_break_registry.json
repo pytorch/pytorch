@@ -1351,6 +1351,16 @@
   "GB0090": [
     {
       "Gb_type": "Operator does not support running with fake tensors",
+      "Context": "unsupported operator: {op}",
+      "Explanation": "",
+      "Hints": [
+        "{import_suggestion}see ",
+        "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0",
+        " for how to fix"
+      ]
+    },
+    {
+      "Gb_type": "Operator does not support running with fake tensors",
       "Context": "unsupported operator: {cause.func}",
       "Explanation": "",
       "Hints": [
