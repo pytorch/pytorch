@@ -4,11 +4,12 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "Hopper+ required")
 @skipIfNoCuteDSL
 class TestKernelXcta(TestCase):
     def test_reduce_row_xcta(self):

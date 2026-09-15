@@ -2,6 +2,8 @@
 # Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
 # axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
 
+from typing import Any
+
 from cutlass import Int32
 
 import torch
@@ -33,14 +35,20 @@ _THREADS_PER_BLOCK = 32
 _WIDE_ACC_THREADS_PER_BLOCK = 64  # 3-field traits (Welford): see above
 
 
-def _split_p(R):
+def _split_p(R: int) -> int:
     """Split the reduced axis into about _Q_TARGET rows per chunk."""
     return max(1, min(_P_MAX, -(-R // _Q_TARGET)))
 
 
 def reduce_col_tile(
-    trait, trait_key, x, out_dtype, threads_per_block=None, npar=None, vec=None
-):
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtype: torch.dtype,
+    threads_per_block: int | None = None,
+    npar: int | None = None,
+    vec: int | None = None,
+) -> torch.Tensor:
     """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways."""
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
