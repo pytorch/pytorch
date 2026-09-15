@@ -2801,7 +2801,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(aux, expected_aux)
 
     def test_fake_tensor_mode_tuple_aux_returns_fake_tensors(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_mode
 
         with FakeTensorMode() as mode:
             a = mode.from_tensor(torch.randn(8, 16))
@@ -2816,8 +2816,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(aux.shape, torch.Size([8, 12]))
         self.assertEqual(actual.dtype, torch.float32)
         self.assertEqual(aux.dtype, torch.float32)
-        self.assertIs(actual.fake_mode, mode)
-        self.assertIs(aux.fake_mode, mode)
+        self.assertIs(maybe_get_fake_mode(actual), mode)
+        self.assertIs(maybe_get_fake_mode(aux), mode)
 
     def test_autograd_is_not_implemented(self):
         a = torch.randn(8, 16, requires_grad=True)
