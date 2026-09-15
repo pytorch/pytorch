@@ -21,7 +21,12 @@ from torch.testing._internal.common_utils import (
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
-from torch.utils.flop_counter import sdpa_backward_flop_count, sdpa_flop_count
+from torch.utils.flop_counter import (
+    _efficient_attention_backward_flop,
+    _varlen_attn_backward_flop,
+    sdpa_backward_flop_count,
+    sdpa_flop_count,
+)
 
 
 try:
@@ -1350,36 +1355,63 @@ class TestFlopCounter(TestCase):
         self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
 
-    def test_varlen_attn_flops_with_unequal_qk_value_dims(self):
-        """Varlen backward uses the value dimension for output gradients."""
-        from torch.utils.flop_counter import _varlen_attn_backward_flop
-
+    def test_nested_attn_backward_flops_with_unequal_qk_value_dims(self):
         total_tokens = 16
-        query = torch.empty(total_tokens, 4, 192, device="meta")
-        key = torch.empty(total_tokens, 2, 192, device="meta")
-        value = torch.empty(total_tokens, 2, 128, device="meta")
-        grad_out = torch.empty(total_tokens, 4, 128, device="meta")
         offsets = torch.empty(3, dtype=torch.int32, device="meta")
+        cases = (
+            (
+                "flash",
+                _varlen_attn_backward_flop,
+                (total_tokens, 4, 192),
+                (total_tokens, 2, 192),
+                (total_tokens, 2, 128),
+                (total_tokens, 4, 128),
+            ),
+            (
+                "efficient",
+                _efficient_attention_backward_flop,
+                (1, total_tokens, 4, 192),
+                (1, total_tokens, 2, 192),
+                (1, total_tokens, 2, 128),
+                (1, total_tokens, 4, 128),
+            ),
+        )
+        for name, backward_flop, q_shape, k_shape, v_shape, grad_shape in cases:
+            with self.subTest(name=name):
+                query = torch.empty(q_shape, device="meta")
+                key = torch.empty(k_shape, device="meta")
+                value = torch.empty(v_shape, device="meta")
+                grad_out = torch.empty(grad_shape, device="meta")
+                actual = backward_flop(
+                    grad_out,
+                    query,
+                    key,
+                    value,
+                    None,
+                    None,
+                    offsets,
+                    offsets,
+                    8,
+                    8,
+                )
+                self.assertExpectedInline(str(actual), """851968""")
 
-        actual = _varlen_attn_backward_flop(
-            grad_out,
-            query,
-            key,
-            value,
-            None,
-            None,
-            offsets,
-            offsets,
-            8,
-            8,
-        )
-        expected = 2 * sdpa_backward_flop_count(
-            (1, 4, 8, 128),
-            (1, 4, 8, 192),
-            (1, 2, 8, 192),
-            (1, 2, 8, 128),
-        )
-        self.assertEqual(actual, expected)
+                bad_grad_out = torch.empty((*grad_shape[:-1], 64), device="meta")
+                with self.assertRaisesRegex(
+                    AssertionError, "grad_out has shape.*expected"
+                ):
+                    backward_flop(
+                        bad_grad_out,
+                        query,
+                        key,
+                        value,
+                        None,
+                        None,
+                        offsets,
+                        offsets,
+                        8,
+                        8,
+                    )
 
 
 class TestFlexAttentionEstimation(TestCase):
