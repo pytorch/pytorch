@@ -6,7 +6,7 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
@@ -27,6 +27,7 @@ from torch._native.ops.reductions import (
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelGeneral(TestCase):
     def test_reduce_dim_general_path(self):
         x = torch.randn(8, 16, 32, device="cuda")

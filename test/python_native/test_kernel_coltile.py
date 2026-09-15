@@ -4,11 +4,12 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "Hopper+ required")
 @skipIfNoCuteDSL
 class TestKernelColTile(TestCase):
     def test_reduce_col_tile_single_stage(self):
@@ -125,6 +126,8 @@ class TestKernelColTile(TestCase):
         )
 
 
+@unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "Hopper+ required")
 @skipIfNoCuteDSL
 class TestColTileHost(TestCase):
     def test_col_axis_carries_no_tile(self):
