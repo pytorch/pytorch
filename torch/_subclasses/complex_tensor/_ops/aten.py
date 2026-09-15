@@ -110,6 +110,7 @@ SIMPLE_OPS_LIST = [
     aten.t,
     aten.gather,
     aten.neg,
+    aten.nan_to_num,
 ]
 
 for simple_op in SIMPLE_OPS_LIST:
