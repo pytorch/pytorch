@@ -15248,6 +15248,33 @@ def forward(self, x, b_t, y):
         epm = export(mod, (x,)).module()
         self.assertTrue(torch.allclose(mod(x), epm(x)))
 
+    def test_bufferdict(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.offsets = torch.nn.BufferDict(
+                    {
+                        "persistent": torch.ones(3),
+                        "temporary": torch.nn.Buffer(torch.zeros(3), persistent=False),
+                    }
+                )
+
+            def forward(self, x):
+                for value in self.offsets.values():
+                    x = x + value
+                return x
+
+        model = Model()
+        x = torch.randn(2, 3)
+        ep = export(model, (x,))
+        self.assertEqual(ep.module()(x), model(x))
+        self.assertEqual(set(ep.state_dict), {"offsets.persistent"})
+        self.assertEqual(set(ep.constants), {"offsets.temporary"})
+        self.assertEqual(
+            set(dict(ep.named_buffers())), {"offsets.persistent", "offsets.temporary"}
+        )
+        self.assertEqual(set(ep.module().state_dict()), {"offsets.persistent"})
+
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:

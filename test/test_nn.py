@@ -1232,6 +1232,184 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertIsNotNone(p2.grad_fn)
             self.assertIs(p2._base, p)
 
+    def test_BufferDict(self):
+        persistent = Buffer(torch.randn(2, 3))
+        temporary = Buffer(torch.randn(2, 3), persistent=False)
+        tensor = torch.randn(2, 3)
+        buffers = nn.BufferDict(OrderedDict([
+            ("persistent", persistent), ("temporary", temporary), ("tensor", tensor), ("empty", None)
+        ]))
+        self.assertIs(buffers["persistent"], persistent)
+        self.assertIs(buffers["temporary"], temporary)
+        self.assertIsInstance(buffers["tensor"], Buffer)
+        self.assertEqual(buffers["tensor"], tensor)
+        self.assertIsNone(buffers["empty"])
+        self.assertEqual(list(buffers), ["persistent", "temporary", "tensor", "empty"])
+        self.assertEqual(list(reversed(buffers)), ["empty", "tensor", "temporary", "persistent"])
+        self.assertEqual(list(buffers.keys()), list(buffers))
+        self.assertEqual(list(buffers.items()), [(key, buffers[key]) for key in buffers])
+        self.assertEqual(list(buffers.values()), [buffers[key] for key in buffers])
+        self.assertEqual(list(buffers.parameters()), [])
+        self.assertEqual(list(buffers.named_buffers()), list(buffers.items())[:-1])
+        self.assertEqual(list(buffers.state_dict()), ["persistent", "tensor"])
+        module = nn.Module()
+        module.data = buffers
+        self.assertEqual(list(module.state_dict()), ["data.persistent", "data.tensor"])
+        self.assertEqual(list(module.parameters()), [])
+
+    def test_BufferDict_mutation(self):
+        buffers = nn.BufferDict()
+        self.assertEqual(len(buffers), 0)
+        value = Buffer(torch.ones(2), persistent=False)
+        buffers["value"] = value
+        self.assertIn("value", buffers)
+        self.assertIs(buffers.get("value"), value)
+        self.assertIs(buffers.setdefault("value", torch.zeros(2)), value)
+        self.assertIsNone(buffers.get("missing"))
+        self.assertEqual(buffers.get("missing", 123), 123)
+        self.assertIsNone(buffers.setdefault("empty"))
+        self.assertIsInstance(buffers.setdefault("other", torch.zeros(2)), Buffer)
+        buffers["value"] = Buffer(torch.zeros(2))
+        self.assertIn("value", buffers.state_dict())
+        buffers["value"] = value
+        self.assertNotIn("value", buffers.state_dict())
+        self.assertIs(buffers.pop("value"), value)
+        self.assertNotIn("value", buffers._non_persistent_buffers_set)
+        key, result = buffers.popitem()
+        self.assertEqual(key, "other")
+        self.assertEqual(result, torch.zeros(2))
+        del buffers["empty"]
+        self.assertEqual(len(buffers), 0)
+        with self.assertRaises(KeyError):
+            buffers.popitem()
+        buffers.update({"a": value, "b": None})
+        buffers.clear()
+        self.assertEqual(len(buffers), 0)
+        self.assertEqual(buffers._non_persistent_buffers_set, set())
+
+    @parametrize_test("operation", ["construct", "update", "copy", "union", "inplace_union"])
+    @parametrize_test("converted", [False, True])
+    def test_BufferDict_preserves_persistence(self, operation, converted):
+        source = nn.BufferDict(OrderedDict([
+            ("z", Buffer(torch.ones(2), persistent=False)),
+            ("a", Buffer(torch.zeros(2))),
+            ("empty", None),
+        ]))
+        if converted:
+            source.double()
+        if operation == "construct":
+            result = nn.BufferDict(source)
+        elif operation == "update":
+            result = nn.BufferDict({"z": torch.zeros(2)})
+            result.update(source)
+        elif operation == "copy":
+            result = source.copy()
+        elif operation == "union":
+            result = nn.BufferDict() | source
+        else:
+            result = nn.BufferDict()
+            result |= source
+        self.assertEqual(list(result), ["z", "a", "empty"])
+        self.assertEqual(list(result.state_dict()), ["a"])
+        for key in source:
+            self.assertIs(result[key], source[key])
+        result["new"] = torch.ones(2)
+        self.assertNotIn("new", source)
+
+    def test_BufferDict_update_order(self):
+        a, b, c = (Buffer(torch.tensor(i)) for i in range(3))
+        buffers = nn.BufferDict({"b": b, "a": a})
+        self.assertEqual(list(buffers), ["a", "b"])
+        buffers.update(OrderedDict([("d", c), ("c", a), ("a", b)]))
+        self.assertEqual(list(buffers), ["a", "b", "d", "c"])
+        self.assertIs(buffers["a"], b)
+        buffers.update(item for item in [("f", a), ("e", b)])
+        self.assertEqual(list(buffers), ["a", "b", "d", "c", "f", "e"])
+        buffers.update(buffers)
+        self.assertEqual(list(buffers), ["a", "b", "d", "c", "f", "e"])
+        result = buffers.fromkeys(["z", "a"], a)
+        self.assertEqual(list(result), ["z", "a"])
+        self.assertIs(result["z"], result["a"])
+
+    def test_BufferDict_invalid_entries(self):
+        buffers = nn.BufferDict({"valid": torch.ones(2)})
+        for key, value, error in [
+            (1, torch.ones(2), TypeError),
+            ("", torch.ones(2), KeyError),
+            ("a.b", torch.ones(2), KeyError),
+            ("training", torch.ones(2), KeyError),
+            ("items", torch.ones(2), KeyError),
+            ("_buffers", torch.ones(2), KeyError),
+            ("invalid", 1, TypeError),
+            ("invalid", nn.Linear(2, 2), TypeError),
+            ("valid", 1, TypeError),
+        ]:
+            with self.subTest(key=key, value_type=type(value)):
+                with self.assertRaises(error):
+                    buffers[key] = value
+                self.assertEqual(list(buffers), ["valid"])
+                self.assertEqual(buffers["valid"], torch.ones(2))
+        for key in ("missing", "training", "items"):
+            with self.assertRaises(KeyError):
+                buffers[key]
+            with self.assertRaises(KeyError):
+                del buffers[key]
+        for invalid, error in [(1, TypeError), ([1], TypeError), ([("x",)], ValueError)]:
+            with self.assertRaises(error):
+                buffers.update(invalid)
+        with self.assertRaisesRegex(RuntimeError, "BufferDict should not be called"):
+            buffers(torch.ones(2))
+
+    @parametrize_test("assign", [False, True])
+    def test_BufferDict_state_dict(self, assign):
+        buffers = nn.BufferDict({
+            "persistent": Buffer(torch.ones(2)),
+            "temporary": Buffer(torch.zeros(2), persistent=False),
+            "empty": None,
+        })
+        checkpoint = {"persistent": torch.full((2,), 3.0)}
+        buffers.load_state_dict(checkpoint, assign=assign)
+        self.assertEqual(buffers["persistent"], checkpoint["persistent"])
+        self.assertEqual(buffers["temporary"], torch.zeros(2))
+        self.assertEqual(list(buffers.state_dict()), ["persistent"])
+        self.assertEqual(list(buffers.copy().state_dict()), ["persistent"])
+        f = io.BytesIO()
+        torch.save(buffers.state_dict(), f)
+        f.seek(0)
+        self.assertEqual(torch.load(f, weights_only=True), checkpoint)
+
+    @parametrize_test("copier", [deepcopy, lambda x: pickle.loads(pickle.dumps(x))])
+    def test_BufferDict_serialization(self, copier):
+        buffers = nn.BufferDict({
+            "persistent": torch.ones(2),
+            "temporary": Buffer(torch.zeros(2), persistent=False),
+        }).double()
+        clone = copier(buffers)
+        self.assertIsInstance(clone, nn.BufferDict)
+        self.assertEqual(list(clone.state_dict()), ["persistent"])
+        for key in buffers:
+            self.assertEqual(clone[key], buffers[key])
+            self.assertIsNot(clone[key], buffers[key])
+
+    def test_BufferDict_parameter_and_alias(self):
+        parameter = Parameter(torch.ones(2))
+        buffer = Buffer(torch.ones(2), persistent=False)
+        buffers = nn.BufferDict({"parameter": parameter, "a": buffer, "b": buffer})
+        self.assertIsInstance(buffers["parameter"], Buffer)
+        self.assertNotIsInstance(buffers["parameter"], Parameter)
+        self.assertTrue(buffers["parameter"].requires_grad)
+        self.assertEqual(list(buffers.parameters()), [])
+        self.assertIs(buffers["a"], buffers["b"])
+        self.assertEqual(len(list(buffers.buffers())), 2)
+        self.assertEqual(len(list(buffers.named_buffers(remove_duplicate=False))), 3)
+
+    def test_BufferDict_repr(self):
+        buffers = nn.BufferDict(OrderedDict([("x", torch.zeros(2, 3)), ("empty", None)]))
+        self.assertIn("BufferDict(", repr(buffers))
+        self.assertIn("(x): Buffer containing:", repr(buffers))
+        self.assertIn("2x3", repr(buffers))
+        self.assertIn("(empty): None", repr(buffers))
+
     def test_ParameterDict(self):
         parameters = OrderedDict([
             ('p1', Parameter(torch.randn(10, 10))),
@@ -7090,6 +7268,24 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+
+    @dtypes(torch.float32, torch.float64, torch.int64, torch.bool)
+    def test_BufferDict_device(self, device, dtype):
+        tensor = torch.arange(6).reshape(2, 3).to(dtype=dtype)
+        module = nn.Module()
+        module.data = nn.BufferDict({
+            "persistent": tensor,
+            "temporary": Buffer(tensor.clone(), persistent=False),
+        })
+        module.to(device)
+        for value in module.data.values():
+            self.assertEqual(value, tensor.to(device))
+            self.assertEqual(value.device, torch.device(device))
+        self.assertEqual(list(module.state_dict()), ["data.persistent"])
+        self.assertEqual(list(module.data.copy().state_dict()), ["persistent"])
+        module.cpu()
+        for value in module.data.values():
+            self.assertEqual(value, tensor)
 
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
