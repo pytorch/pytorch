@@ -47,15 +47,19 @@ from torch.distributed.pipelining.schedules import (
 from torch.distributed.pipelining.stage import _PipelineStageBase  # noqa: TC002
 from torch.nn.attention.flex_attention import BlockMask, create_block_mask
 from torch.nn.modules.loss import MSELoss
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     DeterministicGuard,
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -70,8 +74,6 @@ batch_size = 64
 none_grad_d_hid = 32
 none_grad_microbatches = 8
 torch.manual_seed(0)
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = dist.get_default_backend_for_device(device_type)
 
 
 @dataclass
@@ -321,16 +323,19 @@ def create_packed_document_block_mask(
 
 
 class ScheduleTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
 
     @classmethod
     def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return backend
+        dt = cls.device_type
+        if callable(dt):
+            dt = dt()
+        return dist.get_default_backend_for_device(dt)
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return torch.device(self.device_type, self.rank)
 
     @property
     def config(self) -> PipelineTestConfig:
@@ -339,13 +344,13 @@ class ScheduleTest(MultiProcContinuousTest):
             world_size=self.world_size, device=self.device, rank=self.rank
         )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [_ScheduleForwardOnly])
     @skip_if_lt_x_gpu(4)
-    def test_forward_only(self, ScheduleClass):
+    def test_forward_only(self, device, ScheduleClass):
         mod, mod_ref, x, _, _ = setup_models_and_data(self.config)
         x_clone = x.clone()
 
@@ -374,9 +379,9 @@ class ScheduleTest(MultiProcContinuousTest):
                 x_clone = mod_ref(x_clone)
             torch.testing.assert_close(x_clone, out)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize(
         "ScheduleClass",
@@ -389,7 +394,7 @@ class ScheduleTest(MultiProcContinuousTest):
         ],
     )
     @skip_if_lt_x_gpu(4)
-    def test_eval_inference_mode(self, ScheduleClass):
+    def test_eval_inference_mode(self, device, ScheduleClass):
         num_microbatches = 4
         if ScheduleClass in [
             ScheduleInterleaved1F1B,
@@ -452,9 +457,9 @@ class ScheduleTest(MultiProcContinuousTest):
         if self.rank == self.world_size - 1:
             self.assertTrue(len(losses) > 0, "Losses should be computed during eval()")
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize(
         "ScheduleClass",
@@ -467,7 +472,7 @@ class ScheduleTest(MultiProcContinuousTest):
         ],
     )
     @skip_if_lt_x_gpu(4)
-    def test_return_output(self, ScheduleClass):
+    def test_return_output(self, device, ScheduleClass):
         num_microbatches = 4
         if ScheduleClass in [
             ScheduleInterleaved1F1B,
@@ -517,13 +522,13 @@ class ScheduleTest(MultiProcContinuousTest):
         if self.rank == self.world_size - 1:
             self.assertTrue(output is None, "Output should be None")
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @skip_if_lt_x_gpu(4)
-    def test_multi_iter(self, ScheduleClass):
+    def test_multi_iter(self, device, ScheduleClass):
         mod, _, x, target, loss_fn = setup_models_and_data(self.config)
         chunks = 4
         stage, _, _ = create_single_stage_pipeline(self.config, mod, x, chunks)
@@ -541,14 +546,14 @@ class ScheduleTest(MultiProcContinuousTest):
 
         dist.barrier(device_ids=[self.rank])
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_kwargs_with_tracer(self, ScheduleClass, pre_split):
+    def test_kwargs_with_tracer(self, device, ScheduleClass, pre_split):
         mod = ModelWithKwargs(d_hid, splits=self.world_size)
         mod.to(self.device)
 
@@ -611,14 +616,14 @@ class ScheduleTest(MultiProcContinuousTest):
             torch.testing.assert_close(out, ref_out, rtol=1e-2, atol=5e-3)
             torch.testing.assert_close(pipe_loss, ref_loss)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_tracer(self, ScheduleClass, pre_split):
+    def test_grad_with_tracer(self, device, ScheduleClass, pre_split):
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
         # Run reference
@@ -669,14 +674,14 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_module, ref_mod)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @parametrize("shape_inference", [True, False])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual(self, ScheduleClass, shape_inference):
+    def test_grad_with_manual(self, device, ScheduleClass, shape_inference):
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
         # Run reference
@@ -731,9 +736,9 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_module, ref_mod)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize(
         "ScheduleClass",
@@ -745,7 +750,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_interleaved(self, ScheduleClass, pre_split):
+    def test_grad_with_manual_interleaved(self, device, ScheduleClass, pre_split):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -819,146 +824,13 @@ class ScheduleTest(MultiProcContinuousTest):
             self.config, stage_modules, ref_mod, submod_names, rtol=5e-3, atol=5e-3
         )
 
-    @requires_accelerator_dist_backend(["nccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        device_type != "cuda" or not TEST_MULTIACCELERATOR,
-        "CUDA/NCCL flex attention test requires 4+ GPUs",
-    )
-    @skip_if_lt_x_gpu(4)
-    def test_interleaved_1f1b_pre_split_flex_attention(self):
-        stages_per_rank = 2
-        n_stages = stages_per_rank * self.world_size
-        num_microbatches = 8
-        batch = 8
-        seq_len = 64
-        model_dim = 32
-        num_heads = 2
-        ffn_dim = 64
-
-        auto_mod = FlexAttentionTransformer(model_dim, num_heads, ffn_dim, n_stages).to(
-            self.device
-        )
-        pre_split_mod = copy.deepcopy(auto_mod)
-        ref_mod = copy.deepcopy(auto_mod)
-        x = torch.randn(batch, seq_len, model_dim, device=self.device)
-        target = torch.randn_like(x)
-        positions = torch.stack(
-            [
-                torch.arange(seq_len, device=self.device) % (8 * (i % 4 + 1))
-                for i in range(batch)
-            ]
-        )
-        block_mask = create_packed_document_block_mask(positions, num_heads)
-        loss_fn = torch.nn.MSELoss(reduction="sum")
-
-        auto_stages, auto_stage_modules, submod_names = create_multi_stage_pipeline(
-            self.config, auto_mod, stages_per_rank, n_stages
-        )
-        pre_split_stages, pre_split_stage_modules, pre_split_submod_names = (
-            create_multi_stage_pipeline(
-                self.config, pre_split_mod, stages_per_rank, n_stages
-            )
-        )
-        self.assertEqual(pre_split_submod_names, submod_names)
-
-        has_first_stage = any(stage.is_first for stage in auto_stages)
-        has_last_stage = any(stage.is_last for stage in auto_stages)
-        self.assertEqual(
-            has_first_stage,
-            any(stage.is_first for stage in pre_split_stages),
-        )
-        self.assertEqual(
-            has_last_stage,
-            any(stage.is_last for stage in pre_split_stages),
-        )
-
-        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
-        target_mbs = list(torch.tensor_split(target, num_microbatches))
-        position_mbs = torch.tensor_split(positions, num_microbatches)
-        kwarg_mbs = [
-            {"block_mask": create_packed_document_block_mask(positions_mb, num_heads)}
-            for positions_mb in position_mbs
-        ]
-
-        auto_schedule = ScheduleInterleaved1F1B(
-            auto_stages,
-            num_microbatches,
-            loss_fn=loss_fn,
-            scale_grads=False,
-        )
-        pre_split_schedule = ScheduleInterleaved1F1B(
-            pre_split_stages,
-            num_microbatches,
-            loss_fn=loss_fn,
-            scale_grads=False,
-        )
-
-        auto_out = None
-        auto_losses = []
-        pre_split_out = None
-        pre_split_losses = []
-        with DeterministicGuard(True):
-            ref_out, ref_loss = run_reference_model(
-                ref_mod,
-                x,
-                target,
-                loss_fn,
-                num_iterations=1,
-                block_mask=block_mask,
-            )
-
-            zero_gradients(auto_stage_modules)
-            auto_out = auto_schedule.step(
-                *((x,) if has_first_stage else ()),
-                block_mask=block_mask,
-                target=target if has_last_stage else None,
-                losses=auto_losses if has_last_stage else None,
-            )
-
-            dist.barrier()
-
-            zero_gradients(pre_split_stage_modules)
-            pre_split_out = pre_split_schedule.step(
-                arg_mbs=arg_mbs if has_first_stage else None,
-                kwarg_mbs=kwarg_mbs,
-                target_mbs=target_mbs if has_last_stage else None,
-                losses=pre_split_losses if has_last_stage else None,
-            )
-
-            dist.barrier()
-
-        if has_last_stage:
-            self.assertEqual(pre_split_out, auto_out)
-            self.assertEqual(
-                torch.stack(pre_split_losses),
-                torch.stack(auto_losses),
-            )
-            self.assertEqual(auto_out, ref_out)
-            self.assertEqual(sum(auto_losses), ref_loss)
-
-        for auto_stage_module, pre_split_stage_module in zip(
-            auto_stage_modules,
-            pre_split_stage_modules,
-            strict=True,
-        ):
-            for (auto_name, auto_param), (pre_split_name, pre_split_param) in zip(
-                auto_stage_module.named_parameters(),
-                pre_split_stage_module.named_parameters(),
-                strict=True,
-            ):
-                self.assertEqual(auto_name, pre_split_name)
-                self.assertEqual(pre_split_param.grad, auto_param.grad)
-
-        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
-        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
-
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [ScheduleInterleavedZeroBubble])
     @skip_if_lt_x_gpu(4)
-    def test_schedule_with_weight_update_mlp_e2e(self, ScheduleClass):
+    def test_schedule_with_weight_update_mlp_e2e(self, device, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         full_mod, ref_mod, x, target, _ = setup_models_and_data(
@@ -1036,16 +908,16 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize(
         "schedule_class",
         [ScheduleZBVZeroBubble, ScheduleDualPipeV],
     )
     @skip_if_lt_x_gpu(4)
-    def test_v_shape_schedules(self, schedule_class):
+    def test_v_shape_schedules(self, device, schedule_class):
         n_stages = 8
         rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -1085,12 +957,12 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
-    def test_custom_function_callback(self):
+    def test_custom_function_callback(self, device):
         """Test the custom function callback functionality with _PipelineScheduleRuntime."""
         n_stages = 8
         rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
@@ -1287,15 +1159,16 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize(
         "ScheduleClass",
         [ScheduleInterleavedZeroBubble, ScheduleInterleaved1F1B],
     )
     @skip_if_lt_x_gpu(4)
-    def test_zero_bubble_with_model_kwargs(self, ScheduleClass):
+    def test_zero_bubble_with_model_kwargs(self, device, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -1402,9 +1275,9 @@ class ScheduleTest(MultiProcContinuousTest):
             self.config, stage_modules, ref_mod, submod_names, rtol=1e-5, atol=1e-5
         )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize(
         "ScheduleClass",
@@ -1412,11 +1285,162 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @parametrize("pattern", ["first_false_then_true", "first_true_then_false"])
     @skip_if_lt_x_gpu(4)
-    def test_NoneGrad_conditional_input_grad(self, ScheduleClass, pattern):
+    def test_NoneGrad_conditional_input_grad(self, device, ScheduleClass, pattern):
         self._run_none_grad_schedule(ScheduleClass, pattern)
 
 
-instantiate_parametrized_tests(ScheduleTest)
+class ScheduleTestCUDA(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+    world_size = 4
+
+    @classmethod
+    def backend_str(cls) -> str:
+        dt = cls.device_type
+        if callable(dt):
+            dt = dt()
+        return dist.get_default_backend_for_device(dt)
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(self.device_type, self.rank)
+
+    @property
+    def config(self) -> PipelineTestConfig:
+        return PipelineTestConfig(
+            world_size=self.world_size, device=self.device, rank=self.rank
+        )
+
+    @requires_capabilities(Capability.distributed.backend)
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "CUDA/NCCL flex attention test requires 4+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_interleaved_1f1b_pre_split_flex_attention(self, device):
+        stages_per_rank = 2
+        n_stages = stages_per_rank * self.world_size
+        num_microbatches = 8
+        batch = 8
+        seq_len = 64
+        model_dim = 32
+        num_heads = 2
+        ffn_dim = 64
+
+        auto_mod = FlexAttentionTransformer(model_dim, num_heads, ffn_dim, n_stages).to(
+            self.device
+        )
+        pre_split_mod = copy.deepcopy(auto_mod)
+        ref_mod = copy.deepcopy(auto_mod)
+        x = torch.randn(batch, seq_len, model_dim, device=self.device)
+        target = torch.randn_like(x)
+        positions = torch.stack(
+            [
+                torch.arange(seq_len, device=self.device) % (8 * (i % 4 + 1))
+                for i in range(batch)
+            ]
+        )
+        block_mask = create_packed_document_block_mask(positions, num_heads)
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        auto_stages, auto_stage_modules, submod_names = create_multi_stage_pipeline(
+            self.config, auto_mod, stages_per_rank, n_stages
+        )
+        pre_split_stages, pre_split_stage_modules, pre_split_submod_names = (
+            create_multi_stage_pipeline(
+                self.config, pre_split_mod, stages_per_rank, n_stages
+            )
+        )
+        self.assertEqual(pre_split_submod_names, submod_names)
+
+        has_first_stage = any(stage.is_first for stage in auto_stages)
+        has_last_stage = any(stage.is_last for stage in auto_stages)
+        self.assertEqual(
+            has_first_stage,
+            any(stage.is_first for stage in pre_split_stages),
+        )
+        self.assertEqual(
+            has_last_stage,
+            any(stage.is_last for stage in pre_split_stages),
+        )
+
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+        position_mbs = torch.tensor_split(positions, num_microbatches)
+        kwarg_mbs = [
+            {"block_mask": create_packed_document_block_mask(positions_mb, num_heads)}
+            for positions_mb in position_mbs
+        ]
+
+        auto_schedule = ScheduleInterleaved1F1B(
+            auto_stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+        pre_split_schedule = ScheduleInterleaved1F1B(
+            pre_split_stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+
+        auto_out = None
+        auto_losses = []
+        pre_split_out = None
+        pre_split_losses = []
+        with DeterministicGuard(True):
+            ref_out, ref_loss = run_reference_model(
+                ref_mod,
+                x,
+                target,
+                loss_fn,
+                num_iterations=1,
+                block_mask=block_mask,
+            )
+
+            zero_gradients(auto_stage_modules)
+            auto_out = auto_schedule.step(
+                *((x,) if has_first_stage else ()),
+                block_mask=block_mask,
+                target=target if has_last_stage else None,
+                losses=auto_losses if has_last_stage else None,
+            )
+
+            dist.barrier()
+
+            zero_gradients(pre_split_stage_modules)
+            pre_split_out = pre_split_schedule.step(
+                arg_mbs=arg_mbs if has_first_stage else None,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs if has_last_stage else None,
+                losses=pre_split_losses if has_last_stage else None,
+            )
+
+            dist.barrier()
+
+        if has_last_stage:
+            self.assertEqual(pre_split_out, auto_out)
+            self.assertEqual(
+                torch.stack(pre_split_losses),
+                torch.stack(auto_losses),
+            )
+            self.assertEqual(auto_out, ref_out)
+            self.assertEqual(sum(auto_losses), ref_loss)
+
+        for auto_stage_module, pre_split_stage_module in zip(
+            auto_stage_modules,
+            pre_split_stage_modules,
+            strict=True,
+        ):
+            for (auto_name, auto_param), (pre_split_name, pre_split_param) in zip(
+                auto_stage_module.named_parameters(),
+                pre_split_stage_module.named_parameters(),
+                strict=True,
+            ):
+                self.assertEqual(auto_name, pre_split_name)
+                self.assertEqual(pre_split_param.grad, auto_param.grad)
+
+        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
+        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
 
 
 class CustomSchedulesTest(MultiProcContinuousTest):
@@ -1425,16 +1449,19 @@ class CustomSchedulesTest(MultiProcContinuousTest):
     The schedules test weird and unconventional schedules for edge cases
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 2
 
     @classmethod
     def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return backend
+        dt = cls.device_type
+        if callable(dt):
+            dt = dt()
+        return dist.get_default_backend_for_device(dt)
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return torch.device(self.device_type, self.rank)
 
     @property
     def config(self) -> PipelineTestConfig:
@@ -1443,16 +1470,16 @@ class CustomSchedulesTest(MultiProcContinuousTest):
             world_size=self.world_size, device=self.device, rank=self.rank
         )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize(
         "schedule_class",
         [ScheduleVShaped, ScheduleUnbalanced],
     )
     @skip_if_lt_x_gpu(4)
-    def test_non_symmetric_stage_ids(self, schedule_class):
+    def test_non_symmetric_stage_ids(self, device, schedule_class):
         n_stages = schedule_class.n_stages
         rank_stages = schedule_class.rank_stages
 
@@ -1496,13 +1523,13 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [ScheduleWithReorderedB])
     @skip_if_lt_x_gpu(4)
-    def test_pipeline_schedule_runtime_custom_sched(self, ScheduleClass):
+    def test_pipeline_schedule_runtime_custom_sched(self, device, ScheduleClass):
         n_stages = 2
         stages_per_rank = 1
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -1560,13 +1587,13 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [ScheduleWithW])
     @skip_if_lt_x_gpu(4)
-    def test_schedule_with_native_zero_bubble(self, ScheduleClass):
+    def test_schedule_with_native_zero_bubble(self, device, ScheduleClass):
         n_stages = ScheduleClass.n_stages
         num_microbatches = ScheduleClass.num_microbatches
         rank_stages = ScheduleClass.rank_stages
@@ -1616,9 +1643,6 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
 
-instantiate_parametrized_tests(CustomSchedulesTest)
-
-
 class PerDirectionScheduleTest(MultiProcContinuousTest):
     """Per-direction PP communicators (``config.pipeline_per_direction_p2p``).
 
@@ -1630,11 +1654,15 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
     than relying on the shared MultiProcContinuousTest path.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
 
     @classmethod
     def backend_str(cls) -> str:
-        return backend
+        dt = cls.device_type
+        if callable(dt):
+            dt = dt()
+        return dist.get_default_backend_for_device(dt)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -1652,7 +1680,10 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
         # would make init_process_group raise instead of skip.
         device_id = None
         if torch.accelerator.device_count() >= world_size:
-            device_id = torch.device(cls.device_type(), rank)
+            dt = cls.device_type
+            if callable(dt):
+                dt = dt()
+            device_id = torch.device(dt, rank)
         dist.init_process_group(
             backend=cls.backend_str(),
             world_size=world_size,
@@ -1666,7 +1697,7 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return torch.device(self.device_type, self.rank)
 
     @property
     def config(self) -> PipelineTestConfig:
@@ -1674,12 +1705,12 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             world_size=self.world_size, device=self.device, rank=self.rank
         )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
-    def test_creates_distinct_direction_groups(self):
+    def test_creates_distinct_direction_groups(self, device):
         """PipelineStage builds two distinct, non-WORLD direction groups when the
         config flag is set (no constructor arg)."""
         with dist_config.patch(pipeline_per_direction_p2p=True):
@@ -1693,13 +1724,13 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             self.assertIsNot(stage._upstream_group, dist.group.WORLD)
             self.assertIsNot(stage._downstream_group, stage._upstream_group)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_per_direction(self, ScheduleClass):
+    def test_grad_with_manual_per_direction(self, device, ScheduleClass):
         """Per-direction P2P only changes which communicator carries the bytes,
         not the math: gradients/outputs must still match the reference model."""
         with dist_config.patch(pipeline_per_direction_p2p=True):
@@ -1743,7 +1774,14 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             check_gradients(self.config, stage_module, ref_mod)
 
 
-instantiate_parametrized_tests(PerDirectionScheduleTest)
+instantiate_device_type_tests(ScheduleTest, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(ScheduleTestCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    CustomSchedulesTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    PerDirectionScheduleTest, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
