@@ -826,9 +826,7 @@ def _register_interface_for_privateuse1() -> None:
         )
         return
 
-    if not (
-        isinstance(interface, type) and issubclass(interface, DeviceInterface)
-    ):
+    if not (isinstance(interface, type) and issubclass(interface, DeviceInterface)):
         if interface is not None:
             warnings.warn(
                 f"get_device_interface() for backend '{backend}' returned "

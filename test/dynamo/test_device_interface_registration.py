@@ -36,9 +36,7 @@ class TestPrivateuse1DeviceInterface(TestCase):
         import torch._dynamo.device_interface as di
 
         self._saved_initialized = di._device_initialized
-        self._saved_initialization_in_progress = (
-            di._device_initialization_in_progress
-        )
+        self._saved_initialization_in_progress = di._device_initialization_in_progress
         self._saved_interfaces = dict(di.device_interfaces)
 
     def _restore_device_reg(self):
@@ -48,9 +46,7 @@ class TestPrivateuse1DeviceInterface(TestCase):
         di.device_interfaces.clear()
         di.device_interfaces.update(self._saved_interfaces)
         di._device_initialized = self._saved_initialized
-        di._device_initialization_in_progress = (
-            self._saved_initialization_in_progress
-        )
+        di._device_initialization_in_progress = self._saved_initialization_in_progress
         # Clear the memoization cache so it picks up the restored registry
         from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 
@@ -279,8 +275,7 @@ class TestPrivateuse1DeviceInterface(TestCase):
             [
                 sys.executable,
                 "-c",
-                "import sys; import torch; "
-                "assert 'torch._dynamo' not in sys.modules",
+                "import sys; import torch; assert 'torch._dynamo' not in sys.modules",
             ]
         )
 
