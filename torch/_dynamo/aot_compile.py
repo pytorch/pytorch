@@ -129,18 +129,21 @@ def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
     return type(reason).__name__, reason
 
 
-def _raised_line(index: int, e: Exception) -> str:
+def _raise_text(e: Exception) -> str:
     kind, reason = _unwrapped_raise(e)
     # Keyed on that chain, not on where the raise came from: the clause explains
-    # why the line quotes a chained exception instead of the one the tree
+    # why the text quotes a chained exception instead of the one the tree
     # raised, so a raise with nothing chained -- a TORCH_CHECK inside the tree,
     # which pybind translates at this same boundary into a plain RuntimeError --
-    # gets the line without it.
+    # gets the text without it.
     boundary = "" if reason is e else " (through the guard tree's pybind boundary)"
-    line = f"  [{index}] <guard check raised {kind}: {reason}{boundary}>"
     # str(reason) is arbitrary user text, and the report is one line per input
     # read back with splitlines(), so collapse every separator it breaks on.
-    return " ".join(line.splitlines())
+    return " ".join(f"{kind}: {reason}{boundary}".splitlines())
+
+
+def _raised_line(index: int, e: Exception) -> str:
+    return f"  [{index}] <guard check raised {_raise_text(e)}>"
 
 
 class _GuardScope(enum.Enum):
@@ -1733,13 +1736,14 @@ class AOTCompiledModel:
     ``For [i]:`` hint, for the first entry whose guards failed on a global the
     process does not define, and -- when some checked tree reached an answer,
     or the artifact holds no input at all -- the advice to add a ``ModelInput``
-    or check which guards ``guard_filter_fn`` kept. That advice says to fix the
-    raise first when every rejection it rests on followed a raise from the same
-    tree; when no checked tree ever answered, a line saying every guard tree
-    raised replaces it, unless an opted-out result's line has already said the
-    raise withheld it. When some checked input's guard tree raised, that
-    exception is the ``__cause__`` of the ``RuntimeError`` rather than the
-    exception the caller sees, so a caller catching the tree's own type
+    or check which guards ``guard_filter_fn`` kept. When every rejection that
+    advice rests on followed a raise from its own tree, it names and quotes
+    those raises and says to fix them first; when no checked tree ever
+    answered, a line saying every guard tree raised replaces it, unless an
+    opted-out result's line has already said the raise withheld it. When some
+    checked input's guard tree raised, that exception is the ``__cause__`` of
+    the ``RuntimeError`` rather than the exception the caller sees, so a caller
+    catching the tree's own type
     (``SystemError`` for a leaf that returned with an error set,
     ``RuntimeError`` for a ``TORCH_CHECK``) catches the report instead.
     """
@@ -2048,11 +2052,21 @@ class AOTCompiledModel:
             )
             if coverable and not trusted_rejection:
                 # Keyed on what dispatch recorded, not on the entry lines: the
-                # re-check may have printed a raise or an accept instead.
+                # re-check may have printed a raise or an accept instead. Named
+                # and quoted here because nothing else on the report carries
+                # such a raise: the entry line quotes the rejection, the raiser
+                # line names the FIRST enabled raiser, which need not be one of
+                # these, and the chain carries the first raise of all.
+                untrusted = [
+                    f"[{i}] ({_raise_text(raised[i])})"
+                    for i in sorted(answered - trusted)
+                    if results[i]._guard_check_enabled
+                ]
+                plural = "s" if len(untrusted) > 1 else ""
                 advice += (
-                    " Fix the raise above first: every rejection this advice "
-                    "rests on followed a raise from the same tree, and "
-                    f"{_STALE_AFTER_THROW}."
+                    f" Fix the raise{plural} out of {', '.join(untrusted)} first: "
+                    "every rejection this advice rests on followed a raise from "
+                    f"its own tree, and {_STALE_AFTER_THROW}."
                 )
             lines.append(advice)
         if raised and not withheld and not coverable:
