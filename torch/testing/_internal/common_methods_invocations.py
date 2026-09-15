@@ -15778,7 +15778,6 @@ op_db: list[OpInfo] = [
         supports_sparse_bsc=True,
         dtypes=all_types_and(torch.half, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
-        dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_nn_activation_relu,
         supports_out=False,
         supports_fwgrad_bwgrad=True,
