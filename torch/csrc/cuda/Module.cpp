@@ -575,6 +575,15 @@ PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+PyObject* THCPModule_getMainPoolCachedMemory(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "expected a device index");
+  const auto device = THPUtils_unpackDeviceIndex(arg);
+  return PyLong_FromSize_t(
+      c10::cuda::CUDACachingAllocator::get()->getMainPoolCachedMemory(device));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
@@ -2417,6 +2426,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_emptyCache", THCPModule_emptyCache, METH_NOARGS, nullptr},
     {"_cuda_memoryStats", THCPModule_memoryStats, METH_O, nullptr},
+    {"_cuda_getMainPoolCachedMemory",
+     THCPModule_getMainPoolCachedMemory,
+     METH_O,
+     nullptr},
     {"_cuda_resetAccumulatedMemoryStats",
      THCPModule_resetAccumulatedMemoryStats,
      METH_O,

@@ -1588,8 +1588,7 @@ class CachingAutotuner(KernelInterface):
         To support benchmarking in the presence of mutated args, we need to avoid
         autotuning contaminating them. We try to pass cloned args to the kernel.
         If there is insufficient device memory for those clones, we instead copy
-        to CPU and restore them after each iteration. Leave half the available
-        memory for benchmarking and other allocations.
+        to CPU and restore them after each iteration.
         """
         if not self.optimize_mem:
             return {}
@@ -1607,7 +1606,12 @@ class CachingAutotuner(KernelInterface):
                     free,
                     int(total * fraction) - device_module.memory_reserved(device),
                 )
-            budget = max(0, free) // 2
+            cached = 0
+            if self.device_props.type == "cuda":
+                cached = torch._C._cuda_getMainPoolCachedMemory(
+                    device if device is not None else device_module.current_device()
+                )
+            budget = max(0, free) + cached
         except RuntimeError:
             # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
             return {}

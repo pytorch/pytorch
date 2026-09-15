@@ -1033,8 +1033,13 @@ class TestArgumentCloneAndRestore(TestCase):
         gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
 
         peak_mem_before = torch.get_device_module(GPU_TYPE).max_memory_allocated()
-        with patch.object(
-            torch.get_device_module(GPU_TYPE), "mem_get_info", return_value=(0, 0)
+        with (
+            patch.object(
+                torch.get_device_module(GPU_TYPE), "mem_get_info", return_value=(0, 0)
+            ),
+            patch.object(
+                torch._C, "_cuda_getMainPoolCachedMemory", return_value=0, create=True
+            ),
         ):
             cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
         self.assertTrue(len(cpu_copies) == 1)
@@ -1088,20 +1093,24 @@ class TestArgumentCloneAndRestore(TestCase):
 @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
 class TestAutotuneMutationMemory(TestCase):
     @parametrize(
-        "free,reserved,fraction,cpu_restore",
+        "free,reserved,fraction,cached,cpu_restore",
         [
-            (1 << 30, 4096, 1.0, False),
-            (0, 4096, 1.0, True),
-            (0, 1 << 20, 1.0, True),
-            (1 << 30, 4096, 4096 / (2 << 30), True),
-            (4096, 4096, 1.0, True),
-            (1 << 30, 4096, 0.5, False),
+            (1 << 30, 4096, 1.0, 0, False),
+            (0, 4096, 1.0, 0, True),
+            (0, 1 << 20, 1.0, 0, True),
+            (1 << 30, 4096, 4096 / (2 << 30), 0, True),
+            (4096, 4096, 1.0, 0, False),
+            (1 << 30, 4096, 0.5, 0, False),
+            (0, 4096, 1.0, 4096, False),
+            (1 << 30, 4096, 4096 / (2 << 30), 4096, False),
         ],
     )
     @parametrize("peak", [4096, 1 << 30])
     def test_clone_uses_available_memory(
-        self, device, free, reserved, fraction, cpu_restore, peak
+        self, device, free, reserved, fraction, cached, cpu_restore, peak
     ):
+        if cached and GPU_TYPE != "cuda":
+            self.skipTest("requires CUDA main-pool cache accounting")
         options = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
         options["optimize_mem"] = True
         options["mutated_arg_names"] = ["in_ptr0"]
@@ -1110,6 +1119,12 @@ class TestAutotuneMutationMemory(TestCase):
         expected = x.clone()
         device_module = torch.get_device_module(device)
         with (
+            patch.object(
+                torch._C,
+                "_cuda_getMainPoolCachedMemory",
+                return_value=cached,
+                create=True,
+            ),
             patch.object(device_module, "mem_get_info", return_value=(free, 2 << 30)),
             patch.object(device_module, "memory_allocated", return_value=4096),
             patch.object(
@@ -1129,6 +1144,30 @@ class TestAutotuneMutationMemory(TestCase):
         self.assertEqual(cloned_args[0] is x, cpu_restore)
         cloned_args[0].add_(1)
         autotuner.restore_args_from_cpu(copies)
+        self.assertEqual(x, expected)
+
+    @skipUnless(GPU_TYPE == "cuda", "requires CUDA allocator")
+    def test_main_pool_cached_memory(self, device):
+        options = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        options["optimize_mem"] = True
+        options["mutated_arg_names"] = ["in_ptr0"]
+        autotuner = CachingAutotuner(**options)
+        x = torch.ones(4 << 20, device=device)
+        expected = x.clone()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        device_index = torch.cuda.current_device()
+        before = torch._C._cuda_getMainPoolCachedMemory(device_index)
+        temporary = torch.empty(16 << 20, device=device)
+        del temporary
+        cached = torch._C._cuda_getMainPoolCachedMemory(device_index)
+        self.assertGreaterEqual(cached - before, 64 << 20)
+        _, total = torch.cuda.mem_get_info(device)
+        with patch.object(torch.cuda, "mem_get_info", return_value=(0, total)):
+            copies = autotuner.copy_args_to_cpu_if_needed(x)
+        self.assertEqual(copies, {})
+        cloned_args, _ = autotuner.maybe_clone_args(copies, x)
+        cloned_args[0].add_(1)
         self.assertEqual(x, expected)
 
     @skipUnless(GPU_TYPE == "cuda", "requires CUDA graphs")
