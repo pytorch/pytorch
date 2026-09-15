@@ -372,10 +372,10 @@ def fold_row_rolled(
 @cute.jit
 def fold_linear_rolled(
     trait,
-    mX,
-    r,
+    mX: cute.Tensor,
+    r: Int32,
     vec: cutlass.Constexpr,
-    nchunks,
+    nchunks: Int32,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
 ):
     """Fold row `r` with a runtime chunk loop. Returns an acc tuple. threads_per_row == 1 only."""
@@ -442,7 +442,7 @@ def make_fragment(mX, tm) -> cute.Tensor:
     return cute.make_rmem_tensor(cute.make_layout((tm.vec, tm.loads)), mX.element_type)
 
 
-def smem_box_layout(N: int, threads: int):
+def smem_box_layout(N: int, threads: int) -> cute.Layout:
     """Plain row-major smem for a (threads, N) TMA box.
 
     TMA's GEMM swizzles do not fix whole-row bank conflicts; fold_smem_rotated does.

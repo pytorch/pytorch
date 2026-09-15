@@ -6661,7 +6661,7 @@ class TestAddRelu(TestCase):
         self.assertEqual(broadcasted_res, res)
 
 
-def add_test(test, decorator=None):
+def add_test(test, decorator=None, tf32_decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
@@ -6691,6 +6691,8 @@ def add_test(test, decorator=None):
                 with tf32_on(self, test.tf32_precision):
                     test.test_cuda(self, dtype=torch.float, **kwargs)
 
+            if tf32_decorator is not None:
+                with_tf32_on = tf32_decorator(with_tf32_on)
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name + '_float', lambda self,
@@ -6729,6 +6731,8 @@ def add_test(test, decorator=None):
                 with tf32_on(self, test.tf32_precision):
                     test.test_cuda(self, **kwargs)
 
+            if tf32_decorator is not None:
+                with_tf32_on = tf32_decorator(with_tf32_on)
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name, with_tf32_off)
@@ -6739,8 +6743,9 @@ for test_params in module_tests + get_new_module_tests():
         name = test_params.pop('module_name')
         test_params['constructor'] = getattr(nn, name)
     decorator = test_params.pop('decorator', None)
+    tf32_decorator = test_params.pop('tf32_decorator', None)
     test = NewModuleTest(**test_params)
-    add_test(test, decorator)
+    add_test(test, decorator, tf32_decorator)
     if 'check_eval' in test_params:
         # create a new test that is identical but that sets module.training to False
         desc = test_params.get('desc', None)
@@ -6756,7 +6761,7 @@ for test_params in module_tests + get_new_module_tests():
 
         test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
         test = NewModuleTest(**test_params)
-        add_test(test, decorator)
+        add_test(test, decorator, tf32_decorator)
     if 'check_with_long_tensor' in test_params:
         fullname = test_params.get('fullname', None)
         if fullname:
@@ -6903,7 +6908,10 @@ add_test(NewModuleTest(
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax',
     with_tf32=True,
-    tf32_precision=0.005,
+    # ROCm: gfx942 XF32 param-grad error 0.0056 (1.24 x 2^-10, a single TF32-class gemm)
+    # against a tolerance with no headroom. 0.012 is 2x the measurement, see
+    # https://github.com/pytorch/pytorch/issues/196605.
+    tf32_precision=0.012 if TEST_WITH_ROCM else 0.005,
     default_dtype=torch.double))
 
 
@@ -8739,19 +8747,19 @@ class TestNNDeviceType(NNTestCase):
                 padding=[0, 0, 0, 0, -2, -2])
 
     @onlyNativeDeviceTypes
-    @skipMPS  # MPS routes through a separate kernel (mps::pad_out_template) that does not validate the channel dim
-    def test_ReplicationPad_backward_channel_mismatch(self, device):
+    def test_Pad_backward_channel_mismatch(self, device):
         # regression test for https://github.com/pytorch/pytorch/issues/142834: a
         # gradOutput whose channel dim doesn't match the input used to segfault in
         # the backward pass instead of raising a clear error.
-        for backward, inp, grad_output, padding in [
-            (torch.ops.aten.replication_pad1d_backward,
-             torch.ones(2, 2, 4, device=device), torch.ones(2, 0, 8, device=device), [2, 2]),
-            (torch.ops.aten.replication_pad2d_backward,
-             torch.ones(2, 2, 4, 4, device=device), torch.ones(2, 0, 6, 8, device=device), [2, 2, 1, 1]),
-        ]:
-            with self.assertRaisesRegex(RuntimeError, "gradOutput channel unexpected"):
-                backward(grad_output, inp, padding)
+        for name in ["reflection", "replication"]:
+            for inp, grad_output, padding in [
+                ((2, 2, 4), (2, 0, 8), [2, 2]),
+                ((2, 2, 4, 4), (2, 0, 6, 8), [2, 2, 1, 1]),
+                ((2, 2, 4, 4, 4), (2, 0, 6, 6, 8), [2, 2, 1, 1, 1, 1]),
+            ]:
+                backward = getattr(torch.ops.aten, f"{name}_pad{len(padding) // 2}d_backward")
+                with self.assertRaisesRegex(RuntimeError, "grad_output channel unexpected"):
+                    backward(torch.ones(grad_output, device=device), torch.ones(inp, device=device), padding)
 
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])

@@ -5,7 +5,7 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
@@ -83,6 +83,7 @@ class TestTraitProtocol(TestCase):
                 T._offsets(width)
 
     @unittest.skipUnless(TEST_CUDA, "CUDA required")
+    @unittest.skipUnless(SM90OrLater, "Hopper+ required")
     def test_welford_divisor_clamps_at_zero(self):
         # correction >= n must divide by zero, yielding ATen's +inf, not negative variance.
         # A one-thread kernel probes the cute.jit helper directly.
@@ -121,6 +122,7 @@ class TestTraitProtocol(TestCase):
                 self.assertEqual(out.item(), want)
 
     @unittest.skipUnless(TEST_CUDA, "CUDA required")
+    @unittest.skipUnless(SM90OrLater, "Hopper+ required")
     def test_welford_empty_accumulator_is_identity(self):
         trait = T.WelfordOps(acc=cutlass.Float32)
 
