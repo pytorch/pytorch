@@ -665,8 +665,9 @@ class RejectsOnceThenRaises(NeverReChecked):
 
 
 # The sentence the no-match report appends to its ModelInput advice when every
-# rejection that advice rests on followed a raise from the same tree.
-CAVEAT_AFTER_A_RAISE = "which need not be the one that loaded them. Fix the raise above first: every rejection this advice rests on followed a raise from the same tree, and a C++ throw out of it can leave its own relational guard state stale, so its next check can reject a call it fits or accept one it does not."
+# rejection that advice rests on followed a raise from its own tree; the
+# placeholder is the index and quoted raise it names.
+CAVEAT_AFTER_A_RAISE = "which need not be the one that loaded them. Fix the raise out of {} first: every rejection this advice rests on followed a raise from its own tree, and a C++ throw out of it can leave its own relational guard state stale, so its next check can reject a call it fits or accept one it does not."
 
 
 # Not the identity: an identity weight makes "read the serialized weight" and
@@ -3352,20 +3353,11 @@ from user code:
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
         )
 
-        class RaisesThenRejectsThenAccepts:
-            def __init__(self):
-                self.checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                if self.checks == 1:
-                    raise RuntimeError("the first pass is unhappy")
-                return False
-
+        class RaisesThenRejectsThenAccepts(RaisesOnceThenRejects):
             def check_verbose(self, f_locals):
                 return types.SimpleNamespace(result=True, verbose_code_parts=[])
 
-        stub = RaisesThenRejectsThenAccepts()
+        stub = RaisesThenRejectsThenAccepts("the first pass is unhappy")
         model.forward.compiled_results[0]._artifacts.guard_manager = stub
         with self.assertRaises(RuntimeError) as ctx:
             served = model(torch.randn(3, 3))
@@ -3394,20 +3386,11 @@ from user code:
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
         )
 
-        class RaisesThenRejectsThenRaises:
-            def __init__(self):
-                self.checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                if self.checks == 1:
-                    raise RuntimeError("the first pass is unhappy")
-                return False
-
+        class RaisesThenRejectsThenRaises(RaisesOnceThenRejects):
             def check_verbose(self, f_locals):
                 raise RuntimeError("the re-check is unhappy")
 
-        stub = RaisesThenRejectsThenRaises()
+        stub = RaisesThenRejectsThenRaises("the first pass is unhappy")
         model.forward.compiled_results[0]._artifacts.guard_manager = stub
         with self.assertRaises(RuntimeError) as ctx:
             served = model(torch.randn(3, 3))
@@ -4301,8 +4284,11 @@ from user code:
         self.assertIn("  [0] stub guard rejected", lines)
         self.assertIn("[0]'s guard check raised while checking this call", message)
         advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
-        # One paragraph: the caveat qualifies the advice, not a line of its own.
-        self.assertTrue(advice.endswith(CAVEAT_AFTER_A_RAISE), advice)
+        # One paragraph: the caveat qualifies the advice, not a line of its own,
+        # and it names and quotes the raise it means: the entry line is the
+        # rejection, so nothing else on the report carries that raise.
+        caveat = CAVEAT_AFTER_A_RAISE.format("[0] (RuntimeError: the scan is unhappy)")
+        self.assertTrue(advice.endswith(caveat), advice)
         self.assertNotIn("Every guard tree raised", message)
 
     def test_no_match_message_qualifies_a_rejection_that_followed_a_cpp_throw(self):
@@ -4313,7 +4299,12 @@ from user code:
         # L['x'] from the scan when the second pass visits x's manager -- before
         # y's, whose leaf threw -- and rejects the call there. That stale
         # rejection is the one the advice rests on; the report's re-check runs on
-        # the state that rejection reset and quotes y's mismatch instead.
+        # the state that rejection reset and quotes y's mismatch instead. Two
+        # orderings besides the reset carry this: root accessors stay in
+        # Guard.sort_key order (L['x'] before L['y']; the throw leaves before the
+        # fail-count bump and sort in check_accessors_nopybind), and
+        # TensorCheck::check_verbose compares dispatch key sets before it reads
+        # strides, so the re-check names L['y'] rather than throwing again.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(PairModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -4327,15 +4318,6 @@ from user code:
         nested = torch.nested.nested_tensor(
             [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
         )
-        # The residue itself, on this tree before dispatch touches it: the
-        # evaluation after the throw fails on x as a duplicate.
-        result = model.forward.compiled_results[0]
-        tree = result._live_guard_manager()
-        f_locals = result.prepare_f_locals(model.forward.model, x, nested)
-        with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
-            tree.check(f_locals)
-        stale = tree.check_verbose(f_locals).verbose_code_parts
-        self.assertEqual(stale, ["Duplicate tensor found where not expected!"])
         with self.assertRaises(RuntimeError) as ctx:
             model(x, nested)
         message = str(ctx.exception)
@@ -4350,8 +4332,19 @@ from user code:
         self.assertIn("L['y']", entry)
         self.assertIn("[0]'s guard check raised while checking this call", message)
         advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
-        self.assertTrue(advice.endswith(CAVEAT_AFTER_A_RAISE), advice)
+        caveat = CAVEAT_AFTER_A_RAISE.format(f"[0] (RuntimeError: {cause})")
+        self.assertTrue(advice.endswith(caveat), advice)
         self.assertNotIn("Every guard tree raised", message)
+        # The residue itself, probed after the dispatch under test so that
+        # dispatch ran on a tree nothing here had touched: the evaluation right
+        # after the throw fails on x as a duplicate.
+        result = model.forward.compiled_results[0]
+        tree = result._live_guard_manager()
+        f_locals = result.prepare_f_locals(model.forward.model, x, nested)
+        with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
+            tree.check(f_locals)
+        stale = tree.check_verbose(f_locals).verbose_code_parts
+        self.assertEqual(stale, ["Duplicate tensor found where not expected!"])
 
     def test_no_match_message_trusts_one_rejection_taken_before_a_raise(self):
         # One trusted rejection is enough to leave the advice unqualified: [0]
@@ -4386,6 +4379,49 @@ from user code:
         self.assertEqual(str(ctx.exception.__cause__), "the scan is unhappy")
         self.assertIn("Add a ModelInput", message)
         self.assertNotIn("every rejection this advice rests on", message)
+        self.assertNotIn("Every guard tree raised", message)
+
+    def test_no_match_message_names_the_tree_whose_raise_qualifies_the_advice(self):
+        # The raiser line names the first enabled tree that raised, which need
+        # not be a tree the advice rests on: [0] raised on both passes and gave
+        # no rejection, [1] raised and then rejected. The caveat has to name and
+        # quote [1]'s raise itself: [1]'s line is its rejection, and the raiser
+        # line and the chain are both [0]'s, so nothing else carries it.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [
+                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
+                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
+            ]
+        )
+
+        class AlwaysRaises(NeverReChecked):
+            def check(self, f_locals):
+                raise RuntimeError("every pass is unhappy")
+
+        results = model.forward.compiled_results
+        second = RaisesOnceThenRejects("the scan is unhappy")
+        results[0]._artifacts.guard_manager = AlwaysRaises()
+        results[1]._artifacts.guard_manager = second
+        with self.assertRaises(RuntimeError) as ctx:
+            served = model(torch.randn(3, 3))
+            self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual(second.checks, 2)
+        raised = "  [0] <guard check raised RuntimeError: every pass is unhappy>"
+        self.assertIn(raised, lines)
+        self.assertIn("  [1] stub guard rejected", lines)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, message)
+        self.assertIn("[0]'s guard check raised while checking this call", message)
+        self.assertEqual(str(ctx.exception.__cause__), "every pass is unhappy")
+        advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
+        caveat = CAVEAT_AFTER_A_RAISE.format("[1] (RuntimeError: the scan is unhappy)")
+        self.assertTrue(advice.endswith(caveat), advice)
+        self.assertNotIn("[0]", advice)
+        # The caveat is the one place on the report that raise appears.
+        self.assertEqual(message.count("the scan is unhappy"), 1, message)
         self.assertNotIn("Every guard tree raised", message)
 
     def test_aot_compile_module_second_pass_warns_that_it_served_over_a_raise(self):
@@ -4679,10 +4715,11 @@ from user code:
     def test_aot_compile_module_interrupt_out_of_a_later_tree_propagates(self):
         # accepts() catches Exception, so an interrupt out of a later tree leaves
         # __call__ as itself -- neither read as a non-match nor wrapped in a
-        # report -- and the earlier raise on record goes with it: no graph was
-        # served and no report built, so nothing logs it on the way out. It is
-        # not lost to the process: the tree raises again on the next call that
-        # reaches it, and that call records it.
+        # report -- and the earlier raise on record goes with it, as on any exit
+        # that neither serves a graph nor builds a report. The second call pins
+        # where the dedup is judged: it warns about [0] again, so the aborted
+        # call consumed nothing. Deciding the (index, type) pair at the raise
+        # rather than at the serve leaves that call silent, and fails only here.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -4718,8 +4755,9 @@ from user code:
         # prepare_f_locals is outside accepts()' try for every result, not only
         # the first: a later result whose signature cannot take the call surfaces
         # as bind_locals' TypeError, as a plain module call would, with an earlier
-        # result's raise on record -- and, as with the interrupt above, nothing
-        # logs that raise, since no graph was served and no report built.
+        # result's raise on record and, as on the interrupt above, nothing to log
+        # it. Both premises are pinned first: the results cannot share a binding,
+        # so [1] binds inside the second accepts(), and [0]'s tree does raise.
         self._hide_leaked_dynamo_globals()
         mod = ScaleModule()
         x = torch.randn(3, 3)
@@ -4740,6 +4778,9 @@ from user code:
                 raise RuntimeError("zero is unhappy")
 
         combined.compiled_results[0]._artifacts.guard_manager = Raises()
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+        with self.assertRaisesRegex(RuntimeError, "zero is unhappy"):
+            combined.compiled_results[0].guard_check(mod, x)
         with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
             with self.assertRaisesRegex(TypeError, "missing a required argument: 'z'"):
                 combined(x)
