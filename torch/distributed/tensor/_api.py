@@ -760,10 +760,10 @@ class DTensor(torch.Tensor):
                 no conversion is performed. Default: None
             backward_dtype (torch.dtype, optional): cast the gradient to
                 ``backward_dtype`` before running the backward collective.
-                After the collective the gradient is always cast back to the
-                input DTensor's dtype. If ``None``, the backward collective
-                runs at the input DTensor's dtype (not ``forward_dtype``).
-                Default: None
+                After the collective the gradient is cast to the input
+                DTensor's ``grad_dtype`` when it is not ``None``. If
+                ``backward_dtype`` is ``None``, the backward collective runs at
+                the input DTensor's dtype (not ``forward_dtype``). Default: None
 
         Returns:
             A :class:`DTensor` object
@@ -808,6 +808,7 @@ class DTensor(torch.Tensor):
         placements = tuple(placements)
 
         input_dtype = self._local_tensor.dtype
+        input_grad_dtype = self.grad_dtype if self.requires_grad else input_dtype
         forward_dtype = forward_dtype or input_dtype
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(
@@ -822,7 +823,7 @@ class DTensor(torch.Tensor):
                     # Absent backward_dtype means the backward collective runs
                     # at the input's storage dtype (matching pre-fix behavior).
                     "op_dtype": backward_dtype or input_dtype,
-                    "out_dtype": input_dtype,
+                    "out_dtype": input_grad_dtype,
                 },
             },
         )
