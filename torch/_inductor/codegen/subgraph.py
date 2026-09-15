@@ -66,6 +66,26 @@ class InlinedSubgraphPlan:
         self._committed = True
 
 
+@dataclasses.dataclass
+class InlinedMultiKernelFusionPlan:
+    """A temporary multi-kernel plan owned by one autotuning choice."""
+
+    inlined_subgraph: InlinedSubgraphPlan
+    operation_groups: tuple[tuple[ir.Operation, ...], ...]
+    workspace_names: tuple[str, ...] = ()
+
+    @property
+    def output(self) -> Any:
+        return self.inlined_subgraph.output
+
+    @property
+    def buffers(self) -> tuple[Buffer, ...]:
+        return self.inlined_subgraph.buffers
+
+    def commit(self) -> None:
+        self.inlined_subgraph.commit()
+
+
 def inline_subgraph_to_ir_nodes(
     gm: torch.fx.GraphModule, inputs: list[Any], name: str
 ) -> Any:
@@ -295,8 +315,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         if self._compiled_module is None:
             self._compiled_module = self._compile_for_benchmarking()
 
-    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        """Regular benchmarking: compile if needed, then use benchmarker."""
+    def _benchmark_complete_plan(self, *args: list[Any], out: torch.Tensor) -> float:
+        """Compile and benchmark the complete ordered subgraph wrapper."""
         self._ensure_compiled()
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
@@ -304,6 +324,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         def fn() -> Any:
             return bm_func([*sym_inputs, *args])
 
+        return self._benchmark_callable(fn, *sym_inputs, *args)
+
+    def _benchmark_callable(self, fn: Callable[[], Any], *args: Any) -> float:
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(fn)
 
@@ -311,8 +334,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             return do_bench_using_profiling(fn)
         return benchmarker.benchmark(
             fn,
-            device=benchmarker.infer_device(*sym_inputs, *args),
+            device=benchmarker.infer_device(*args),
         )
+
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        """Compile if needed, then benchmark the complete subgraph."""
+        return self._benchmark_complete_plan(*args, out=out)
 
     def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
         """Run once for collective benchmarking (barrier sync handled by caller)."""
@@ -369,9 +396,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         graph = V.graph
         operation_watermark = len(graph.operations)
         buffer_watermark = len(graph.buffers)
-        operation_names = set(graph.name_to_op)
-        buffer_names = set(graph.name_to_buffer)
+        operation_names = OrderedSet(graph.name_to_op)
+        buffer_names = OrderedSet(graph.name_to_buffer)
         env = graph.env.copy()
+        removed_buffers = graph.removed_buffers.copy()
+        removed_operations = graph.removed_operations.copy()
 
         plan: InlinedSubgraphPlan | None = None
         try:
@@ -390,10 +419,14 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 del graph.buffers[buffer_watermark:]
                 graph.env.clear()
                 graph.env.update(env)
+                graph.removed_buffers.clear()
+                graph.removed_buffers.update(removed_buffers)
+                graph.removed_operations.clear()
+                graph.removed_operations.update(removed_operations)
 
-                for name in set(graph.name_to_op) - operation_names:
+                for name in OrderedSet(graph.name_to_op) - operation_names:
                     graph.name_to_op.pop(name, None)
-                for name in set(graph.name_to_buffer) - buffer_names:
+                for name in OrderedSet(graph.name_to_buffer) - buffer_names:
                     graph.name_to_buffer.pop(name, None)
 
                 # A later committed expansion may reuse the same deterministic
@@ -414,6 +447,85 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
     def autoheuristic_id(self) -> str:
         return f"subgraph_{self.name}"
+
+
+class MultiKernelFusionPlanChoice(SubgraphChoiceCaller):
+    """A subgraph choice with explicit ordered fusion groups.
+
+    The choice owns the complete executable and cache identity inherited from
+    ``SubgraphChoiceCaller``.  ``group_builder`` describes which operations
+    form each generated kernel, while ``speculative_fusion_plan`` owns the
+    graph transaction used to inspect or reject the candidate.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        group_builder: Callable[
+            [InlinedSubgraphPlan], tuple[tuple[ir.Operation, ...], ...]
+        ],
+        fusion_plan_key: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.group_builder = group_builder
+        self.fusion_plan_key = fusion_plan_key
+
+    @contextlib.contextmanager
+    def speculative_fusion_plan(self):
+        with self.speculative_inline() as inlined_subgraph:
+            operation_groups = self.group_builder(inlined_subgraph)
+            flattened_operations = tuple(
+                operation for group in operation_groups for operation in group
+            )
+            if flattened_operations != inlined_subgraph.operations:
+                raise AssertionError(
+                    "fusion-plan groups must cover every operation exactly once "
+                    "and preserve program order"
+                )
+            if len(operation_groups) < 2 or any(
+                not group for group in operation_groups
+            ):
+                raise AssertionError(
+                    "a multi-kernel fusion plan requires at least two nonempty groups"
+                )
+            yield InlinedMultiKernelFusionPlan(
+                inlined_subgraph=inlined_subgraph,
+                operation_groups=operation_groups,
+            )
+
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        scheduler = getattr(V.graph, "scheduler", None)
+        if scheduler is None:
+            return self._benchmark_complete_plan(*args, out=out)
+        return scheduler.benchmark_multi_kernel_fusion_plan(self, args, out)
+
+    def hash_key(self) -> str:
+        input_metadata = tuple(
+            (
+                tuple(inp.get_size()),
+                tuple(inp.get_stride()),
+                inp.get_dtype(),
+                inp.get_device(),
+            )
+            for inp in self.input_nodes
+        )
+        output_metadata = (
+            tuple(self.layout.size),
+            tuple(self.layout.stride),
+            self.layout.dtype,
+            self.layout.device,
+        )
+        return "-".join(
+            (
+                super().hash_key(),
+                "fusion-plan",
+                self.fusion_plan_key,
+                str(input_metadata),
+                str(output_metadata),
+                str(sorted(self.config_patches.items())),
+            )
+        )
 
 
 class SubgraphTemplate(KernelTemplate):
