@@ -23,13 +23,13 @@ struct IpcCloseCtx {
 
 namespace c10::openreg {
 
-at::IpcMemHandle OpenRegHooksInterface::getIpcMemHandle(void* ptr) const {
+at::PrivateUse1HooksInterface::IpcMemHandle OpenRegHooksInterface::getIpcMemHandle(void* ptr) const {
 #ifndef _WIN32
   char name[OR_IPC_HANDLE_MAX_LEN];
   ptrdiff_t offset = 0;
   orError_t err = orGetIpcMemHandle(ptr, name, sizeof(name), &offset);
   TORCH_CHECK(err == orSuccess, "orGetIpcMemHandle failed (err=", err, ")");
-  return at::IpcMemHandle{offset, std::string(name)};
+  return at::PrivateUse1HooksInterface::IpcMemHandle{offset, std::string(name)};
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "OpenReg IPC is not supported on Windows.");

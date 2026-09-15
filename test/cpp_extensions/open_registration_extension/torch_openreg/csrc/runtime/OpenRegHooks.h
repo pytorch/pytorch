@@ -103,7 +103,7 @@ struct OPENREG_EXPORT OpenRegHooksInterface : public at::PrivateUse1HooksInterfa
 
   // Copies the allocation containing ptr into a POSIX shm object and
   // returns the shm name and byte offset (see OpenRegHooks.cpp).
-  at::IpcMemHandle getIpcMemHandle(void* ptr) const override;
+  at::PrivateUse1HooksInterface::IpcMemHandle getIpcMemHandle(void* ptr) const override;
 
   // Not invoked by the framework when requiresEventSync() returns false.
   std::string getIpcEventHandle() const override {
