@@ -28,11 +28,13 @@ from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..debug import set_kernel_post_grad_provenance_tracing
 from ..loop_body import LoopBody
 from ..scheduler import (
+    _LoopStateSnapshot,
     BaseSchedulerNode,
     BaseScheduling,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
+    refresh_group_node_dependencies,
     Scheduler,
     SchedulerNode,
 )
@@ -5169,19 +5171,6 @@ class CppScheduling(BaseScheduling):
             body.var_ranges, list(body.indexing_exprs.values())
         )
 
-    def _snapshot_node_loop_states(self, node):
-        if isinstance(node, SchedulerNode):
-            return [(node, node.snapshot_loop_state())]
-
-        if not isinstance(node, FusedSchedulerNode):
-            raise AssertionError("expected isinstance(node, FusedSchedulerNode)")
-        snapshots = []
-        for snode in node.snodes:
-            if not isinstance(snode, SchedulerNode):
-                raise AssertionError("expected isinstance(snode, SchedulerNode)")
-            snapshots.append((snode, snode.snapshot_loop_state()))
-        return snapshots
-
     def _align_compatible_range_nodes(self, node1, node2):
         if not isinstance(node1, (SchedulerNode, FusedSchedulerNode)):
             raise AssertionError(
@@ -5230,6 +5219,13 @@ class CppScheduling(BaseScheduling):
                 snode.recompute_size_and_body(
                     extra_indexing_constraints=node_to_recomp_indexing_constraints
                 )
+            ref_group = ref_node.snodes[0].group
+            if any(snode.group != ref_group for snode in ref_node.snodes[1:]):
+                # Simplification picked a different loop factorization per snode
+                return False
+            # Update the reference to avoid comparing with the stale one
+            ref_node.group = ref_group
+            refresh_group_node_dependencies(ref_node)
 
         _, (vars1, _) = node1.group
         _, (vars2, _) = node2.group
@@ -5342,13 +5338,11 @@ class CppScheduling(BaseScheduling):
         if ranges1 != ranges2:
             return False
 
-        snapshots = self._snapshot_node_loop_states(node_to_recomp)
-        snapshots.extend(self._snapshot_node_loop_states(ref_node))
+        snapshot = _LoopStateSnapshot.create((node_to_recomp, ref_node))
         try:
             return self._align_compatible_range_nodes(node1, node2)
         finally:
-            for node, state in reversed(snapshots):
-                node.restore_loop_state(state)
+            snapshot.restore()
 
     def _can_fuse_horizontal_impl(self, node1, node2):
         if not (
