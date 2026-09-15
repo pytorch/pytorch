@@ -4592,12 +4592,6 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-# The exporter recomputes the envelope kineto's C++ writes (device properties, the CUDA
-# driver/runtime versions), and both are NVIDIA-shaped: the driver version comes from
-# cuda-bindings, which cannot work on ROCm, and the property set is the one
-# cudaDeviceProp defines. Nobody has established what equivalence should even mean here,
-# so skip rather than assert something unverified.
-@unittest.skipIf(TEST_WITH_ROCM, "Python chrome-trace export is not validated on ROCm")
 class TestPythonChromeTraceExport(TestCase):
     """Verify that the Python streaming exporter produces traces equivalent
     to the C++ Kineto save() path."""
@@ -4727,6 +4721,13 @@ class TestPythonChromeTraceExport(TestCase):
         x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
         self.assertGreater(len(x_events), 0)
 
+    # The envelope is NVIDIA-shaped on both sides, and on ROCm the two sides disagree:
+    # kineto's ROCm backend writes hip_driver_version/hip_runtime_version instead of the
+    # cuda_* keys, and its device-property set names two fields differently
+    # (maxSharedMemoryPerMultiProcessor, regsPerBlock) from the cudaDeviceProp shape the
+    # exporter reproduces. The event-stream comparisons above hold on ROCm; only the
+    # envelope has no defined ROCm equivalence yet.
+    @unittest.skipIf(TEST_WITH_ROCM, "Chrome-trace envelope is not validated on ROCm")
     def test_python_export_envelope_matches_kineto(self):
         """Top-level trace keys, which the profiler result does not expose and the
         exporter therefore recomputes: device properties and the CUDA versions kineto
