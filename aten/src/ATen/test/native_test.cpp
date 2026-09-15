@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/ops/as_strided_native.h>
 #include <c10/util/irange.h>
 
 using namespace at;
@@ -260,6 +261,22 @@ TEST(TestNative, NativeTestCPU) {
 
   test(at::device(kCPU).dtype(kFloat),
        at::device(kCPU).dtype(kDouble));
+}
+
+TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
+  auto input = at::empty({4}, at::device(at::kMeta));
+  auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
+  auto* input_impl = input.unsafeGetTensorImpl();
+  input_impl->set_and_normalize_fake_device(c10::Device(c10::kCPU));
+  input_impl->set_fake_tensor_mode(mode);
+
+  auto result = at::native::as_strided_tensorimpl(input, {2, 2}, {2, 1}, 0);
+  auto* result_impl = result.unsafeGetTensorImpl();
+  auto fake_device = result_impl->fake_device();
+
+  ASSERT_TRUE(fake_device.has_value());
+  EXPECT_EQ(*fake_device, c10::Device(c10::kCPU));
+  EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
 }
 
 TEST(TestNative, NativeTestGPU) {
