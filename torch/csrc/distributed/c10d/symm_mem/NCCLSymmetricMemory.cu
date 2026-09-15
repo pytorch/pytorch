@@ -873,10 +873,19 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       auto it = symm_mems_.find(key);
-      if (it != symm_mems_.end()) {
 #ifdef USE_ROCM
-        it->second->check_liveness();
+      // A cached handle whose communicator was destroyed or replaced cannot be
+      // revived, but the caller can be. Drop it and fall through to rebuild
+      // against whatever is registered for this group now. Raising here instead
+      // would make restart-after-error unrecoverable for any tensor that had
+      // already rendezvoused, since nothing else evicts this entry while the
+      // allocation is alive.
+      if (it != symm_mems_.end() && !it->second->is_live()) {
+        symm_mems_.erase(it);
+        it = symm_mems_.end();
+      }
 #endif
+      if (it != symm_mems_.end()) {
         return it->second;
       }
 
@@ -898,6 +907,15 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     std::lock_guard<std::mutex> alloc_lock(allocation->mutex);
     auto& peer_alloc_infos = allocation->peer_alloc_infos_;
     auto& pai = peer_alloc_infos[*group_name];
+#ifdef USE_ROCM
+    // The window this holds was registered against the retired communicator, so
+    // it has to be rebuilt too. Releasing it here is what makes the dropped
+    // handle above replaceable rather than merely absent. Its destructor skips
+    // deregistration precisely because the registration is no longer live.
+    if (pai && !pai->is_live()) {
+      pai.reset();
+    }
+#endif
     if (!pai) {
       pai = c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name);
     }
