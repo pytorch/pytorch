@@ -402,7 +402,8 @@ def _restore_override_libs(registry, saved):
     there (`_install_override`), so a handle in the snapshot can be dead by the
     time tearDown runs. Restoring it would leave the registry listing a kernel
     the dispatcher no longer has; the caller rebuilds those from the restored
-    graphs instead.
+    graphs instead, having first destroyed the replacement so the rebuild
+    captures the op's own kernel as its fallback rather than that replacement.
     """
     clobbered = [
         key for key, lib in saved.items() if registry._override_libs.get(key) is not lib
@@ -455,14 +456,16 @@ class TestRegistryRuntime(TestCase):
         self.registry._dispatch_key_to_lib_graph.clear()
 
     def tearDown(self):
-        # Destroy only what this test installed. On a DSL-equipped machine
-        # `import torch` leaves production overrides live in
+        # Destroy only what this test installed -- anything that is not the
+        # handle the snapshot holds for its key, which covers both a new key
+        # and an override installed over an existing one. On a DSL-equipped
+        # machine `import torch` leaves production overrides live in
         # `_override_libs`; destroying those would strip the dispatcher of
         # kernels the registry still lists as installed, for the rest of the
         # process.
         saved_override_libs = self._saved["override_libs"]
         for key, lib in list(self.registry._override_libs.items()):
-            if key not in saved_override_libs:
+            if saved_override_libs.get(key) is not lib:
                 lib._destroy()
         rebuild = _restore_override_libs(self.registry, saved_override_libs)
 
@@ -499,6 +502,73 @@ class TestRegistryRuntime(TestCase):
             dispatch_key,
             self.registry._graphs[(lib_symbol, op_symbol, dispatch_key)],
         )
+
+    def test_teardown_restores_the_fallback_of_a_replaced_override(self):
+        """An override installed over one that is already there must not
+        outlive teardown as the rebuilt override's fallback.
+
+        `_install_override` destroys the library it replaces, so the snapshot
+        holds a dead handle and teardown has to rebuild that override from the
+        saved graph. The rebuild captures whatever kernel is live at that
+        moment, so leaving the replacement registered makes it the fallback,
+        and every later call in the process that the restored override declines
+        lands in a test's impl. Both classes' teardowns follow the same rule:
+        destroy what is not the snapshot's own handle for the key.
+        """
+
+        # `torch.equal`, not `assertEqual`: the latter compares through
+        # `torch.isclose`, which multiplies by rtol and re-enters the very
+        # override under test with a float argument the captured Tensor-overload
+        # fallback cannot take.
+        def mul():
+            return torch.ops.aten.mul.Tensor(torch.tensor([2.0]), torch.tensor([4.0]))
+
+        key = ("aten", "mul.Tensor", "CPU")
+        try:
+            # Stands in for an override that was live before setUp. It declines
+            # every call, so what the op returns is entirely its fallback.
+            self.registry.register_op_override(
+                "test_dsl",
+                "aten",
+                "mul.Tensor",
+                "CPU",
+                lambda *a, **k: False,
+                lambda a, b: torch.full_like(a, 11.0),
+            )
+            self._install("mul.Tensor", "CPU")
+            self._saved["override_libs"][key] = self.registry._override_libs[key]
+            self._saved["graphs"][key] = list(self.registry._graphs[key])
+            self.assertTrue(torch.equal(mul(), torch.tensor([8.0])))
+
+            # The test's own override replaces it at the same key.
+            self.registry.register_op_override(
+                "test_dsl",
+                "aten",
+                "mul.Tensor",
+                "CPU",
+                lambda *a, **k: True,
+                lambda a, b: torch.full_like(a, 99.0),
+            )
+            self._install("mul.Tensor", "CPU")
+            self.assertTrue(torch.equal(mul(), torch.tensor([99.0])))
+
+            # What tearDown does, in the order it does it.
+            saved_override_libs = self._saved["override_libs"]
+            for k, lib in list(self.registry._override_libs.items()):
+                if saved_override_libs.get(k) is not lib:
+                    lib._destroy()
+            rebuild = _restore_override_libs(self.registry, saved_override_libs)
+            self.registry._graphs.clear()
+            self.registry._graphs.update(self._saved["graphs"])
+            if rebuild:
+                self.registry._register_all_overrides()
+
+            self.assertTrue(torch.equal(mul(), torch.tensor([8.0])))
+        finally:
+            # The stand-in was added to the snapshot, so drop it again or the
+            # real tearDown would preserve it for the rest of the process.
+            self._saved["override_libs"].pop(key, None)
+            self._saved["graphs"].pop(key, None)
 
     def test_cond_false_falls_through_to_native(self):
         """cond=False must transparently invoke the captured native kernel."""
@@ -1108,7 +1178,7 @@ class TestRegistryNonAtenNamespace(TestCase):
         # Only what this test installed; production overrides in the snapshot
         # stay live (see TestRegistryRuntime.tearDown).
         for key, lib in list(self.registry._override_libs.items()):
-            if key not in self._saved_override_libs:
+            if self._saved_override_libs.get(key) is not lib:
                 lib._destroy()
         rebuild = _restore_override_libs(self.registry, self._saved_override_libs)
 
@@ -1201,7 +1271,7 @@ class TestRegistryNonAtenNamespace(TestCase):
 
         # What tearDown does, in the order it does it.
         for key, lib in list(self.registry._override_libs.items()):
-            if key not in self._saved_override_libs:
+            if self._saved_override_libs.get(key) is not lib:
                 lib._destroy()
         _restore_override_libs(self.registry, self._saved_override_libs)
         self.registry._graphs.clear()
