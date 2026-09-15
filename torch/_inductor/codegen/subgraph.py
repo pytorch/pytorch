@@ -1,4 +1,5 @@
 import contextlib
+import dataclasses
 import functools
 import itertools
 import logging
@@ -33,6 +34,36 @@ from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class InlinedSubgraphPlan:
+    """A temporary, inspectable lowering of a :class:`SubgraphChoiceCaller`.
+
+    Unlike a ``SubgraphBuffer``, this exposes the individual operations.  It is
+    intended for schedulers which need to inspect or benchmark an internal
+    template boundary before committing to a multi-kernel subgraph choice.
+
+    The plan is only valid inside ``SubgraphChoiceCaller.speculative_inline``.
+    Call ``commit`` to retain the lowering in the parent graph; otherwise all
+    graph mutations are rolled back on context-manager exit.
+    """
+
+    output: Any
+    operations: tuple[ir.Operation, ...]
+    buffers: tuple[Buffer, ...]
+    _committed: bool = False
+
+    @property
+    def template_operations(self) -> tuple[ir.TemplateBuffer, ...]:
+        return tuple(
+            operation
+            for operation in self.operations
+            if isinstance(operation, ir.TemplateBuffer)
+        )
+
+    def commit(self) -> None:
+        self._committed = True
 
 
 def inline_subgraph_to_ir_nodes(
@@ -311,6 +342,64 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 config_patches=self.config_patches if self.config_patches else None,
             )
         )
+
+    @contextlib.contextmanager
+    def speculative_inline(self):
+        """Temporarily lower this choice into the current parent graph.
+
+        This is the graph-level analogue of ``MultiTemplateBuffer``'s temporary
+        caller swap.  A scheduler can inspect the internal template operation,
+        construct scheduler nodes, and benchmark a complete multi-operation
+        plan without permanently selecting the choice.  Unless the yielded
+        plan is explicitly committed, registrations made while lowering are
+        removed.
+
+        This deliberately snapshots graph registration state rather than
+        cloning IR objects.  Re-entering the context re-lowers the FX graph and
+        therefore produces a fresh candidate.  That makes rollback reliable
+        even when lowering mutates layouts or realizes inputs.
+        """
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
+
+        graph = V.graph
+        operation_watermark = len(graph.operations)
+        buffer_watermark = len(graph.buffers)
+        operation_names = set(graph.name_to_op)
+        buffer_names = set(graph.name_to_buffer)
+        env = graph.env.copy()
+
+        plan: InlinedSubgraphPlan | None = None
+        try:
+            output = inline_subgraph_to_ir_nodes(self.gm, self.input_nodes, self.name)
+            plan = InlinedSubgraphPlan(
+                output=output,
+                operations=tuple(graph.operations[operation_watermark:]),
+                buffers=tuple(graph.buffers[buffer_watermark:]),
+            )
+            yield plan
+        finally:
+            if plan is None or not plan._committed:
+                new_operations = graph.operations[operation_watermark:]
+                new_buffers = graph.buffers[buffer_watermark:]
+                del graph.operations[operation_watermark:]
+                del graph.buffers[buffer_watermark:]
+                graph.env.clear()
+                graph.env.update(env)
+
+                for name in set(graph.name_to_op) - operation_names:
+                    graph.name_to_op.pop(name, None)
+                for name in set(graph.name_to_buffer) - buffer_names:
+                    graph.name_to_buffer.pop(name, None)
+
+                # A later committed expansion may reuse the same deterministic
+                # registration names.  Clear them from discarded IR objects so
+                # a failed candidate cannot appear registered twice in
+                # diagnostics.
+                for operation in new_operations:
+                    operation.operation_name = None
+                for buffer in new_buffers:
+                    buffer.name = None
 
     def info_dict(self) -> dict[str, Any]:
         """Information returned here is logged to the autotune log file when that is enabled."""

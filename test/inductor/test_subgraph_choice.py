@@ -3,10 +3,12 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import torch
+from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
 from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -33,6 +35,87 @@ class TestSubgraphChoice(TestCase):
             name=name,
             layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
         )
+
+    def test_speculative_inline_rolls_back_graph_registrations(self):
+        caller = object.__new__(SubgraphChoiceCaller)
+        caller.gm = MagicMock()
+        caller.input_nodes = []
+        caller.name = "candidate"
+
+        old_operation = MagicMock(operation_name="op0")
+        old_buffer = MagicMock(name="buf0")
+        graph = MagicMock()
+        graph.operations = [old_operation]
+        graph.buffers = [old_buffer]
+        graph.name_to_op = {"op0": old_operation}
+        graph.name_to_buffer = {"buf0": old_buffer}
+        graph.env = {"old": object()}
+
+        new_operation = MagicMock(operation_name="op1")
+        new_buffer = MagicMock(name="buf1")
+
+        def inline(*args, **kwargs):
+            graph.operations.append(new_operation)
+            graph.buffers.append(new_buffer)
+            graph.name_to_op["op1"] = new_operation
+            graph.name_to_buffer["buf1"] = new_buffer
+            graph.env["candidate"] = object()
+            return "output"
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.subgraph.inline_subgraph_to_ir_nodes",
+                side_effect=inline,
+            ),
+        ):
+            with caller.speculative_inline() as plan:
+                self.assertEqual(plan.output, "output")
+                self.assertEqual(plan.operations, (new_operation,))
+                self.assertEqual(plan.buffers, (new_buffer,))
+
+        self.assertEqual(graph.operations, [old_operation])
+        self.assertEqual(graph.buffers, [old_buffer])
+        self.assertEqual(graph.name_to_op, {"op0": old_operation})
+        self.assertEqual(graph.name_to_buffer, {"buf0": old_buffer})
+        self.assertEqual(set(graph.env), {"old"})
+
+    def test_speculative_inline_can_commit_graph_registrations(self):
+        caller = object.__new__(SubgraphChoiceCaller)
+        caller.gm = MagicMock()
+        caller.input_nodes = []
+        caller.name = "candidate"
+
+        graph = MagicMock()
+        graph.operations = []
+        graph.buffers = []
+        graph.name_to_op = {}
+        graph.name_to_buffer = {}
+        graph.env = {}
+        new_operation = MagicMock(operation_name="op0")
+        new_buffer = MagicMock(name="buf0")
+
+        def inline(*args, **kwargs):
+            graph.operations.append(new_operation)
+            graph.buffers.append(new_buffer)
+            graph.name_to_op["op0"] = new_operation
+            graph.name_to_buffer["buf0"] = new_buffer
+            return "output"
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.subgraph.inline_subgraph_to_ir_nodes",
+                side_effect=inline,
+            ),
+        ):
+            with caller.speculative_inline() as plan:
+                plan.commit()
+
+        self.assertEqual(graph.operations, [new_operation])
+        self.assertEqual(graph.buffers, [new_buffer])
+        self.assertEqual(graph.name_to_op, {"op0": new_operation})
+        self.assertEqual(graph.name_to_buffer, {"buf0": new_buffer})
 
     def test_subgraph_decompose_k(self):
         from torch._inductor.kernel.mm import aten_mm
