@@ -1,4 +1,5 @@
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
+load("//tools/build_defs:buckconfig.bzl", "read_bool")
 load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "CXX", "IOS", "MACOSX", "WINDOWS")
@@ -13,7 +14,7 @@ load(
     "prod_srcs_for_arch_wrapper",
 )
 
-XNN_COMMON_PREPROCESSOR_FLAGS = [
+XNN_BASE_PREPROCESSOR_FLAGS = [
     "-DXNN_PRIVATE=",
     "-DXNN_INTERNAL=",
     "-DXNN_LOG_LEVEL=0",
@@ -21,6 +22,9 @@ XNN_COMMON_PREPROCESSOR_FLAGS = [
     "DEFAULT": ["-Werror=implicit-fallthrough"],
     "ovr_config//os:windows": [],
 })
+
+# Opt in with `buck build -c xnnpack.enable_arm64_kleidiai=true <target>`.
+_XNNPACK_KLEIDIAI_ENABLED = read_bool("xnnpack", "enable_arm64_kleidiai", False)
 
 # Zip kernels are patched back in internally.
 ZIP_SCALAR_SRCS = [
@@ -102,11 +106,31 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         ],
     })
 
+    # These macros are read as C expressions in gemm-config.c, so define them
+    # to 0/1 consistently across the main library and every microkernel target.
+    XNN_KLEIDIAI_DISABLED_PREPROCESSOR_FLAGS = [
+        "-DXNN_ENABLE_KLEIDIAI=0",
+        "-DXNN_ENABLE_ARM_SME=0",
+        "-DXNN_ENABLE_ARM_SME2=0",
+    ]
+    XNN_COMMON_PREPROCESSOR_FLAGS = XNN_BASE_PREPROCESSOR_FLAGS + (select({
+        "ovr_config//cpu:arm64": [
+            "-DXNN_ENABLE_KLEIDIAI=1",
+            "-DXNN_ENABLE_ARM_SME=1",
+            "-DXNN_ENABLE_ARM_SME2=1",
+        ],
+        "DEFAULT": XNN_KLEIDIAI_DISABLED_PREPROCESSOR_FLAGS,
+    }) if _XNNPACK_KLEIDIAI_ENABLED else XNN_KLEIDIAI_DISABLED_PREPROCESSOR_FLAGS)
+
     XNN_COMMON_MICROKERNEL_EXPORTED_DEPS = [
         ":interface",
         third_party("FP16"),
         third_party("FXdiv"),
-    ]
+    ] + (select({
+        # kai_* headers, included under XNN_ENABLE_KLEIDIAI on ARM64.
+        "ovr_config//cpu:arm64": ["fbsource//third-party/kleidiai:kleidiai"],
+        "DEFAULT": [],
+    }) if _XNNPACK_KLEIDIAI_ENABLED else [])
 
     fb_xplat_cxx_library(
         name = "interface",
@@ -1736,6 +1760,58 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     )
 
     fb_xplat_cxx_library(
+        name = "ukernels_neonsme",
+        srcs = select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neonsme"),
+        }) if _XNNPACK_KLEIDIAI_ENABLED else [],
+        headers = get_xnnpack_headers(),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX),
+        compiler_flags = [
+            "-O2",
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm64": ["-march=armv8.2-a+sve+sve2"],
+        }),
+        labels = labels,
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        fbandroid_link_whole = True,
+        preferred_linkage = "static",
+        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_neonsme2",
+        srcs = select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neonsme2"),
+        }) if _XNNPACK_KLEIDIAI_ENABLED else [],
+        headers = get_xnnpack_headers(),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX),
+        compiler_flags = [
+            "-O2",
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm64": ["-march=armv8.2-a+sve+sve2"],
+        }),
+        labels = labels,
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        fbandroid_link_whole = True,
+        preferred_linkage = "static",
+        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
+    )
+
+    fb_xplat_cxx_library(
         name = "ukernels_asm_aarch32",
         srcs = select({
             "DEFAULT": [],
@@ -1902,7 +1978,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_neonfma_aarch64",
             ":ukernels_neonfma_i8mm",
             ":ukernels_neoni8mm",
-        ],
+        ] + ([":ukernels_neonsme", ":ukernels_neonsme2"] if _XNNPACK_KLEIDIAI_ENABLED else []),
     )
 
     fb_xplat_cxx_library(
@@ -1980,6 +2056,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_neonfma_aarch64",
             ":ukernels_neonfma_i8mm",
             ":ukernels_neoni8mm",
+        ] + ([":ukernels_neonsme", ":ukernels_neonsme2"] if _XNNPACK_KLEIDIAI_ENABLED else []) + [
             ":ukernels_fp16arith",
         ],
     )
@@ -2036,7 +2113,11 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_zip",
             third_party("cpuinfo"),
             third_party("pthreadpool"),
-        ],
+        ] + (select({
+            # kai_* headers, included under XNN_ENABLE_KLEIDIAI on ARM64.
+            "ovr_config//cpu:arm64": ["fbsource//third-party/kleidiai:kleidiai"],
+            "DEFAULT": [],
+        }) if _XNNPACK_KLEIDIAI_ENABLED else []),
         exported_headers = {
             "xnnpack.h": "XNNPACK/include/xnnpack.h",
         },
@@ -2066,8 +2147,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_ENABLE_CPUINFO",
             "-DXNN_ENABLE_ARM_I8MM=1",
             "-DXNN_ENABLE_ARM_FP16_VECTOR=1",
-            "-DXNN_ENABLE_ARM_SME=0",
-            "-DXNN_ENABLE_ARM_SME2=0",
+            # KLEIDIAI / ARM_SME / ARM_SME2 come from XNN_COMMON_PREPROCESSOR_FLAGS.
             # The hardware-config / gemm-config dispatch code now references every
             # XNN_ENABLE_<ISA> macro as a C expression (not just #ifdef), so each
             # must be defined to 0/1. Values mirror the x86 ukernels linked via

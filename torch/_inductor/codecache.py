@@ -42,13 +42,16 @@ from types import (
     ModuleType,
 )
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import NotRequired, override, Self, TypedDict
+from typing_extensions import override, Self, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import (
+    get_interface_for_device,
+    get_registered_device_interfaces,
+)
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import (
     CompileEventLogger,
@@ -129,6 +132,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_guarding_hint,
     ShapeEnv,
 )
+from torch.utils._config_module import _ImplicationConfigModule
 from torch.utils._device import _device_constructors
 from torch.utils._ordered_set import OrderedSet
 
@@ -159,10 +163,14 @@ class SystemVersionInfo(TypedDict, total=False):
     hip: str | None
 
 
-class SystemInfo(TypedDict):
+class SystemCacheInfo(TypedDict, total=False):
+    device: SystemDeviceInfo
+    version: SystemVersionInfo
+    device_interfaces: dict[str, dict[str, object]]
+
+
+class SystemInfo(SystemCacheInfo):
     hash: str
-    device: NotRequired[SystemDeviceInfo]
-    version: NotRequired[SystemVersionInfo]
 
 
 class CacheInfo(TypedDict, total=False):
@@ -333,9 +341,10 @@ class CacheBase:
         with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
 
+        version_info: SystemVersionInfo = {"triton": triton_version}
+        hash_input: SystemCacheInfo = {"version": version_info}
         try:
             device_info: SystemDeviceInfo = {"name": None}
-            version_info: SystemVersionInfo = {"triton": triton_version}
             device_properties = torch.cuda.get_device_properties(
                 torch.cuda.current_device()
             )
@@ -345,18 +354,48 @@ class CacheBase:
             else:
                 device_info["name"] = device_properties.gcnArchName
                 version_info["hip"] = torch.version.hip
-            hash_input: dict[str, Any] = {
-                "device": device_info,
-                "version": version_info,
-            }
-            return {
-                "device": device_info,
-                "version": version_info,
-                "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input),
-            }
+            hash_input["device"] = device_info
         except (AssertionError, RuntimeError):
-            # If cuda is not installed, none of the above config is relevant.
-            return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
+            # If CUDA is not installed, omit CUDA/HIP-specific device information.
+            pass
+
+        device_interface_info: dict[str, dict[str, object]] = {}
+        for name, interface in get_registered_device_interfaces():
+            # The registry contains both the base device name and indexed local
+            # instances; collect cache metadata only once per backend.
+            if ":" in name:
+                continue
+
+            # CacheBase.get_system() participates in every compile's FX graph
+            # cache key, so a broken third-party backend must not break CPU-only
+            # compilation.
+            try:
+                if not interface.is_available():
+                    continue
+                info = interface.get_cache_system_info()
+                if info is None:
+                    continue
+                if not isinstance(info, dict):
+                    raise TypeError(f"expected a dict or None, got {type(info)}")
+                # Probe serializability here before key_from_json() and
+                # update_local_cache() serialize this metadata later.
+                json.dumps(info, sort_keys=True)
+                device_interface_info[name] = info
+            except Exception:
+                log.warning(
+                    "Failed to collect cache system info from device interface %s",
+                    name,
+                    exc_info=True,
+                )
+                continue
+
+        if device_interface_info:
+            hash_input["device_interfaces"] = device_interface_info
+
+        return {
+            **hash_input,
+            "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input),
+        }
 
     @staticmethod
     @clear_on_fresh_cache
@@ -428,7 +467,10 @@ class PersistentCache(CacheBase):
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
-        precision = torch.get_float32_matmul_precision()
+        precision = torch.backends.cuda.matmul.fp32_precision
+        # bfx9 has no legacy equivalent, and the legacy getter may reject it.
+        if precision != "bfx9":
+            precision = torch.get_float32_matmul_precision()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
@@ -1152,9 +1194,8 @@ class CacheabilityValidator:
     def _check_nested_region_inductor_config_patches(self) -> None:
         # Nested region config patches are hashed by pickling their raw value
         # (see _collect_nested_region_inductor_config_patches_for_hash). Unlike
-        # top-level custom passes there is no uuid() fallback, so any callable or
-        # custom-pass value is conservatively treated as uncacheable, including a
-        # CustomGraphPass that provides a stable uuid().
+        # top-level custom passes there is no uuid() fallback, so any callable is
+        # conservatively treated as uncacheable.
         for _, config_patches in _collect_nested_region_inductor_config_patches(
             self.gm
         ):
@@ -1165,10 +1206,6 @@ class CacheabilityValidator:
                 if any(callable(v) for v in values):
                     self.bypass(
                         f"Uncacheable nested region config '{key}': callable value"
-                    )
-                if key in _NESTED_REGION_UNCACHEABLE_CONFIG_KEYS and value:
-                    self.bypass(
-                        f"Uncacheable nested region config '{key}': custom pass"
                     )
 
     def _check_frozen_params(self) -> None:
@@ -1291,20 +1328,6 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
 @dataclasses.dataclass
 class HashableOpaqueValue:
     ordinal: int
-
-
-_NESTED_REGION_UNCACHEABLE_CONFIG_KEYS = OrderedSet(
-    [
-        "custom_partitioner_fn",
-        "joint_custom_post_pass",
-        "joint_custom_pre_pass",
-        "post_grad_custom_post_pass",
-        "post_grad_custom_pre_pass",
-        "pre_grad_custom_pass",
-        "_post_fusion_custom_pass",
-        "_pre_fusion_custom_pass",
-    ]
-)
 
 
 def _collect_nested_region_inductor_config_patches(
@@ -1695,6 +1718,14 @@ class FxGraphHashDetails:
             for device, custom_config in custom_backend_codegen_configs.items()
             if custom_config is not None
         }
+        implication_hashes = {
+            device: custom_config._implication_hash
+            for device, custom_config in custom_backend_codegen_configs.items()
+            if isinstance(custom_config, _ImplicationConfigModule)
+        }
+        if implication_hashes:
+            # FxGraphCachePickler includes these rule fingerprints through self.__dict__.
+            self.custom_backend_codegen_implications = implication_hashes
 
         # Register the custom partitioner function
         self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(
@@ -1850,19 +1881,36 @@ class GuardedCache(Generic[T]):
     ) -> Generator[tuple[T, bytes, bool], None, None]:
         if local:
             subdir = cls._get_tmp_dir_for_key(key)
-            if os.path.exists(subdir):
-                for path in sorted(os.listdir(subdir)):
-                    if path.startswith("."):
-                        continue  # Skip temp files from concurrent write_atomic() calls
-                    try:
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            content = f.read()
-                            yield pickle.loads(content), content, True
-                    except Exception:
-                        log.warning(
-                            "fx graph cache unable to load compiled graph",
-                            exc_info=True,
-                        )
+            try:
+                names = sorted(os.listdir(subdir))
+            except FileNotFoundError:
+                # Nothing was ever written for this key, or another process cleared
+                # the cache out from under us. The local cache root is shared across
+                # processes, so checking os.path.exists() first would only narrow the
+                # race, not close it. Either way there are no candidates: a miss.
+                names = []
+            except OSError:
+                # Anything else (a bad mode on the cache dir, a dead mount) is not a
+                # race and is worth surfacing, but it still leaves no candidates.
+                log.warning(
+                    "%s unable to list cache entries", cls.__name__, exc_info=True
+                )
+                names = []
+            for path in names:
+                if path.startswith("."):
+                    continue  # Skip temp files from concurrent write_atomic() calls
+                try:
+                    with open(os.path.join(subdir, path), "rb") as f:
+                        content = f.read()
+                        yield pickle.loads(content), content, True
+                except FileNotFoundError:
+                    continue  # Raced with a concurrent cache clear
+                except Exception:
+                    log.warning(
+                        "%s unable to load compiled graph",
+                        cls.__name__,
+                        exc_info=True,
+                    )
 
         if remote_cache:
             try:
