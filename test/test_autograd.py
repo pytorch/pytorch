@@ -17274,6 +17274,38 @@ class TestSelectiveActivationCheckpoint(TestCase):
         out = checkpoint(fn, x_wrapper, use_reentrant=False, context_fn=context_fn)
         out.sum().backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_effect_lookup_only_for_recompute_policies(self):
+        from torch.utils.checkpoint import _CachingTorchDispatchMode
+
+        for policy in (
+            CheckpointPolicy.MUST_SAVE,
+            CheckpointPolicy.PREFER_SAVE,
+            CheckpointPolicy.MUST_CPU_OFFLOAD,
+            CheckpointPolicy.PREFER_CPU_OFFLOAD,
+        ):
+            with self.subTest(policy=policy):
+                storage = defaultdict(dict)
+
+                def policy_fn(_ctx, _op, *args, **kwargs):
+                    return policy
+
+                with unittest.mock.patch(
+                    "torch.utils.checkpoint._is_cacheable_effect",
+                    side_effect=AssertionError("unexpected effect lookup"),
+                ):
+                    with _CachingTorchDispatchMode(policy_fn, storage):
+                        torch.ones(1).sin()
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_raw_c10d_launch_is_not_a_cacheable_effect(self):
+        from torch._higher_order_ops.effects import has_effects
+        from torch.utils.checkpoint import _is_cacheable_effect
+
+        op = torch.ops.c10d.alltoall_.default
+        self.assertTrue(has_effects(op))
+        self.assertFalse(_is_cacheable_effect(op))
+
     def test_bad_inputs(self):
         bad_op_list1 = [2]
 
