@@ -15171,6 +15171,12 @@ if __name__ == '__main__':
     def test_pdist_empty_row(self, device):
         inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True)
         self.assertTrue(gradcheck(F.pdist, (inp,)))
+        # zero-row input: backward must produce an empty grad instead of
+        # crashing (https://github.com/pytorch/pytorch/issues/197099)
+        inp = torch.randn(0, 3, dtype=torch.double, device=device, requires_grad=True)
+        self.assertEqual(F.pdist(inp).shape, (0,))
+        F.pdist(inp).sum().backward()
+        self.assertEqual(inp.grad.shape, (0, 3))
 
     @skipMPS
     def test_pdist_empty_col(self, device):
