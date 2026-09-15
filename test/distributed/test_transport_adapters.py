@@ -15,7 +15,12 @@ from transport_test_utils import TransportTestMixin
 
 import torch
 from torch.distributed._transport import _torchcomms, _ucxx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 @dataclass(frozen=True)
@@ -118,6 +123,10 @@ class TestTorchCommsTransport(TransportTestMixin, TestCase):
     def test_supported(self):
         with patch.object(_torchcomms, "_load_backend", return_value=self.backend()):
             self.assertTrue(_torchcomms.TorchCommsTransport.supported())
+
+    def test_requires_device(self):
+        with self.assertRaisesRegex(ValueError, "requires an explicit CUDA device"):
+            _torchcomms.TorchCommsTransport()
 
     def test_forwards_operations_and_keeps_memory_alive(self):
         with patch.object(_torchcomms, "_load_backend", return_value=self.backend()):
@@ -236,8 +245,8 @@ class TestUCXXTransport(TransportTestMixin, TestCase):
     def connect(self, *, symmetric=False, timeout=5.0):
         backend = _UCXXBackend()
         with patch.object(_ucxx, "_load_backend", return_value=backend):
-            server = _ucxx.UCXXTransport("cpu", host="127.0.0.1", timeout=timeout)
-            client = _ucxx.UCXXTransport("cpu", host="127.0.0.1", timeout=timeout)
+            server = _ucxx.UCXXTransport(host="127.0.0.1", timeout=timeout)
+            client = _ucxx.UCXXTransport(host="127.0.0.1", timeout=timeout)
         server_url = server.bind()
         client_url = client.bind() if symmetric else None
         self.assertEqual(client.connect(server_url), 0)
@@ -252,6 +261,36 @@ class TestUCXXTransport(TransportTestMixin, TestCase):
 
     def make_transport_pair(self):
         return self.connect(symmetric=True)
+
+    @parametrize("read", [False, True])
+    def test_selects_buffer_device_after_sending_header(self, read):
+        tensor = SimpleNamespace(device=torch.device("cuda:2"), data_ptr=lambda: 123)
+        registered = SimpleNamespace(tensor=tensor, lock=asyncio.Lock())
+        with patch.object(_ucxx, "_load_backend", return_value=_UCXXBackend()):
+            transport = _ucxx.UCXXTransport()
+        self.addCleanup(transport.close)
+        current_device = None
+
+        def set_device(device):
+            nonlocal current_device
+            current_device = device
+
+        async def send_header(*args):
+            set_device(torch.device("cuda:1"))
+            await asyncio.sleep(0)
+
+        async def transfer(buffer):
+            self.assertEqual(current_device, tensor.device)
+            self.assertEqual(buffer.__cuda_array_interface__["data"], (123, read))
+
+        endpoint = SimpleNamespace(send=transfer, recv=transfer)
+        with (
+            patch.object(transport, "_lookup_memory", return_value=registered),
+            patch.object(transport, "_send_header", side_effect=send_header),
+            patch.object(torch.cuda, "set_device", side_effect=set_device),
+        ):
+            serve = transport._serve_read if read else transport._serve_write
+            asyncio.run(serve(endpoint, 1, 2, 3, 0, 16))
 
     def test_default_host_is_loopback(self):
         backend = _UCXXBackend()
@@ -350,6 +389,9 @@ class TestUCXXTransport(TransportTestMixin, TestCase):
                 transport.write(source.to_view(), remote)
         finally:
             transport.close()
+
+
+instantiate_parametrized_tests(TestUCXXTransport)
 
 
 if __name__ == "__main__":
