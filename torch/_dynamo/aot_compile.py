@@ -28,7 +28,7 @@ from torch._dynamo.package import (
     SystemInfo,
 )
 
-from . import convert_frame
+from . import convert_frame, external_utils
 from .aot_compile_types import (
     BundledAOTAutogradSerializableCallable,
     SerializableCallable,
@@ -896,8 +896,11 @@ class AOTCompiledFunction:
             namespace = _module_namespace_name(self._guard_globals or {})
             named = "" if namespace is None else f", here vars({namespace})"
             where = (
-                f"the globals of the function {forward} resolves to, since that "
-                f"is the one the load resolved{named}"
+                # A rebind to a Dynamo wrapper is resolved THROUGH it
+                # (_resolve_guard_scope), so the sentence sends the reader through too.
+                f"the globals of the function {forward} resolves to, seen through "
+                "any Dynamo wrapper to the function it wraps, since that is the one "
+                f"the load resolved{named}"
                 if forward is not None
                 else f"the live scope this artifact was loaded against{named}"
             )
@@ -1291,9 +1294,12 @@ def _resolve_guard_scope(
     # attribute keeps winning the lookup), but object.__setattr__ can; refusing
     # here also keeps get_traced_fn's Module branch, whose hook reads can raise
     # AttributeError on an uninitialized module, off this path entirely.
+    from torch._dynamo.eval_frame import _static_getattr, innermost_fn
+
     forward = model.forward
-    # Describe forward in a bounded way that avoids dumping the entire module
-    # repr (functools.partial embeds the module's full repr).
+    # Describe forward AS GIVEN, not what the unwrap below reached, in a bounded
+    # way that avoids dumping the entire module repr (functools.partial embeds
+    # the module's full repr).
     forward_type = type(forward).__name__
     forward_qualname = getattr(forward, "__qualname__", "")
     described = (
@@ -1306,32 +1312,112 @@ def _resolve_guard_scope(
             "that module's forward, rooting the guards in its defining namespace; "
             "bind a plain function or bound method as model.forward instead"
         )
+    # torch.compile(mod.forward) or torch._dynamo.disable(mod.forward) bound
+    # back on the instance is a functools.wraps'd wrapper Dynamo minted, in
+    # eval_frame or (non-recursive disable) external_utils; innermost_fn
+    # follows the chain those set and stops at a wrapper Dynamo did not mint.
+    # Its AssertionError on a non-callable _torchdynamo_orig_callable is not
+    # caught: every Dynamo site that sets the pair on a function checks
+    # callable(fn) first, and the one that sets it on an OptimizedModule is
+    # behind the nn.Module refusal above. The branches of
+    # _TorchDynamoContext.__call__ that wrap their target (config.wrap_top_frame
+    # and trace_rules.check among them) end that chain on
+    # external_utils.wrap_inline's inner, a wraps'd function that only forwards
+    # to the callable it wraps -- the one the module capture traced -- so a
+    # function that OWNS external_utils' dict as its __globals__ is hopped to
+    # its __wrapped__, one hop per stacked compile. external_utils' non-wraps'd
+    # wrappers (wrap_dunder_call_ctx_manager's inner, bound by
+    # error_on_graph_break and its siblings) carry no __wrapped__ to follow.
+    # The predicate is that module's identity, not "defined under
+    # torch._dynamo": functools.wraps copies __module__, so inner reports the
+    # forward's; and torch._dynamo.decorators' wraps'd wrappers
+    # (nonstrict_trace, leaf_function) are what the capture traces as its root
+    # frame, recording decorators' dict, so hopping through them would disagree
+    # with it. _static_getattr reads only what the object owns, never a user
+    # __getattr__: a bound method proxies __globals__ to __func__ but owns
+    # none, so a forward decorated in the class body with
+    # torch.compiler.wrap_numpy (external_utils' other wraps'd wrapper) is not
+    # hopped; it resolves to wrap, whose globals are external_utils', and the
+    # namespace test below refuses it. Rebound on the instance, mod.forward =
+    # wrap_numpy(mod.forward), wrap is a plain function owning both, so it IS
+    # hopped to the bound method, which a capture of that shape (root frame
+    # wrap) would not record; no such artifact exists, since wrap's closure
+    # holds the bound method and with it the module instance, which serialize
+    # refuses, and a load onto that shape of an artifact captured from the
+    # undecorated forward agrees with that capture.
+    resolved = innermost_fn(forward)
+    while _static_getattr(resolved, "__globals__") is vars(external_utils):
+        wrapped = _static_getattr(resolved, "__wrapped__")
+        if wrapped is None:
+            return None, (
+                f"{described} is a Dynamo wrapper without a resolvable target, "
+                "a torch._dynamo.external_utils function carrying no "
+                "__wrapped__; bind the forward it wraps as model.forward instead"
+            )
+        resolved = wrapped
+    # torch.compile(mod).forward and torch._dynamo.disable(mod).forward wrap
+    # the module's DISPATCH, not its forward, and the capture traced the
+    # forward, so a dispatch is refused whatever shape it takes: the module
+    # itself (OptimizedModule._initialize hands it to wrap_inline under
+    # config.wrap_top_frame or a skip rule), which only the hop can reach (an
+    # nn.Module given as forward returned above); or a bound method whose
+    # __func__ owns a torch namespace, which the namespace test below refuses
+    # -- nn.Module.__call__ resolving to Module._wrapped_call_impl,
+    # OptimizedModule._call_lazy_check for a lazy module, the compile_wrapper
+    # torch.compile(Cls) rebinds as Cls.__call__, GraphModule's call_wrapped.
+    # That test also catches a dispatch bound with no wrapper in front,
+    # mod.forward = other.__call__: a shape a capture did record nn.Module's
+    # namespace for, so refusing forgoes agreeing with it rather than seed a
+    # process-wide torch namespace with an artifact's aliases.
+    if isinstance(resolved, torch.nn.Module):
+        return None, (
+            f"{described} resolves through a Dynamo wrapper to an nn.Module, "
+            "the module's dispatch rather than its forward; bind that module's "
+            "forward, or a wrapper over the forward rather than over the "
+            "module, as model.forward instead"
+        )
+    # get_traced_fn raises RuntimeError on a callable that is neither a
+    # function nor a method, and its __self__ branch returns __func__
+    # unchecked, so a C-implemented bound method (a tensor's sum) raises
+    # AttributeError there or on the __globals__ read.
     try:
-        # The __globals__ read is inside the try because get_traced_fn's
-        # __self__ branch returns __func__ unchecked.
-        traced_fn = convert_frame.get_traced_fn(forward)[0]
+        traced_fn = convert_frame.get_traced_fn(resolved)[0]
         scope = traced_fn.__globals__
     except (RuntimeError, AttributeError):
+        if resolved is forward:
+            return None, (
+                f"get_traced_fn cannot resolve {described} to a Python function; "
+                "make model.forward a plain function or bound method so its own "
+                "globals are used instead"
+            )
+        # torch.compile over a functools.partial or a tensor method wraps it in
+        # wrap_inline (no source file, not a function), so the unwrap lands on
+        # it; the cannot-resolve advice above would describe the
+        # compile_wrapper, a plain function that resolves fine.
         return None, (
-            f"get_traced_fn cannot resolve {described} to a Python function; "
-            "make model.forward a plain function or bound method so its own "
-            "globals are used instead"
+            f"{described} resolves through a Dynamo wrapper to an instance of "
+            f"{type(resolved).__name__}, which get_traced_fn cannot resolve to "
+            "a Python function; bind a plain function or bound method as "
+            "model.forward instead"
         )
     # A forward that resolves to a function torch itself defines -- the
     # nn.Module.forward a module never overrode, _LazyGraphModule._lazy_forward
-    # before a real recompile, the wrapper torch.compile(mod.forward) returns --
-    # owns a torch module's namespace, which a load must neither root guards in
-    # nor seed: the seeding is permanent and installs no CleanupHook. The test
-    # is the namespace, not the function's __module__, which functools.wraps
-    # copies; a GraphModule's forward is exec'd into a private per-instance copy
-    # of its codegen globals, no module's namespace, and resolves.
+    # before a real recompile, the bound Module._wrapped_call_impl a wrapper over
+    # the module's dispatch hops to -- owns a torch module's namespace, which a
+    # load must neither root guards in nor seed: the seeding is permanent and
+    # installs no CleanupHook. The test is the namespace, not the function's
+    # __module__, which functools.wraps copies; a GraphModule's forward is
+    # exec'd into a private per-instance copy of its codegen globals, no
+    # module's namespace, and resolves.
     namespace = _module_namespace_name(scope)
     if namespace is not None and namespace.partition(".")[0] == "torch":
+        hopped = resolved is not forward
+        via = "resolves through a Dynamo wrapper to" if hopped else "resolves to"
         return None, (
-            f"{described} resolves to {traced_fn.__qualname__}, whose globals "
-            f"are {namespace}'s namespace, a torch module a load neither roots "
-            "guards in nor seeds; bind the module's own forward, defined outside "
-            "torch, as model.forward instead"
+            f"{described} {via} {traced_fn.__qualname__}, whose globals are "
+            f"{namespace}'s namespace, a torch module a load neither roots guards "
+            "in nor seeds; bind the module's own forward, defined outside torch, "
+            "as model.forward instead"
         )
     return scope, None
 
@@ -1770,16 +1856,25 @@ class AOTCompiledModel:
 
         There is no live scope only when ``model.forward`` does not resolve to a
         Python function of its own: ``get_traced_fn`` cannot resolve it, or it is
-        an ``nn.Module``, or it resolves to a function torch itself defines, whose
-        globals are a torch module's namespace; guards then resolve against the
-        scope rebuilt from the artifact, where they check nothing useful, and a
-        guard rooted at any global but those aliases and that key warns to say
-        so, naming the cause.
+        an ``nn.Module``, as given or reached through a Dynamo wrapper (the
+        module's dispatch under ``config.wrap_top_frame``), or it resolves to a
+        function torch itself defines, whose globals are a torch module's
+        namespace (the module's dispatch otherwise, ``torch.compile(mod).forward``,
+        included), or it is a Dynamo wrapper (a
+        ``torch._dynamo.external_utils`` function) with no wrapped forward to
+        follow to, or one whose wrapped target itself does not resolve; guards
+        then resolve against the scope rebuilt from the artifact, where they
+        check nothing useful, and a guard rooted at any global but those aliases
+        and that key warns to say so, naming the cause.
 
-        The function ``model.forward`` resolves to is the outermost one bound as
-        ``forward``: a ``functools.wraps``'d decorator over it, in the class body
-        or rebound on the instance, resolves to the decorator's own function, so
-        the scope is the decorator's module. That is the scope a capture of the
+        The function ``model.forward`` resolves to is the one bound as ``forward``
+        seen through Dynamo's own wrappers (``torch.compile``, both
+        ``torch._dynamo.disable`` wrappers), never through a wrapper the caller
+        applied, except ``torch.compiler.wrap_numpy`` rebound on the instance,
+        whose only loadable artifact is one captured from the undecorated
+        forward: a ``functools.wraps``'d decorator over it, in the class body or
+        rebound on the instance, resolves to the decorator's own function, so the
+        scope is the decorator's module. That is the scope a capture of the
         decorated forward records as well -- Dynamo traces the decorator as the
         root frame -- so an artifact captured through the same decorator loads
         and reads that module's guarded globals live, and one captured from the
