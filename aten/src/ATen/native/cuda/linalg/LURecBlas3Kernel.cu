@@ -1041,6 +1041,7 @@ ldl_diagonal_panel_fused_kernel(
     // The remaining part of B is handled by a GEMM. {
     auto curr_nb = nb - (curr_step + pivot_rank - panel_start);
     auto curr_dim = n - (curr_step + pivot_rank);
+    // TODO: these might be redundant -- revisit and remove!
     if (curr_nb > 0 && curr_dim > 0) {
       auto* L21 = dLD + LinOff(curr_step + pivot_rank, curr_step, lda);
       auto* U12 = dLD + LinOff(curr_step, curr_step + pivot_rank, lda);
@@ -1099,6 +1100,12 @@ ldl_diagonal_panel_fused_kernel(
   if (tid == 0) {
     // Panel is processed -- update curr_step in the global memory
     *dcurr_step = curr_step;
+
+    // Implies the whole computation is done, but
+    // dipiv[-1] still needs to be updated
+    if (curr_step == n - 1) {
+      dipiv[n - 1] = n;
+    }
   }
 }
 
