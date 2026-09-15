@@ -54,6 +54,7 @@ struct MPSScalar {
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
     at::BFloat16 bf16;
+    c10::Float8_e4m3fn f8;
   } value{};
 };
 
@@ -103,15 +104,11 @@ inline void mtlDispatchByIndexWidth(bool use32, Fn&& fn) {
 
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
-std::string getMPSShapeString(MPSShape* shape);
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true, bool exclude_shape = false);
-std::string to_hex_key(float);
 std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
 Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
-MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input);
-MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input);
 
 MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray);
 MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
@@ -410,7 +407,7 @@ struct MPSGraphCache {
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
@@ -428,7 +425,7 @@ struct MPSGraphCache {
   }
 
   void clear() {
-    dispatch_sync(serialQueue_, ^() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       for (const auto& i : cache_) {
         delete i.second.cachedGraph_;
       }
@@ -636,9 +633,17 @@ static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index = false);
+static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
+                                     id<MTLComputePipelineState> cplState,
+                                     NSUInteger dim0,
+                                     NSUInteger dim1,
+                                     NSUInteger dim2) {
+  const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto tg_x = std::min(maxThreadsPerGroup, dim0);
+  auto tg_y = std::clamp(dim1, 1UL, maxThreadsPerGroup / tg_x);
+  auto tg_z = std::clamp(dim2, 1UL, maxThreadsPerGroup / (tg_x * tg_y));
+  [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
+}
 
 inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
   return @{p1.getMPSGraphTensor() : p1.getMPSGraphTensorData()};
@@ -734,7 +739,7 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
     auto cplState = getPipelineStateForFunc(kernel_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
 
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor}, mpsStream);
