@@ -144,19 +144,16 @@ class TestDefaultStagerStreamAccelerator(_StagerTestMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_async_staging(self, device) -> None:
-        state_dict = {"tensor": torch.randn(3, 4, device=device)}
-        options = CheckpointStagerConfig(
-            use_pinned_memory=False,
-            use_shared_memory=False,
-            use_async_staging=True,
-            use_non_blocking_copy=False,
-        )
+        options = CheckpointStagerConfig(use_async_staging=True)
         stager = DefaultStager(options)
 
-        result = stager.stage(state_dict)
+        result = stager.stage(self.state_dict)
         self.assertIsInstance(result, Future)
         staged_dict = result.result()
-        self.assertEqual(staged_dict["tensor"].device.type, "cpu")
+        self.assertIn("model", staged_dict)
+        self.assertIn("optimizer", staged_dict)
+        self.assertEqual(staged_dict["epoch"], 5)
+        self.assertEqual(staged_dict["step"], 1000)
         stager.close()
 
 
@@ -188,7 +185,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestDefaultStagerStreamAccelerator,
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
