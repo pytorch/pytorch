@@ -1157,20 +1157,37 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
     // Max possible (diagonal) panel for the LDL kernel
     constexpr int MAX_LDL_NB = 32;
     while (step < n - 1) {
-      // 1. Panel factorization
+      // 1. Panel factorization {
+      const auto curr_nb = std::min(n - step, MAX_LDL_NB);
       ldl_diagonal_panel(
         dLD, n, lda,
-        std::min(n - step, MAX_LDL_NB), step, dstep,
+        curr_nb, step, dstep,
         dipiv, dinfo
       );
+      // }
 
-      // 2. Trailing matrix update
-
+      // 2. Trailing matrix update of B[curr_step + 1: curr_step + 1:] {
       // D2H to update the step on the host
       auto curr_step = panel_step_holder.item().toInt();
+      auto panel_width = curr_step - step + 1;
+      auto trail_step = curr_step + (panel_width == curr_nb ? 1 : 0);
+      std::cout << "last elem: " << LD.select(0, -1).select(0, -1).item() << std::endl;
+      std::cout << "trail_step: " << trail_step << "curr_step: " << curr_step << " step: " << step << " panel_width: " << panel_width << std::endl;
+      if (trail_step < n) {
+        at::cuda::blas::gemm(
+          'n', 'n',
+          n - trail_step, n - trail_step, panel_width,
+          /*alpha=*/static_cast<scalar_t>(-1),
+          /*L21=*/dLD + LinOff(trail_step, step, lda), lda,
+          /*U12=*/dLD + LinOff(step, trail_step, lda), lda,
+          /*beta=*/static_cast<scalar_t>(1),
+          /*LD22=*/dLD + LinOff(trail_step, trail_step, lda), lda
+        );
+      }
+      // }
 
       // Finish iteration
-      step = curr_step;
+      step = trail_step;
     }
   });
 }

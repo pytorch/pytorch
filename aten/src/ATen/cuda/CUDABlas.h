@@ -71,13 +71,13 @@ template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEM
 void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
-void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
+TORCH_CUDA_CU_API void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
-void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
+TORCH_CUDA_CU_API void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
-void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
 template <>
-void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
