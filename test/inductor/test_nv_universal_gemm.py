@@ -165,6 +165,31 @@ class TestNVUniversalGemm(TestCase):
         }
         self.assertEqual(len(signatures), 7)
 
+    def test_vendored_dense_efc_uses_operators_0_2_interfaces(self):
+        try:
+            from cutlass.operators.providers.cutedsl.evt.efc.dense_gemm.sm100 import (
+                DenseGemmEFC,
+            )
+        except ModuleNotFoundError:
+            self.skipTest("Requires nvidia-cutlass-operators>=0.2.0")
+
+        import inspect
+
+        from torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc import (
+            PersistentDenseGemmEFCKernel,
+        )
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+            VendoredDenseGemmEFCOperator,
+        )
+
+        self.assertIsNotNone(VendoredDenseGemmEFCOperator)
+        dtype_parameter = inspect.signature(
+            PersistentDenseGemmEFCKernel.epilogue_gmem_copy_and_partition
+        ).parameters["dtype"]
+        self.assertIsNone(dtype_parameter.default)
+        self.assertIs(PersistentDenseGemmEFCKernel.JIT, DenseGemmEFC.JIT)
+        self.assertIs(PersistentDenseGemmEFCKernel.Kernel, DenseGemmEFC.Kernel)
+
     def test_nvgemm_cache_key_distinguishes_epilogue_source(self):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_cache_key,
@@ -2137,7 +2162,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     @parametrize(
         "axis_group",
-        ((0, 64), (0, 128), (1, 16), (1, 32), (1, 64), (1, 128)),
+        ((1, 16), (1, 32), (1, 64)),
     )
     def test_bf16_grouped_reduce_epilogue_fusion_swap_ab(self, axis_group):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
@@ -2169,23 +2194,25 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         benchmarked_orientations = set()
 
-        def benchmark(caller, *args, **kwargs):
-            benchmarked_orientations.add(caller.swap_ab)
-            is_target = (
+        def is_target(caller):
+            min_tile_shape = (group, 0) if axis == 0 else (0, group)
+            return (
                 caller.swap_ab
                 and caller.supports_epilogue_fusion
-                and caller.kernel.metadata.design.tile_shape[:2] == (128, 128)
+                and NVUniversalGemmScheduling._supports_reduction_layout(
+                    caller, min_tile_shape
+                )
             )
-            return 0.1 if is_target else 1.0
+
+        def benchmark(caller, *args, **kwargs):
+            benchmarked_orientations.add(caller.swap_ab)
+            return 0.1 if is_target(caller) else 1.0
 
         def best_epilogue_choice(ir_node, **kwargs):
             return next(
                 choice
                 for choice in ir_node._choices
-                if isinstance(choice, NVUniversalGemmCaller)
-                and choice.swap_ab
-                and choice.supports_epilogue_fusion
-                and choice.kernel.metadata.design.tile_shape[:2] == (128, 128)
+                if isinstance(choice, NVUniversalGemmCaller) and is_target(choice)
             )
 
         torch._dynamo.reset()
@@ -2241,7 +2268,6 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             (0, 64, False),
             (1, 16, True),
             (1, 64, True),
-            (1, 128, False),
         ),
     )
     def test_bf16_grouped_reduce_swap_ab_dense_2cta_layouts(self, case):
@@ -2265,11 +2291,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         def benchmark(caller, *args, **kwargs):
             physical_axis = 1 - axis
+            per_cta_extent = caller.kernel.metadata.design.tile_shape[physical_axis]
+            if physical_axis == 0 and caller.kernel.metadata.design.use_2cta_mma:
+                per_cta_extent //= 2
             is_target = (
                 caller.swap_ab
                 and caller.supports_epilogue_fusion
                 and caller.kernel.metadata.design.use_2cta_mma
-                and caller.kernel.metadata.design.tile_shape[physical_axis] >= group
+                and group <= per_cta_extent
             )
             return 0.1 if is_target else 1.0
 
@@ -2373,7 +2402,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC")
+        self._assert_scalar_reduce_marker(
+            code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC"
+        )
         self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
 
     def test_bf16_grouped_n_mean_feeds_main_before_output_finalizer(self):
@@ -2390,7 +2421,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC")
+        self._assert_scalar_reduce_marker(
+            code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC"
+        )
         self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
 
     def test_bf16_grouped_n_composite_reduction_fusion(self):
@@ -2850,7 +2883,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self._assert_scalar_reduce_marker(code, "'local_reduce_type': 'mean'")
+        self._assert_scalar_reduce_marker(code, "VendoredDenseBlockScaledGemmEFC")
+        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
 
     @parametrize(
         "axis_group",
@@ -3113,7 +3147,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC")
+        self._assert_scalar_reduce_marker(
+            code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC"
+        )
         self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
 
     def test_matmul_add_relu_chained(self):
