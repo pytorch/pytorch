@@ -76,7 +76,7 @@ class DummyMLP(torch.nn.Module):
             self.net2.bias.fill_(1.2)
 
 
-class DTensorTest(DTensorTestBase):
+class TestDTensorDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
@@ -998,8 +998,8 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(dt_scalar.to_local(), 42.0)
 
 
-DTensorTestWithLocalTensor = create_local_tensor_test_class(
-    DTensorTest,
+TestDTensorDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorDevice,
     skipped_tests=[
         # Async output in local mode is not supported
         "test_dtensor_async_output",
@@ -1011,7 +1011,7 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
-class DTensorSubclassTest(DTensorTestBase):
+class TestDTensorSubclassDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _make_dtensor(self, cls, mesh):
@@ -1080,7 +1080,7 @@ class DTensorSubclassTest(DTensorTestBase):
         self.assertEqual(len(custom_ops), 0)
 
 
-class DTensorMeshTest(DTensorTestBase):
+class TestDTensorMeshDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -1512,8 +1512,8 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(result.to_local(), dtensor.to_local())
 
 
-DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
-    DTensorMeshTest,
+TestDTensorMeshDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorMeshDevice,
     skipped_tests=[
         # Test asserts must be rewritten for local tensor
         "test_from_local_sub_mesh",
@@ -1526,7 +1526,7 @@ DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
-class TestDTensorPlacementTypes(DTensorTestBase):
+class TestDTensorPlacementTypesDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -1592,12 +1592,12 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
 
 
-TestDTensorPlacementTypesWithLocalTensor = create_local_tensor_test_class(
-    TestDTensorPlacementTypes,
+TestDTensorPlacementTypesDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorPlacementTypesDevice,
 )
 
 
-class TestDTensorSpec(DTensorTestBase):
+class TestDTensorSpecDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -1845,8 +1845,8 @@ class TestDTensorSpec(DTensorTestBase):
         self.assertEqual(local_shape2, expected_shape2)
 
 
-TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
-    TestDTensorSpec,
+TestDTensorSpecDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorSpecDevice,
 )
 
 
@@ -1909,11 +1909,11 @@ class TestMixedPartialTypes(TestCase):
         redistribute_local_tensor(tensor, current_spec, target_spec)
 
 
-instantiate_device_type_tests(DTensorTest, globals())
-instantiate_device_type_tests(DTensorSubclassTest, globals())
-instantiate_device_type_tests(DTensorMeshTest, globals())
-instantiate_device_type_tests(TestDTensorPlacementTypes, globals())
-instantiate_device_type_tests(TestDTensorSpec, globals())
+instantiate_device_type_tests(TestDTensorDevice, globals())
+instantiate_device_type_tests(TestDTensorSubclassDevice, globals())
+instantiate_device_type_tests(TestDTensorMeshDevice, globals())
+instantiate_device_type_tests(TestDTensorPlacementTypesDevice, globals())
+instantiate_device_type_tests(TestDTensorSpecDevice, globals())
 
 
 if __name__ == "__main__":
