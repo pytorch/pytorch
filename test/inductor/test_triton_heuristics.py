@@ -1088,21 +1088,19 @@ class TestArgumentCloneAndRestore(TestCase):
 @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
 class TestAutotuneMutationMemory(TestCase):
     @parametrize(
-        "free,reserved,active,private,fraction,cpu_restore",
+        "free,reserved,fraction,cpu_restore",
         [
-            (1 << 30, 4096, 4096, 0, 1.0, False),
-            (0, 4096, 4096, 0, 1.0, True),
-            (0, 1 << 20, 4096, 0, 1.0, False),
-            (1 << 30, 4096, 4096, 0, 4096 / (2 << 30), True),
-            (4096, 4096, 4096, 0, 1.0, True),
-            (0, 1 << 20, 4096, 1 << 20, 1.0, True),
-            (0, 1 << 20, 1 << 20, 0, 1.0, True),
-            (0, 1 << 20, 4096, None, 1.0, True),
+            (1 << 30, 4096, 1.0, False),
+            (0, 4096, 1.0, True),
+            (0, 1 << 20, 1.0, True),
+            (1 << 30, 4096, 4096 / (2 << 30), True),
+            (4096, 4096, 1.0, True),
+            (1 << 30, 4096, 0.5, False),
         ],
     )
     @parametrize("peak", [4096, 1 << 30])
     def test_clone_uses_available_memory(
-        self, device, free, reserved, active, private, fraction, cpu_restore, peak
+        self, device, free, reserved, fraction, cpu_restore, peak
     ):
         options = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
         options["optimize_mem"] = True
@@ -1111,21 +1109,12 @@ class TestAutotuneMutationMemory(TestCase):
         x = torch.ones(1024, device=device)
         expected = x.clone()
         device_module = torch.get_device_module(device)
-        stats = {
-            "reserved_bytes": {"all": {"current": reserved}},
-            "active_bytes": {"all": {"current": active}},
-        }
-        if private is not None:
-            stats["reserved_bytes_by_private_pools"] = {
-                (0, 1): {"all": {"current": private}}
-            }
         with (
-            patch.object(
-                device_module, "memory_stats_as_nested_dict", return_value=stats
-            ),
             patch.object(device_module, "mem_get_info", return_value=(free, 2 << 30)),
             patch.object(device_module, "memory_allocated", return_value=4096),
-            patch.object(device_module, "memory_reserved", return_value=reserved),
+            patch.object(
+                device_module, "memory_reserved", return_value=reserved
+            ) as memory_reserved,
             patch.object(
                 device_module, "get_per_process_memory_fraction", return_value=fraction
             ),
@@ -1134,6 +1123,7 @@ class TestAutotuneMutationMemory(TestCase):
             patch.object(torch.accelerator, "max_memory_allocated", return_value=peak),
         ):
             copies = autotuner.copy_args_to_cpu_if_needed(x)
+        self.assertEqual(memory_reserved.call_count, int(fraction < 1))
         self.assertEqual(bool(copies), cpu_restore)
         cloned_args, _ = autotuner.maybe_clone_args(copies, x)
         self.assertEqual(cloned_args[0] is x, cpu_restore)

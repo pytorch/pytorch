@@ -1601,23 +1601,13 @@ class CachingAutotuner(KernelInterface):
             device = self.device_props.index
             device_module = torch.get_device_module(self.device_props.type)
             free, total = device_module.mem_get_info(device)
-            stats = device_module.memory_stats_as_nested_dict(device)
-            reserved = stats.get("reserved_bytes", {}).get("all", {}).get("current", 0)
-            active = (
-                stats.get("active_bytes", {}).get("all", {}).get("current", reserved)
-            )
-            private_pools = stats.get("reserved_bytes_by_private_pools")
-            cached = 0
-            if private_pools is not None:
-                # Private-pool reservations and pending stream frees cannot be
-                # treated as reusable memory for ordinary input clones.
-                private_reserved = sum(
-                    pool["all"]["current"] for pool in private_pools.values()
+            fraction = device_module.get_per_process_memory_fraction(device)
+            if fraction < 1:
+                free = min(
+                    free,
+                    int(total * fraction) - device_module.memory_reserved(device),
                 )
-                cached = max(0, reserved - active - private_reserved)
-            limit = int(total * device_module.get_per_process_memory_fraction(device))
-            available = min(free, limit - reserved) + cached
-            budget = max(0, available) // 2
+            budget = max(0, free) // 2
         except RuntimeError:
             # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
             return {}
