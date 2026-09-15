@@ -1306,6 +1306,36 @@ class TestFP8Matmul(TestCase):
                         result, scaled_addmm(input, *args), atol=5e-2, rtol=5e-2
                     )
 
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("fake", [False, True])
+    @parametrize("use_out", [False, True])
+    @parametrize("contraction_dim,supported", [
+        ((), True), ((1, 0), True), ((-1, -2), True),
+        ((1, -2), True), ((-1, 0), True),
+        ((0, 0), False), ((1, 1), False), ((0, 1), False), ((0,), False),
+    ])
+    def test_scaled_mm_v2_contraction_dim(self, device, fake, use_out, contraction_dim, supported):
+        with FakeTensorMode() if fake else contextlib.nullcontext():
+            a = torch.randn(32, 32, device=device).to(e4m3_type)
+            b = torch.randn(32, 32, device=device).to(e4m3_type).t()
+            scale = torch.ones((), device=device)
+            args = (a, b, [scale], [0], [0], [scale], [0], [0], None, torch.bfloat16)
+            op = torch.ops.aten._scaled_mm_v2.out if use_out else torch.ops.aten._scaled_mm_v2.default
+            kwargs = {"out": torch.empty(32, 32, device=device, dtype=torch.bfloat16)} if use_out else {}
+            if not supported:
+                with self.assertRaisesRegex((ValueError, RuntimeError), "only supports contraction_dim"):
+                    op(*args, contraction_dim=contraction_dim, **kwargs)
+            else:
+                result = op(*args, contraction_dim=contraction_dim, **kwargs)
+                self.assertEqual(result.shape, (32, 32))
+                self.assertEqual(result.dtype, torch.bfloat16)
+                if use_out:
+                    self.assertIs(result, kwargs["out"])
+                if not fake:
+                    self.assertEqual(result, torch.ops.aten._scaled_mm_v2.default(*args))
+
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
