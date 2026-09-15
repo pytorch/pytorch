@@ -41,7 +41,11 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_kernels,
 )
-from torch._inductor.virtualized import V
+from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -80,6 +84,7 @@ except ImportError:
     )
 
 
+@instantiate_parametrized_tests
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -343,6 +348,41 @@ def helper(x):
 
         self.assertFalse(kernel.persistent_reduction)
         self.assertEqual(seen_scores, [tiling_scores])
+
+    @parametrize(
+        "reduction_type,identity,reduction_fn",
+        (("sum", "0", "tl.sum"), ("prod", "1", "triton_helpers.prod")),
+    )
+    def test_mix_order_partial_accumulate_masks_x(
+        self, reduction_type, identity, reduction_fn
+    ):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
+        xnumel = sympy.Integer(40961)
+        rnumel = sympy.Integer(129)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            mix_order_reduction=True,
+            optimize_mask=False,
+            override_persistent_reduction=True,
+            override_cooperative_reduction=False,
+        )
+
+        with kernel:
+            x_tree, r_tree = kernel.range_trees
+            xvalue = ops.index_expr(x_tree.full_range().symbol(), torch.float32)
+            rvalue = ops.index_expr(r_tree.full_range().symbol(), torch.float32)
+            value = ops.add(xvalue, rvalue)
+            value = ops.add(value, ops.constant(0.25, torch.float32))
+            ops.partial_accumulate("out", reduction_type, value, {})
+            kernel.codegen_body()
+
+        code = kernel.body.getvalue()
+        masked_reduction = re.compile(
+            rf"(?P<masked>tmp\d+) = tl\.where\(xmask, tmp\d+, {identity}\)\n"
+            rf"\s+tmp\d+ = {re.escape(reduction_fn)}\((?P=masked), 0\)"
+        )
+        self.assertRegex(code, masked_reduction)
 
     def test_reduction_invariant_load_indexing(self):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
