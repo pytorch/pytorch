@@ -32,7 +32,7 @@ namespace symmetric_memory {
 
 /* Start of NVSHMEMSymmetricMemory implementation */
 
-static StoreExchange storeExchange = StoreExchange("NVSHMEMSymmetricMemory");
+static StoreExchange storeExchange{"NVSHMEMSymmetricMemory"};
 
 struct NVSHMEMAllocation {
   // Layout (signal pad first):
@@ -116,8 +116,8 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     if (it == rank_to_global_rank_map.end()) {
       auto global_group = resolve_process_group("0");
       auto global_rank = global_group->getRank();
-      auto rank_to_global_rank =
-          storeExchange.all_gather(store, rank_, world_size_, global_rank);
+      auto rank_to_global_rank = storeExchange.all_gather(
+          store, rank_, world_size_, global_rank, group_name);
       exchanged_n_times++;
       if (rank_ == 0) {
         LOG(INFO) << "[rank " << rank_ << ']'
@@ -390,7 +390,8 @@ static void initialize_nvshmem_with_store(
     c10::intrusive_ptr<c10d::Store> store,
     int rank,
     int world_size,
-    int device_idx) {
+    int device_idx,
+    const std::string& group_name) {
   static bool is_initialized = false;
   if (is_initialized) {
     return;
@@ -408,7 +409,7 @@ static void initialize_nvshmem_with_store(
   // Using an existing store_all_gather due to laziness.
   // TODO(yifu): should use broadcast
   auto unique_ids =
-      storeExchange.all_gather(store, rank, world_size, unique_id);
+      storeExchange.all_gather(store, rank, world_size, unique_id, group_name);
 
   nvshmemx_init_attr_t attr;
   nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
@@ -447,7 +448,11 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // NVSHMEM needs to be initialized with the global group
     auto group = resolve_process_group("0");
     initialize_nvshmem_with_store(
-        group->getStore(), group->getRank(), group->getSize(), device_idx);
+        group->getStore(),
+        group->getRank(),
+        group->getSize(),
+        device_idx,
+        group->getGroupName());
 
     // Signal pad first at [0, buffer_offset), data buffer at buffer_offset,
     // which is the signal pad size rounded up to signal_pad_alignment.
