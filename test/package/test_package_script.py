@@ -7,6 +7,7 @@ from unittest import skipIf
 import torch
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     IS_SANDCASTLE,
     run_tests,
@@ -31,6 +32,8 @@ skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TestPackageScript(PackageTestCase):
     """Tests for compatibility with TorchScript."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_package_interface(self):
         """Packaging an interface class should work correctly."""
