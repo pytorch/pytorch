@@ -396,7 +396,7 @@ class LocalTest(TestCase):
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
 
-class UtilTest(DTensorTestBase):
+class TestUtilDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -824,7 +824,7 @@ class UtilSingleDeviceTest(TestCase):
         torch.distributed.destroy_process_group()
 
 
-class TestStridedSharding(DTensorTestBase):
+class TestStridedShardingDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -1300,7 +1300,7 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
             )
 
 
-class Test_StridedShard_Optimizer(DTensorTestBase):
+class Test_StridedShard_OptimizerDevice(DTensorTestBase):
     """Test optimizer updates with _StridedShard placement using FSDP+TP.
 
     This test uses FSDP+TP to create parameters with placement
@@ -1518,7 +1518,7 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
                 self.assertIsNone(shard_order)
 
 
-class Test2DStridedLocalShard(DTensorTestBase):
+class Test2DStridedLocalShardDevice(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -1745,7 +1745,9 @@ class TestStridedShardCollectiveOpUtils:
         return new_logical_shape
 
 
-class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBase):
+class TestStridedShardReplicateDevice(
+    TestStridedShardCollectiveOpUtils, DTensorTestBase
+):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -2047,17 +2049,19 @@ class TestIsTensorShardable(LocalTensorTestBase):
         self.assertFalse(is_tensor_evenly_shardable([16, 8], spec))
 
 
-UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
-TestStridedShardingWithLocalTensor = create_local_tensor_test_class(TestStridedSharding)
-Test2DStridedLocalShardWithLocalTensor = create_local_tensor_test_class(
-    Test2DStridedLocalShard
+TestUtilDeviceWithLocalTensor = create_local_tensor_test_class(TestUtilDevice)
+TestStridedShardingDeviceWithLocalTensor = create_local_tensor_test_class(
+    TestStridedShardingDevice
+)
+Test2DStridedLocalShardDeviceWithLocalTensor = create_local_tensor_test_class(
+    Test2DStridedLocalShardDevice
 )
 
-instantiate_device_type_tests(UtilTest, globals())
-instantiate_device_type_tests(TestStridedSharding, globals())
-instantiate_device_type_tests(Test_StridedShard_Optimizer, globals())
-instantiate_device_type_tests(Test2DStridedLocalShard, globals())
-instantiate_device_type_tests(TestStridedShardReplicate, globals())
+instantiate_device_type_tests(TestUtilDevice, globals())
+instantiate_device_type_tests(TestStridedShardingDevice, globals())
+instantiate_device_type_tests(Test_StridedShard_OptimizerDevice, globals())
+instantiate_device_type_tests(Test2DStridedLocalShardDevice, globals())
+instantiate_device_type_tests(TestStridedShardReplicateDevice, globals())
 
 if __name__ == "__main__":
     run_tests()
