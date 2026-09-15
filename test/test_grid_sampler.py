@@ -69,7 +69,7 @@ class TestGridSampler(TestCase):
     @parametrize("padding", ["zeros", "border", "reflection"])
     @parametrize("align", [False, True])
     def test_backward(self, device, dtype, dimension_mode, padding, align):
-        """Check numerics, gradient masks, and identical bits with determinism on/off."""
+        """Check numerics, gradient masks, and strict/warn-only deterministic replay."""
         dims, mode = dimension_mode
         rng = torch.Generator().manual_seed(20260911)
         spatial = (4, 8) if dims == 2 else (2, 4, 8)
@@ -98,9 +98,9 @@ class TestGridSampler(TestCase):
                     input.double(), grid.double(), grad.double(), options, required
                 )
                 cpu = gradients(input, grid, grad, options, required)
-                with DeterministicGuard(False):
-                    first = gradients(*data, options, required)
                 with DeterministicGuard(True):
+                    first = gradients(*data, options, required)
+                with DeterministicGuard(True, warn_only=True):
                     actual = gradients(*data, options, required)
                 for value, prior, ref, baseline in zip(actual, first, expected, cpu):
                     self.assertEqual(value.view(torch.uint8), prior.view(torch.uint8))
@@ -124,6 +124,59 @@ class TestGridSampler(TestCase):
             # Native backward historically returns a computed grid gradient even
             # when the second output-mask entry is false.
             self.assertEqual(grid_grad, first[0], atol=0, rtol=0)
+
+    @parametrize("route", ["native2d", "native3d", "cudnn"])
+    @parametrize("policy", [(False, False), (True, False), (True, True)])
+    def test_dispatch(self, device, route, policy):
+        """Only deterministic mode may launch grouping, including warn-only mode."""
+        if (
+            torch.profiler.ProfilerActivity.CUDA
+            not in torch.profiler.supported_activities()
+        ):
+            self.skipTest("CUDA profiling unavailable")
+        if route == "cudnn" and (not TEST_CUDNN or torch.version.hip):
+            self.skipTest("cuDNN not available")
+        dims = 3 if route == "native3d" else 2
+        output_shape = (1,) * (dims - 1) + (513,)
+        input = torch.randn((1, 3) + (4,) * dims, device=device)
+        grid = torch.zeros((1,) + output_shape + (dims,), device=device)
+        grad = torch.randn((1, 3) + output_shape, device=device)
+        if route == "cudnn":
+            backward = partial(
+                torch.ops.aten.cudnn_grid_sampler_backward, input, grid, grad
+            )
+        else:
+            op = (
+                torch.ops.aten.grid_sampler_2d_backward
+                if dims == 2
+                else torch.ops.aten.grid_sampler_3d_backward
+            )
+            backward = partial(op, grad, input, grid, 0, 0, False, (True, True))
+        expected = gradients(
+            input.cpu().double(),
+            grid.cpu().double(),
+            grad.cpu().double(),
+            dict(align_corners=route == "cudnn"),
+        )
+        enabled, warn_only = policy
+        with (
+            DeterministicGuard(enabled, warn_only=warn_only),
+            torch.backends.cudnn.flags(enabled=route == "cudnn"),
+        ):
+            backward()
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as prof:
+                actual = backward()
+        for value, ref in zip(actual, expected):
+            self.assertEqual(value.cpu().double(), ref, atol=2e-5, rtol=2e-5)
+        names = {event.name for event in prof.events()}
+        self.assertEqual(any("make_records" in name for name in names), enabled)
+        if route == "cudnn":
+            self.assertEqual("aten::grid_sampler_2d_backward" in names, enabled)
 
     @unittest.skipIf(not TEST_CUDNN, "cuDNN not available")
     @skipCUDAIfRocm

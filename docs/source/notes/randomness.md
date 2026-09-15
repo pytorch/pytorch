@@ -141,6 +141,15 @@ itself may be nondeterministic, unless either
 controls only this behavior, unlike {meth}`torch.use_deterministic_algorithms`
 which will make other PyTorch operations behave deterministically, too.
 
+### CUDA grid sampling
+
+The backward pass of {func}`torch.nn.functional.grid_sample` may be
+nondeterministic by default. Setting `torch.use_deterministic_algorithms(True)`
+selects a deterministic backward implementation for both 2D and 3D inputs,
+including calls whose forward pass uses cuDNN. This also applies with
+`warn_only=True`. The deterministic implementation may use more memory and run
+more slowly than the default implementation.
+
 ### CUDA Scaled Dot Product Attention
 
 {func}`torch.nn.functional.scaled_dot_product_attention` (SDPA) dispatches to
