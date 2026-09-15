@@ -9,6 +9,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
+from torch.export.graph_signature import InputKind
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
 from torch.testing._internal.torchbind_impls import (
@@ -617,6 +618,61 @@ class TestConverter(TestCase):
             torch.randn([3, 3]),
         )
         self._check_equal_ts_ep_converter(NestedM(3), inp)
+
+    def test_param_buffer_classification(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                w = torch.arange(6.0).reshape(2, 3)
+                self.p = torch.nn.Parameter(w.clone())
+                self.p_nan = torch.nn.Parameter(torch.full((4,), float("nan")))
+                # Same shape and values as self.p, while NaN never compares
+                # equal to itself: classifying by value puts b_same_value in
+                # name_to_param and p_nan in name_to_buffer.
+                self.register_buffer("b_same_value", w.clone())
+
+            def forward(self, x: torch.Tensor):
+                return (
+                    x
+                    + self.p.sum()
+                    + torch.nan_to_num(self.p_nan).sum()
+                    + self.b_same_value.sum()
+                )
+
+        inp = (torch.randn(4),)
+        self._check_equal_ts_ep_converter(M(), inp)
+
+        converter = TS2EPConverter(torch.jit.script(M().eval()), inp)
+        self.assertEqual(set(converter.name_to_param), {"p", "p_nan"})
+        ep = converter.convert()
+        kind = {s.target: s.kind for s in ep.graph_signature.input_specs}
+        self.assertEqual(kind["p_nan"], InputKind.PARAMETER)
+
+    def test_aliased_submodule_params_classification(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(3, 3)
+
+            def forward(self, x: torch.Tensor):
+                return self.lin(x)
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                leaf = Leaf()
+                self.m1 = leaf
+                self.m2 = leaf
+
+            def forward(self, x: torch.Tensor):
+                return self.m1(x) + self.m2(x)
+
+        inp = (torch.randn(2, 3),)
+        ts_model = torch.jit.script(M().eval())
+        converter = TS2EPConverter(ts_model, inp)
+        # The aliased submodule appears under both FQNs in state_dict(), and all
+        # four entries are parameters, so deduplicating names would lose two.
+        self.assertEqual(set(converter.name_to_param), set(ts_model.state_dict()))
 
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
