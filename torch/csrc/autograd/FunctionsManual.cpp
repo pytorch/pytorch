@@ -1062,15 +1062,19 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.is_meta() || isTensorSubclassLike(input)) {
-    // For Composite Compliance, always take the safer (and slower) path
+  if (input.is_meta() || isTensorSubclassLike(input) ||
+      at::GradMode::is_enabled()) {
+    // For Composite Compliance and to keep backward-graph evaluation off the
+    // result / input division, always take the safer path. In low-precision
+    // dtypes, that intermediate can overflow or underflow even when the final
+    // Hessian is representable.
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.sym_numel() == 0) {
     return grad * (result / input).conj();
-  } else if (!at::GradMode::is_enabled() && zero_idx.sym_size(0) > 1) {
+  } else if (zero_idx.sym_size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
@@ -1094,8 +1098,9 @@ Tensor prod_backward(
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (input.is_meta() || isTensorSubclassLike(input)) {
-    // For Composite Compliance, always take the safer (and slower) path
+  if (input.is_meta() || isTensorSubclassLike(input) ||
+      at::GradMode::is_enabled()) {
+    // See comment in the flat prod_backward overload above.
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
