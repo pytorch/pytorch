@@ -88,8 +88,8 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3.10-mi350
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      build-environment: linux-noble-rocm-py3.11-mi350
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [

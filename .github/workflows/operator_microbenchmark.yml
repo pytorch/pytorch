@@ -125,8 +125,8 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3_10
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      build-environment: linux-noble-rocm-py3.11
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
