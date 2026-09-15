@@ -177,8 +177,10 @@ class Adam(Optimizer):
                     # Exponential moving average of gradient values
                     beta1 = group["betas"][0]
                     skip_first_moment = (
-                        isinstance(beta1, float) and beta1 == 0.0
-                        and not group.get("fused") and not group.get("foreach")
+                        isinstance(beta1, float)
+                        and beta1 == 0.0
+                        and not group.get("fused")
+                        and not group.get("foreach")
                     )
                     if not skip_first_moment:
                         state["exp_avg"] = torch.zeros_like(
