@@ -1029,12 +1029,16 @@ def load_compiled_function(
                    guards check on the next call. The compiled bytecode reads a
                    load-time snapshot of this dict merged over the globals
                    serialized with the artifact, so a name this dict omits
-                   still resolves there; on top of that, a global a kept guard
-                   is rooted at is re-read from this dict on every call, so a
-                   rebind the guards ACCEPT -- a same-metadata swap under a
-                   kept ``TENSOR_MATCH``, which checks metadata, not values --
-                   is what the call computes with, while a rebind of a global
-                   no kept guard reads is not seen. That re-read is not atomic
+                   still resolves there; on top of that, a global that is
+                   itself the source of a kept guard is re-read from this dict
+                   on every call, so a rebind the guards ACCEPT -- a
+                   same-metadata swap under a kept ``TENSOR_MATCH``, which
+                   checks metadata, not values -- is what the call computes
+                   with. A global no kept guard reads keeps its load-time
+                   value, and so does a container a guard reaches only through
+                   a sub-path such as ``D['a']``, whose other members nothing
+                   certifies: a rebind of either is not seen, even when the
+                   guard on ``D['a']`` passes. That re-read is not atomic
                    with the guard check before it, so a rebind landing between
                    the two is served unchecked, as an eager compiled frame
                    serves one landing between its guards and its globals. The
