@@ -278,8 +278,7 @@ scipy==1.16.2 ; python_version >= "3.14"
 #test that import:
 
 # needed by torchgen utils
-typing-extensions==4.12.2 ; python_version < "3.14"
-typing-extensions==4.15.0 ; python_version >= "3.14"
+typing-extensions==4.15.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -354,7 +353,7 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.21.0
+onnx==1.22.0
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
