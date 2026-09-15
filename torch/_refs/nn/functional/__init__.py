@@ -320,6 +320,10 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
         lambda: f"Number of groups to divide channels in must be positive. Value of groups:{groups}",
     )
     torch._check(
+        groups <= c,
+        lambda: f"Number of groups must not exceed number of channels. Got {groups} groups and {c} channels.",
+    )
+    torch._check(
         (c % groups) == 0,
         lambda: f"Number of channels must be divisible by groups. Got {c} channels and {groups} groups.",
     )
