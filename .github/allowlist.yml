@@ -41,6 +41,7 @@ L1:
   - NVIDIA-dev/pytorch-oot-internal
   - google-pytorch/torch_tpu
   - Isalia20/pytorch-mps-ci
+  - RBLN-SW/torch-rbln
 
 L2:
   - NVIDIA/pytorch-windows-ci
