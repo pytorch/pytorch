@@ -842,20 +842,29 @@ class DistMathOpsTest(DTensorTestBase):
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
-        grad0 = torch.randn(12, 8)
-        grad1 = torch.randn(8, 8)
+        # dtype is _foreach_norm.Scalar's keyword argument: (self, ord, *, dtype).
+        for input_dtype, dtype in (
+            (torch.float32, None),
+            (torch.bfloat16, torch.float32),
+        ):
+            with self.subTest(input_dtype=input_dtype, dtype=dtype):
+                grad0 = torch.randn(12, 8, dtype=input_dtype)
+                grad1 = torch.randn(8, 8, dtype=input_dtype)
 
-        sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
-        sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
+                sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
+                sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
 
-        # non-sharded op
-        out = torch.ops.aten._foreach_norm([grad0, grad1], 2)
+                # non-sharded op
+                out = torch.ops.aten._foreach_norm([grad0, grad1], 2, dtype=dtype)
 
-        # sharded op
-        sharded_out = torch.ops.aten._foreach_norm([sharded_grad0, sharded_grad1], 2)
+                # sharded op
+                sharded_out = torch.ops.aten._foreach_norm(
+                    [sharded_grad0, sharded_grad1], 2, dtype=dtype
+                )
 
-        for o, so in zip(out, sharded_out):
-            self.assertEqual(so.full_tensor(), o)
+                for o, so in zip(out, sharded_out):
+                    self.assertEqual(so.dtype, o.dtype)
+                    self.assertEqual(so.full_tensor(), o)
 
     @with_comms
     def test_foreach_max_sharded(self):
