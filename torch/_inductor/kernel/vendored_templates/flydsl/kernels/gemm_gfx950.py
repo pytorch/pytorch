@@ -119,83 +119,6 @@ class AsyncLoadOperand:
     is_k_major: Any
 
 
-@dataclass(frozen=True)
-class Gfx950TileSchedule:
-    block_threads: int
-    ldg_x_threads: int
-    ldg_a_iters: int
-    ldg_b_iters: int
-    ldg_wait_count: int
-    a_stage_bytes: int
-    b_stage_bytes: int
-
-
-def make_tile_schedule(
-    block_m: int,
-    block_n: int,
-    block_k_bytes: int,
-    stages: int,
-    m_waves: int,
-    n_waves: int,
-    *,
-    extra_stage_bytes: int = 0,
-    extra_load_iters: int = 0,
-    output_tile_bytes: int = 0,
-) -> Gfx950TileSchedule:
-    if block_k_bytes <= 0 or block_k_bytes % GFX950_DMA_BYTES != 0:
-        raise ValueError(
-            "block_k_bytes must be a positive multiple of the DMA width: "
-            f"block_k_bytes={block_k_bytes}, dma_bytes={GFX950_DMA_BYTES}"
-        )
-    block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
-    if block_threads <= 0 or block_threads > GFX950_MAX_BLOCK_THREADS:
-        raise ValueError(
-            f"block must contain between 1 and {GFX950_MAX_BLOCK_THREADS} threads"
-        )
-    dma_bytes_per_pass = block_threads * GFX950_DMA_BYTES
-    a_stage_bytes = block_m * block_k_bytes
-    b_stage_bytes = block_n * block_k_bytes
-    for operand, axis, outer_size, stage_bytes in (
-        ("A", "m", block_m, a_stage_bytes),
-        ("B", "n", block_n, b_stage_bytes),
-    ):
-        if stage_bytes % dma_bytes_per_pass != 0:
-            raise ValueError(
-                f"{operand} tile load schedule must exactly cover the LDS tile: "
-                f"block_{axis}={outer_size}, block_k_bytes={block_k_bytes}, "
-                f"block_threads={block_threads}"
-            )
-    ldg_a_iters = a_stage_bytes // dma_bytes_per_pass
-    ldg_b_iters = b_stage_bytes // dma_bytes_per_pass
-    ldg_wait_count = ldg_a_iters + ldg_b_iters + extra_load_iters
-    if (stages - 2) * ldg_wait_count >= 63:
-        raise ValueError("staged pipeline wait count exceeds supported range")
-    smem_bytes = max(
-        stages * (a_stage_bytes + b_stage_bytes + extra_stage_bytes),
-        output_tile_bytes,
-    )
-    smem_capacity = {
-        "gfx942": 65536,
-        "gfx950": 163840,
-    }.get(get_rocm_arch(), 65536)
-    if smem_bytes > smem_capacity:
-        raise ValueError(
-            "staged LDS buffers exceed the device shared-memory capacity: "
-            f"stages={stages}, block_m={block_m}, block_n={block_n}, "
-            f"block_k_bytes={block_k_bytes}, smem_bytes={smem_bytes}, "
-            f"capacity={smem_capacity}"
-        )
-    return Gfx950TileSchedule(
-        block_threads=block_threads,
-        ldg_x_threads=block_k_bytes // GFX950_DMA_BYTES,
-        ldg_a_iters=ldg_a_iters,
-        ldg_b_iters=ldg_b_iters,
-        ldg_wait_count=ldg_wait_count,
-        a_stage_bytes=a_stage_bytes,
-        b_stage_bytes=b_stage_bytes,
-    )
-
-
 def mxfp8_scale_stage_bytes(rows, block_k, block_threads):
     # A complete 32-bit DMA per thread, padding the last workgroup-sized
     # chunk. Extra lanes duplicate valid rows rather than reading OOB.
@@ -306,15 +229,13 @@ def make_gemm_gfx950_param(
     elif block_n % cshuffle_vec_size != 0:
         raise ValueError("block_n must be divisible by the c-shuffle vector size")
 
-    extra_stage_bytes = 0
-    extra_load_iters = 0
     scale_a_iters = 0
     scale_b_iters = 0
     scale_a_bytes = 0
     scale_b_bytes = 0
     scale_row_bytes = 0
+    block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
     if is_mxfp:
-        block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
         cshuffle_x_threads = block_n // cshuffle_vec_size
         if (
             cshuffle_x_threads == 0
@@ -332,21 +253,51 @@ def make_gemm_gfx950_param(
         scale_b_bytes = mxfp8_scale_stage_bytes(block_n, block_k, block_threads)
         scale_a_iters = scale_a_bytes // scale_bytes_per_pass
         scale_b_iters = scale_b_bytes // scale_bytes_per_pass
-        extra_stage_bytes = scale_a_bytes + scale_b_bytes
-        extra_load_iters = scale_a_iters + scale_b_iters
 
-    schedule = make_tile_schedule(
-        block_m,
-        block_n,
-        block_k_bytes,
-        stages,
-        m_waves,
-        n_waves,
-        extra_stage_bytes=extra_stage_bytes,
-        extra_load_iters=extra_load_iters,
-        output_tile_bytes=block_m * block_n * out_dbytes,
+    if block_k_bytes <= 0 or block_k_bytes % GFX950_DMA_BYTES != 0:
+        raise ValueError(
+            "block_k_bytes must be a positive multiple of the DMA width: "
+            f"block_k_bytes={block_k_bytes}, dma_bytes={GFX950_DMA_BYTES}"
+        )
+    if block_threads <= 0 or block_threads > GFX950_MAX_BLOCK_THREADS:
+        raise ValueError(
+            f"block must contain between 1 and {GFX950_MAX_BLOCK_THREADS} threads"
+        )
+    dma_bytes_per_pass = block_threads * GFX950_DMA_BYTES
+    a_stage_bytes = block_m * block_k_bytes
+    b_stage_bytes = block_n * block_k_bytes
+    for operand, axis, outer_size, stage_bytes in (
+        ("A", "m", block_m, a_stage_bytes),
+        ("B", "n", block_n, b_stage_bytes),
+    ):
+        if stage_bytes % dma_bytes_per_pass != 0:
+            raise ValueError(
+                f"{operand} tile load schedule must exactly cover the LDS tile: "
+                f"block_{axis}={outer_size}, block_k_bytes={block_k_bytes}, "
+                f"block_threads={block_threads}"
+            )
+    ldg_a_iters = a_stage_bytes // dma_bytes_per_pass
+    ldg_b_iters = b_stage_bytes // dma_bytes_per_pass
+    ldg_wait_count = ldg_a_iters + ldg_b_iters + scale_a_iters + scale_b_iters
+    if (stages - 2) * ldg_wait_count >= 63:
+        raise ValueError("staged pipeline wait count exceeds supported range")
+    smem_bytes = max(
+        stages * (a_stage_bytes + b_stage_bytes + scale_a_bytes + scale_b_bytes),
+        block_m * block_n * out_dbytes,
     )
-    load_elems_per_iter = schedule.block_threads * GFX950_DMA_BYTES // in_dbytes
+    smem_capacity = {
+        "gfx942": 65536,
+        "gfx950": 163840,
+    }.get(get_rocm_arch(), 65536)
+    if smem_bytes > smem_capacity:
+        raise ValueError(
+            "staged LDS buffers exceed the device shared-memory capacity: "
+            f"stages={stages}, block_m={block_m}, block_n={block_n}, "
+            f"block_k_bytes={block_k_bytes}, smem_bytes={smem_bytes}, "
+            f"capacity={smem_capacity}"
+        )
+    ldg_x_threads = block_k_bytes // GFX950_DMA_BYTES
+    load_elems_per_iter = block_threads * GFX950_DMA_BYTES // in_dbytes
     if use_half_tile_interleaved:
         half_ldg_a_iters = ((block_m // 2) * block_k) // load_elems_per_iter
         half_ldg_b_iters = ((block_n // 2) * block_k) // load_elems_per_iter
@@ -405,10 +356,10 @@ def make_gemm_gfx950_param(
         async_load_bytes=GFX950_DMA_BYTES,
         in_data_bytes=in_dbytes,
         out_data_bytes=out_dbytes,
-        ldg_x_threads=schedule.ldg_x_threads,
-        block_threads=schedule.block_threads,
-        ldg_a_iters=schedule.ldg_a_iters,
-        ldg_b_iters=schedule.ldg_b_iters,
+        ldg_x_threads=ldg_x_threads,
+        block_threads=block_threads,
+        ldg_a_iters=ldg_a_iters,
+        ldg_b_iters=ldg_b_iters,
         mma_m=mma_m,
         mma_n=mma_n,
         mma_k=mma_k,
