@@ -1256,7 +1256,11 @@ def instantiate_device_type_tests(
         if base._should_exclude(generic_test_class.__name__):
             continue
 
-        class_name = generic_test_class.__name__ + base.device_type.upper()
+        class_name = generic_test_class.__name__
+        device_type_upper = base.device_type.upper()
+
+        if not class_name.endswith(device_type_upper):
+            class_name += device_type_upper
 
         # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features

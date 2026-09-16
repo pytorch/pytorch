@@ -246,7 +246,7 @@ ROUND_TRIP_TEST_CASES = (
 )
 
 
-class TestFloat8Dtype(TestCase):
+class TestFloat8DtypeDevice(TestCase):
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
@@ -421,7 +421,7 @@ class TestFloat8Dtype(TestCase):
             torch.testing.assert_close(x1, x1_save_load, atol=0, rtol=0)
 
 
-class TestFloat4Dtype(TestCase):
+class TestFloat4DtypeDevice(TestCase):
     # TODO(#146647): make the testing generic for shell dtypes
     def test_float4_e2m1fn_x2(self, device):
         # can create a tensor of dtype float4
@@ -457,11 +457,11 @@ class TestFloat4Dtype(TestCase):
             )
 
 
-instantiate_device_type_tests(TestFloat8Dtype, globals(), allow_mps=True)
-instantiate_device_type_tests(TestFloat4Dtype, globals())
+instantiate_device_type_tests(TestFloat8DtypeDevice, globals(), allow_mps=True)
+instantiate_device_type_tests(TestFloat4DtypeDevice, globals())
 
 
-class TestFloat8DtypeCPUOnly(TestCase):
+class TestFloat8DtypeCPU(TestCase):
     """
     Test of mul implementation
 
@@ -504,7 +504,8 @@ class TestFloat8DtypeCPUOnly(TestCase):
         f(x).sum().backward()
 
 
-instantiate_device_type_tests(TestFloat8DtypeCPUOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(TestFloat8DtypeCPU, globals(), only_for="cpu")
+
 
 if __name__ == "__main__":
     run_tests()

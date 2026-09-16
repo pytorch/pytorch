@@ -171,7 +171,7 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.skip("Incorrect result!"),
-                "TestUnaryUfuncs",
+                "TestUnaryUfuncsDevice",
                 "test_reference_numerics_large",
                 dtypes=(torch.int8,),
             ),
@@ -311,7 +311,7 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestUnaryUfuncs",
+                "TestUnaryUfuncsDevice",
                 "test_reference_numerics_large",
                 dtypes=[torch.bfloat16, torch.float16],
             ),
@@ -390,7 +390,7 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestUnaryUfuncs",
+                "TestUnaryUfuncsDevice",
                 "test_reference_numerics_large",
             ),
             # NotImplementedError: The operator 'aten::special_airy_ai.out' is not currently implemented for the MPS device
@@ -870,7 +870,7 @@ op_db: list[OpInfo] = [
                 unittest.skip(
                     "Scipy doesn't support bool inputs to spherical_bessel_j0"
                 ),
-                "TestUnaryUfuncs",
+                "TestUnaryUfuncsDevice",
                 "test_reference_numerics_normal",
                 dtypes=(torch.bool,),
             ),
@@ -916,7 +916,7 @@ python_ref_db: list[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestUnaryUfuncs",
+                "TestUnaryUfuncsDevice",
                 "test_reference_numerics_large",
                 dtypes=[torch.bfloat16, torch.float16],
             ),
@@ -973,7 +973,7 @@ python_ref_db: list[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.skip("Incorrect result!"),
-                "TestUnaryUfuncs",
+                "TestUnaryUfuncsDevice",
                 "test_reference_numerics_large",
                 dtypes=(torch.int8,),
             ),
@@ -1035,7 +1035,7 @@ python_ref_db: list[OpInfo] = [
                 unittest.skip(
                     "Scipy doesn't support bool inputs to spherical_bessel_j0"
                 ),
-                "TestUnaryUfuncs",
+                "TestUnaryUfuncsDevice",
                 "test_reference_numerics_normal",
                 dtypes=(torch.bool,),
             ),

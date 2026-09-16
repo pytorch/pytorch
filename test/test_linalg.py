@@ -125,7 +125,7 @@ def get_tunableop_untuned_filename():
     return untuned_filename
 
 
-class TestLinalg(TestCase):
+class TestLinalgDevice(TestCase):
     def setUp(self):
         super().setUp()
         # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
@@ -9662,7 +9662,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
-class TestLinalgCudaOnly(TestCase):
+class TestLinalgCUDA(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
     def setUp(self):
@@ -11766,8 +11766,8 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
-instantiate_device_type_tests(TestLinalg, globals())
-instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestLinalgDevice, globals())
+instantiate_device_type_tests(TestLinalgCUDA, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':
