@@ -1332,6 +1332,129 @@ def add(x, y):
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
+    def test_import_alias_the_trace_left_alone_is_recorded_for_install(self):
+        # The skip arm under a CompilePackage: install() bound the live module
+        # after a handover, the memo is older, and the trace leaves that
+        # binding alone. The alias is recorded all the same, because the
+        # graph's guards read through it whoever bound it, and a fresh process
+        # has no writer but install(): there it binds
+        # importlib.import_module(name), that process's own live entry -- here
+        # a third module, distinct from the slot this trace left alone and
+        # from the module its graph was built from -- and the loaded guards
+        # are rebuilt against it, so the loaded function serves with no
+        # recompile. Without the record install() binds nothing and the
+        # loaded guards read an alias no writer has bound.
+        ctx = DiskDynamoStore()
+        name = "torch_test_package_import_alias_recorded"
+        alias = f"__import_{name}"
+        old = types.ModuleType(name)
+        old.VALUE = 2
+        new = types.ModuleType(name)
+        new.VALUE = 7
+        third = types.ModuleType(name)
+        third.VALUE = 7
+
+        def fn(x):
+            import torch_test_package_import_alias_recorded as shim
+
+            return x + shim.VALUE
+
+        def fn2(x):
+            import torch_test_package_import_alias_recorded as shim
+
+            return x * shim.VALUE
+
+        args = (torch.randn(3, 2),)
+        second = os.path.join(self.path(), "second")
+        try:
+            sys.modules[name] = old
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+            torch._dynamo.reset()
+
+            sys.modules[name] = new
+            package, backends = ctx.load_package(fn, self.path())
+            package.install(backends)
+            self.assertIs(fn.__globals__[alias], new)
+
+            pkg2 = CompilePackage(fn2)
+            compiled_fn2 = torch._dynamo.optimize(backend="eager", package=pkg2)(fn2)
+            self.assertEqual(fn2(*args), compiled_fn2(*args))
+            self.assertIs(fn.__globals__[alias], new)
+            self.assertEqual(pkg2._codes[fn2.__code__].import_sources[alias], name)
+            for backend_id, backend in pkg2.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(pkg2, second)
+            torch._dynamo.reset()
+
+            del fn.__globals__[alias]
+            sys.modules[name] = third
+            pkg2, backends = ctx.load_package(fn2, second)
+            compiled_fn2 = torch._dynamo.optimize(backend="eager", package=pkg2)(fn2)
+            pkg2.install(backends)
+            self.assertIs(fn.__globals__[alias], third)
+            with torch.compiler.set_stance("fail_on_recompile"):
+                self.assertEqual(fn2(*args), compiled_fn2(*args))
+        finally:
+            sys.modules.pop(name, None)
+            _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_of_an_empty_slot_is_the_memo_even_when_stale(self):
+        # An empty slot takes the memo without consulting the live entry, so
+        # after a handover the guards root at a module the graph was not built
+        # from: the graph holds the live module's VALUE, which __import__
+        # pushed, and the guards read the memo's. A change to the live module
+        # goes unseen -- the compiled function diverges from eager, with no
+        # recompile -- and a change to the memo recompiles. The parent has
+        # this for every empty slot and this commit keeps it; the next commit
+        # (#197046) binds the live entry and turns the divergence into a
+        # recompile.
+        name = "torch_test_package_import_alias_stale_memo"
+        alias = f"__import_{name}"
+        old = types.ModuleType(name)
+        old.VALUE = 2
+        new = types.ModuleType(name)
+        new.VALUE = 7
+
+        def fn(x):
+            import torch_test_package_import_alias_stale_memo as shim
+
+            return x + shim.VALUE
+
+        args = (torch.randn(3, 2),)
+        try:
+            sys.modules[name] = old
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertIs(fn.__globals__[alias], old)
+            del fn.__globals__[alias]
+            torch._dynamo.reset()
+
+            sys.modules[name] = new
+            cnt = CompileCounter()
+            compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertIs(fn.__globals__[alias], old)
+            self.assertEqual(cnt.frame_count, 1)
+            new.VALUE = 8
+            self.assertEqual(compiled_fn(*args), args[0] + 7)
+            self.assertNotEqual(fn(*args), compiled_fn(*args))
+            self.assertEqual(cnt.frame_count, 1)
+            old.VALUE = 11
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            sys.modules.pop(name, None)
+            _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
     def test_import_alias_taken_by_a_non_module_graph_breaks(self):
         # The relaxed check still catches what it was written for: the alias name
         # holding something other than the module it names -- a non-module, or a
