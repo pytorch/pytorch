@@ -2421,7 +2421,10 @@ class InstructionTranslatorBase(
             alias = (
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
-            # Never served from _import_source_cache, so never written to it.
+            # Not cached: _package_imported_modules is a WeakValueDictionary and
+            # _import_source_cache is never cleared, so an entry would pin a
+            # torch.package module the user has dropped for the process; the
+            # cache read is in the other arm in any case.
             cacheable = False
         else:
             # The live sys.modules entry, which is what IMPORT_NAME pushed and
@@ -2528,9 +2531,11 @@ class InstructionTranslatorBase(
         # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
         # trace that graph-breaks or restarts, as does the write install makes
         # to this name. A writer's same-named module is replaced: value is the
-        # live entry whenever sys.modules holds a module under the name, and
-        # what this process's traces last bound when the name is gone or
-        # blocked with None, where the writer's module is no more live.
+        # live entry whenever sys.modules holds a module under the name, or the
+        # one a first import has just put there, and what this process's traces
+        # last bound when the name is gone or blocked with None; there neither
+        # module is the live entry, and the cached one is the object the guards
+        # this alias roots were built against.
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
