@@ -60,6 +60,7 @@ requires_flydsl = unittest.skipUnless(HAS_FLYDSL, "FlyDSL is not available")
 
 class FlyDSLInductorTest(TestCase):
     def setUp(self):
+        super().setUp()
         flydsl_launcher_side_table.reset_table()
 
     @requires_flydsl
