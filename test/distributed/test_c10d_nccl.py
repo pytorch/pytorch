@@ -7416,7 +7416,11 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                     t[1]["state"], self.started_or_scheduled(timing_enabled)
                 )
 
-            self.assertFalse(os.path.exists(self._trace_name(rank=1)))
+            with open(self._trace_name(rank=1), "rb") as f:
+                rank1_trace = pickle.load(f)["entries"]
+                self.assertEqual(len(rank1_trace), 1)
+                self.assertEqual(rank1_trace[0]["collective_seq_id"], 1)
+                self.assertEqual(rank1_trace[0]["state"], "completed")
 
             return
 
